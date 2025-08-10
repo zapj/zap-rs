@@ -15,10 +15,11 @@ use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::time::sleep;
 use tower_http::timeout::TimeoutLayer;
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{self, TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod db;
+mod config;
 // use db::prepare_database;
 
 struct AppState {
@@ -28,7 +29,7 @@ struct AppState {
 
 #[tokio::main]
 async fn main()-> anyhow::Result<()> {
-    
+    println!("{:?}",config::new());
     // Enable tracing.
     tracing_subscriber::registry()
         .with(
@@ -64,7 +65,7 @@ async fn main()-> anyhow::Result<()> {
 }
 
 async fn handler_404() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, "nothing to see here")
+    (StatusCode::NOT_FOUND, "404 page")
 }
 
 async fn handler(Extension(pool): Extension<SqlitePool>) {
