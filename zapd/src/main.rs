@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
+
 use anyhow::Ok;
-use axum::extract::State;
 use axum::Extension;
 use axum::{
     http::StatusCode,
@@ -97,3 +96,5 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 }
+
+
