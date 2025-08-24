@@ -1,17 +1,11 @@
-//! Run with
-//!
-//! ```not_rust
-//! cargo run -p example-low-level-rustls
-//! ```
-//! 
-//! 基本完成
 
 use std::time::Duration;
-
+use std::sync::{RwLock,OnceLock};
 use axum::{extract::{Path, Request}, response::IntoResponse, routing::get, Extension, Router};
+use config::ZapConfig;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use tokio::{io::AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio_rustls::{
     rustls::{pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}, ServerConfig},
     TlsAcceptor,
@@ -20,14 +14,28 @@ use tower_http::trace::TraceLayer;
 use tower_service::Service;
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use tokio::net::{TcpListener};
+use tokio::net::TcpListener;
 use tower_http::timeout::TimeoutLayer;
 
 mod config;
 mod db;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
+    
+    println!("{:?}",config::get_config().read().unwrap());
+    let pub_id_addr = match public_ip_address::perform_lookup(None).await {
+        Ok(ip) => {
+            ip.ip.to_string()
+        }
+        Err(_) => {
+            "127.0.0.1".to_string()
+        }
+    };
+    // let mut cnf  = config::get_config().write().unwrap();
+    // cnf.server.address = pub_id_addr;
+
+    // println!("{:?}", *cnf);
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -36,7 +44,7 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    println!("{:?}",config::new());
+    
     let tls_acceptor = create_tls_acceptor("conf/zap.crt","conf/zap.key");
     let bind = "0.0.0.0:2600";
     let tcp_listener = TcpListener::bind(bind).await.unwrap();

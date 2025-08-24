@@ -19,3 +19,6 @@ hyper = { version = "1.7.0", features = ["full"] }
 hyper-util = { version = "0.1.16", features = ["http2"] }
 tokio-rustls = "0.26.2"
 tower-service = "0.3.3"
+
+public-ip-address = { version = "0.3" }
+lazy_static = "1.5.0"
