@@ -8,22 +8,18 @@
 
 use std::time::Duration;
 
-use axum::{extract::{Path, Request}, response::IntoResponse, routing::get, Extension, Router};
-use hyper::body::Incoming;
+use axum::{extract::{Path, Request}, response::{IntoResponse, Response}, routing::get, Extension, Router};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use tokio::{io::AsyncWriteExt};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
 use tokio_rustls::{
-    rustls::{pki_types::{CertificateDer, PrivateKeyDer}, ServerConfig},
+    rustls::{pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}, ServerConfig},
     TlsAcceptor,
 };
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use tokio::net::{TcpListener};
 use tower_http::timeout::TimeoutLayer;
 use tower_service::Service;
-use hyper::{ Request, Response};
-
 
 mod config;
 mod db;
