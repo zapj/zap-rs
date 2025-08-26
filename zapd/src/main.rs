@@ -1,8 +1,17 @@
-use std::time::Duration;
-use axum::{extract::Path, response::IntoResponse, routing::get, Extension, Router};
+//! Run with
+//!
+//! ```not_rust
+//! cargo run -p example-low-level-rustls
+//! ```
+//! 
+//! 基本完成
 
+use std::time::Duration;
+
+use axum::{extract::{Path, Request}, response::IntoResponse, routing::get, Extension, Router};
+use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use tokio_rustls::rustls::pki_types::pem::PemObject;
+use tokio::{io::AsyncWriteExt};
 use tokio_rustls::{
     rustls::{pki_types::{CertificateDer, PrivateKeyDer}, ServerConfig},
     TlsAcceptor,
@@ -10,8 +19,7 @@ use tokio_rustls::{
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener};
 use tower_http::timeout::TimeoutLayer;
 use tower_service::Service;
 use hyper::{ Request, Response};
@@ -22,9 +30,7 @@ mod db;
 mod routers;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    println!("{:?}", config::get_config().read().unwrap());
-    
+async fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -33,7 +39,8 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let tls_acceptor = create_tls_acceptor("conf/zap.crt", "conf/zap.key");
+    println!("{:?}",config::new());
+    let tls_acceptor = create_tls_acceptor("conf/zap.crt","conf/zap.key");
     let bind = "0.0.0.0:2600";
     let tcp_listener = TcpListener::bind(bind).await.unwrap();
     info!("Zap server listening on {bind}.");
