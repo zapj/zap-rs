@@ -1,14 +1,5 @@
-//! Run with
-//!
-//! ```not_rust
-//! cargo run -p example-low-level-rustls
-//! ```
-//! 
-//! 基本完成
-
-use std::time::Duration;
-
-use axum::{extract::{Path, Request}, response::{IntoResponse, Response}, routing::get, Extension, Router};
+use std::{env::{self, current_dir}, time::Duration};
+use axum::{extract::Request, response::Response, Extension, Router};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
 use tokio_rustls::{
@@ -34,18 +25,17 @@ async fn main() {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
-
-    println!("{:?}",config::new());
-    let tls_acceptor = create_tls_acceptor("conf/zap.crt","conf/zap.key");
-    let bind = "0.0.0.0:2600";
-    let tcp_listener = TcpListener::bind(bind).await.unwrap();
-    info!("Zap server listening on {bind}.");
+    // let path = env::current_dir().unwrap();
+    // println!("The current directory is {}", path.display());
+    let zap_config = config::get_config().read().unwrap();
+    let tls_acceptor = create_tls_acceptor(&zap_config.server.cert_file,&zap_config.server.key_file);
+    let bind = format!("{}:{}",zap_config.server.address,zap_config.server.port);
+    let tcp_listener = TcpListener::bind(bind.to_string()).await.unwrap();
+    info!("Zap server listening on {}.",bind.to_string());
     
     let conn = db::prepare_database().await.unwrap();
     let app = Router::new()
         .merge(routers::api_auth_routers())
-        .route("/hello/{id}", get(hello))
-        .route("/", get(handler))
         .layer((
             TraceLayer::new_for_http(),
             TimeoutLayer::new(Duration::from_secs(10)),
@@ -55,14 +45,12 @@ async fn main() {
     loop {
         let (stream, client_addr) = tcp_listener.accept().await.unwrap();
         
-        // 设置连接超时
-        stream.set_linger(Some(Duration::from_secs(5))).ok();
+        stream.set_linger(Some(Duration::from_secs(30))).ok();
         
         let mut buf = [0; 1];
         let n = stream.peek(&mut buf).await.unwrap();
 
         if n > 0 && buf[0] == 0x16 {
-            // TLS连接处理
             let tls_acceptor = tls_acceptor.clone();
             let app = app.clone();
             
@@ -87,8 +75,6 @@ async fn main() {
             });
         } else {
             tokio::spawn(async move {
-                
-                // 快速处理HTTP请求，直接返回301重定向
                 if let Err(e) = handle_plain_http(stream, client_addr).await {
                     warn!("Error handling plain HTTP from {}: {}", client_addr, e);
                 }
@@ -97,9 +83,7 @@ async fn main() {
     }
 }
 
-// 专门处理非TLS HTTP连接，直接返回301重定向
 async fn handle_plain_http(mut stream: tokio::net::TcpStream, _client_addr: std::net::SocketAddr) -> anyhow::Result<()> {
-    // 读取请求头（只读取必要的部分）
     let mut buffer = [0; 1024];
     let n = stream.read(&mut buffer).await?;
     
@@ -130,14 +114,6 @@ async fn handle_plain_http(mut stream: tokio::net::TcpStream, _client_addr: std:
     
     stream.flush().await?;
     Ok(())
-}
-
-async fn handler() -> &'static str {
-    "Hello, World!"
-}
-
-async fn hello(Path(id): Path<u32>) -> impl IntoResponse {
-    format!("id {}", id)
 }
 
 fn create_tls_acceptor(cert: &str, key: &str) -> TlsAcceptor {
