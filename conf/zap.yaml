@@ -1,0 +1,8 @@
+server:
+  address: 0.0.0.0
+  port: 2600
+  cert_file: conf/zap.crt
+  key_file: conf/zap.key
+jwt:
+  jwt_secure: secure-key-zap-default
+  jwt_expire: 3600

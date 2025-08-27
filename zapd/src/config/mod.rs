@@ -64,7 +64,12 @@ pub fn get_config() -> &'static RwLock<ZapConfig> {
                 }
             }
           }
-          Err(_) => {}
+          Err(_) => {
+                let file = OpenOptions::new().write(true).create(true).open("conf/zap.yaml");
+                if let Ok(f) = file {
+                    let _ = serde_yaml::to_writer(f, &default_conf);
+                }
+            }
       };
       RwLock::new(default_conf)
     })
