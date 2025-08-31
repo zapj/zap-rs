@@ -32,7 +32,7 @@ async fn main() {
     let bind = format!("{}:{}",zap_config.server.address,zap_config.server.port);
     let tcp_listener = TcpListener::bind(bind.to_string()).await.unwrap();
     info!("Zap server listening on {}.",bind.to_string());
-    
+    db::init_db().await;
     let conn = db::prepare_database().await.unwrap();
     let app = Router::new()
         .merge(routers::api_auth_routers())
