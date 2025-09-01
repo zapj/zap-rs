@@ -1,5 +1,5 @@
-use std::{fs::{File, OpenOptions}, io::Read, sync::{OnceLock, RwLock}};
-use tracing::{error, info};
+use std::{fs::OpenOptions, io::Read, sync::{OnceLock, RwLock}};
+use tracing::info;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug,Deserialize,Serialize)]
