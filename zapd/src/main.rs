@@ -16,6 +16,7 @@ use local_ip_address::local_ip;
 mod config;
 mod db;
 mod routers;
+pub mod zap;
 
 #[tokio::main]
 async fn main() {
@@ -39,7 +40,7 @@ async fn main() {
     db::init_db().await;
     let conn = db::prepare_database().await.unwrap();
     let app = Router::new()
-        .merge(routers::api_auth_routers())
+        .merge(routers::routers())
         .layer((
             TraceLayer::new_for_http(),
             TimeoutLayer::new(Duration::from_secs(10)),

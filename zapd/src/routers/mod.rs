@@ -1,5 +1,5 @@
 use axum::{
-    body::Body, http::{header, StatusCode, Uri}, response::Response, routing::post
+    body::Body, http::{header, StatusCode, Uri}, response::Response, routing::{post, Route}
 };
 use axum::Router;
 use axum::routing::get;
@@ -60,10 +60,14 @@ async fn static_handler(uri: Uri) -> Response {
     }
 }
 
-pub fn api_auth_routers () -> Router {
+pub fn routers () -> Router {
     Router::new()
     .fallback(static_handler)
-    .route("/api/auth/login", post(auth::login))
+    .nest("/api",  api_routers())
     // .route("/ws", get(handler))
     // .route("/", get(index))
+}
+
+fn api_routers() -> Router {
+    Router::new().route("/auth/login", post(auth::login) )
 }
