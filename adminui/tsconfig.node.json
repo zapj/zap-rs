@@ -14,7 +14,8 @@
       "composite": true,
       "module": "ESNext",
       "moduleResolution": "Bundler",
-      "types": ["node"]
+      "types": ["node"],
+      "lib": ["ES2023"]
     }
   }
   

@@ -5,7 +5,7 @@
     "compilerOptions": {
       "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
       "composite": true,
-      "jsx": "react",
+      // "jsx": "react",
       "paths": {
         "@/*": ["./src/*"]
       }

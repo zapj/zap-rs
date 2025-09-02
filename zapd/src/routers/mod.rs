@@ -1,11 +1,11 @@
 use axum::{
-    body::Body, http::{header, StatusCode, Uri}, response::Response
+    body::Body, http::{header, StatusCode, Uri}, response::Response, routing::post
 };
 use axum::Router;
 use axum::routing::get;
 use rust_embed::RustEmbed;
 
-
+mod auth;
 
 #[derive(RustEmbed)]
 #[folder = "../adminui/dist/"]
@@ -63,6 +63,7 @@ async fn static_handler(uri: Uri) -> Response {
 pub fn api_auth_routers () -> Router {
     Router::new()
     .fallback(static_handler)
+    .route("/api/auth/login", post(auth::login))
     // .route("/ws", get(handler))
     // .route("/", get(index))
 }

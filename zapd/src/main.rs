@@ -1,4 +1,4 @@
-use std::{env::{self, current_dir}, time::Duration};
+use std::time::Duration;
 use axum::{extract::Request, response::Response, Extension, Router};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
@@ -7,6 +7,7 @@ use tokio_rustls::{
     TlsAcceptor,
 };
 use tower_http::trace::TraceLayer;
+use tower_http::compression::CompressionLayer;
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tower_http::timeout::TimeoutLayer;
@@ -34,7 +35,7 @@ async fn main() {
     let tcp_listener = TcpListener::bind(bind.to_string()).await.unwrap();
     let primary_ip = local_ip().unwrap();
     info!("listening on https://{}:{}", primary_ip, zap_config.server.port);
-    info!("Zap server listening on {}.",bind.to_string());
+    info!("Zap server listening on https://{}.",bind.to_string());
     db::init_db().await;
     let conn = db::prepare_database().await.unwrap();
     let app = Router::new()
@@ -42,6 +43,7 @@ async fn main() {
         .layer((
             TraceLayer::new_for_http(),
             TimeoutLayer::new(Duration::from_secs(10)),
+            CompressionLayer::new(),
             Extension(conn),
         ));
     
