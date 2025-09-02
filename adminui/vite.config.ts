@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
       UnoCSS(),
       AutoImport({
         resolvers: [ElementPlusResolver()],
+        imports:['vue','vue-router','pinia']
       }),
       Components({
         resolvers: [ElementPlusResolver()],

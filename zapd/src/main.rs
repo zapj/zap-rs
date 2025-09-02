@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tower_http::timeout::TimeoutLayer;
 use tower_service::Service;
-
+use local_ip_address::local_ip;
 mod config;
 mod db;
 mod routers;
@@ -27,10 +27,13 @@ async fn main() {
         .init();
     // let path = env::current_dir().unwrap();
     // println!("The current directory is {}", path.display());
+    
     let zap_config = config::get_config().read().unwrap();
     let tls_acceptor = create_tls_acceptor(&zap_config.server.cert_file,&zap_config.server.key_file);
     let bind = format!("{}:{}",zap_config.server.address,zap_config.server.port);
     let tcp_listener = TcpListener::bind(bind.to_string()).await.unwrap();
+    let primary_ip = local_ip().unwrap();
+    info!("listening on https://{}:{}", primary_ip, zap_config.server.port);
     info!("Zap server listening on {}.",bind.to_string());
     db::init_db().await;
     let conn = db::prepare_database().await.unwrap();

@@ -43,6 +43,7 @@ const menus = [
           title: '用户管理',
           icon: 'user',
           roles: ['admin'], // 仅管理员可见
+          affix:true,
         },
         order: 1,
         status: 1, // 不隐藏
@@ -57,6 +58,7 @@ const menus = [
           title: '角色管理',
           icon: 'view',
           roles: ['admin'], // 仅管理员可见
+          affix:true,
         },
         order: 2,
         status: 1, // 不隐藏
@@ -71,6 +73,7 @@ const menus = [
           title: '菜单管理',
           icon: 'menu',
           roles: ['admin'], // 仅管理员可见
+          affix: true,
         },
         order: 3,
         status: 1, // 不隐藏
@@ -103,7 +106,7 @@ const menus = [
           title: '文章管理',
           icon: 'document',
           roles: ['admin', 'editor'], // 管理员和编辑可见
-          
+          affix: true,
         },
         order: 1,
         status: 1, // 不隐藏
@@ -118,6 +121,7 @@ const menus = [
           title: '分类管理',
           icon: 'folder',
           roles: ['admin', 'editor'], // 管理员和编辑可见
+          affix: true,
         },
         order: 2,
         status: 1, // 不隐藏
@@ -132,6 +136,7 @@ const menus = [
           title: '标签管理',
           icon: 'star',
           roles: ['admin', 'editor'], // 管理员和编辑可见
+          affix: true,
         },
         order: 3,
         status: 1, // 不隐藏
