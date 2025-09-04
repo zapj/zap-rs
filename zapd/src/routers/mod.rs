@@ -5,7 +5,7 @@ use axum::Router;
 use axum::routing::get;
 use rust_embed::RustEmbed;
 
-mod auth;
+pub mod auth;
 
 #[derive(RustEmbed)]
 #[folder = "../adminui/dist/"]
