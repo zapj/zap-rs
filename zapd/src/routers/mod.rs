@@ -1,5 +1,5 @@
 use axum::{
-    body::Body, http::{header, StatusCode, Uri}, response::Response, routing::{post, Route}
+    body::Body, http::{header, StatusCode, Uri}, response::Response, routing::post
 };
 use axum::Router;
 use axum::routing::get;
@@ -7,6 +7,8 @@ use rust_embed::RustEmbed;
 
 
 pub mod auth;
+
+pub mod user;
 
 #[derive(RustEmbed)]
 #[folder = "../adminui/dist/"]
@@ -73,4 +75,5 @@ fn api_routers() -> Router {
     
     Router::new().route("/auth/login", post(auth::login) )
         .route("/protected", get(auth::protected))
+        .route("/user/info", get(user::user_info))
 }

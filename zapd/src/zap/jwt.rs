@@ -16,11 +16,11 @@ use crate::config;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    id : u64, // uid
-    iat: u64, // 签发时间
-    sub: String, //签发给
-    iss: String, //发布者
-    exp: u64, // 过期时间
+    pub id : u64, // uid
+    pub iat: u64, // 签发时间
+    pub sub: String, //签发给
+    pub iss: String, //发布者
+    pub exp: u64, // 过期时间
 }
 
 #[derive(Debug)]

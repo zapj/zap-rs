@@ -1,5 +1,6 @@
 pub mod models;
 
+
 use anyhow::{Context, Ok, Result};
 use sqlx::{pool::Pool, sqlite::{SqliteConnectOptions, SqlitePoolOptions}, Executor, Sqlite};
 use tracing::error;
@@ -23,7 +24,14 @@ pub async fn init_db() {
     if rst.is_err() {
         error!("init db error");
     }
-
+    let conn = rst.unwrap();
+    //check table exists
+    let table_is_exist:Result<(String,),sqlx::Error> = sqlx::query_as("select name from sqlite_master where name='user1'").fetch_one(&conn).await;
+    
+    if table_is_exist.is_ok() {
+        return;
+    }
+    
     let sql_script = r#"
     CREATE TABLE user (  
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -34,6 +42,8 @@ pub async fn init_db() {
         last_login_time INTEGER,
         last_login_ip TEXT,
         status INTEGER DEFAULT 1,
+        roles TEXT,
+        permissions TEXT,
         created_at INTEGER,
         updated_at INTEGER
     
@@ -42,7 +52,7 @@ pub async fn init_db() {
 VALUES ("admin","admin","admin@demo.zap.cn","admin",1756650543,"127.0.0.1",1,1756650543,1756650543);
     "#;
 
-    let conn = rst.unwrap();
+    
     let _ = conn.execute(sql_script).await;
 
 }
