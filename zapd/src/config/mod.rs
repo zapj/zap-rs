@@ -19,7 +19,7 @@ pub struct ServerConfig {
 #[derive(Debug,Deserialize,Serialize)]
 pub struct JWTConfig {
     pub jwt_secure:String,
-    pub jwt_expire: u32
+    pub jwt_expire: u64
 }
 
 pub fn new() -> ZapConfig {

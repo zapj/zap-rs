@@ -5,6 +5,7 @@ use axum::Router;
 use axum::routing::get;
 use rust_embed::RustEmbed;
 
+
 pub mod auth;
 
 #[derive(RustEmbed)]
@@ -69,5 +70,7 @@ pub fn routers () -> Router {
 }
 
 fn api_routers() -> Router {
+    
     Router::new().route("/auth/login", post(auth::login) )
+        .route("/protected", get(auth::protected))
 }
