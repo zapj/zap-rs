@@ -29,3 +29,5 @@ local-ip-address = "0.6.5"
 bcrypt = "0.17.1"
 jsonwebtoken = "9.3.1"
 axum-extra = { version = "0.10.1", features = ["typed-header"] }
+thiserror = "2.0.16"
+sysinfo = "0.37.0"

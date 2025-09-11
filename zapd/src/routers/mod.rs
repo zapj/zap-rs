@@ -66,9 +66,8 @@ async fn static_handler(uri: Uri) -> Response {
 pub fn routers () -> Router {
     Router::new()
     .fallback(static_handler)
+    // 动态生成 prefix + /api
     .nest("/api",  api_routers())
-    // .route("/ws", get(handler))
-    // .route("/", get(index))
 }
 
 fn api_routers() -> Router {

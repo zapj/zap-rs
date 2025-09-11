@@ -1,13 +1,66 @@
+use axum::{response::{IntoResponse, Response}, Json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use thiserror::Error;
+
 pub mod jwt;
+pub mod system_info;
+
+#[derive(Error,Debug)]
+pub enum ZapError {
+    /// 处理io错误
+    #[error("IO Error: {0}")]
+    IOError(#[from] std::io::Error),
+
+    #[error("Json Parse Error : {0}")]
+    JsonParseError(#[from] serde_json::Error),
+
+    #[error("Json Web Token Error : {0}")]
+    JsonWebTokenError(#[from] jsonwebtoken::errors::Error),
+
+    #[error("DataBase Error : {0}")]
+    DataBaseError(#[from] sqlx::Error),
+
+    #[error("404 Not Found")]
+    NotFound,
+
+    #[error("{0}")]
+    Message(String),
+
+    #[error("{0}")]
+    Error(String),
 
 
-pub struct Api {
+    #[error("{1}")]
+    New(i64,String),
 
 }
 
+#[derive(Serialize,Deserialize,Debug)]
+pub struct ZapErrorResponse {
+    pub code : i64,
+    pub message: String,
+}
 
-// pub fn api_response(code : i32,message : &str) {
-    
-// }
 
+pub type ZapJsonResult = Result<Json<Value>,ZapError>;
+pub type ZapResult<T> = Result<T,ZapError>;
+
+
+
+impl IntoResponse for ZapError {
+    fn into_response(self) -> Response {
+        let (code,message) = match self {
+            ZapError::Error(msg) => (1,msg.to_string()),
+            ZapError::JsonParseError(e) => (2,e.to_string()),
+            ZapError::JsonWebTokenError(e) => (3,e.to_string()),
+            ZapError::DataBaseError(e) => (4,e.to_string()),
+            ZapError::IOError(e) => (5,e.to_string()),
+            ZapError::NotFound => (404,self.to_string()),
+            ZapError::Message(msg) => (0,msg.to_string()),
+            ZapError::New(code,msg) => (code,msg.to_string()),
+        };
+        (hyper::StatusCode::OK, Json(ZapErrorResponse{code,message})).into_response()
+    }
+}
 

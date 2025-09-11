@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{env, time::Duration};
 use axum::{extract::Request, response::Response, Extension, Router};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
@@ -29,7 +29,7 @@ async fn main() {
         .init();
     // let path = env::current_dir().unwrap();
     // println!("The current directory is {}", path.display());
-    
+    zap::system_info::get_os_info().await;
     let zap_config = config::get_config().read().unwrap();
     let tls_acceptor = create_tls_acceptor(&zap_config.server.cert_file,&zap_config.server.key_file);
     let bind = format!("{}:{}",zap_config.server.address,zap_config.server.port);
