@@ -22,6 +22,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --mode development",
+    "prod": "vite --mode production",
     "build:dev": "vite build --mode development",
     "build:prod": "vite build --mode production",
     "build": "run-p type-check \"build-only {@}\" --",

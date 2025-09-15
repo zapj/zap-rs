@@ -21,7 +21,11 @@ export interface ApiResponse<T> {
  * 登录响应数据接口
  */
 export interface LoginResponse {
-  token: string
+  access_token: string
+  code : number
+  message : string
+  token_type: string
+
 }
 
 /**

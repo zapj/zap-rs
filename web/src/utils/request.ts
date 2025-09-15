@@ -1,6 +1,6 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
-import { ElMessage } from 'element-plus'
+// import { ElMessage } from 'element-plus'
 import { getToken } from './auth'
 
 // 创建axios实例
@@ -17,6 +17,7 @@ service.interceptors.request.use(
     if (token && config.headers) {
       config.headers['Authorization'] = `Bearer ${token}`
     }
+    config.headers['Content-Type'] = 'application/json'
     return config
   },
   (error) => {
@@ -29,15 +30,15 @@ service.interceptors.response.use(
   (response) => {
     const res = response.data
     // 如果响应码不是200，则判断为错误
-    if (res.code !== 200) {
-      ElMessage({
-        message: res.message || '系统错误',
-        type: 'error',
-        duration: 5 * 1000,
-      })
+    if (res.code !== 0) {
+      // ElMessage({
+      //   message: res.message || '系统错误',
+      //   type: 'error',
+      //   duration: 5 * 1000,
+      // })
       return Promise.reject(new Error(res.message || '系统错误'))
     }
-    return res.data
+    return res
   },
   (error) => {
     console.log('请求错误:', error)
@@ -71,11 +72,11 @@ service.interceptors.response.use(
       message = error.message || '系统错误'
     }
 
-    ElMessage({
-      message: message,
-      type: 'error',
-      duration: 5 * 1000,
-    })
+    // ElMessage({
+    //   message: message,
+    //   type: 'error',
+    //   duration: 5 * 1000,
+    // })
     return Promise.reject(error)
   },
 )

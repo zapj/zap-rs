@@ -42,7 +42,6 @@ pub struct ZapErrorResponse {
     pub message: String,
 }
 
-
 pub type ZapJsonResult = Result<Json<Value>,ZapError>;
 pub type ZapResult<T> = Result<T,ZapError>;
 

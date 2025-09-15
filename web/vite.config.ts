@@ -11,8 +11,10 @@ import { visualizer } from "rollup-plugin-visualizer";
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
+  console.log(mode)
   const env = loadEnv(mode, process.cwd())
   const useProxy = env.VITE_USE_PROXY === 'true'
+  const useMock = env.VITE_USE_MOCK === 'true'
 
   return {
     plugins: [
@@ -28,7 +30,7 @@ export default defineConfig(({ mode }) => {
       }),
       viteMockServe({
         mockPath: 'mock',
-        enable: mode === 'development',
+        enable: useMock,
         logger: true,
       }),
       visualizer({
@@ -48,14 +50,17 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: 5173,
       allowedHosts: [
-        '.cn'
+        '.cn',
+        '127.0.0.1',
+        'localhost'
       ],
       proxy: useProxy
         ? {
             '/api': {
-              target: 'https://localhost:2600',
+              target: 'https://127.0.0.1:2600',
               changeOrigin: true,
-              rewrite: (path) => path.replace(/^\/api/, ''),
+              secure: false,
+              // rewrite: (path) => path.replace(/^\/api/, ''),
             },
           }
         : undefined,

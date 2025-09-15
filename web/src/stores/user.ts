@@ -30,9 +30,9 @@ export const useUserStore = defineStore('user', () => {
   async function loginAction(userInfo: { username: string; password: string }) {
     try {
       const res = await login(userInfo)
-      if (res.token) {
-        token.value = res.token
-        setToken(res.token)
+      if (res.access_token) {
+        token.value = res.access_token
+        setToken(res.access_token)
         return Promise.resolve(res)
       }
       return Promise.reject(new Error('登录失败'))
@@ -46,10 +46,10 @@ export const useUserStore = defineStore('user', () => {
     try {
       const res = await getUserInfo()
       if (res) {
-        name.value = res.username
-        avatar.value = res.avatar
-        roles.value = res.roles
-        permissions.value = res.permissions
+        name.value = res.data.username
+        avatar.value = res.data.avatar
+        roles.value = res.data.roles
+        permissions.value = res.data.permissions
         return Promise.resolve(res)
       }
       return Promise.reject(new Error('获取用户信息失败'))

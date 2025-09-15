@@ -20,16 +20,16 @@ pub mod zap;
 
 #[tokio::main]
 async fn main() {
+    println!("{}", format!("{}=debug", env!("CARGO_CRATE_NAME")));
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| format!("{}=debug", env!("CARGO_CRATE_NAME")).into()),
+                .unwrap_or_else(|_| format!("{}=debug,tower_http=debug,axum::rejection=trace", env!("CARGO_CRATE_NAME")).into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
     // let path = env::current_dir().unwrap();
     // println!("The current directory is {}", path.display());
-    zap::system_info::get_os_info().await;
     let zap_config = config::get_config().read().unwrap();
     let tls_acceptor = create_tls_acceptor(&zap_config.server.cert_file,&zap_config.server.key_file);
     let bind = format!("{}:{}",zap_config.server.address,zap_config.server.port);
@@ -54,8 +54,10 @@ async fn main() {
         stream.set_linger(Some(Duration::from_secs(30))).ok();
         
         let mut buf = [0; 1];
-        let n = stream.peek(&mut buf).await.unwrap();
-
+        let n = match stream.peek(&mut buf).await {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
         if n > 0 && buf[0] == 0x16 {
             let tls_acceptor = tls_acceptor.clone();
             let app = app.clone();

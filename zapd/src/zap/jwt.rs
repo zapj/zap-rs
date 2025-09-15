@@ -10,7 +10,6 @@ use axum_extra::{headers::{authorization::Bearer, Authorization}, TypedHeader};
 use jsonwebtoken::{decode, encode, errors::{Error, ErrorKind}, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::info;
 
 use crate::config;
 
@@ -74,7 +73,7 @@ where
         
         // Decode the user data
         let secure_key = &config::get_config().read().unwrap().jwt.jwt_secure;
-        info!("secure_key {} ",secure_key);
+        // info!("secure_key {} ",secure_key);
         let token_data = decode::<Claims>(bearer.token(), &DecodingKey::from_secret(secure_key.as_ref()), &Validation::default())
             .map_err(|e| {
                 let a = e.kind();

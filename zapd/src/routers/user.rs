@@ -23,7 +23,7 @@ pub async fn user_info(claims:jwt::Claims,Extension(pool):Extension<Pool<Sqlite>
         return Json(json!({
             "code":0,
             "message":"OK",
-            "user_info": {
+            "data": {
                 "id": user.id,
                 "username":user.username,
                 "email": user.email,

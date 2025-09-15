@@ -1,12 +1,13 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 /// System Info
 /// 
 /// 
 use sysinfo::{
     Disks, Networks, System,
 };
+use systemstat::Platform;
 
-#[derive(Debug,Deserialize,Default)]
+#[derive(Debug,Deserialize,Default,Serialize)]
 pub struct SystemInfo {
     pub total_memory : u64,
     pub used_memory : u64,
@@ -23,19 +24,27 @@ pub struct SystemInfo {
     pub disks: Vec<DiskInfo>,
 
     pub networks: Vec<NetWorkInfo>,
+
+    pub loadavg : (f32,f32,f32),
+
+    pub uptime : String,
+
+    pub boot_time : String,
     
 }
 
 
-#[derive(Deserialize,Debug,Default)]
+#[derive(Deserialize,Debug,Default,Serialize)]
 pub struct DiskInfo {
     pub name : String,
     pub file_system : String,
     pub available_space : u64,
+    pub total_space : u64,
+    pub mount_point : String,
 }
 
 
-#[derive(Deserialize,Debug,Default)]
+#[derive(Deserialize,Debug,Default,Serialize)]
 pub struct NetWorkInfo {
     pub interface_name : String,
     pub mtu : u64,
@@ -83,6 +92,8 @@ pub async fn get_os_info() -> SystemInfo {
             name: disk.name().to_string_lossy().to_string(),
             file_system: disk.file_system().to_string_lossy().to_string(),
             available_space: disk.available_space(),
+            total_space: disk.total_space(),
+            mount_point: disk.mount_point().to_string_lossy().to_string(),
         });
         
     }
@@ -101,7 +112,21 @@ pub async fn get_os_info() -> SystemInfo {
             ipaddrs : ip,
         });
     }
+    let systat = systemstat::System::new();
+    sinfo.uptime = match systat.uptime() {
+        Ok(uptime)=> humantime::format_duration(uptime).to_string(),
+        Err(_) => "0 s".to_string(),
+    };
 
+    let boot_time = systat.boot_time().unwrap();
+    
+    
+    sinfo.boot_time = format!("{} {}",boot_time.date(),boot_time.time());
+    
+    sinfo.loadavg = match systat.load_average() {
+        Ok(loadavg) => (loadavg.one,loadavg.five,loadavg.fifteen),
+        Err(_) => (0.0,0.0,0.0)
+    };
     sinfo
 
 }

@@ -9,9 +9,11 @@ use rust_embed::RustEmbed;
 pub mod auth;
 
 pub mod user;
+pub mod system_info;
+pub mod system_menu;
 
 #[derive(RustEmbed)]
-#[folder = "../adminui/dist/"]
+#[folder = "../web/dist/"]
 struct Assets;
 
 static INDEX_HTML: &str = "index.html";
@@ -73,6 +75,7 @@ pub fn routers () -> Router {
 fn api_routers() -> Router {
     
     Router::new().route("/auth/login", post(auth::login) )
-        .route("/protected", get(auth::protected))
         .route("/user/info", get(user::user_info))
+        .route("/system/info", get(system_info::system_info))
+        .route("/system/menus/tree",get(system_menu::get_menus_tree))
 }
