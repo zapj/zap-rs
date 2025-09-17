@@ -1,0 +1,14 @@
+[Unit]
+Description=zap free linux server control panel
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+PIDFile=/var/run/zapd.pid
+WorkingDirectory=/usr/local/zap
+ExecStart=/usr/local/zap/zapd master
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target
