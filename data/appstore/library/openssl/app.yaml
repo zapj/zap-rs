@@ -1,0 +1,8 @@
+name: openssl
+title: OpenSSL
+version: [3.0.2,1.1.1w]
+category: library
+description: OpenSSL is a toolkit for the Transport Layer Security (TLS) and Secure Sockets Layer (SSL) protocols.
+tags: [openssl,ssl,tls,crypto,x509]
+allow_multiple_instances: 'yes'
+

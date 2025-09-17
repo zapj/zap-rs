@@ -8,7 +8,9 @@ use crate::zap::ZapJsonResult;
 pub async fn get_menus_tree() -> ZapJsonResult {
 
     Ok(Json(json!({
-        "data":[
+      "code":0,
+      "message":"ok",
+      "data":[
             {
               "id": 1,
               "name": "dashboard",

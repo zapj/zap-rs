@@ -30,6 +30,8 @@ pub async fn user_info(claims:jwt::Claims,Extension(pool):Extension<Pool<Sqlite>
                 "nickname": user.nickname,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
+                "roles": ["admin"],
+                "permissions":["*"],
             }
         }));
     }

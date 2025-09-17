@@ -1,0 +1,10 @@
+name: mariadb
+title: MariaDB Server
+version: [10.11.7]
+category: database
+description: MariaDB is a community-developed fork of MySQL. The open source relational database.
+icon: mariadb.png
+tags: [mariadb,db,mysql]
+allow_multiple_instances: 'no'
+actions:
+  bin: 安装

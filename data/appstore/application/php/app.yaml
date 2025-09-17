@@ -1,0 +1,15 @@
+name: php
+title: PHP
+version: [8.3.3,7.4.33]
+category: application
+description: PHP is a server-side scripting language designed for web development.
+icon: php.png
+tags: [php]
+allow_multiple_instances: 'yes'
+dependencies:
+  openssl: 1.1.1w 
+actions:
+  build: 编译安装
+options:
+  with:
+    enable-shmop:

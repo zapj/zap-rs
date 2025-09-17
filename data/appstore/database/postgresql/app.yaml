@@ -1,0 +1,12 @@
+name: postgresql
+title: PostgreSQL Server
+version: [16.2,15.6, 14.11, 13.14, 12.18]
+category: database
+description: PostgreSQL is a powerful, open source object-relational database system with a wide range of features.
+icon: postgresql.png
+tags: [postgresql,db,rdbms]
+allow_multiple_instances: 'no'
+actions:
+  bin: 安装
+options:
+

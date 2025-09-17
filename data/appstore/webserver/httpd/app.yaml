@@ -1,0 +1,24 @@
+name: httpd
+title: Httpd Server
+version: [2.4.7]
+license: Apache-2.0
+homepage: https://httpd.apache.org
+platforms:
+  - linux/amd64
+category: webserver
+description: Httpd is an open source web server. It is a part of the Apache HTTP Server project.
+icon: httpd.png
+allow_multiple_instances: 'no'
+tags: [webserver,apache2,httpd]
+author: zap
+organization_name : zap
+actions:
+  build: 编译安装
+options:
+  env:
+    CC: gcc
+    CFLAGS: -O2
+  configuire:
+    prefix: /usr/local/apps/httpd
+
+

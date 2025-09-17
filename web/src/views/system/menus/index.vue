@@ -56,7 +56,8 @@ const rules = ref<FormRules>({
 const getMenus = async () => {
   loading.value = true
   try {
-    tableData.value = await getMenuTree()
+    const resp = await getMenuTree()
+    tableData.value = resp.data
   } catch (error) {
     console.error('获取菜单列表失败:', error)
   } finally {

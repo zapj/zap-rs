@@ -53,9 +53,9 @@ export const usePermissionStore = defineStore('permission', {
     async generateRoutes(roles: string[]) {
       try {
         // 从后端获取菜单树
-        const menuTree = await getMenuTree()
+        const resp = await getMenuTree()
         // 将菜单树转换为路由配置
-        let accessedRoutes = menuTreeToRoutes(menuTree)
+        let accessedRoutes = menuTreeToRoutes(resp.data)
 
         // 如果不是管理员，需要根据角色过滤路由
         if (!roles.includes('admin')) {

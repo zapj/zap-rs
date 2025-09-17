@@ -3,7 +3,7 @@
     <!-- Logo -->
     <div class="logo-container">
       <router-link to="/" class="logo-link">
-        <div v-if="!isCollapse" class="logo-title">ZapAdmin UI</div>
+        <div v-if="!isCollapse" class="logo-title">ZAP</div>
         <div v-else class="logo-short">ZAP</div>
       </router-link>
     </div>

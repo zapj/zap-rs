@@ -1,0 +1,8 @@
+name: libpng
+title: libpng
+version: [1.6.43]
+category: library
+description: libpng is a library for reading and writing PNG images.
+tags: [libpng,lib]
+allow_multiple_instances: 'yes'
+

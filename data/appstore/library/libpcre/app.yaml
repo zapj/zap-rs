@@ -1,0 +1,8 @@
+name: libpcre
+title: libpcre
+version: [8.45]
+category: library
+description: libpcre is a library implementing regular expressions with support for Unicode.
+tags: [libpcre,lib]
+allow_multiple_instances: 'yes'
+

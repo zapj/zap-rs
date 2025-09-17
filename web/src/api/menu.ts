@@ -1,15 +1,16 @@
 import { http } from '@/utils/request'
 import type { MenuItem, MenuForm } from '@/types/menu'
+import type { ApiResponse } from '@/types/user'
 
 /**
  * 获取菜单树
  */
 export function getMenuTree() {
-  return http.get<MenuItem[]>('/system/menus/tree')
+  return http.get<ApiResponse<MenuItem[]>>('/system/menus/tree')
 }
 
 export function getMenuRole() {
-  return http.get<MenuItem[]>('/system/menus/role')
+  return http.get<ApiResponse<MenuItem[]>>('/system/menus/role')
 }
 
 /**
@@ -17,7 +18,7 @@ export function getMenuRole() {
  * @param id 菜单ID
  */
 export function getMenu(id: string) {
-  return http.get<MenuItem>(`/system/menus/${id}`)
+  return http.get<ApiResponse<MenuItem>>(`/system/menus/${id}`)
 }
 
 /**
@@ -25,7 +26,7 @@ export function getMenu(id: string) {
  * @param data 菜单数据
  */
 export function createMenu(data: MenuForm) {
-  return http.post<MenuItem>('/system/menus', data)
+  return http.post<ApiResponse<MenuItem>>('/system/menus', data)
 }
 
 /**
