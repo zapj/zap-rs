@@ -11,7 +11,7 @@
       >
         <span>{{ tag.title }}</span>
         <el-icon class="close-icon" @click.stop="closeSelectedTag(tag)" v-if="!isAffix(tag)">
-          <Close />
+          <icon-ep-close />
         </el-icon>
       </div>
     </el-scrollbar>

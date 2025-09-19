@@ -1,8 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-// import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import App from './App.vue'
 import router from './router'
@@ -14,17 +12,11 @@ import { ElMessage } from 'element-plus'
 
 const app = createApp(App)
 
-// 注册Element Plus图标
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
-}
-
 // 使用插件
 const pinia = createPinia()
 pinia.use(piniaPluginPersistedstate)
 app.use(pinia)
 app.use(router)
-// app.use(ElementPlus)
 
 // 全局错误处理
 app.config.errorHandler = (err, instance, info) => {

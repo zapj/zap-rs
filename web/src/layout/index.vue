@@ -30,7 +30,7 @@
             </keep-alive>
           </transition>
         </router-view>
-        <AsyncFooter />
+        <Footer />
       </div>
     </div>
   </div>
@@ -43,9 +43,8 @@ import { useAppStore } from '@/stores/app'
 import Navbar from './components/Navbar.vue'
 import Sidebar from './components/Sidebar.vue'
 import TagsView from './components/TagsView.vue'
-// import Footer from './components/Footer.vue'
+import Footer from './components/Footer.vue'
 
-const AsyncFooter = defineAsyncComponent(() => import("./components/Footer.vue") )
 const route = useRoute()
 const appStore = useAppStore()
 

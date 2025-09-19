@@ -47,9 +47,17 @@ declare module 'vue' {
     ElTree: typeof import('element-plus/es')['ElTree']
     ElUpload: typeof import('element-plus/es')['ElUpload']
     Hamburger: typeof import('./src/components/Hamburger/index.vue')['default']
+    IconEpArrowDown: typeof import('~icons/ep/arrow-down')['default']
+    IconEpClose: typeof import('~icons/ep/close')['default']
+    IconEpFold: typeof import('~icons/ep/fold')['default']
+    IconEpLock: typeof import('~icons/ep/lock')['default']
+    IconEpSwitchButton: typeof import('~icons/ep/switch-button')['default']
+    IconEpUser: typeof import('~icons/ep/user')['default']
+    IconEpUserFilled: typeof import('~icons/ep/user-filled')['default']
     Permission: typeof import('./src/components/Permission/index.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    ZIcon: typeof import('./src/components/ZIcon.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

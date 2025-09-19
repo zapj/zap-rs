@@ -83,8 +83,11 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
           type="text"
           tabindex="1"
           autocomplete="on"
-          prefix-icon="User"
-        />
+        >
+        <template #prefix>
+        <el-icon><icon-ep-user /></el-icon>
+        </template>
+        </el-input>
       </el-form-item>
 
       <el-form-item prop="password">
@@ -95,9 +98,12 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
           tabindex="2"
           autocomplete="on"
           show-password
-          prefix-icon="Lock"
           @keyup.enter="handleLogin(loginFormRef)"
-        />
+        >
+        <template #prefix>
+        <el-icon><icon-ep-lock /></el-icon>
+        </template>
+      </el-input>
       </el-form-item>
 
       <el-button

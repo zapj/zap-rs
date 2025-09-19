@@ -20,7 +20,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
               "type": "menu",
               "meta": {
                 "title": "仪表盘",
-                "icon": "menu",
+                "icon": "ep:menu",
                 "roles": ["admin", "editor", "user"], // 所有角色可见
               },
               "order": 1,
@@ -35,7 +35,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                 "type": "dir",
                 "meta": {
                     "title": "系统管理",
-                    "icon": "setting",
+                    "icon": "ep:setting",
                     "roles": ["admin"], // 仅管理员可见
                 },
                 "order": 2,
@@ -49,7 +49,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                         "type": "menu",
                         "meta": {
                             "title": "用户管理",
-                            "icon": "user",
+                            "icon": "ep:user",
                             "roles": ["admin"], // 仅管理员可见
                             "affix":true,
                     },
@@ -64,7 +64,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                     "type": "menu",
                     "meta": {
                         "title": "角色管理",
-                        "icon": "view",
+                        "icon": "ep:view",
                         "roles": ["admin"], // 仅管理员可见
                         "affix":true,
                   },
@@ -79,7 +79,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                     "type": "menu",
                     "meta": {
                         "title": "菜单管理",
-                        "icon": "menu",
+                        "icon": "ep:menu",
                         "roles": ["admin"], // 仅管理员可见
                         "affix": true,
                   },
@@ -98,7 +98,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                 "type": "dir",
                 "meta": {
                     "title": "内容管理",
-                    "icon": "document",
+                    "icon": "ep:document",
                     "roles": ["admin", "editor"], // 管理员和编辑可见
               },
               "order": 3,
@@ -112,7 +112,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                     "type": "menu",
                     "meta": {
                         "title": "文章管理",
-                        "icon": "document",
+                        "icon": "ep:document",
                         "roles": ["admin", "editor"], // 管理员和编辑可见
                         "affix": true,
                   },
@@ -127,7 +127,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                     "type": "menu",
                     "meta": {
                         "title": "分类管理",
-                        "icon": "folder",
+                        "icon": "ep:folder",
                         "roles": ["admin", "editor"], // 管理员和编辑可见
                         "affix": true,
                   },
@@ -142,7 +142,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                     "type": "menu",
                     "meta": {
                         "title": "标签管理",
-                        "icon": "star",
+                        "icon": "ep:star",
                         "roles": ["admin", "editor"], // 管理员和编辑可见
                         "affix": true,
                     },

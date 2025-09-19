@@ -8,6 +8,8 @@ import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import { viteMockServe } from 'vite-plugin-mock'
 import { visualizer } from "rollup-plugin-visualizer";
+import Icons from 'unplugin-icons/vite'
+import IconsResolver from 'unplugin-icons/resolver'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -22,11 +24,23 @@ export default defineConfig(({ mode }) => {
       vueDevTools(),
       UnoCSS(),
       AutoImport({
-        resolvers: [ElementPlusResolver()],
+        resolvers: [
+          ElementPlusResolver(),
+          IconsResolver({
+            prefix: "icon", 
+            enabledCollections: ['ep','mdi'],
+          }),
+        ],
         imports:['vue','vue-router','pinia']
       }),
       Components({
-        resolvers: [ElementPlusResolver()],
+        resolvers: [
+          ElementPlusResolver(),
+          IconsResolver({
+            prefix: "icon", 
+            enabledCollections: ['ep','mdi'],
+          }),
+        ],
       }),
       viteMockServe({
         mockPath: 'mock',
@@ -39,6 +53,10 @@ export default defineConfig(({ mode }) => {
         emitFile: false,
         filename: "a.html", //分析图生成的文件名
         open:true //如果存在本地服务端口，将在打包后自动展示
+      }),
+      Icons({
+        autoInstall: true,
+        compiler: 'vue3',
       }),
     ],
     resolve: {

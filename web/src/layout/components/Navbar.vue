@@ -14,17 +14,17 @@
           <img :src="userStore.userInfo.avatar" class="user-avatar" />
           <span class="user-name">{{ userStore.userInfo.name }}</span>
           <el-icon class="el-icon-caret-bottom">
-            <arrow-down />
+            <icon-ep-arrow-down />
           </el-icon>
         </div>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item @click="handleProfile">
-              <el-icon><user-filled /></el-icon>
+              <el-icon><icon-ep-user-filled /></el-icon>
               个人中心
             </el-dropdown-item>
             <el-dropdown-item divided @click="handleLogout">
-              <el-icon><switch-button /></el-icon>
+              <el-icon><icon-ep-switch-button /></el-icon>
               退出登录
             </el-dropdown-item>
           </el-dropdown-menu>
@@ -38,7 +38,6 @@
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { ArrowDown, UserFilled, SwitchButton } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import Breadcrumb from '@/components/Breadcrumb/index.vue'

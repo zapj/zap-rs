@@ -11,7 +11,8 @@
       <app-link v-if="onlyOneChild.meta" :to="resolvePath(onlyOneChild.path)">
         <el-menu-item :index="resolvePath(onlyOneChild.path)">
           <el-icon v-if="onlyOneChild.meta && onlyOneChild.meta.icon">
-            <component :is="onlyOneChild.meta.icon" />
+            <!-- <component :is="onlyOneChild.meta.icon" /> -->
+            <Icon :icon="onlyOneChild.meta.icon" />
           </el-icon>
           <template #title>
             <span>{{ onlyOneChild.meta.title }}</span>
@@ -24,7 +25,8 @@
     <el-sub-menu v-else :index="resolvePath(item.path)" popper-append-to-body>
       <template #title>
         <el-icon v-if="item.meta && item.meta.icon">
-          <component :is="item.meta.icon" />
+          <!-- <component :is="item.meta.icon" /> -->
+          <Icon :icon="item.meta.icon" />
         </el-icon>
         <span>{{ item.meta.title }}</span>
       </template>
@@ -46,6 +48,7 @@ import { ref } from 'vue'
 import { isExternal } from '@/utils/validate'
 import AppLink from './AppLink.vue'
 import path from 'path-browserify'
+import {Icon} from '@iconify/vue'
 
 const props = defineProps({
   item: {
