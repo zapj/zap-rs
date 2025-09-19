@@ -22,6 +22,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                 "title": "仪表盘",
                 "icon": "ep:menu",
                 "roles": ["admin", "editor", "user"], // 所有角色可见
+                "affix": true,
               },
               "order": 1,
               "status": 1, // 不隐藏
@@ -37,6 +38,7 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                     "title": "系统管理",
                     "icon": "ep:setting",
                     "roles": ["admin"], // 仅管理员可见
+                    "affix": true,
                 },
                 "order": 2,
                 "status": 1, // 不隐藏
@@ -100,10 +102,11 @@ pub async fn get_menus_tree() -> ZapJsonResult {
                     "title": "内容管理",
                     "icon": "ep:document",
                     "roles": ["admin", "editor"], // 管理员和编辑可见
-              },
-              "order": 3,
-              "status": 1, // 不隐藏
-              "children": [
+                    "affix": true,
+                },
+                "order": 3,
+                "status": 1, // 不隐藏
+                "children": [
                 {
                     "id": 31,
                     "name": "articles",

@@ -65,6 +65,9 @@ const initTags = () => {
 // 添加访问标签
 const addVisitedView = (view: TagView) => {
   if (visitedViews.value.some((v) => v.path === view.path)) return
+  if(view.path?.startsWith("/redirect")){
+    return
+  }
   visitedViews.value.push(
     Object.assign({}, view, {
       title: view.meta?.title || 'no-name',
@@ -135,11 +138,11 @@ const toLastView = () => {
 
 // 打开右键菜单
 const openMenu = (tag: TagView, e: MouseEvent) => {
-  const menuMinWidth = 105
+  const menuMinWidth = 210
   const offsetLeft = e.clientX
   const offsetWidth = (e.target as HTMLElement).offsetWidth
   const maxLeft = window.innerWidth - menuMinWidth
-  left.value = offsetLeft + offsetWidth > maxLeft ? maxLeft : offsetLeft
+  left.value = offsetLeft + offsetWidth > maxLeft ? maxLeft : offsetLeft - 210
   top.value = e.clientY + 5
   visible.value = true
   selectedTag.value = tag

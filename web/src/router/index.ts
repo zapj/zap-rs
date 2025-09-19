@@ -15,10 +15,11 @@ export const constantRoutes: Array<RouteRecordRaw> = [
   {
     path: '/redirect',
     component: Layout,
-    meta: { hidden: true },
+    meta: { hidden: true,affix:false },
     children: [
       {
         path: '/redirect/:path(.*)',
+        meta: { hidden: true,affix:false },
         component: () => import('@/views/redirect/index.vue'),
       },
     ],

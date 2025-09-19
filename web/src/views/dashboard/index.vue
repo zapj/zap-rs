@@ -60,7 +60,6 @@
         </el-table-column>
       </el-table>
     </el-card>
-    <iconify-icon icon="mdi:account-cash" width="24" height="24"></iconify-icon>
   </div>
 </template>
 

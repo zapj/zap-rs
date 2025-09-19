@@ -4,7 +4,7 @@ import 'element-plus/dist/index.css'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import App from './App.vue'
 import router from './router'
-
+import 'virtual:uno.css'
 // 导入全局样式
 import './assets/styles/index.css'
 // 使用Element Plus的消息提示
