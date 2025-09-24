@@ -34,3 +34,4 @@ sysinfo = "0.37.0"
 systemstat = "0.2.5"
 humantime = "2.3.0"
 chrono = "0.4.42"
+human_bytes = { version = "0.4.3", default-features = false }

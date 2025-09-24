@@ -1,11 +1,17 @@
+use axum::Json;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use crate::zap::ZapJsonResult;
+
+use human_bytes::human_bytes;
 /// System Info
 /// 
 /// 
 use sysinfo::{
-    Disks, Networks, System,
+    Disks, Networks, Product, System
 };
 use systemstat::Platform;
+
 
 #[derive(Debug,Deserialize,Default,Serialize)]
 pub struct SystemInfo {
@@ -33,6 +39,23 @@ pub struct SystemInfo {
     
 }
 
+#[derive(Deserialize,Debug,Default,Serialize)]
+pub struct OsInfo {
+    pub name : String,
+    pub kernel_version : String,
+    pub os_version : String,
+    pub host_name : String,
+    pub uptime : String,
+    pub boot_time : String,
+}
+
+#[derive(Deserialize,Debug,Default,Serialize)]
+pub struct MemoryInfo {
+    pub total_memory : u64,
+    pub used_memory : u64,
+    pub total_swap : u64,
+    pub used_swap : u64,
+}
 
 #[derive(Deserialize,Debug,Default,Serialize)]
 pub struct DiskInfo {
@@ -54,6 +77,32 @@ pub struct NetWorkInfo {
     pub down : u64,
 
     pub ipaddrs : Vec<String>,
+}
+
+pub async fn get_system_info() -> ZapJsonResult {
+    let sys = System::new_all();
+    let load_avg = System::load_average();
+    return Ok(Json(json!({
+        "code":0,
+        "message":"OK",
+        "data": {
+            "os_name": System::name().unwrap_or("".to_string()),
+            "os_name_version": System::long_os_version().unwrap_or("".to_string()),
+            "os_id":System::distribution_id(),
+            "host_name":System::host_name().unwrap_or("".to_string()),
+            "arch":System::cpu_arch(),
+            "physical_core_count":System::physical_core_count(),
+            "cpu_num":sys.cpus().len(),
+            "product_name":Product::name().unwrap_or("".to_string()),
+            "product_vender_name":Product::vendor_name().unwrap_or("".to_string()),
+            "memory_total": human_bytes(sys.total_memory() as f64),
+            
+            // 初始化 cpu / memory / disk / loadavg
+            "loadavg_one": load_avg.one,
+            "loadavg_five": load_avg.five,
+            "loadavg_fifteen": load_avg.fifteen,
+        }
+    })));
 }
 
 pub async fn get_os_info() -> SystemInfo {

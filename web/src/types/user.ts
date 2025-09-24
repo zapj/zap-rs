@@ -8,14 +8,6 @@ export interface LoginForm {
   rememberMe?: boolean
 }
 
-/**
- * API 响应基础接口
- */
-export interface ApiResponse<T> {
-  code: number
-  data: T
-  message: string
-}
 
 /**
  * 登录响应数据接口

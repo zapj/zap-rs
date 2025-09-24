@@ -1,6 +1,5 @@
 use axum::{response::{IntoResponse, Response}, Json};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 
 pub mod jwt;
@@ -43,7 +42,7 @@ pub struct ZapErrorResponse {
     pub message: String,
 }
 
-pub type ZapJsonResult = Result<Json<Value>,ZapError>;
+pub type ZapJsonResult = Result<axum::Json<serde_json::Value>,ZapError>;
 pub type ZapResult<T> = Result<T,ZapError>;
 
 
