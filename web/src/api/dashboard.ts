@@ -7,3 +7,8 @@ import type { ApiResponse } from '@/types/api_response'
 export async function getSystemInfo() {
   return http.get<ApiResponse>('/system/info')
 }
+
+
+export async function getRTStatus(){
+  return http.get<ApiResponse>('/system/status')
+}

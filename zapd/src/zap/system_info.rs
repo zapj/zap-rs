@@ -80,8 +80,46 @@ pub struct NetWorkInfo {
 }
 
 pub async fn get_system_info() -> ZapJsonResult {
-    let sys = System::new_all();
+    let mut sys = System::new_all();
     let load_avg = System::load_average();
+    let pub_ip_address = match public_ip_address::perform_lookup(None).await {
+        Ok(ip) => {
+            ip.ip.to_string()
+        }
+        Err(_) => {
+            match local_ip_address::local_ip() {
+                Ok(ip) => ip.to_string(),
+                Err(_)=> "127.0.0.1".to_string(),
+            }
+        }
+    };
+
+    let mut disk_info:Vec<DiskInfo> = Vec::new();
+    let disks = Disks::new_with_refreshed_list();
+    sys.refresh_cpu_usage();
+    for disk in &disks {
+        // disk.name();
+        disk_info.push(DiskInfo{
+            name: disk.name().to_string_lossy().to_string(),
+            file_system: disk.file_system().to_string_lossy().to_string(),
+            available_space: disk.available_space(),
+            total_space: disk.total_space(),
+            mount_point: disk.mount_point().to_string_lossy().to_string(),
+        });
+        
+    }
+
+    let systat = systemstat::System::new();
+    let uptime = match systat.uptime() {
+        Ok(uptime)=> humantime::format_duration(uptime).to_string(),
+        Err(_) => "0 s".to_string(),
+    };
+
+    let boot_time = systat.boot_time().unwrap();
+    
+    
+    let boot_time = format!("{} {}",boot_time.date(),boot_time.time());
+    
     return Ok(Json(json!({
         "code":0,
         "message":"OK",
@@ -95,15 +133,66 @@ pub async fn get_system_info() -> ZapJsonResult {
             "cpu_num":sys.cpus().len(),
             "product_name":Product::name().unwrap_or("".to_string()),
             "product_vender_name":Product::vendor_name().unwrap_or("".to_string()),
-            "memory_total": human_bytes(sys.total_memory() as f64),
+            "uptime":uptime,
+            "boot_time":boot_time,
             
             // 初始化 cpu / memory / disk / loadavg
+            "memory_total": human_bytes(sys.total_memory() as f64),
+            "memory_total_b":sys.total_memory(),
+            "memory_free_b":sys.free_memory(),
+            "available_memory_b":sys.available_memory(),
+            "swap_total":sys.total_swap(),
+            "swap_used":sys.used_swap(),
+            "swap_free":sys.free_swap(),
+
+            "cpu_usage":sys.global_cpu_usage(),
+
+            "loadavg_one": load_avg.one,
+            "loadavg_five": load_avg.five,
+            "loadavg_fifteen": load_avg.fifteen,
+            "public_ip":pub_ip_address,
+
+            "disk_info": disk_info,
+        }
+    })));
+}
+
+pub async fn get_system_status() -> ZapJsonResult {
+    let mut sys = System::new_all();
+    let load_avg = System::load_average();
+    
+    let systat = systemstat::System::new();
+    let uptime = match systat.uptime() {
+        Ok(uptime)=> humantime::format_duration(uptime).to_string(),
+        Err(_) => "0 s".to_string(),
+    };
+
+    sys.refresh_cpu_usage();
+    return Ok(Json(json!({
+        "code":0,
+        "message":"OK",
+        "data": {
+            "uptime":uptime,
+            
+            // 初始化 cpu / memory / disk / loadavg
+            "memory_total": human_bytes(sys.total_memory() as f64),
+            "memory_total_b":sys.total_memory(),
+            "memory_free_b":sys.free_memory(),
+            "available_memory_b":sys.available_memory(),
+            "swap_total":sys.total_swap(),
+            "swap_used":sys.used_swap(),
+            "swap_free":sys.free_swap(),
+
+            "cpu_usage":sys.global_cpu_usage(),
+
             "loadavg_one": load_avg.one,
             "loadavg_five": load_avg.five,
             "loadavg_fifteen": load_avg.fifteen,
         }
     })));
 }
+
+
 
 pub async fn get_os_info() -> SystemInfo {
     

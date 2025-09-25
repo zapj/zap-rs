@@ -13,7 +13,9 @@
             <el-descriptions-item label="服务商" v-if="sysinfo.product_name !== '' " >{{ sysinfo.product_name }}</el-descriptions-item>
             <el-descriptions-item label="CPU">{{ sysinfo.physical_core_count }} cores / {{ sysinfo.arch }}</el-descriptions-item>
             <el-descriptions-item label="Memory" >{{ sysinfo.memory_total }}</el-descriptions-item>
-            <el-descriptions-item label="Public IP">127.0.0.1</el-descriptions-item>
+            <el-descriptions-item label="启动时间" >{{ sysinfo.boot_time }}</el-descriptions-item>
+            <el-descriptions-item label="运行时间" >{{ sysinfo.uptime }}</el-descriptions-item>
+            <el-descriptions-item label="Public IP">{{ sysinfo.public_ip }}</el-descriptions-item>
             
           </el-descriptions>
         </el-card>
@@ -28,15 +30,15 @@
               <div>系统负载</div>
             </el-col>
             <el-col :sm="6" >
-              <el-progress type="dashboard" :percentage="100"  />
+              <el-progress type="dashboard" :percentage="cpu_avg"  />
               <div>CPU</div>
             </el-col>
             <el-col :sm="6" >
-              <el-progress type="dashboard" :percentage="100"  />
+              <el-progress type="dashboard" :percentage="memeory_avg"  />
               <div>内存</div>
             </el-col>
             <el-col :sm="6" >
-              <el-progress type="dashboard" :percentage="100"  />
+              <el-progress type="dashboard" :percentage="disk_root_avg"  />
               <div>硬盘 /</div>
             </el-col>
           </el-row>
@@ -109,11 +111,18 @@
 <script setup lang="ts">
 import Chart from 'chart.js/auto';
 import { onMounted } from 'vue';
-import { getSystemInfo } from '@/api/dashboard.ts'
+import { getSystemInfo,getRTStatus } from '@/api/dashboard.ts'
 import { ref } from 'vue';
+import { isArray } from '@/utils/validate';
 const sysinfo:Record<string, any> = ref({})
 // 加载服务器信息（不含图表）
 const load_avg = ref(0)
+const cpu_avg = ref(0)
+const memeory_avg = ref(0)
+const disk_root_avg = ref(0)
+const fetchrt_secs = 5
+const fetchrt_count = ref(fetchrt_secs) //倒计时5秒
+const fetchrt_timer = ref()
 
 onMounted(async () =>  {
   const resp = await getSystemInfo()
@@ -123,7 +132,19 @@ onMounted(async () =>  {
   
   
   load_avg.value = (sysinfo.value.loadavg_one/sysinfo.value.cpu_num) * 100
-  console.log(resp.data);
+  cpu_avg.value = parseFloat(sysinfo.value.cpu_usage.toFixed(2))
+  let memory_prc = ((sysinfo.value.memory_total_b - sysinfo.value.memory_free_b - sysinfo.value.available_memory_b)/sysinfo.value.memory_total_b  * 100).toFixed(2)
+  memeory_avg.value = parseFloat(memory_prc)
+  if(isArray(sysinfo.value.disk_info)){
+    sysinfo.value.disk_info.forEach((item: { mount_point: string; available_space: number; total_space: number; }) => {
+      if(item.mount_point === "/") {
+        disk_root_avg.value = parseFloat(((item.available_space / item.total_space ) * 100).toFixed(2))
+      }
+      
+    });
+  }
+
+  await FetchRTStatus()
   
   const data = [
     { year: 2010, count: "10:00" },
@@ -221,6 +242,37 @@ onMounted(async () =>  {
   );
 
 })
+
+
+const FetchRTStatus = async () => {
+  const resp = await getRTStatus()
+  fetchrt_count.value = fetchrt_secs
+  if(resp.code === 0 ){
+    sysinfo.value = {...sysinfo.value,...resp.data}
+    load_avg.value = parseFloat(((sysinfo.value.loadavg_one/sysinfo.value.cpu_num) * 100).toFixed(2))
+  cpu_avg.value = parseFloat(sysinfo.value.cpu_usage.toFixed(2))
+  let memory_prc = ((sysinfo.value.memory_total_b - sysinfo.value.memory_free_b - sysinfo.value.available_memory_b)/sysinfo.value.memory_total_b  * 100).toFixed(2)
+  memeory_avg.value = parseFloat(memory_prc)
+  if(isArray(sysinfo.value.disk_info)){
+    sysinfo.value.disk_info.forEach((item: { mount_point: string; available_space: number; total_space: number; }) => {
+      if(item.mount_point === "/") {
+        disk_root_avg.value = parseFloat(((item.available_space / item.total_space ) * 100).toFixed(2))
+      }
+      
+    });
+  }
+  }
+  fetchrt_timer.value = setInterval(async ()=>{
+    fetchrt_count.value--
+    if (fetchrt_count.value <= 0){
+      fetchrt_count.value = fetchrt_secs
+      clearInterval(fetchrt_timer.value)
+      await FetchRTStatus()
+    }
+    
+    
+  },1000)
+}
 
 
 </script>

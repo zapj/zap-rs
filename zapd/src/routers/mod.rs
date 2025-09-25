@@ -77,5 +77,6 @@ fn api_routers() -> Router {
     Router::new().route("/auth/login", post(auth::login) )
         .route("/user/info", get(user::user_info))
         .route("/system/info", get(system_info::system_info))
+        .route("/system/status", get(system_info::system_status))
         .route("/system/menus/tree",get(system_menu::get_menus_tree))
 }

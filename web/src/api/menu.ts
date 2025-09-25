@@ -1,6 +1,6 @@
 import { http } from '@/utils/request'
 import type { MenuItem, MenuForm } from '@/types/menu'
-import type { ApiResponse } from '@/types/user'
+import type { ApiResponse } from '@/types/api_response'
 
 /**
  * 获取菜单树

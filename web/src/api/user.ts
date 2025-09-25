@@ -1,5 +1,6 @@
 import { http } from '@/utils/request'
-import type { LoginForm, LoginResponse, UserInfo, ApiResponse } from '@/types/user'
+import type { LoginForm, LoginResponse, UserInfo } from '@/types/user'
+import type { ApiResponse } from '@/types/api_response'
 
 /**
  * 用户登录
