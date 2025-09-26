@@ -18,9 +18,10 @@ mod db;
 mod routers;
 pub mod zap;
 
+
 #[tokio::main]
 async fn main() {
-    println!("{}", format!("{}=debug", env!("CARGO_CRATE_NAME")));
+    // println!("{}", format!("{}=debug", env!("CARGO_CRATE_NAME")));
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -37,8 +38,13 @@ async fn main() {
     let primary_ip = local_ip().unwrap();
     info!("listening on https://{}:{}", primary_ip, zap_config.server.port);
     info!("Zap server listening on https://{}.",bind.to_string());
+    
+    // init db
     db::init_db().await;
     let conn = db::prepare_database().await.unwrap();
+    // init job
+    zap::job::init_system_jobs().await;
+
     let app = Router::new()
         .merge(routers::routers())
         .layer((

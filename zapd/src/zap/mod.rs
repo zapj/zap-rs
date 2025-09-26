@@ -5,6 +5,8 @@ use thiserror::Error;
 pub mod jwt;
 pub mod system_info;
 pub mod certmgr;
+pub mod global;
+pub mod job;
 
 #[derive(Error,Debug)]
 pub enum ZapError {

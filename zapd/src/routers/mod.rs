@@ -11,6 +11,7 @@ pub mod auth;
 pub mod user;
 pub mod system_info;
 pub mod system_menu;
+pub mod system_job;
 
 #[derive(RustEmbed)]
 #[folder = "../web/dist/"]
@@ -78,5 +79,7 @@ fn api_routers() -> Router {
         .route("/user/info", get(user::user_info))
         .route("/system/info", get(system_info::system_info))
         .route("/system/status", get(system_info::system_status))
+        .route("/system/job/stop", get(system_job::stop_job))
+        .route("/system/job/start", get(system_job::start_job))
         .route("/system/menus/tree",get(system_menu::get_menus_tree))
 }
