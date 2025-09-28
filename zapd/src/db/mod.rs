@@ -19,6 +19,7 @@ pub async fn get_db_pool() -> &'static SqlitePool {
     }).await
 }
 
+#[allow(dead_code)]
 pub async fn open_db() -> Result<Pool<Sqlite>,ZapError> {
     let filename = "data/zap.db";
     let options = SqliteConnectOptions::new()

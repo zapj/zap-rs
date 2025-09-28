@@ -1,7 +1,8 @@
 use axum::Json;
+use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::zap::ZapJsonResult;
+use crate::{db, zap::ZapJsonResult};
 
 use human_bytes::human_bytes;
 /// System Info
@@ -166,6 +167,11 @@ pub async fn get_system_status() -> ZapJsonResult {
         Ok(uptime)=> humantime::format_duration(uptime).to_string(),
         Err(_) => "0 s".to_string(),
     };
+    let current_time = chrono::Local::now();
+    let five_algo = current_time-Duration::minutes(5);
+    
+    let pool = db::get_db_pool().await;
+    let loadavg_rs : Vec<(u64,f32,f32,f32,u64)> = sqlx::query_as("select * from loadavg_sys where created_at >= $1").bind(five_algo.timestamp()).fetch_all(pool).await?;
 
     sys.refresh_cpu_usage();
     return Ok(Json(json!({
@@ -188,6 +194,7 @@ pub async fn get_system_status() -> ZapJsonResult {
             "loadavg_one": load_avg.one,
             "loadavg_five": load_avg.five,
             "loadavg_fifteen": load_avg.fifteen,
+            "loadavg_history" : loadavg_rs,
         }
     })));
 }
