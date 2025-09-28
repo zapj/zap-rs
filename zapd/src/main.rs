@@ -1,5 +1,5 @@
 use std::{env, time::Duration};
-use axum::{extract::Request, response::Response, Extension, Router};
+use axum::{extract::Request, response::Response, Router};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
 use tokio_rustls::{
@@ -40,8 +40,9 @@ async fn main() {
     info!("Zap server listening on https://{}.",bind.to_string());
     
     // init db
-    db::init_db().await;
-    let conn = db::prepare_database().await.unwrap();
+    db::init_db::init_schema().await;
+    // let conn = db::open_db().await.unwrap();
+    // let conn = db::get_db_pool().await;
     // init job
     zap::job::init_system_jobs().await;
 
@@ -51,7 +52,7 @@ async fn main() {
             TraceLayer::new_for_http(),
             TimeoutLayer::new(Duration::from_secs(10)),
             CompressionLayer::new(),
-            Extension(conn),
+            // Extension(conn),
         ));
     
     loop {

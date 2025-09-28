@@ -1,19 +1,37 @@
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
+use sysinfo::System;
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::{job::job_data::Uuid, Job, JobScheduler};
 use tracing::info;
+
+use crate::db::get_db_pool;
 
 
 lazy_static!{
     static ref GLOBAL_SCHEDULED_MAP : RwLock<HashMap<String,JobScheduler>> = RwLock::new(HashMap::new());
     static ref GLOBAL_JOB_MAP : RwLock<HashMap<String,Uuid>> = RwLock::new(HashMap::new());
+    
 }
 
 async fn system_scheduled_task() {
     println!("Scheduled task executed at: {:?}", chrono::Utc::now());
-    // Your task logic here, e.g., database operations, API calls
+    let pool = get_db_pool().await;
+
+    //load avg
+    let load_avg = System::load_average();
+    let _ = sqlx::query("insert into loadavg_sys (loadavg_one,loadavg_five,loadavg_fifteen,created_at) values ($1,$2,$3,$4)")
+    .bind(load_avg.one)
+    .bind(load_avg.five)
+    .bind(load_avg.fifteen)
+    .bind(chrono::Local::now().timestamp())
+    .execute(pool).await;
+    // match r {
+    //     Ok(v) => info!("{}",v.last_insert_rowid()),
+    //     Err(e) => info!("{:?}",e)
+    // }
+    
 }
 
 
@@ -25,7 +43,7 @@ pub async fn init_system_jobs() {
         info!("scheduled start failed")
     }
     let mut sched_map = GLOBAL_SCHEDULED_MAP.write().await;
-    sched.start().await;
+    let _ = sched.start().await;
     sched_map.insert("zap".to_string(), sched);
     
     

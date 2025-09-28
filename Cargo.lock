@@ -3824,6 +3824,7 @@ dependencies = [
  "lazy_static",
  "local-ip-address",
  "mime_guess",
+ "once_cell",
  "public-ip-address",
  "rust-embed",
  "serde",

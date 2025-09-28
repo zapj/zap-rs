@@ -1,7 +1,7 @@
-use axum::{ Extension, Json};
+use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{query_as, Pool, Sqlite};
+use sqlx::query_as;
 use crate::{db, zap::{self, ZapError, ZapJsonResult}};
 use bcrypt::{self};
 // use crate::zap;
@@ -12,11 +12,12 @@ pub struct UserLoginData {
     pub password : String
 }
 
-pub async fn login(Extension(conn) : Extension<Pool<Sqlite>>,Json(playload) : Json<UserLoginData>)  -> ZapJsonResult {
+pub async fn login(Json(playload) : Json<UserLoginData>)  -> ZapJsonResult {
     // info!("json {:?}", playload);
+    let pool = db::get_db_pool().await;
     let record: Result<db::models::UserModel, sqlx::Error> = query_as("select * from user where username = ?")
     .bind(playload.username.to_string())
-    .fetch_one(&conn).await;
+    .fetch_one(pool).await;
     if let Ok(row) = record {
        if let Ok(v) =  bcrypt::verify(playload.password.to_string(), &row.password) && v == true {
             if let Ok(token) = zap::jwt::generate_jwt_token(row.username,row.id) {
@@ -32,5 +33,12 @@ pub async fn login(Extension(conn) : Extension<Pool<Sqlite>>,Json(playload) : Js
     }
     return Err(ZapError::New(-1, "用户名或密码错误".to_string()));
     
+}
+
+pub async fn logout() -> ZapJsonResult {
+    Ok(Json(json!({
+        "code":0,
+        "message":"登陆成功"
+    })))
 }
 

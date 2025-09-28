@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { login, getUserInfo, logout as logoutApi } from '@/api/user'
 import { setToken, removeToken } from '@/utils/auth'
+import { ElMessage } from 'element-plus'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref('')
@@ -68,6 +69,10 @@ export const useUserStore = defineStore('user', () => {
       roles.value = []
       permissions.value = []
       removeToken()
+      ElMessage({
+        type:"success",
+        message:"您已安全退出",
+      })
       return Promise.resolve()
     } catch (error) {
       return Promise.reject(error)

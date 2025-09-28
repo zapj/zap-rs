@@ -23,7 +23,7 @@ export function getUserInfo() {
  * @returns Promise<ApiResponse<null>>
  */
 export function logout() {
-  return http.post<ApiResponse<null>>('/auth/logout')
+  return http.get<ApiResponse>('/auth/logout')
 }
 
 /**

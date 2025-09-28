@@ -1,9 +1,7 @@
-use axum::{Extension, Json};
+use axum::Json;
 use serde_json::{json, Value};
-use sqlx::{Pool, Sqlite};
-use tracing::info;
 
-use crate::zap::jwt;
+use crate::{db, zap::jwt};
 
 
 #[derive(sqlx::FromRow)]
@@ -15,10 +13,13 @@ struct UserInfo {
     last_login_ip: String,
     last_login_time: i64,
 }
-pub async fn user_info(claims:jwt::Claims,Extension(pool):Extension<Pool<Sqlite>>) -> Json<Value>{
-    info!("{:?}",claims);
+pub async fn user_info(claims:jwt::Claims) -> Json<Value>{
+    // info!("{:?}",claims);
     let uid = claims.id;
-    let result:Result<UserInfo,sqlx::Error> = sqlx::query_as("select * from user where id= ?").bind(uid as i64).fetch_one(&pool).await;
+    let pool = db::get_db_pool().await;
+    let result:Result<UserInfo,sqlx::Error> = sqlx::query_as("select * from user where id= ?")
+    .bind(uid as i64)
+    .fetch_one(pool).await;
     if let Ok(user) = result {
         return Json(json!({
             "code":0,
