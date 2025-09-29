@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
-use sysinfo::System;
+use sysinfo::{System,Networks};
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::{job::job_data::Uuid, Job, JobScheduler};
 use tracing::info;
@@ -20,11 +20,51 @@ async fn system_scheduled_task() {
     let pool = get_db_pool().await;
 
     //load avg
-    let load_avg = System::load_average();
-    let _ = sqlx::query("insert into loadavg_sys (loadavg_one,loadavg_five,loadavg_fifteen,created_at) values ($1,$2,$3,$4)")
+    let mut sys = System::new_all();
+    let load_avg = sysinfo::System::load_average();
+    sys.refresh_cpu_usage();
+    let cpu_usage = sys.global_cpu_usage();
+    let memory_usage = (sys.total_memory()-sys.available_memory()) as f32 / sys.total_memory() as f32 * 100.0;
+    let swap_usage = if sys.total_swap() == 0 {0.00_f32} else {(sys.total_swap()-sys.free_swap()) as f32 / sys.total_swap() as f32 * 100.0};
+    info!("cpu_usage: {}, memory_usage: {}, swap_usage: {}", cpu_usage, memory_usage, swap_usage);
+    // network traffic
+    let networks = Networks::new_with_refreshed_list();
+    for (interface_name, data) in &networks {
+        let ip:Vec<String> =  data.ip_networks().iter().map(|v| v.to_string()).collect();
+        let _ = sqlx::query("insert into networks_stats (name,
+        received,transmitted,
+        errors_on_received,errors_on_transmitted,
+        packets_received,packets_transmitted,
+        total_received,total_transmitted,
+        total_packets_received,total_packets_transmitted,
+        total_errors_on_received,total_errors_on_transmitted,
+        ipaddrs,created_at) 
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)")
+        .bind(interface_name)
+        .bind(data.received() as i64)
+        .bind(data.transmitted() as i64)
+        .bind(data.errors_on_received() as i64)
+        .bind(data.errors_on_transmitted() as i64)
+        .bind(data.packets_received() as i64)
+        .bind(data.packets_transmitted() as i64)
+        .bind(data.total_received() as i64)
+        .bind(data.total_transmitted() as i64)
+        .bind(data.total_packets_received() as i64)
+        .bind(data.total_packets_transmitted() as i64)
+        .bind(data.total_errors_on_received() as i64)
+        .bind(data.total_errors_on_transmitted() as i64)
+        .bind(ip.join(","))
+        .bind(chrono::Local::now().timestamp())
+        .execute(pool).await;
+    }
+
+    let _ = sqlx::query("insert into system_stats (loadavg_one,loadavg_five,loadavg_fifteen,cpu_usage,memory_usage,swap_usage,created_at) values ($1,$2,$3,$4,$5,$6,$7)")
     .bind(load_avg.one)
     .bind(load_avg.five)
     .bind(load_avg.fifteen)
+    .bind(cpu_usage)
+    .bind(memory_usage)
+    .bind(swap_usage)
     .bind(chrono::Local::now().timestamp())
     .execute(pool).await;
     // match r {

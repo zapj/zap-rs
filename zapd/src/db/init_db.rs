@@ -7,6 +7,7 @@ use super::get_db_pool;
 pub async fn init_schema() {
     init_system_user_table_schema().await;
     init_system_monitor_table_schema().await;
+    init_system_monitor_networks_table_schema().await;
 
 }
 async fn init_system_user_table_schema(){    
@@ -38,16 +39,48 @@ VALUES ("admin","$2y$10$LiiwCTjRHewO1FY/B8Y7yuLYvOBuL/7gFKIZAP/JWDwliWWPTiE4a","
 }
 
 async fn init_system_monitor_table_schema(){    
-    if table_exists("loadavg_sys").await {
+    if table_exists("system_stats").await {
         return;
     }
 
     let sql_script = r#"
-    CREATE TABLE loadavg_sys (
+    CREATE TABLE system_stats (
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         loadavg_one DECIMAL(10, 2),
         loadavg_five DECIMAL(10, 2),
         loadavg_fifteen DECIMAL(10, 2),
+        cpu_usage DECIMAL(10, 2),
+        memory_usage DECIMAL(10, 2),
+        swap_usage REAL,
+        created_at BIGINT
+    )
+    "#;
+
+    let _ = get_db_pool().await.execute(sql_script).await;
+}
+
+async fn init_system_monitor_networks_table_schema(){    
+    if table_exists("networks_stats").await {
+        return;
+    }
+
+    let sql_script = r#"
+    CREATE TABLE networks_stats (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        received BIGINT,
+        transmitted BIGINT,
+        errors_on_received BIGINT,
+        errors_on_transmitted BIGINT,
+        packets_received BIGINT,
+        packets_transmitted BIGINT,
+        total_received BIGINT,
+        total_transmitted BIGINT,
+        total_packets_received BIGINT,
+        total_packets_transmitted BIGINT,
+        total_errors_on_received BIGINT,
+        total_errors_on_transmitted BIGINT,
+        ipaddrs TEXT,
         created_at BIGINT
     )
     "#;

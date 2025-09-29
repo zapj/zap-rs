@@ -67,7 +67,6 @@ pub struct DiskInfo {
     pub mount_point : String,
 }
 
-
 #[derive(Deserialize,Debug,Default,Serialize)]
 pub struct NetWorkInfo {
     pub interface_name : String,
@@ -79,6 +78,7 @@ pub struct NetWorkInfo {
 
     pub ipaddrs : Vec<String>,
 }
+
 
 pub async fn get_system_info() -> ZapJsonResult {
     let mut sys = System::new_all();
@@ -171,8 +171,11 @@ pub async fn get_system_status() -> ZapJsonResult {
     let five_algo = current_time-Duration::minutes(5);
     
     let pool = db::get_db_pool().await;
-    let loadavg_rs : Vec<(u64,f32,f32,f32,u64)> = sqlx::query_as("select * from loadavg_sys where created_at >= $1").bind(five_algo.timestamp()).fetch_all(pool).await?;
-
+    let system_stats : Vec<db::models::SystemStatsModel> = sqlx::query_as("select * from system_stats where created_at >= $1").bind(five_algo.timestamp()).fetch_all(pool).await?;
+    let network_stats : Vec<db::models::NetworksStatsForDashboard> = sqlx::query_as("select name, received,transmitted,packets_received,
+    packets_transmitted,total_received,total_transmitted,
+    ipaddrs,created_at from networks_stats where created_at >= $1")
+    .bind(five_algo.timestamp()).fetch_all(pool).await?;
     sys.refresh_cpu_usage();
     return Ok(Json(json!({
         "code":0,
@@ -194,7 +197,8 @@ pub async fn get_system_status() -> ZapJsonResult {
             "loadavg_one": load_avg.one,
             "loadavg_five": load_avg.five,
             "loadavg_fifteen": load_avg.fifteen,
-            "loadavg_history" : loadavg_rs,
+            "system_stats" : system_stats,
+            "network_stats" : network_stats,
         }
     })));
 }

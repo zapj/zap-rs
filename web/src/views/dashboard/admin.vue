@@ -94,10 +94,10 @@
         <el-card>
           <template #header>
             <div class="card-header">
-              <span>Disk Usage</span>
+              <span>Network Usage</span>
             </div>
           </template>
-          <canvas id="disk_chart" style="width:100%"></canvas>
+          <canvas id="network_chart" style="width:100%"></canvas>
         </el-card>
 
       </el-col>
@@ -122,20 +122,18 @@ const disk_root_avg = ref(0)
 const fetchrt_secs = 5
 const fetchrt_count = ref(fetchrt_secs) //倒计时5秒
 const fetchrt_timer = ref()
-let loadavg_charts: Chart
+let loadavg_chart: Chart
 let cpu_chart : Chart
 let memory_chart : Chart
-let disk_chart : Chart
+let network_chart : Chart
 onMounted(async () => {
   await loadSystemInfo()
 
-  var cpu_chart = document.getElementById("cpu_chart") as HTMLCanvasElement;
-  var memory_chart = document.getElementById("memory_chart") as HTMLCanvasElement;
-  var loadavg_chart = document.getElementById("loadavg_chart") as HTMLCanvasElement;
-  var disk_chart = document.getElementById("disk_chart") as HTMLCanvasElement;
-  new Chart(
-    cpu_chart,
-    {
+  var cpu_container = document.getElementById("cpu_chart") as HTMLCanvasElement;
+  var memory_container = document.getElementById("memory_chart") as HTMLCanvasElement;
+  var loadavg_container = document.getElementById("loadavg_chart") as HTMLCanvasElement;
+  var network_container = document.getElementById("network_chart") as HTMLCanvasElement;
+  cpu_chart = new Chart(cpu_container,{
       type: 'line',
       data: {
         labels: [],
@@ -149,10 +147,9 @@ onMounted(async () => {
       },
       options: {
         plugins: {
-          // legend:{
-          //   display: false,
-          // },
-
+          legend:{
+            display: false,
+          },
         }
       }
     }
@@ -160,8 +157,8 @@ onMounted(async () => {
 
 
 
-  new Chart(
-    memory_chart,
+  memory_chart = new Chart(
+    memory_container,
     {
       type: 'line',
       data: {
@@ -178,8 +175,8 @@ onMounted(async () => {
     }
   );
 
-  loadavg_charts = new Chart(
-    loadavg_chart,
+  loadavg_chart = new Chart(
+    loadavg_container,
     {
       type: 'line',
       data: {
@@ -207,17 +204,17 @@ onMounted(async () => {
 
     }
   );
-  // loadavg_charts.data
-  new Chart(
-    disk_chart,
+  
+  network_chart = new Chart(
+    network_container,
     {
       type: 'line',
       data: {
         labels: [],
         datasets: [{
-          label: 'My First Dataset',
+          label: 'eth0',
           data: [],
-          fill: true,
+          fill: false,
           borderColor: 'rgba(75, 192, 192, 1)',
           tension: 0.1
         }]
@@ -228,7 +225,7 @@ onMounted(async () => {
 
 
   await FetchRTStatus()
-
+  window.addEventListener('resize', resizeChart)
 })
 
 
@@ -236,7 +233,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', resizeChart)
 })
 const resizeChart = () => {
-
+  loadavg_chart?.resize()
 }
 const loadSystemInfo = async () => {
   const resp = await getSystemInfo()
@@ -247,7 +244,7 @@ const loadSystemInfo = async () => {
 
   load_avg.value = (sysinfo.value.loadavg_one / sysinfo.value.cpu_num) * 100
   cpu_avg.value = parseFloat(sysinfo.value.cpu_usage.toFixed(2))
-  let memory_prc = ((sysinfo.value.memory_total_b - sysinfo.value.memory_free_b - sysinfo.value.available_memory_b) / sysinfo.value.memory_total_b * 100).toFixed(2)
+  let memory_prc = ((sysinfo.value.memory_total_b - sysinfo.value.available_memory_b) / sysinfo.value.memory_total_b * 100).toFixed(2)
   memeory_avg.value = parseFloat(memory_prc)
   if (isArray(sysinfo.value.disk_info)) {
     sysinfo.value.disk_info.forEach((item: { mount_point: string; available_space: number; total_space: number; }) => {
@@ -265,7 +262,7 @@ const FetchRTStatus = async () => {
     sysinfo.value = { ...sysinfo.value, ...resp.data }
     load_avg.value = parseFloat(((sysinfo.value.loadavg_one / sysinfo.value.cpu_num) * 100).toFixed(2))
     cpu_avg.value = parseFloat(sysinfo.value.cpu_usage.toFixed(2))
-    let memory_prc = ((sysinfo.value.memory_total_b - sysinfo.value.memory_free_b - sysinfo.value.available_memory_b) / sysinfo.value.memory_total_b * 100).toFixed(2)
+    let memory_prc = ((sysinfo.value.memory_total_b - sysinfo.value.available_memory_b) / sysinfo.value.memory_total_b * 100).toFixed(2)
     memeory_avg.value = parseFloat(memory_prc)
     if (isArray(sysinfo.value.disk_info)) {
       sysinfo.value.disk_info.forEach((item: { mount_point: string; available_space: number; total_space: number; }) => {
@@ -280,22 +277,40 @@ const FetchRTStatus = async () => {
     let five_data : any[] = []
     let fifteen_data:any[] = []
     let lables : string[] = []
-    resp.data.loadavg_history.forEach((element: any[]) => {
-        one_data.push(element[1])
-        five_data.push(element[2])
-        fifteen_data.push(element[3])
-        let tm = new Date(element[4]);
+    let cpu_data : any[] = []
+    let memory_data : any[] = []
+    resp.data.system_stats.forEach((element: Record<string,any>) => {
+        one_data.push(element.loadavg_one)
+        five_data.push(element.loadavg_five)
+        fifteen_data.push(element.loadavg_fifteen)
+        cpu_data.push(parseFloat(element.cpu_usage.toFixed(2)))
+        memory_data.push(parseFloat(element.memory_usage.toFixed(2)))
+        let tm = new Date(element.created_at * 1000);
         lables.push(tm.getHours().toString() + ':' + tm.getMinutes().toString() + ':' + tm.getSeconds().toString())
     });
-    // console.log(loadavg_charts);
-    
-    loadavg_charts.data.datasets[0].data = one_data
-    loadavg_charts.data.datasets[1].data = five_data
-    loadavg_charts.data.datasets[2].data = fifteen_data
-    loadavg_charts.data.labels = lables
-    loadavg_charts?.update('none')
+    loadavg_chart.data.datasets[0].data = one_data
+    loadavg_chart.data.datasets[1].data = five_data
+    loadavg_chart.data.datasets[2].data = fifteen_data
+    cpu_chart.data.datasets[0].data = cpu_data
+    memory_chart.data.datasets[0].data = memory_data
+    cpu_chart.data.labels = lables
+    cpu_chart?.update('none')
+    memory_chart.data.labels = lables
+    memory_chart?.update('none')
+    loadavg_chart.data.labels = lables
+    loadavg_chart?.update('none')
+    let labels : string[] = []
+    resp.data.network_stats.forEach((element: Record<string,any>) => {
+      let total = (element.received + element.transmitted) / 1024
+      network_chart.data.datasets[0].data.push(parseFloat(total.toFixed(2)))
+      let tm = new Date(element.created_at * 1000);
+      labels.push(tm.getHours().toString() + ':' + tm.getMinutes().toString() + ':' + tm.getSeconds().toString())
+    });
+    network_chart.data.labels = labels
+    network_chart?.update('none')
     
   }
+  
   fetchrt_timer.value = setInterval(async () => {
     fetchrt_count.value--
     if (fetchrt_count.value <= 0) {
