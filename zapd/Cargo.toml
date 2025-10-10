@@ -30,7 +30,7 @@ bcrypt = "0.17.1"
 jsonwebtoken = "9.3.1"
 axum-extra = { version = "0.10.1", features = ["typed-header"] }
 thiserror = "2.0.16"
-sysinfo = "0.37.0"
+sysinfo = { version = "0.37.0", default-features = false,features=[ "default"] }
 systemstat = "0.2.5"
 humantime = "2.3.0"
 chrono = "0.4.42"

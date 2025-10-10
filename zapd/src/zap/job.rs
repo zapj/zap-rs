@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
-use sysinfo::{System,Networks};
+use sysinfo::{Networks, System};
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::{job::job_data::Uuid, Job, JobScheduler};
 use tracing::info;

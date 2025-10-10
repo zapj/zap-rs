@@ -46,11 +46,11 @@ async fn init_system_monitor_table_schema(){
     let sql_script = r#"
     CREATE TABLE system_stats (
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        loadavg_one DECIMAL(10, 2),
-        loadavg_five DECIMAL(10, 2),
-        loadavg_fifteen DECIMAL(10, 2),
-        cpu_usage DECIMAL(10, 2),
-        memory_usage DECIMAL(10, 2),
+        loadavg_one REAL,
+        loadavg_five REAL,
+        loadavg_fifteen REAL,
+        cpu_usage REAL,
+        memory_usage REAL,
         swap_usage REAL,
         created_at BIGINT
     )

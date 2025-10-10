@@ -138,7 +138,7 @@ onMounted(async () => {
       data: {
         labels: [],
         datasets: [{
-          label: 'My First Dataset',
+          label: 'CPU',
           data: [],
           fill: false,
           borderColor: 'rgba(75, 192, 192, 1)',
@@ -164,13 +164,20 @@ onMounted(async () => {
       data: {
         labels: [],
         datasets: [{
-          label: 'My First Dataset',
+          label: '内存',
           data: [],
-          fill: true,
+          fill: false,
           borderColor: 'rgba(75, 192, 192, 1)',
           tension: 0.1
         }]
       },
+      options: {
+        plugins: {
+          legend:{
+            display: false,
+          },
+        }
+      }
 
     }
   );

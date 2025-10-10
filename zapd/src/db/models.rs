@@ -23,7 +23,7 @@ pub struct SystemStatsModel {
     pub created_at : u64,
 }
 
-
+#[allow(dead_code)]
 #[derive(Debug,Clone,sqlx::FromRow,Deserialize,Serialize)]
 pub struct NetworksStatsModel {
     pub id : u64,
