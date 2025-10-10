@@ -13,6 +13,7 @@ lazy_static!{
     static ref GLOBAL_SCHEDULED_MAP : RwLock<HashMap<String,JobScheduler>> = RwLock::new(HashMap::new());
     static ref GLOBAL_JOB_MAP : RwLock<HashMap<String,Uuid>> = RwLock::new(HashMap::new());
     
+    static ref GLOBAL_SYSTEM_INFO : RwLock<HashMap<String,String>> = RwLock::new(HashMap::new());
 }
 
 async fn system_scheduled_task() {
@@ -30,6 +31,11 @@ async fn system_scheduled_task() {
     // network traffic
     let networks = Networks::new_with_refreshed_list();
     for (interface_name, data) in &networks {
+        // println!("{:?}", data);
+        let received = data.total_received() - GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_total_received",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let transmitted = data.total_transmitted() - GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_total_transmitted",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let packets_received = data.packets_received() - GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_packets_received",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let packets_transmitted = data.packets_transmitted() - GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_packets_transmitted",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
         let ip:Vec<String> =  data.ip_networks().iter().map(|v| v.to_string()).collect();
         let _ = sqlx::query("insert into networks_stats (name,
         received,transmitted,
@@ -41,12 +47,12 @@ async fn system_scheduled_task() {
         ipaddrs,created_at) 
         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)")
         .bind(interface_name)
-        .bind(data.received() as i64)
-        .bind(data.transmitted() as i64)
+        .bind(received as i64)
+        .bind(transmitted as i64)
         .bind(data.errors_on_received() as i64)
         .bind(data.errors_on_transmitted() as i64)
-        .bind(data.packets_received() as i64)
-        .bind(data.packets_transmitted() as i64)
+        .bind(packets_received as i64)
+        .bind(packets_transmitted as i64)
         .bind(data.total_received() as i64)
         .bind(data.total_transmitted() as i64)
         .bind(data.total_packets_received() as i64)
@@ -56,6 +62,10 @@ async fn system_scheduled_task() {
         .bind(ip.join(","))
         .bind(chrono::Local::now().timestamp())
         .execute(pool).await;
+        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_packets_received",interface_name)).or_insert(data.packets_received().to_string());
+        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_packets_transmitted",interface_name)).or_insert(data.packets_transmitted().to_string());
+        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_total_received",interface_name)).or_insert(data.total_received().to_string());
+        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_total_transmitted",interface_name)).or_insert(data.total_transmitted().to_string());
     }
 
     let _ = sqlx::query("insert into system_stats (loadavg_one,loadavg_five,loadavg_fifteen,cpu_usage,memory_usage,swap_usage,created_at) values ($1,$2,$3,$4,$5,$6,$7)")

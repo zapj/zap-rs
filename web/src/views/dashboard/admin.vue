@@ -68,7 +68,7 @@
         <el-card>
           <template #header>
             <div class="card-header">
-              <span>内存使用</span>
+              <span>内存</span>
             </div>
           </template>
           <canvas id="memory_chart" style="width:100%"></canvas>
@@ -81,7 +81,7 @@
         <el-card>
           <template #header>
             <div class="card-header">
-              <span>Loadavg Usage</span>
+              <span>系统负载</span>
             </div>
           </template>
           <canvas id="loadavg_chart" style="width:100%"></canvas>
@@ -308,6 +308,7 @@ const FetchRTStatus = async () => {
     loadavg_chart?.update('none')
     let labels : string[] = []
     resp.data.network_stats.forEach((element: Record<string,any>) => {
+      console.log(element)
       let total = (element.received + element.transmitted) / 1024
       network_chart.data.datasets[0].data.push(parseFloat(total.toFixed(2)))
       let tm = new Date(element.created_at * 1000);
