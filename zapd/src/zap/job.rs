@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, f32::consts::E};
 
 use lazy_static::lazy_static;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
@@ -41,11 +41,11 @@ async fn system_scheduled_task() {
         let last_packets_received = GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_packets_received",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
         let last_packets_transmitted = GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_packets_transmitted",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
         println!("last_received: {}, last_transmitted: {}, last_packets_received: {}, last_packets_transmitted: {}", last_received, last_transmitted, last_packets_received, last_packets_transmitted);   
-
-        let received = (data.total_received() - last_received) / per_10s;
-        let transmitted = (data.total_transmitted() - last_transmitted)  / per_10s;
-        let packets_received = (data.packets_received() - last_packets_received) / per_10s;
-        let packets_transmitted = (data.packets_transmitted() - last_packets_transmitted) / per_10s;
+        
+        let received = if data.total_received() > last_received { (data.total_received() - last_received) / per_10s } else {0};
+        let transmitted = if data.total_transmitted() > last_transmitted { (data.total_transmitted() - last_transmitted)  / per_10s} else {0};
+        let packets_received = if data.packets_received() > last_packets_received { (data.packets_received() - last_packets_received) / per_10s} else {0};
+        let packets_transmitted = if data.packets_transmitted() > last_packets_transmitted { (data.packets_transmitted() - last_packets_transmitted) / per_10s} else {0};
         let ip:Vec<String> =  data.ip_networks().iter().map(|v| v.to_string()).collect();
         let _ = sqlx::query("insert into networks_stats (name,
         received,transmitted,

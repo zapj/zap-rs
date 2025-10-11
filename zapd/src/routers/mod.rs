@@ -78,6 +78,12 @@ fn api_routers() -> Router {
     Router::new().route("/auth/login", post(auth::login) )
     .route("/auth/logout", get(auth::logout))
         .route("/user/info", get(user::user_info))
+        
+        // User
+        .route("/system/user/list", get(user::user_list))
+        .route("/system/user/update", get(user::user_info))
+        .route("/system/user/add", get(user::user_info))
+        // System
         .route("/system/info", get(system_info::system_info))
         .route("/system/status", get(system_info::system_status))
         .route("/system/job/stop", get(system_job::stop_job))
