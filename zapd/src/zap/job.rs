@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
-use sysinfo::{Networks, System};
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::{job::job_data::Uuid, Job, JobScheduler};
 use tracing::info;
@@ -19,23 +19,33 @@ lazy_static!{
 async fn system_scheduled_task() {
     println!("Scheduled task executed at: {:?}", chrono::Utc::now());
     let pool = get_db_pool().await;
-
+    let per_10s = 10; //seconds
     //load avg
-    let mut sys = System::new_all();
+    let mut sys = System::new_with_specifics(RefreshKind::nothing()
+        .with_cpu(CpuRefreshKind::everything())
+        .with_memory(MemoryRefreshKind::everything())
+    );
     let load_avg = sysinfo::System::load_average();
     sys.refresh_cpu_usage();
     let cpu_usage = sys.global_cpu_usage();
     let memory_usage = (sys.total_memory()-sys.available_memory()) as f32 / sys.total_memory() as f32 * 100.0;
     let swap_usage = if sys.total_swap() == 0 {0.00_f32} else {(sys.total_swap()-sys.free_swap()) as f32 / sys.total_swap() as f32 * 100.0};
-    info!("cpu_usage: {}, memory_usage: {}, swap_usage: {}", cpu_usage, memory_usage, swap_usage);
+    // info!("cpu_usage: {}, memory_usage: {}, swap_usage: {}", cpu_usage, memory_usage, swap_usage);
     // network traffic
-    let networks = Networks::new_with_refreshed_list();
-    for (interface_name, data) in &networks {
+    let mut networks = Networks::new_with_refreshed_list();
+    networks.refresh(true);
+    for (interface_name, data) in networks.iter() {
         // println!("{:?}", data);
-        let received = data.total_received() - GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_total_received",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-        let transmitted = data.total_transmitted() - GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_total_transmitted",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-        let packets_received = data.packets_received() - GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_packets_received",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-        let packets_transmitted = data.packets_transmitted() - GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_packets_transmitted",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let last_received = GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_total_received",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let last_transmitted = GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_total_transmitted",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let last_packets_received = GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_packets_received",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let last_packets_transmitted = GLOBAL_SYSTEM_INFO.read().await.get(&format!("net_{}_packets_transmitted",interface_name)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        println!("last_received: {}, last_transmitted: {}, last_packets_received: {}, last_packets_transmitted: {}", last_received, last_transmitted, last_packets_received, last_packets_transmitted);   
+
+        let received = (data.total_received() - last_received) / per_10s;
+        let transmitted = (data.total_transmitted() - last_transmitted)  / per_10s;
+        let packets_received = (data.packets_received() - last_packets_received) / per_10s;
+        let packets_transmitted = (data.packets_transmitted() - last_packets_transmitted) / per_10s;
         let ip:Vec<String> =  data.ip_networks().iter().map(|v| v.to_string()).collect();
         let _ = sqlx::query("insert into networks_stats (name,
         received,transmitted,
@@ -62,10 +72,18 @@ async fn system_scheduled_task() {
         .bind(ip.join(","))
         .bind(chrono::Local::now().timestamp())
         .execute(pool).await;
-        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_packets_received",interface_name)).or_insert(data.packets_received().to_string());
-        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_packets_transmitted",interface_name)).or_insert(data.packets_transmitted().to_string());
-        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_total_received",interface_name)).or_insert(data.total_received().to_string());
-        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_total_transmitted",interface_name)).or_insert(data.total_transmitted().to_string());
+        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_packets_received",interface_name))
+        .and_modify(|v| *v = data.packets_received().to_string())
+        .or_insert(data.packets_received().to_string());
+        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_packets_transmitted",interface_name))
+        .and_modify(|v| *v = data.packets_transmitted().to_string())
+        .or_insert(data.packets_transmitted().to_string());
+        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_total_received",interface_name))
+        .and_modify(|v| *v = data.total_received().to_string())
+        .or_insert(data.total_received().to_string());
+        GLOBAL_SYSTEM_INFO.write().await.entry(format!("net_{}_total_transmitted",interface_name))
+        .and_modify(|v| *v = data.total_transmitted().to_string())
+        .or_insert(data.total_transmitted().to_string());
     }
 
     let _ = sqlx::query("insert into system_stats (loadavg_one,loadavg_five,loadavg_fifteen,cpu_usage,memory_usage,swap_usage,created_at) values ($1,$2,$3,$4,$5,$6,$7)")

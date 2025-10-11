@@ -113,6 +113,7 @@ import { onMounted, onUnmounted } from 'vue';
 import { getSystemInfo, getRTStatus } from '@/api/dashboard.ts'
 import { ref } from 'vue';
 import { isArray } from '@/utils/validate';
+import { fmtBytes,formatBytes } from '@/utils/fmt';
 const sysinfo: Record<string, any> = ref({})
 // 加载服务器信息（不含图表）
 const load_avg = ref(0)
@@ -192,7 +193,7 @@ onMounted(async () => {
           label: '1 M',
           data: [],
           fill: false,
-          borderColor: 'rgba(75, 92, 192, 1)',
+          borderColor: 'rgba(192, 75, 75, 1)',
           tension: 0.1
         },{
           label: '5 M',
@@ -204,7 +205,7 @@ onMounted(async () => {
           label: '15 M',
           data: [],
           fill: false,
-          borderColor: 'rgba(50, 192, 192, 1)',
+          borderColor: 'rgba(75, 192, 10, 1)',
           tension: 0.1
         }]
       },
@@ -219,13 +220,25 @@ onMounted(async () => {
       data: {
         labels: [],
         datasets: [{
-          label: 'eth0',
+          label: 'eth0 Up',
           data: [],
           fill: false,
-          borderColor: 'rgba(75, 192, 192, 1)',
+          borderColor: 'rgba(192, 75, 192, 1)',
           tension: 0.1
-        }]
+        },
+        {
+            label: 'eth0 Down',
+            data: [],
+            fill: false,
+            borderColor: 'rgba(192, 192, 75, 1)',
+            tension: 0.1
+          }]
       },
+      options:{
+        plugins:{
+        }
+      
+      }
 
     }
   );
@@ -307,13 +320,40 @@ const FetchRTStatus = async () => {
     loadavg_chart.data.labels = lables
     loadavg_chart?.update('none')
     let labels : string[] = []
+    let data1 : any[] = []
+    let data2 : any[] = []
     resp.data.network_stats.forEach((element: Record<string,any>) => {
-      console.log(element)
-      let total = (element.received + element.transmitted) / 1024
-      network_chart.data.datasets[0].data.push(parseFloat(total.toFixed(2)))
+      // console.log(element)
+      data1.push((element.transmitted/1024).toFixed(2))
+      data2.push((element.received/1024).toFixed(2))
       let tm = new Date(element.created_at * 1000);
       labels.push(tm.getHours().toString() + ':' + tm.getMinutes().toString() + ':' + tm.getSeconds().toString())
     });
+    network_chart.data.datasets[0].data = data1
+    network_chart.data.datasets[1].data = data2
+    network_chart.options = {
+      plugins:{
+        tooltip:{
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+              label : function(context) {
+                  let label = context.dataset.label || '';
+
+                  if (label) {
+                      label += ': ';
+                  }
+                  if (context.parsed.y !== null) {
+                      // label += formatBytes(context.parsed.y, 2);
+                      label += context.parsed.y + ' KB';
+                  }
+                  return label;
+                }
+            }
+        },
+      }
+    }
+
     network_chart.data.labels = labels
     network_chart?.update('none')
     
