@@ -49,7 +49,7 @@ pub async fn user_info(claims:jwt::Claims) -> Json<Value>{
 
 
 pub async fn user_list(claims:jwt::Claims) ->  ZapJsonResult {
-    let uid = claims.id;
+    let _uid: u64 = claims.id;
     let pool = db::get_db_pool().await;
     
     let mut querybuilder   :QueryBuilder<'_, Sqlite>  = QueryBuilder::new("SELECT * FROM user");

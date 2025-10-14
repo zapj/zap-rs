@@ -7,6 +7,7 @@ pub mod system_info;
 pub mod certmgr;
 pub mod global;
 pub mod job;
+pub mod types;
 
 #[derive(Error,Debug)]
 pub enum ZapError {

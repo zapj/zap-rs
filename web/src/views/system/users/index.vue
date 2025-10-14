@@ -110,10 +110,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance } from 'element-plus'
+import { http } from '@/utils/request'
 
 // 搜索表单数据
 const searchForm = reactive({
@@ -289,6 +290,31 @@ const resetForm = () => {
     status: '1',
   })
 }
+
+const loadUserList = () => {
+  loading.value = true
+   http.get('/system/user/list', {
+    params: {
+      page: currentPage.value,
+      size: pageSize.value,
+      username: searchForm.username,
+      status: searchForm.status,
+    },
+  }).then((response) => {
+    // 假设返回的数据格式为 { data: [...], total: number }
+    tableData.value = response.data.data
+    total.value = response.data.total
+  }).catch((error) => {
+    ElMessage.error('加载用户列表失败')
+    console.error(error)
+  }).finally(() => {
+    loading.value = false
+  })
+}
+
+onMounted(() => {
+  loadUserList()
+})
 </script>
 
 <style scoped>
