@@ -302,7 +302,7 @@ const loadUserList = () => {
     },
   }).then((response) => {
     // 假设返回的数据格式为 { data: [...], total: number }
-    tableData.value = response.data.data
+    tableData.value = response.data
     total.value = response.data.total
   }).catch((error) => {
     ElMessage.error('加载用户列表失败')
