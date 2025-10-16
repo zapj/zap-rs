@@ -1,6 +1,6 @@
 use axum::Json;
 use serde_json::{json, Value};
-use sqlx::{sqlite::SqliteRow, QueryBuilder, Sqlite};
+use sqlx::{QueryBuilder, Sqlite};
 
 use crate::{db, zap::{jwt, ZapJsonResult}};
 

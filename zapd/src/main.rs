@@ -1,4 +1,5 @@
 use std::{env, time::Duration};
+use clap::Parser;
 use axum::{extract::Request, response::Response, Router};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
@@ -18,9 +19,19 @@ mod db;
 mod routers;
 pub mod zap;
 
+#[derive(clap::Parser)]
+struct Cli {
+    #[clap(short, long, action)]
+    version: bool,
+}
 
 #[tokio::main]
 async fn main() {
+    let cli = Cli::parse();
+    if cli.version {
+        println!("zapd version {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     // println!("{}", format!("{}=debug", env!("CARGO_CRATE_NAME")));
     tracing_subscriber::registry()
         .with(
