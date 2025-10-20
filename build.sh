@@ -56,7 +56,8 @@ case "$OS_NAME" in
     tar -czvf "$ZAP_FILE_NAME" *
     echo "zapd package created successfully...."
     echo $VERSION
-    zapfile upload zap/dist/ "$ZAP_FILE_NAME"
+    zapfile upload zap/releases/ "$ZAP_FILE_NAME"
+    zapfile put zap/releases/version.txt "$VERSION"
     echo "zapd package uploaded successfully...."
     ;;
 esac  

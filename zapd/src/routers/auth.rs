@@ -4,7 +4,6 @@ use serde_json::json;
 use sqlx::query_as;
 use crate::{db, zap::{self, ZapError, ZapJsonResult}};
 use bcrypt::{self};
-// use crate::zap;
 
 #[derive(Debug,Deserialize,Serialize,Clone)]
 pub struct UserLoginData {
@@ -25,7 +24,8 @@ pub async fn login(Json(playload) : Json<UserLoginData>)  -> ZapJsonResult {
                     "code":0,
                     "access_token": token,
                     "token_type":"Bearer",
-                    "message":"登陆成功"
+                    "message":"登陆成功",
+                    "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire
                 })));    
             }
             
@@ -38,7 +38,20 @@ pub async fn login(Json(playload) : Json<UserLoginData>)  -> ZapJsonResult {
 pub async fn logout() -> ZapJsonResult {
     Ok(Json(json!({
         "code":0,
-        "message":"登陆成功"
+        "message":"退出成功"
     })))
 }
 
+
+pub async fn reflash_token(claims:zap::jwt::Claims) -> ZapJsonResult {
+    if let Ok(token) = zap::jwt::generate_jwt_token(claims.sub,claims.id) {
+        return Ok(Json(json!({
+            "code":0,
+            "access_token": token,
+            "token_type":"Bearer",
+            "message":"刷新成功",
+            "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire
+        })));    
+    }
+    return Err(ZapError::New(-1, "刷新失败".to_string()));
+}

@@ -51,7 +51,7 @@ export const constantRoutes: Array<RouteRecordRaw> = [
         path: '',
         name: 'Profile',
         component: () => import('@/views/profile/index.vue'),
-        meta: { title: '个人中心' , affix:true},
+        meta: { title: '个人中心' , affix:false},
       },
     ],
   },

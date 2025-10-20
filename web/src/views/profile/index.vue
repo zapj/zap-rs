@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { updateUserProfile, updateUserPassword, uploadAvatar } from '@/api/user'
 import type { UploadProps } from 'element-plus'
+import { getTokenExpire } from '@/utils/auth'
+import { Plus } from '@element-plus/icons-vue'
 
 const userStore = useUserStore()
 const { userInfo } = userStore
@@ -23,6 +25,11 @@ const passwordForm = ref({
   oldPassword: '',
   newPassword: '',
   confirmPassword: '',
+})
+
+onMounted(() => {
+  console.log(getTokenExpire());
+   
 })
 
 // 更新用户信息

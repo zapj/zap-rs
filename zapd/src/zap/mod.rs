@@ -66,3 +66,9 @@ impl IntoResponse for ZapError {
     }
 }
 
+impl ZapError {
+    pub fn new(code: i64, message: String) -> ZapJsonResult {
+        Err(ZapError::New(code, message))
+    }
+}
+

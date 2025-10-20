@@ -75,8 +75,11 @@ pub fn routers () -> Router {
 
 fn api_routers() -> Router {
     
-    Router::new().route("/auth/login", post(auth::login) )
-    .route("/auth/logout", get(auth::logout))
+    Router::new()
+        // Auth
+        .route("/auth/login", post(auth::login) )
+        .route("/auth/logout", get(auth::logout))
+        .route("/auth/reflash_token", post(auth::reflash_token))
         .route("/user/info", get(user::user_info))
         
         // User
@@ -89,4 +92,18 @@ fn api_routers() -> Router {
         .route("/system/job/stop", get(system_job::stop_job))
         .route("/system/job/start", get(system_job::start_job))
         .route("/system/menus/tree",get(system_menu::get_menus_tree))
+
+        // Site
+
+
+        // Docker
+
+        // Monitor
+
+        // Settings
+
+        // Logs
+
+        // Terminal
+        
 }

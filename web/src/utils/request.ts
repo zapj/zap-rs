@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 // import { ElMessage } from 'element-plus'
-import { getToken } from './auth'
+import { getToken, setToken } from './auth'
 
 // 创建axios实例
 const service = axios.create({
@@ -13,6 +13,7 @@ const service = axios.create({
 service.interceptors.request.use(
   (config) => {
     // 添加token到请求头
+    
     const token = getToken()
     if (token && config.headers) {
       config.headers['Authorization'] = `Bearer ${token}`
@@ -128,4 +129,14 @@ export const http = {
       ...config,
     })
   },
+}
+
+const reflashToken = async (): Promise<string> => {
+  try {
+    const response = await service.post('/auth/reflash_token')
+    setToken(response.data.access_token)
+    return response.data.access_token
+  } catch (error) {
+    return Promise.reject(error)
+  }
 }

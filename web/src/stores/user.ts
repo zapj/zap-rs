@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { login, getUserInfo, logout as logoutApi } from '@/api/user'
-import { setToken, removeToken } from '@/utils/auth'
+import { setToken, removeToken,setTokenExpire } from '@/utils/auth'
 import { ElMessage } from 'element-plus'
 
 export const useUserStore = defineStore('user', () => {
@@ -34,6 +34,7 @@ export const useUserStore = defineStore('user', () => {
       if (res.access_token) {
         token.value = res.access_token
         setToken(res.access_token)
+        setTokenExpire(res.expire_in)
         return Promise.resolve(res)
       }
       return Promise.reject(new Error('登录失败'))
