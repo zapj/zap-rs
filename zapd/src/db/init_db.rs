@@ -21,6 +21,7 @@ async fn init_system_user_table_schema(){
         username VARCHAR(128) UNIQUE NOT NULL,
         password VARCHAR(256) NOT NULL,
         email VARCHAR(256) UNIQUE NOT NULL,
+        phone VARCHAR(32) UNIQUE NOT NULL,
         nickname TEXT,
         last_login_time INTEGER,
         last_login_ip TEXT,
@@ -32,7 +33,7 @@ async fn init_system_user_table_schema(){
     
     );
     INSERT INTO "user" (username,password,email,nickname,last_login_time,last_login_ip,status,created_at,updated_at)
-VALUES ("admin","$2y$10$LiiwCTjRHewO1FY/B8Y7yuLYvOBuL/7gFKIZAP/JWDwliWWPTiE4a","admin@demo.zap.cn","admin",1756650543,"127.0.0.1",1,1756650543,1756650543);
+VALUES ("admin","$2y$10$LiiwCTjRHewO1FY/B8Y7yuLYvOBuL/7gFKIZAP/JWDwliWWPTiE4a","admin@demo.zap.cn","18826002600","admin",1756650543,"127.0.0.1",1,1756650543,1756650543);
     "#;
 
     let _ = get_db_pool().await.execute(sql_script).await;

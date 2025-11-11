@@ -34,20 +34,20 @@
         <el-table-column prop="nickname" label="昵称" width="120" />
         <el-table-column prop="email" label="邮箱" width="180" />
         <el-table-column prop="phone" label="手机号" width="120" />
-        <el-table-column prop="role" label="角色" width="120" />
+        <el-table-column prop="roles" label="角色" width="120" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="scope">
-            <el-tag :type="scope.row.status === '1' ? 'success' : 'danger'">
-              {{ scope.row.status === '1' ? '启用' : '禁用' }}
+            <el-tag :type="scope.row.status === 1 ? 'success' : 'danger'">
+              {{ scope.row.status === 1 ? '启用' : '禁用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="createTime" label="创建时间" width="180" />
+        <el-table-column prop="created_at" label="创建时间" width="180" :formatter="formatDate" />
         <el-table-column label="操作" fixed="right" width="200">
           <template #default="scope">
             <el-button type="primary" link @click="handleEdit(scope.row)"> 编辑 </el-button>
             <el-button type="primary" link @click="handleChangeStatus(scope.row)">
-              {{ scope.row.status === '1' ? '禁用' : '启用' }}
+              {{ scope.row.status === 1 ? '禁用' : '启用' }}
             </el-button>
             <el-button type="danger" link @click="handleDelete(scope.row)"> 删除 </el-button>
           </template>
@@ -115,6 +115,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import { http } from '@/utils/request'
+import { formatDate } from '@/utils/fmt'
 
 // 搜索表单数据
 const searchForm = reactive({
@@ -124,28 +125,7 @@ const searchForm = reactive({
 
 // 表格数据
 const loading = ref(false)
-const tableData = ref([
-  {
-    id: 1,
-    username: 'admin',
-    nickname: '管理员',
-    email: 'admin@example.com',
-    phone: '13800138000',
-    role: '管理员',
-    status: '1',
-    createTime: '2023-05-01 12:00:00',
-  },
-  {
-    id: 2,
-    username: 'user1',
-    nickname: '用户1',
-    email: 'user1@example.com',
-    phone: '13800138001',
-    role: '普通用户',
-    status: '1',
-    createTime: '2023-05-01 12:00:00',
-  },
-])
+const tableData = ref([])
 
 // 分页相关
 const currentPage = ref(1)
