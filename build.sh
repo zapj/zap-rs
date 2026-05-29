@@ -17,7 +17,7 @@ fi
 # test zapfile command is exist
 if ! command -v zapfile >/dev/null 2>&1; then
   echo "zapfile could not be found, install zapfile...."
-  wget -qO- https://mirrors.zap.cn/zapfile/releases/v1.0.5/zapfile-linux-amd64 -O /usr/bin/zapfile
+  wget -qO- https://mirrors.zap.cn/zapfile/zapfile-linux-amd64 -O /usr/bin/zapfile
   chmod +x /usr/bin/zapfile
   echo "zapfile installed successfully...."
 fi

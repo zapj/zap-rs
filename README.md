@@ -22,3 +22,12 @@ Linux 服务器/VPS管理系统
 - [x] 定时任务
 - [x] 服务器监控
 
+
+
+## 安装步骤
+
+### 默认密码 123456
+
+1. cd web  && npm install
+2. cargo run --bin zapd
+
