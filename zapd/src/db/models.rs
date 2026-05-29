@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 
 #[derive(Debug,Clone,sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct UserModel {
     pub id : u64,
     pub username : String,

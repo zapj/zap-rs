@@ -1,100 +1,72 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { updateUserProfile, updateUserPassword, uploadAvatar } from '@/api/user'
-import type { UploadProps } from 'element-plus'
-import { getTokenExpire } from '@/utils/auth'
-import { Plus } from '@element-plus/icons-vue'
+import { updateUser } from '@/api/user'
 
 const userStore = useUserStore()
 const { userInfo } = userStore
 
-const activeTab = ref('userInfo')
+const activeTab = ref('info')
 
-// 用户信息表单
-const userForm = ref({
-  nickname: userInfo.nickname,
-  email: userInfo.email || '',
-  phone: userInfo.phone || '',
-  introduction: userInfo.introduction || '',
-})
-
-// 修改密码表单
-const passwordForm = ref({
-  oldPassword: '',
-  newPassword: '',
-  confirmPassword: '',
+// ── 基本资料 ───────────────────────────────────────────────
+const infoForm = reactive({
+  nickname: '',
+  email: '',
 })
 
 onMounted(() => {
-  console.log(getTokenExpire());
-   
+  // 回填当前用户信息
+  infoForm.nickname = userInfo.nickname
+  infoForm.email = userInfo.email
 })
 
-// 更新用户信息
-const updateUserInfo = async () => {
+async function saveInfo() {
   try {
-    await updateUserProfile(userForm.value)
-    ElMessage.success('个人信息更新成功')
-    // 重新获取用户信息
+    await updateUser({
+      id: userInfo.id,
+      nickname: infoForm.nickname,
+      email: infoForm.email,
+    })
+    ElMessage.success('资料更新成功')
     await userStore.getInfoAction()
-  } catch (error) {
-    console.error('更新个人信息失败:', error)
+  } catch {
+    // 拦截器已弹窗
   }
 }
 
-// 修改密码
-const updatePassword = async () => {
-  if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
-    ElMessage.error('两次输入的新密码不一致')
+// ── 修改密码 ───────────────────────────────────────────────
+const pwdForm = reactive({
+  newPassword: '',
+  confirmPassword: '',
+})
+const pwdLoading = ref(false)
+
+async function changePassword() {
+  if (!pwdForm.newPassword) {
+    ElMessage.warning('请输入新密码')
+    return
+  }
+  if (pwdForm.newPassword.length < 6) {
+    ElMessage.warning('密码至少 6 个字符')
+    return
+  }
+  if (pwdForm.newPassword !== pwdForm.confirmPassword) {
+    ElMessage.warning('两次输入的密码不一致')
     return
   }
 
+  pwdLoading.value = true
   try {
-    await updateUserPassword({
-      oldPassword: passwordForm.value.oldPassword,
-      newPassword: passwordForm.value.newPassword,
-    })
-    ElMessage.success('密码修改成功')
-    // 清空表单
-    passwordForm.value = {
-      oldPassword: '',
-      newPassword: '',
-      confirmPassword: '',
-    }
-  } catch (error) {
-    console.error('修改密码失败:', error)
+    await updateUser({ id: userInfo.id, password: pwdForm.newPassword })
+    ElMessage.success('密码修改成功，下次登录请使用新密码')
+    pwdForm.newPassword = ''
+    pwdForm.confirmPassword = ''
+  } catch {
+    // 拦截器已弹窗
+  } finally {
+    pwdLoading.value = false
   }
-}
-
-// 头像上传
-const handleAvatarSuccess: UploadProps['onSuccess'] = async (response, uploadFile) => {
-  try {
-    const file = uploadFile.raw!
-    const result = await uploadAvatar(file)
-    userInfo.avatar = result.avatar
-    ElMessage.success('头像上传成功')
-  } catch (error) {
-    console.error('头像上传失败:', error)
-  }
-}
-
-// 上传前校验
-const beforeAvatarUpload: UploadProps['beforeUpload'] = (file) => {
-  const isJPG = file.type === 'image/jpeg'
-  const isPNG = file.type === 'image/png'
-  const isLt2M = file.size / 1024 / 1024 < 2
-
-  if (!isJPG && !isPNG) {
-    ElMessage.error('头像只能是 JPG 或 PNG 格式!')
-    return false
-  }
-  if (!isLt2M) {
-    ElMessage.error('头像大小不能超过 2MB!')
-    return false
-  }
-  return true
 }
 </script>
 
@@ -102,86 +74,64 @@ const beforeAvatarUpload: UploadProps['beforeUpload'] = (file) => {
   <div class="app-container">
     <el-card>
       <template #header>
-        <div class="card-header">
-          <span>个人中心</span>
-        </div>
+        <span>个人中心</span>
       </template>
 
       <el-tabs v-model="activeTab">
-        <!-- 个人信息 -->
-        <el-tab-pane label="基本资料" name="userInfo">
-          <el-form ref="userFormRef" :model="userForm" label-width="100px">
-            <!-- 头像上传 -->
-            <el-form-item label="头像">
-              <el-upload
-                class="avatar-uploader"
-                :show-file-list="false"
-                :before-upload="beforeAvatarUpload"
-                :on-success="handleAvatarSuccess"
-                action="auto"
-              >
-                <img v-if="userInfo.avatar" :src="userInfo.avatar" class="avatar" alt="Avatar" />
-                <el-icon v-else class="avatar-uploader-icon">
-                  <Plus />
-                </el-icon>
-              </el-upload>
+        <!-- 基本资料 -->
+        <el-tab-pane label="基本资料" name="info">
+          <el-form label-width="80px" style="max-width: 440px">
+            <el-form-item label="用户 ID">
+              <el-input :model-value="userInfo.id" disabled />
             </el-form-item>
-
             <el-form-item label="用户名">
-              <el-input v-model="userInfo.username" disabled />
+              <el-input :model-value="userInfo.username" disabled />
+            </el-form-item>
+            <el-form-item label="角色">
+              <el-tag
+                v-for="r in userInfo.roles"
+                :key="r"
+                style="margin-right: 6px"
+              >
+                {{ r === 'admin' ? '管理员' : '普通用户' }}
+              </el-tag>
+              <span v-if="!userInfo.roles?.length" style="color: #909399">-</span>
             </el-form-item>
             <el-form-item label="昵称">
-              <el-input v-model="userForm.nickname" placeholder="请输入昵称" />
+              <el-input v-model="infoForm.nickname" placeholder="请输入昵称" />
             </el-form-item>
             <el-form-item label="邮箱">
-              <el-input v-model="userForm.email" placeholder="请输入邮箱" />
-            </el-form-item>
-            <el-form-item label="手机号码">
-              <el-input v-model="userForm.phone" placeholder="请输入手机号码" />
-            </el-form-item>
-            <el-form-item label="个人简介">
-              <el-input
-                v-model="userForm.introduction"
-                type="textarea"
-                placeholder="请输入个人简介"
-                :rows="4"
-              />
+              <el-input v-model="infoForm.email" placeholder="请输入邮箱" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="updateUserInfo">保存</el-button>
+              <el-button type="primary" @click="saveInfo">保存修改</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
         <!-- 修改密码 -->
         <el-tab-pane label="修改密码" name="password">
-          <el-form ref="passwordFormRef" :model="passwordForm" label-width="100px">
-            <el-form-item label="原密码">
-              <el-input
-                v-model="passwordForm.oldPassword"
-                type="password"
-                placeholder="请输入原密码"
-                show-password
-              />
-            </el-form-item>
+          <el-form label-width="90px" style="max-width: 400px">
             <el-form-item label="新密码">
               <el-input
-                v-model="passwordForm.newPassword"
+                v-model="pwdForm.newPassword"
                 type="password"
-                placeholder="请输入新密码"
                 show-password
+                placeholder="至少 6 个字符"
               />
             </el-form-item>
-            <el-form-item label="确认新密码">
+            <el-form-item label="确认密码">
               <el-input
-                v-model="passwordForm.confirmPassword"
+                v-model="pwdForm.confirmPassword"
                 type="password"
-                placeholder="请再次输入新密码"
                 show-password
+                placeholder="再次输入新密码"
               />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="updatePassword">保存</el-button>
+              <el-button type="primary" :loading="pwdLoading" @click="changePassword">
+                修改密码
+              </el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
@@ -193,50 +143,5 @@ const beforeAvatarUpload: UploadProps['beforeUpload'] = (file) => {
 <style scoped>
 .app-container {
   padding: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-:deep(.el-input) {
-  width: 400px;
-}
-
-:deep(.el-textarea) {
-  width: 400px;
-}
-
-.avatar-uploader {
-  :deep(.el-upload) {
-    border: 1px dashed var(--el-border-color);
-    border-radius: 6px;
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
-    transition: var(--el-transition-duration-fast);
-
-    &:hover {
-      border-color: var(--el-color-primary);
-    }
-  }
-}
-
-.avatar-uploader-icon {
-  font-size: 28px;
-  color: #8c939d;
-  width: 100px;
-  height: 100px;
-  text-align: center;
-  line-height: 100px;
-}
-
-.avatar {
-  width: 100px;
-  height: 100px;
-  display: block;
-  object-fit: cover;
 }
 </style>

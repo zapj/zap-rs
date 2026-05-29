@@ -6,24 +6,26 @@ import { ElMessage } from 'element-plus'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref('')
+  const userId = ref<number>(0)
   const name = ref('')
   const avatar = ref('')
   const roles = ref<string[]>([])
   const permissions = ref<string[]>([])
-  const email = ref('') // 添加 email 属性
-  const phone = ref('') // 添加 phone 属性
-  // 用户信息计算属性
+  const email = ref('')
+  const phone = ref('')
+  const nickname = ref('')
+
   const userInfo = computed(() => ({
+    id: userId.value,
     name: name.value || '用户',
-    username: name.value || '用户', // 用 name 作为 username，提供默认值
-    nickname: name.value || '用户', // 用 name 作为 nickname，提供默认值
-    // 使用在线占位符图片作为默认头像
+    username: name.value || '用户',
+    nickname: nickname.value || name.value || '用户',
     avatar: avatar.value || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png',
     roles: roles.value,
     permissions: permissions.value,
-    email: email.value || '', // 提供默认值
-    phone: phone.value || '', // 提供默认值
-    introduction: '欢迎使用我们的应用', // 提供默认介绍
+    email: email.value || '',
+    phone: phone.value || '',
+    introduction: '欢迎使用我们的应用',
   }))
 
 
@@ -35,7 +37,11 @@ export const useUserStore = defineStore('user', () => {
         token.value = res.access_token
         setToken(res.access_token)
         setTokenExpire(res.expire_in)
-        return Promise.resolve(res)
+        // Pass through must_change_password flag
+        return Promise.resolve({
+          ...res,
+          must_change_password: res.must_change_password || false,
+        })
       }
       return Promise.reject(new Error('登录失败'))
     } catch (error) {
@@ -48,10 +54,13 @@ export const useUserStore = defineStore('user', () => {
     try {
       const res = await getUserInfo()
       if (res) {
+        userId.value = res.data.id ?? 0
         name.value = res.data.username
+        nickname.value = res.data.nickname
         avatar.value = res.data.avatar
         roles.value = res.data.roles
         permissions.value = res.data.permissions
+        email.value = res.data.email ?? ''
         return Promise.resolve(res)
       }
       return Promise.reject(new Error('获取用户信息失败'))
@@ -65,15 +74,15 @@ export const useUserStore = defineStore('user', () => {
     try {
       await logoutApi()
       token.value = ''
+      userId.value = 0
       name.value = ''
+      nickname.value = ''
       avatar.value = ''
+      email.value = ''
       roles.value = []
       permissions.value = []
       removeToken()
-      ElMessage({
-        type:"success",
-        message:"您已安全退出",
-      })
+      ElMessage({ type: 'success', message: '您已安全退出' })
       return Promise.resolve()
     } catch (error) {
       return Promise.reject(error)
@@ -83,8 +92,11 @@ export const useUserStore = defineStore('user', () => {
   // 重置 Token（不调用后端）
   async function resetToken() {
     token.value = ''
+    userId.value = 0
     name.value = ''
+    nickname.value = ''
     avatar.value = ''
+    email.value = ''
     roles.value = []
     permissions.value = []
     removeToken()

@@ -4,5 +4,5 @@ server:
   cert_file: conf/zap.crt
   key_file: conf/zap.key
 jwt:
-  jwt_secure: secure-key-zap-default
+  jwt_secure: da8966cc5ad82529c56a75b9e7a03b2f9aec51ae381150a4360fdb49061b0c60
   jwt_expire: 3600

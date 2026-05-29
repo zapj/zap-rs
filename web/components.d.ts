@@ -48,7 +48,6 @@ declare module 'vue' {
     ElTabs: typeof import('element-plus/es')['ElTabs']
     ElTag: typeof import('element-plus/es')['ElTag']
     ElTree: typeof import('element-plus/es')['ElTree']
-    ElUpload: typeof import('element-plus/es')['ElUpload']
     Hamburger: typeof import('./src/components/Hamburger/index.vue')['default']
     IconEpArrowDown: typeof import('~icons/ep/arrow-down')['default']
     IconEpClose: typeof import('~icons/ep/close')['default']

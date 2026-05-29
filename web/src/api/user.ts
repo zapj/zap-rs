@@ -2,50 +2,81 @@ import { http } from '@/utils/request'
 import type { LoginForm, UserInfo } from '@/types/user'
 import type { ApiResponse } from '@/types/api_response'
 
-/**
- * 用户登录
- * @param data 登录表单数据
- */
+// ── 认证 ───────────────────────────────────────────────────
+
 export function login(data: LoginForm) {
   return http.post('/auth/login', data)
 }
 
-/**
- * 获取用户信息
- * @returns Promise<ApiResponse<UserInfo>>
- */
 export function getUserInfo() {
   return http.get<ApiResponse<UserInfo>>('/user/info')
 }
 
-/**
- * 退出登录
- * @returns Promise<ApiResponse<null>>
- */
 export function logout() {
   return http.get<ApiResponse>('/auth/logout')
 }
 
-/**
- * 更新用户个人信息
- * @param data 用户信息
- */
-export function updateUserProfile(data: Partial<UserInfo>) {
-  return http.put<UserInfo>('/user/profile', data)
+// ── 用户管理 CRUD ─────────────────────────────────────────
+
+export interface UserListItem {
+  id: number
+  username: string
+  email: string
+  nickname: string
+  last_login_ip: string
+  last_login_time: number
+  status: number
+  roles: string[]
+  permissions: string[]
+  created_at: number
+  updated_at: number
 }
 
-/**
- * 修改用户密码
- * @param data 密码信息
- */
-export function updateUserPassword(data: { oldPassword: string; newPassword: string }) {
-  return http.put('/user/password', data)
+export interface UserListResponse {
+  code: number
+  message: string
+  data: UserListItem[]
+  total: number
 }
 
-/**
- * 上传用户头像
- * @param file 头像文件
- */
-export function uploadAvatar(file: File) {
-  return http.upload<{ avatar: string }>('/user/avatar', file)
+/** 获取用户列表 */
+export function getUserList(params?: { username?: string; status?: string }) {
+  return http.get<UserListResponse>('/system/user/list', { params })
+}
+
+export interface CreateUserPayload {
+  username: string
+  password: string
+  email: string
+  nickname?: string
+  roles?: string
+}
+
+/** 新增用户 */
+export function createUser(data: CreateUserPayload) {
+  return http.post<ApiResponse<{ id: number }>>('/system/user/add', data)
+}
+
+export interface UpdateUserPayload {
+  id: number
+  email?: string
+  nickname?: string
+  roles?: string
+  status?: number
+  password?: string
+}
+
+/** 更新用户（管理员编辑或用户自己改密码） */
+export function updateUser(data: UpdateUserPayload) {
+  return http.post<ApiResponse>('/system/user/update', data)
+}
+
+/** 删除用户 */
+export function deleteUser(id: number) {
+  return http.post<ApiResponse>('/system/user/delete', { id })
+}
+
+/** 修改当前用户密码 */
+export function changeMyPassword(newPassword: string) {
+  return http.post<ApiResponse>('/system/user/update', { password: newPassword })
 }

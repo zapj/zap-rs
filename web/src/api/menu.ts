@@ -1,65 +1,65 @@
 import { http } from '@/utils/request'
-import type { MenuItem, MenuForm } from '@/types/menu'
 import type { ApiResponse } from '@/types/api_response'
 
-/**
- * 获取菜单树
- */
+export interface MenuItem {
+  id: number
+  name: string
+  path: string
+  component: string
+  redirect?: string
+  type: string
+  meta: {
+    title: string
+    icon?: string
+    hidden?: boolean
+    keepAlive?: boolean
+    affix?: boolean
+    roles?: string[]
+  }
+  children?: MenuItem[]
+  order: number
+  status: number
+}
+
+export interface MenuForm {
+  parent_id?: number
+  name: string
+  path: string
+  component?: string
+  redirect?: string
+  type?: string
+  title?: string
+  icon?: string
+  hidden?: number
+  keep_alive?: number
+  affix?: number
+  roles?: string
+  sort_order?: number
+  status?: number
+}
+
+/** Get menu tree for sidebar rendering */
 export function getMenuTree() {
   return http.get<ApiResponse<MenuItem[]>>('/system/menus/tree')
 }
 
-export function getMenuRole() {
-  return http.get<ApiResponse<MenuItem[]>>('/system/menus/role')
+/** Get menu tree for admin management */
+export function getMenuList() {
+  return http.get<ApiResponse<MenuItem[]>>('/system/menus/list')
 }
 
-/**
- * 获取菜单详情
- * @param id 菜单ID
- */
-export function getMenu(id: string) {
-  return http.get<ApiResponse<MenuItem>>(`/system/menus/${id}`)
-}
-
-/**
- * 创建菜单
- * @param data 菜单数据
- */
 export function createMenu(data: MenuForm) {
-  return http.post<ApiResponse<MenuItem>>('/system/menus', data)
+  return http.post<ApiResponse<{ id: number }>>('/system/menus/add', data)
 }
 
-/**
- * 更新菜单
- * @param id 菜单ID
- * @param data 菜单数据
- */
-export function updateMenu(id: string, data: MenuForm) {
-  return http.put<MenuItem>(`/system/menus/${id}`, data)
+export function updateMenu(data: { id: number } & Partial<MenuForm>) {
+  return http.post<ApiResponse>('/system/menus/update', data)
 }
 
-/**
- * 删除菜单
- * @param id 菜单ID
- */
-export function deleteMenu(id: string) {
-  return http.delete(`/system/menus/${id}`)
+export function deleteMenu(id: number) {
+  return http.post<ApiResponse>('/system/menus/delete', { id })
 }
 
-/**
- * 更新菜单状态
- * @param id 菜单ID
- * @param status 状态(0: 禁用, 1: 启用)
- */
-export function updateMenuStatus(id: string, status: 0 | 1) {
-  return http.put(`/system/menus/status`, { status,id: id })
-}
-
-/**
- * 更新菜单排序
- * @param id 菜单ID
- * @param orderNum 排序号
- */
-export function updateMenuOrder(id: string, orderNum: number) {
-  return http.put(`/system/menus/${id}/order`, { orderNum })
+export function toggleMenuStatus(id: number, status: number) {
+  return http.post<ApiResponse>('/system/menus/status', { id, status })
 }

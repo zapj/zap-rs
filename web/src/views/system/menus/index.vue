@@ -2,235 +2,184 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import {
-  getMenuTree,
-  createMenu,
-  updateMenu,
-  deleteMenu,
-  updateMenuStatus,
-  updateMenuOrder,
-} from '@/api/menu'
-import type { MenuItem, MenuForm } from '@/types/menu'
+import { getMenuList, createMenu, updateMenu, deleteMenu, toggleMenuStatus, type MenuItem, type MenuForm } from '@/api/menu'
 
-// 表格数据
 const tableData = ref<MenuItem[]>([])
 const loading = ref(false)
 
-// 表单数据
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
-const form = ref<MenuForm>({
-  parentId: '',
-  name: '',
-  path: '',
-  component: '',
-  meta: {
-    title: '',
-    icon: '',
-    hidden: false,
-    keepAlive: false,
-    affix: false,
-    roles: [],
-  },
-  order: 0,
-  type: 'menu',
-  status: 1,
-})
-
-// 表单校验规则
-const rules = ref<FormRules>({
-  name: [
-    { required: true, message: '请输入菜单名称', trigger: 'blur' },
-    { min: 2, max: 50, message: '长度在 2 到 50 个字符', trigger: 'blur' },
-  ],
-  path: [{ required: true, message: '请输入菜单路径', trigger: 'blur' }],
-  'meta.title': [{ required: true, message: '请输入显示名称', trigger: 'blur' }],
-  orderNum: [
-    { required: true, message: '请输入排序号', trigger: 'blur' },
-    { type: 'number', message: '排序号必须为数字', trigger: 'blur' },
-  ],
-})
-
-// 获取菜单树数据
-const getMenus = async () => {
+async function loadMenus() {
   loading.value = true
   try {
-    const resp = await getMenuTree()
-    tableData.value = resp.data
-  } catch (error) {
-    console.error('获取菜单列表失败:', error)
-  } finally {
-    loading.value = false
-  }
+    const res = await getMenuList()
+    tableData.value = res.data ?? []
+  } catch { /* handled */ }
+  finally { loading.value = false }
 }
 
-// 添加菜单
-const handleAdd = (row?: MenuItem) => {
-  resetForm()
+// ── 表单 ───────────────────────────────────────────────────
+const dialogVisible = ref(false)
+const dialogTitle = ref('添加菜单')
+const formRef = ref<FormInstance>()
+
+interface FormData {
+  parent_id: number
+  name: string
+  path: string
+  component: string
+  redirect: string
+  type: string
+  title: string
+  icon: string
+  hidden: number
+  keep_alive: number
+  affix: number
+  roles: string
+  sort_order: number
+  status: number
+}
+
+const emptyForm = (): FormData => ({
+  parent_id: 0, name: '', path: '', component: '', redirect: '', type: 'menu',
+  title: '', icon: '', hidden: 0, keep_alive: 0, affix: 0, roles: '', sort_order: 0, status: 1,
+})
+
+const form = ref<FormData>(emptyForm())
+const editingId = ref(0)
+
+const rules: FormRules<FormData> = {
+  name: [{ required: true, message: '请输入路由名称', trigger: 'blur' }],
+  path: [{ required: true, message: '请输入路由路径', trigger: 'blur' }],
+  title: [{ required: true, message: '请输入显示名称', trigger: 'blur' }],
+}
+
+function handleAdd(row?: MenuItem) {
   dialogTitle.value = '添加菜单'
-  if (row) {
-    form.value.parentId = row.id
-  }
+  editingId.value = 0
+  form.value = emptyForm()
+  if (row) form.value.parent_id = row.id
   dialogVisible.value = true
 }
 
-// 编辑菜单
-const handleEdit = (row: MenuItem) => {
+function handleEdit(row: MenuItem) {
   dialogTitle.value = '编辑菜单'
+  editingId.value = row.id
   form.value = {
-    parentId: row.parentId,
+    parent_id: 0,
     name: row.name,
     path: row.path,
     component: row.component,
-    redirect: row.redirect,
-    meta: { ...row.meta },
-    order: row.order,
+    redirect: row.redirect ?? '',
     type: row.type,
+    title: row.meta?.title ?? '',
+    icon: row.meta?.icon ?? '',
+    hidden: row.meta?.hidden ? 1 : 0,
+    keep_alive: row.meta?.keepAlive ? 1 : 0,
+    affix: row.meta?.affix ? 1 : 0,
+    roles: row.meta?.roles?.join(',') ?? '',
+    sort_order: row.order,
     status: row.status,
   }
   dialogVisible.value = true
 }
 
-// 删除菜单
-const handleDelete = async (row: MenuItem) => {
+async function submitForm() {
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
   try {
-    await ElMessageBox.confirm('确认要删除该菜单吗？', '提示', {
-      type: 'warning',
-    })
+    const payload: MenuForm = {
+      parent_id: form.value.parent_id || undefined,
+      name: form.value.name,
+      path: form.value.path,
+      component: form.value.component || undefined,
+      redirect: form.value.redirect || undefined,
+      type: form.value.type,
+      title: form.value.title,
+      icon: form.value.icon || undefined,
+      hidden: form.value.hidden || undefined,
+      keep_alive: form.value.keep_alive || undefined,
+      affix: form.value.affix || undefined,
+      roles: form.value.roles || undefined,
+      sort_order: form.value.sort_order || undefined,
+      status: form.value.status,
+    }
+    if (editingId.value) {
+      await updateMenu({ id: editingId.value, ...payload })
+      ElMessage.success('更新成功')
+    } else {
+      await createMenu(payload)
+      ElMessage.success('创建成功')
+    }
+    dialogVisible.value = false
+    loadMenus()
+  } catch { /* handled */ }
+}
+
+async function handleDelete(row: MenuItem) {
+  try {
+    await ElMessageBox.confirm(`确认删除菜单「${row.meta?.title ?? row.name}」及其子菜单？`, '警告', { type: 'warning', confirmButtonText: '确认删除' })
+  } catch { return }
+  try {
     await deleteMenu(row.id)
     ElMessage.success('删除成功')
-    getMenus()
-  } catch (error) {
-    console.error('删除菜单失败:', error)
-  }
+    loadMenus()
+  } catch { /* handled */ }
 }
 
-// 更新菜单状态
-const handleStatusChange = async (row: MenuItem) => {
+async function handleStatusChange(row: MenuItem) {
   try {
-    await updateMenuStatus(row.id, row.status)
-    ElMessage.success('更新状态成功')
-  } catch (error) {
-    console.error('更新状态失败:', error)
-    // 恢复原状态
-    row.status = row.status === 1 ? 0 : 1
+    await toggleMenuStatus(row.id, row.status)
+    ElMessage.success('状态更新成功')
+  } catch {
+    row.status = row.status === 1 ? 0 : 1 // rollback
   }
 }
 
-// 提交表单
-const submitForm = async (formEl: FormInstance | undefined) => {
-  if (!formEl) return
-
-  await formEl.validate(async (valid) => {
-    if (valid) {
-      try {
-        if (dialogTitle.value === '添加菜单') {
-          await createMenu(form.value)
-          ElMessage.success('添加成功')
-        } else {
-          // TODO: 需要传入当前编辑的菜单ID
-          await updateMenu('currentId', form.value)
-          ElMessage.success('更新成功')
-        }
-        dialogVisible.value = false
-        getMenus()
-      } catch (error) {
-        console.error('保存菜单失败:', error)
-      }
-    }
-  })
-}
-
-// 重置表单
-const resetForm = () => {
-  if (formRef.value) {
-    formRef.value.resetFields()
-  }
-  form.value = {
-    parentId: '',
-    name: '',
-    path: '',
-    component: '',
-    meta: {
-      title: '',
-      icon: '',
-      hidden: false,
-      keepAlive: false,
-      affix: false,
-      roles: [],
-    },
-    order: 0,
-    type: 'menu',
-    status: 1,
-  }
-}
-
-// 初始化
-onMounted(() => {
-  getMenus()
-})
+onMounted(loadMenus)
 </script>
 
 <template>
   <div class="app-container">
-    <!-- 操作按钮 -->
-    <div class="mb-4">
-      <el-button type="primary" @click="handleAdd()">
-        <el-icon><Plus /></el-icon>
-        添加菜单
-      </el-button>
-    </div>
+    <el-button type="primary" @click="handleAdd()" style="margin-bottom:16px">
+      <el-icon><Plus /></el-icon>添加菜单
+    </el-button>
 
-    <!-- 菜单表格 -->
     <el-table
       v-loading="loading"
       :data="tableData"
       row-key="id"
       border
       default-expand-all
-      :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
+      :tree-props="{ children: 'children' }"
     >
       <el-table-column prop="meta.title" label="菜单名称" min-width="180" />
-      <el-table-column prop="name" label="路由名称" min-width="120" />
-      <el-table-column prop="path" label="路由路径" min-width="120" />
-      <el-table-column prop="component" label="组件路径" min-width="180" />
-      <el-table-column prop="order" label="排序" width="80" align="center" />
-      <el-table-column prop="type" label="类型" width="100" align="center">
+      <el-table-column prop="name" label="路由名称" width="120" />
+      <el-table-column prop="path" label="路由路径" width="120" />
+      <el-table-column prop="component" label="组件路径" min-width="160" />
+      <el-table-column prop="order" label="排序" width="70" align="center" />
+      <el-table-column prop="type" label="类型" width="80" align="center">
         <template #default="{ row }">
-          <el-tag v-if="row.type === 'dir'" type="success">目录</el-tag>
-          <el-tag v-else-if="row.type === 'menu'" type="primary">菜单</el-tag>
-          <el-tag v-else type="warning">按钮</el-tag>
+          <el-tag v-if="row.type === 'dir'" type="success" size="small">目录</el-tag>
+          <el-tag v-else-if="row.type === 'menu'" type="primary" size="small">菜单</el-tag>
+          <el-tag v-else type="warning" size="small">按钮</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="status" label="状态" width="100" align="center">
+      <el-table-column label="状态" width="80" align="center">
         <template #default="{ row }">
-          <el-switch
-            v-model="row.status"
-            :active-value="1"
-            :inactive-value="0"
-            @change="handleStatusChange(row)"
-          />
+          <el-switch :model-value="row.status === 1" @change="handleStatusChange(row)" />
         </template>
       </el-table-column>
       <el-table-column label="操作" width="200" align="center" fixed="right">
         <template #default="{ row }">
-          <el-button type="primary" link @click="handleAdd(row)"> 添加子菜单 </el-button>
-          <el-button type="primary" link @click="handleEdit(row)"> 编辑 </el-button>
-          <el-button type="danger" link @click="handleDelete(row)"> 删除 </el-button>
+          <el-button type="primary" link @click="handleAdd(row)">子菜单</el-button>
+          <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
+          <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <!-- 菜单表单弹窗 -->
-    <el-dialog
-      v-model="dialogVisible"
-      :title="dialogTitle"
-      width="700px"
-      append-to-body
-      destroy-on-close
-    >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+    <!-- 菜单表单 -->
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="660px" destroy-on-close>
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="菜单类型">
           <el-radio-group v-model="form.type">
             <el-radio-button value="dir">目录</el-radio-button>
@@ -238,58 +187,50 @@ onMounted(() => {
             <el-radio-button value="button">按钮</el-radio-button>
           </el-radio-group>
         </el-form-item>
-
         <el-form-item label="路由名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入路由名称" />
+          <el-input v-model="form.name" placeholder="唯一标识，如 system" />
         </el-form-item>
-
         <el-form-item label="路由路径" prop="path">
-          <el-input v-model="form.path" placeholder="请输入路由路径" />
+          <el-input v-model="form.path" placeholder="如 /system 或 user" />
         </el-form-item>
-
-        <el-form-item v-if="form.type !== 'button'" label="组件路径" prop="component">
-          <el-input v-model="form.component" placeholder="请输入组件路径" />
+        <el-form-item v-if="form.type !== 'button'" label="组件路径">
+          <el-input v-model="form.component" placeholder="如 system/users/index" />
         </el-form-item>
-
-        <el-form-item v-if="form.type === 'dir'" label="重定向" prop="redirect">
-          <el-input v-model="form.redirect" placeholder="请输入重定向路径" />
+        <el-form-item v-if="form.type === 'dir'" label="重定向">
+          <el-input v-model="form.redirect" placeholder="如 /system/user" />
         </el-form-item>
-
-        <el-form-item label="显示名称" prop="meta.title">
-          <el-input v-model="form.meta.title" placeholder="请输入显示名称" />
+        <el-form-item label="显示名称" prop="title">
+          <el-input v-model="form.title" placeholder="侧边栏显示的文字" />
         </el-form-item>
-
-        <el-form-item v-if="form.type !== 'button'" label="图标" prop="meta.icon">
-          <el-input v-model="form.meta.icon" placeholder="请输入图标名称" />
+        <el-form-item v-if="form.type !== 'button'" label="图标">
+          <el-input v-model="form.icon" placeholder="如 ep:setting" />
         </el-form-item>
-
-        <el-form-item label="排序号" prop="orderNum">
-          <el-input-number v-model="form.order" :min="0" :max="999" />
+        <el-form-item label="排序">
+          <el-input-number v-model="form.sort_order" :min="0" />
         </el-form-item>
-
+        <el-form-item v-if="form.type !== 'button'" label="角色限制">
+          <el-input v-model="form.roles" placeholder="逗号分隔，如 admin,user" />
+        </el-form-item>
         <el-form-item v-if="form.type !== 'button'" label="状态">
           <el-radio-group v-model="form.status">
-            <el-radio :label="1">启用</el-radio>
-            <el-radio :label="0">禁用</el-radio>
+            <el-radio :value="1">启用</el-radio>
+            <el-radio :value="0">禁用</el-radio>
           </el-radio-group>
         </el-form-item>
-
-        <el-form-item v-if="form.type !== 'button'" label="其他设置">
-          <el-checkbox v-model="form.meta.hidden">隐藏菜单</el-checkbox>
-          <el-checkbox v-model="form.meta.keepAlive">开启缓存</el-checkbox>
-          <el-checkbox v-model="form.meta.affix">固定标签</el-checkbox>
+        <el-form-item v-if="form.type !== 'button'" label="选项">
+          <el-checkbox v-model="form.hidden" :true-value="1" :false-value="0">隐藏</el-checkbox>
+          <el-checkbox v-model="form.keep_alive" :true-value="1" :false-value="0">缓存</el-checkbox>
+          <el-checkbox v-model="form.affix" :true-value="1" :false-value="0">固定</el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitForm(formRef)"> 确定 </el-button>
+        <el-button type="primary" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.app-container {
-  padding: 20px;
-}
+.app-container { padding: 20px; }
 </style>

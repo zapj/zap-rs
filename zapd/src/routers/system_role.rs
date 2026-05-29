@@ -1,0 +1,224 @@
+use axum::Json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sqlx::Sqlite;
+use tracing::info;
+
+use crate::{
+    db,
+    zap::{
+        jwt::ValidatedClaims,
+        ZapError, ZapJsonResult,
+    },
+};
+
+// ── types ──────────────────────────────────────────────────
+
+#[derive(sqlx::FromRow, Debug, Serialize)]
+struct RoleRow {
+    id: i64,
+    name: String,
+    role_key: String,
+    description: String,
+    status: i64,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRolePayload {
+    pub name: String,
+    pub role_key: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateRolePayload {
+    pub id: i64,
+    pub name: Option<String>,
+    pub role_key: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteRolePayload {
+    pub id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRolePermissionsPayload {
+    pub role_id: i64,
+    pub menu_ids: Vec<i64>,
+}
+
+fn role_to_value(r: &RoleRow) -> Value {
+    json!({
+        "id": r.id,
+        "name": r.name,
+        "role_key": r.role_key,
+        "description": r.description,
+        "status": r.status,
+        "created_at": r.created_at,
+        "updated_at": r.updated_at,
+    })
+}
+
+// ── handlers ───────────────────────────────────────────────
+
+pub async fn role_list(_claims: ValidatedClaims) -> ZapJsonResult {
+    let pool = db::get_db_pool().await;
+    let rows: Vec<RoleRow> = sqlx::query_as("SELECT * FROM roles ORDER BY id")
+        .fetch_all(pool)
+        .await?;
+
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": rows.iter().map(role_to_value).collect::<Vec<_>>(),
+        "total": rows.len(),
+    })))
+}
+
+pub async fn role_add(
+    _claims: ValidatedClaims,
+    Json(payload): Json<CreateRolePayload>,
+) -> ZapJsonResult {
+    let pool = db::get_db_pool().await;
+    let now = chrono::Local::now().timestamp();
+    let desc = payload.description.unwrap_or_default();
+
+    let result = sqlx::query(
+        "INSERT INTO roles (name, role_key, description, status, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
+    )
+    .bind(&payload.name)
+    .bind(&payload.role_key)
+    .bind(&desc)
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(r) => {
+            info!("Role created: {} (id: {})", payload.name, r.last_insert_rowid());
+            Ok(Json(json!({ "code": 0, "message": "创建成功", "data": { "id": r.last_insert_rowid() } })))
+        }
+        Err(e) if e.to_string().contains("UNIQUE") => {
+            Err(ZapError::New(-1, "角色名称或标识已存在".to_string()))
+        }
+        Err(e) => Err(ZapError::from(e)),
+    }
+}
+
+pub async fn role_update(
+    _claims: ValidatedClaims,
+    Json(payload): Json<UpdateRolePayload>,
+) -> ZapJsonResult {
+    let pool = db::get_db_pool().await;
+    let now = chrono::Local::now().timestamp();
+
+    let mut qb: sqlx::QueryBuilder<'_, Sqlite> = sqlx::QueryBuilder::new("UPDATE roles SET ");
+    let mut sep = qb.separated(", ");
+
+    if let Some(ref name) = payload.name {
+        sep.push("name = ").push_bind_unseparated(name);
+    }
+    if let Some(ref key) = payload.role_key {
+        sep.push("role_key = ").push_bind_unseparated(key);
+    }
+    if let Some(ref desc) = payload.description {
+        sep.push("description = ").push_bind_unseparated(desc);
+    }
+    if let Some(status) = payload.status {
+        sep.push("status = ").push_bind_unseparated(status);
+    }
+    sep.push("updated_at = ").push_bind_unseparated(now);
+
+    qb.push(" WHERE id = ").push_bind(payload.id);
+    let result = qb.build().execute(pool).await?;
+
+    if result.rows_affected() == 0 {
+        return Err(ZapError::New(-1, "角色不存在".to_string()));
+    }
+    Ok(Json(json!({ "code": 0, "message": "更新成功" })))
+}
+
+pub async fn role_delete(
+    _claims: ValidatedClaims,
+    Json(payload): Json<DeleteRolePayload>,
+) -> ZapJsonResult {
+    // Prevent deleting built-in roles
+    let pool = db::get_db_pool().await;
+    let role: RoleRow = sqlx::query_as("SELECT * FROM roles WHERE id = ?")
+        .bind(payload.id)
+        .fetch_one(pool)
+        .await?;
+
+    if role.role_key == "admin" || role.role_key == "user" {
+        return Err(ZapError::New(-1, "系统内置角色不可删除".to_string()));
+    }
+
+    let result = sqlx::query("DELETE FROM roles WHERE id = ?")
+        .bind(payload.id)
+        .execute(pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(ZapError::New(-1, "角色不存在".to_string()));
+    }
+
+    // Also clean up role_menus
+    let _ = sqlx::query("DELETE FROM role_menus WHERE role_id = ?")
+        .bind(payload.id)
+        .execute(pool)
+        .await;
+
+    info!("Role deleted: id={}", payload.id);
+    Ok(Json(json!({ "code": 0, "message": "删除成功" })))
+}
+
+/// Get role permissions (menu IDs)
+pub async fn role_permissions_get(
+    _claims: ValidatedClaims,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> ZapJsonResult {
+    let role_id: i64 = params
+        .get("role_id")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    let pool = db::get_db_pool().await;
+    let rows: Vec<(i64,)> = sqlx::query_as("SELECT menu_id FROM role_menus WHERE role_id = ?")
+        .bind(role_id)
+        .fetch_all(pool)
+        .await?;
+
+    let menu_ids: Vec<i64> = rows.into_iter().map(|r| r.0).collect();
+    Ok(Json(json!({ "code": 0, "data": menu_ids })))
+}
+
+/// Set role permissions
+pub async fn role_permissions_set(
+    _claims: ValidatedClaims,
+    Json(payload): Json<SetRolePermissionsPayload>,
+) -> ZapJsonResult {
+    let pool = db::get_db_pool().await;
+
+    // Remove existing
+    let _ = sqlx::query("DELETE FROM role_menus WHERE role_id = ?")
+        .bind(payload.role_id)
+        .execute(pool)
+        .await;
+
+    // Insert new
+    for menu_id in &payload.menu_ids {
+        let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (?, ?)")
+            .bind(payload.role_id)
+            .bind(menu_id)
+            .execute(pool)
+            .await;
+    }
+
+    Ok(Json(json!({ "code": 0, "message": "权限设置成功" })))
+}

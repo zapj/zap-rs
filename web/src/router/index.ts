@@ -83,6 +83,18 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         component: () => import('@/views/system/menus/index.vue'),
         meta: { title: '菜单管理', icon: 'Menu' , affix: true},
       },
+      {
+        path: 'config',
+        name: 'Config',
+        component: () => import('@/views/system/config/index.vue'),
+        meta: { title: '服务配置', icon: 'Tools', affix: true },
+      },
+      {
+        path: 'ssh-keys',
+        name: 'SshKeys',
+        component: () => import('@/views/system/config/ssh-keys.vue'),
+        meta: { title: 'SSH 密钥', icon: 'Key', affix: true },
+      },
     ],
   },
   // 404 页面必须放在末尾

@@ -1,17 +1,21 @@
 use axum::{
-    body::Body, http::{header, StatusCode, Uri}, response::Response, routing::post
+    body::Body,
+    http::{header, StatusCode, Uri},
+    response::Response,
+    routing::{get, post},
+    Json, Router,
 };
-use axum::Router;
-use axum::routing::get;
 use rust_embed::RustEmbed;
-
+use serde_json::json;
 
 pub mod auth;
-
-pub mod user;
+pub mod ssh_keys;
+pub mod system_config;
 pub mod system_info;
-pub mod system_menu;
 pub mod system_job;
+pub mod system_menu;
+pub mod system_role;
+pub mod user;
 
 #[derive(RustEmbed)]
 #[folder = "../web/dist/"]
@@ -66,44 +70,68 @@ async fn static_handler(uri: Uri) -> Response {
     }
 }
 
-pub fn routers () -> Router {
+/// Health check endpoint — no auth required
+async fn health_check() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+        "timestamp": chrono::Local::now().timestamp(),
+    }))
+}
+
+pub fn routers() -> Router {
     Router::new()
-    .fallback(static_handler)
-    // 动态生成 prefix + /api
-    .nest("/api",  api_routers())
+        .fallback(static_handler)
+        .nest("/api", api_routers())
 }
 
 fn api_routers() -> Router {
-    
     Router::new()
+        // Health
+        .route("/health", get(health_check))
         // Auth
-        .route("/auth/login", post(auth::login) )
+        .route("/auth/login", post(auth::login))
         .route("/auth/logout", get(auth::logout))
         .route("/auth/reflash_token", post(auth::reflash_token))
         .route("/user/info", get(user::user_info))
-        
-        // User
+        // User management (admin only)
         .route("/system/user/list", get(user::user_list))
-        .route("/system/user/update", get(user::user_info))
-        .route("/system/user/add", get(user::user_info))
+        .route("/system/user/add", post(user::user_add))
+        .route("/system/user/update", post(user::user_update))
+        .route("/system/user/delete", post(user::user_delete))
+        // Role management (admin only)
+        .route("/system/role/list", get(system_role::role_list))
+        .route("/system/role/add", post(system_role::role_add))
+        .route("/system/role/update", post(system_role::role_update))
+        .route("/system/role/delete", post(system_role::role_delete))
+        .route("/system/role/permissions", get(system_role::role_permissions_get))
+        .route("/system/role/permissions/set", post(system_role::role_permissions_set))
+        // Menu management (admin only)
+        .route("/system/menus/tree", get(system_menu::get_menus_tree))
+        .route("/system/menus/list", get(system_menu::menu_list))
+        .route("/system/menus/add", post(system_menu::menu_add))
+        .route("/system/menus/update", post(system_menu::menu_update))
+        .route("/system/menus/delete", post(system_menu::menu_delete))
+        .route("/system/menus/status", post(system_menu::menu_status))
+        // Server config (admin only)
+        .route("/system/config/time", get(system_config::get_time))
+        .route("/system/config/time/sync", post(system_config::sync_time))
+        .route("/system/config/time/timezone", post(system_config::set_timezone))
+        .route("/system/config/time/timezones", get(system_config::list_timezones))
+        .route("/system/config/ssh/status", get(system_config::ssh_status))
+        .route("/system/config/ssh/restart", post(system_config::ssh_restart))
+        // SSH key management (admin only)
+        .route("/system/config/ssh/keys", get(ssh_keys::list_keys))
+        .route("/system/config/ssh/keys/content", get(ssh_keys::get_key_content))
+        .route("/system/config/ssh/keys/generate", post(ssh_keys::generate_key))
+        .route("/system/config/ssh/keys/import", post(ssh_keys::import_key))
+        .route("/system/config/ssh/keys/delete", post(ssh_keys::delete_key))
+        .route("/system/config/ssh/authorized_keys", get(ssh_keys::list_authorized_keys))
+        .route("/system/config/ssh/authorize", post(ssh_keys::authorize_key))
+        .route("/system/config/ssh/deauthorize", post(ssh_keys::deauthorize_key))
         // System
         .route("/system/info", get(system_info::system_info))
         .route("/system/status", get(system_info::system_status))
         .route("/system/job/stop", get(system_job::stop_job))
         .route("/system/job/start", get(system_job::start_job))
-        .route("/system/menus/tree",get(system_menu::get_menus_tree))
-
-        // Site
-
-
-        // Docker
-
-        // Monitor
-
-        // Settings
-
-        // Logs
-
-        // Terminal
-        
 }
