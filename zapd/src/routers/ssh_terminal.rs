@@ -1,6 +1,5 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::Arc;
 
 use axum::{
     extract::{
@@ -17,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Executor, Row};
 use ssh2::Session;
-use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use crate::config;
@@ -367,6 +365,7 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
     };
 
     session.set_tcp_stream(tcp);
+    // Handshake must run in blocking mode
     if let Err(e) = session.handshake() {
         error!("SSH handshake failed: {}", e);
         send_error_and_close(socket, &format!("SSH 握手失败: {}\r\n", e)).await;
@@ -398,42 +397,75 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
         return;
     }
 
+    // Now switch to non-blocking for the interactive I/O loop
+    session.set_blocking(false);
+
     info!("SSH terminal started for connection {}", conn_id);
 
     let (mut ws_tx, mut ws_rx) = socket.split();
-    let channel = Arc::new(Mutex::new(channel));
 
-    // Spawn SSH → WebSocket reader
-    let channel_r = channel.clone();
-    let read_handle = tokio::spawn(async move {
+    // Channel: SSH read → WebSocket
+    let (ssh_read_tx, mut ssh_read_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    // Channel: WebSocket → SSH write
+    let (ssh_write_tx, mut ssh_write_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+
+    // Spawn blocking SSH I/O task (owns the channel, no mutex needed)
+    let ssh_handle = tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 4096];
+        let mut write_buf: Vec<u8> = Vec::new();
         loop {
-            let n = {
-                let mut ch = channel_r.lock().await;
-                match ch.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => n,
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::WouldBlock {
-                            drop(ch);
-                            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                            continue;
-                        }
-                        warn!("SSH read error: {}", e);
+            // Try to read from SSH
+            match channel.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if ssh_read_tx.blocking_send(buf[..n].to_vec()).is_err() {
                         break;
                     }
                 }
-            };
-            let data = axum::body::Bytes::from(buf[..n].to_vec());
-            if ws_tx.send(Message::Binary(data)).await.is_err() {
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    warn!("SSH read error: {}", e);
+                    break;
+                }
+            }
+
+            // Drain all pending writes
+            while let Ok(data) = ssh_write_rx.try_recv() {
+                write_buf.extend_from_slice(&data);
+            }
+            if !write_buf.is_empty() {
+                match channel.write_all(&write_buf) {
+                    Ok(()) => {
+                        write_buf.clear();
+                        let _ = channel.flush();
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e) => {
+                        warn!("SSH write error: {}", e);
+                        break;
+                    }
+                }
+            }
+
+            // Avoid busy-waiting
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // Cleanup
+        let _ = channel.close();
+        let _ = channel.wait_close();
+    });
+
+    // Forward SSH reads to WebSocket
+    let ws_forward = tokio::spawn(async move {
+        while let Some(data) = ssh_read_rx.recv().await {
+            if ws_tx.send(Message::Binary(data.into())).await.is_err() {
                 break;
             }
         }
         let _ = ws_tx.close().await;
     });
 
-    // WebSocket → SSH writer
-    let channel_w = channel.clone();
+    // Forward WebSocket writes to SSH
     while let Some(Ok(msg)) = ws_rx.next().await {
         let data: Vec<u8> = match msg {
             Message::Binary(d) => d.to_vec(),
@@ -441,17 +473,15 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
             Message::Close(_) => break,
             _ => continue,
         };
-        let mut ch = channel_w.lock().await;
-        if ch.write_all(&data).is_err() {
+        if ssh_write_tx.send(data).await.is_err() {
             break;
         }
-        let _ = ch.flush();
     }
 
-    read_handle.abort();
-    let mut ch = channel.lock().await;
-    let _ = ch.close();
-    let _ = ch.wait_close();
+    // Cleanup
+    ws_forward.abort();
+    drop(ssh_write_tx); // signal SSH task to stop
+    let _ = ssh_handle.await;
     info!("Terminal WebSocket closed for connection {}", conn_id);
 }
 

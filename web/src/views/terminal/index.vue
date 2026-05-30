@@ -408,18 +408,16 @@ async function openTerminal(conn: SshConnection) {
   // Connect WebSocket
   const wsUrl = getWsUrl(conn.id)
   const ws = new WebSocket(wsUrl)
+  // Receive binary as ArrayBuffer (no async FileReader overhead)
+  ws.binaryType = 'arraybuffer'
 
   ws.onopen = () => {
     term.writeln('\x1b[32m已连接到 ' + conn.name + ' (' + conn.host + ':' + conn.port + ')\x1b[0m')
   }
 
   ws.onmessage = (event) => {
-    if (event.data instanceof Blob) {
-      const reader = new FileReader()
-      reader.onload = () => {
-        term.write(new Uint8Array(reader.result as ArrayBuffer))
-      }
-      reader.readAsArrayBuffer(event.data)
+    if (event.data instanceof ArrayBuffer) {
+      term.write(new Uint8Array(event.data))
     } else if (typeof event.data === 'string') {
       term.write(event.data)
     }
@@ -442,13 +440,9 @@ async function openTerminal(conn: SshConnection) {
     }
   })
 
-  // Handle resize
+  // Handle resize (fit only; resize signaling to backend not yet implemented)
   const resizeObserver = new ResizeObserver(() => {
     fitAddon.fit()
-    const dims = fitAddon.proposeDimensions()
-    if (dims && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }))
-    }
   })
   resizeObserver.observe(el)
   ;(tab as any)._resizeObserver = resizeObserver
