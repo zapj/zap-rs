@@ -12,6 +12,7 @@ pub mod auth;
 pub mod ssh_keys;
 pub mod system_config;
 pub mod system_info;
+pub mod system_file;
 pub mod system_job;
 pub mod system_menu;
 pub mod system_role;
@@ -134,4 +135,14 @@ fn api_routers() -> Router {
         .route("/system/status", get(system_info::system_status))
         .route("/system/job/stop", get(system_job::stop_job))
         .route("/system/job/start", get(system_job::start_job))
+        // File manager
+        .route("/system/files/list", get(system_file::file_list))
+        .route("/system/files/read", get(system_file::file_read))
+        .route("/system/files/write", post(system_file::file_write))
+        .route("/system/files/delete", post(system_file::file_delete))
+        .route("/system/files/mkdir", post(system_file::file_mkdir))
+        .route("/system/files/rename", post(system_file::file_rename))
+        .route("/system/files/download", get(system_file::file_download))
+        .route("/system/files/upload", post(system_file::file_upload))
+        .route("/system/files/info", get(system_file::file_info))
 }

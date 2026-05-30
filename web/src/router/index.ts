@@ -60,6 +60,12 @@ export const constantRoutes: Array<RouteRecordRaw> = [
 // 动态路由，基于用户权限动态加载
 export const asyncRoutes: Array<RouteRecordRaw> = [
   {
+    path: '/dashboard',
+    name: 'Dashboard',
+    component: () => import('@/views/dashboard/index.vue'),
+    meta: { title: '仪表盘', icon: 'House', affix: true, roles: ['admin', 'user'] },
+  },
+  {
     path: '/system',
     component: Layout,
     redirect: '/system/users',
@@ -94,6 +100,20 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         name: 'SshKeys',
         component: () => import('@/views/system/config/ssh-keys.vue'),
         meta: { title: 'SSH 密钥', icon: 'Key', affix: true },
+      },
+    ],
+  },
+  // 文件管理
+  {
+    path: '/files',
+    component: Layout,
+    meta: { title: '文件管理', icon: 'Folder', roles: ['admin', 'user'] },
+    children: [
+      {
+        path: '',
+        name: 'FileManager',
+        component: () => import('@/views/files/index.vue'),
+        meta: { title: '文件管理器', icon: 'FolderOpened', affix: true },
       },
     ],
   },

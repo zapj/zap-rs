@@ -162,7 +162,7 @@ async fn init_menus_table() {
 
     -- Dashboard
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (1, 0, 'dashboard', '/dashboard', 'Layout', '/dashboard/analysis', 'menu', '仪表盘', 'ep:menu', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (1, 0, 'dashboard', '/dashboard', 'dashboard/index', '', 'menu', '仪表盘', 'ep:house', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- System dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -179,6 +179,12 @@ async fn init_menus_table() {
     VALUES (24, 2, 'config', 'config', 'system/config/index', 'menu', '服务配置', 'ep:tools', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- File manager
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (3, 0, 'files', '/files', 'Layout', '/files', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (31, 3, 'file-manager', '', 'files/index', 'menu', '文件管理器', 'ep:folder-opened', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -206,6 +212,11 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 25);
     -- User gets dashboard only
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 1);
+    -- File manager: admin gets all, user gets read access
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 3);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 31);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 3);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 31);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
