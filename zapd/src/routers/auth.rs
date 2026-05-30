@@ -108,6 +108,74 @@ pub async fn logout() -> ZapJsonResult {
     })))
 }
 
+/// Change password — uses `Claims` (not `ValidatedClaims`) so it works even
+/// when the user is still on the default password.
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordPayload {
+    pub old_password: String,
+    pub new_password: String,
+}
+
+pub async fn change_password(
+    claims: zap::jwt::Claims,
+    Json(payload): Json<ChangePasswordPayload>,
+) -> ZapJsonResult {
+    if payload.new_password.len() < 6 {
+        return Err(ZapError::New(-1, "新密码长度不能少于6位".to_string()));
+    }
+    if payload.old_password == payload.new_password {
+        return Err(ZapError::New(-1, "新密码不能与旧密码相同".to_string()));
+    }
+
+    let pool = db::get_db_pool().await;
+
+    // Verify old password
+    let row: Result<(String,), sqlx::Error> =
+        sqlx::query_as("SELECT password FROM user WHERE id = ?")
+            .bind(claims.id as i64)
+            .fetch_one(pool)
+            .await;
+
+    match row {
+        Ok((stored_hash,)) => {
+            if !bcrypt::verify(&payload.old_password, &stored_hash).unwrap_or(false) {
+                return Err(ZapError::New(-1, "旧密码错误".to_string()));
+            }
+        }
+        Err(_) => return Err(ZapError::New(-1, "用户不存在".to_string())),
+    }
+
+    // Hash new password
+    let new_hash = bcrypt::hash(&payload.new_password, bcrypt::DEFAULT_COST)
+        .map_err(|e| ZapError::Error(format!("密码加密失败: {}", e)))?;
+
+    // Update password
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query("UPDATE user SET password = ?, updated_at = ? WHERE id = ?")
+        .bind(&new_hash)
+        .bind(now)
+        .bind(claims.id as i64)
+        .execute(pool)
+        .await?;
+
+    // Issue a new token with pwd_is_default = false
+    let token = zap::jwt::generate_jwt_token(
+        claims.sub.clone(),
+        claims.id,
+        &claims.roles,
+        false, // no longer default
+    )
+    .map_err(|_| ZapError::New(-1, "Token 生成失败".to_string()))?;
+
+    tracing::info!("Password changed for user {}", claims.sub);
+    Ok(Json(json!({
+        "code": 0,
+        "message": "密码修改成功",
+        "access_token": token,
+        "token_type": "Bearer",
+    })))
+}
+
 pub async fn reflash_token(claims: zap::jwt::Claims) -> ZapJsonResult {
     if let Ok(token) =
         zap::jwt::generate_jwt_token(claims.sub, claims.id, &claims.roles, claims.pwd_is_default)

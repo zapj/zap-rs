@@ -117,6 +117,20 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
+  // 终端管理
+  {
+    path: '/terminal',
+    component: Layout,
+    meta: { title: '终端', icon: 'Monitor', roles: ['admin', 'user'] },
+    children: [
+      {
+        path: 'index',
+        name: 'Terminal',
+        component: () => import('@/views/terminal/index.vue'),
+        meta: { title: 'SSH 终端', icon: 'Connection', affix: true },
+      },
+    ],
+  },
   // 404 页面必须放在末尾
   {
     path: '/:pathMatch(.*)*',

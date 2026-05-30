@@ -38,11 +38,13 @@ function loadComponent(component: string) {
  */
 export function menuToRoute(menuItem: MenuItem): RouteRecordRaw {
   // 确保基础属性存在
-  if (!menuItem.path || !menuItem.name) {
-    throw new Error('菜单项必须包含path和name属性')
+  if (!menuItem.name) {
+    throw new Error('菜单项必须包含name属性')
   }
+  // 兼容空 path：子菜单使用 'index' 作为默认路径
+  const itemPath = menuItem.path || 'index'
   const route: RouteRecordRaw = {
-    path: menuItem.path,
+    path: itemPath,
     name: menuItem.name,
     meta: {
       title: menuItem.meta?.title || '',

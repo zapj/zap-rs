@@ -9,6 +9,10 @@ pub async fn init_schema() {
     init_roles_table().await;
     init_menus_table().await;
     init_role_menus_table().await;
+    crate::routers::ssh_terminal::init_table().await;
+
+    // Migration: fix empty path on existing child menus
+    fix_empty_menu_paths().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -180,11 +184,17 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
 
+    -- Terminal
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (4, 0, 'terminal', '/terminal', 'Layout', '/terminal', 'menu', '终端', 'ep:monitor', 1, 'admin,user', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (41, 4, 'ssh-terminal', 'index', 'terminal/index', 'menu', 'SSH 终端', 'ep:connection', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+
     -- File manager
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (3, 0, 'files', '/files', 'Layout', '/files', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (31, 3, 'file-manager', '', 'files/index', 'menu', '文件管理器', 'ep:folder-opened', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (31, 3, 'file-manager', 'index', 'files/index', 'menu', '文件管理器', 'ep:folder-opened', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -217,8 +227,33 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 31);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 3);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 31);
+    -- Terminal: both admin and user
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 4);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 41);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 4);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 41);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
+}
+
+// ── migrations ─────────────────────────────────────────────
+
+/// Fix child menus that have empty path (causes frontend menuToRoute to crash)
+async fn fix_empty_menu_paths() {
+    let pool = get_db_pool().await;
+
+    let result = sqlx::query(
+        "UPDATE menus SET path = 'index' WHERE parent_id > 0 AND (path = '' OR path IS NULL)"
+    )
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(r) if r.rows_affected() > 0 => {
+            tracing::info!("Fixed {} menu(s) with empty path", r.rows_affected());
+        }
+        _ => {}
+    }
 }
 
 // ── helper ─────────────────────────────────────────────────

@@ -10,6 +10,7 @@ use serde_json::json;
 
 pub mod auth;
 pub mod ssh_keys;
+pub mod ssh_terminal;
 pub mod system_config;
 pub mod system_info;
 pub mod system_file;
@@ -94,6 +95,7 @@ fn api_routers() -> Router {
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", get(auth::logout))
         .route("/auth/reflash_token", post(auth::reflash_token))
+        .route("/auth/change_password", post(auth::change_password))
         .route("/user/info", get(user::user_info))
         // User management (admin only)
         .route("/system/user/list", get(user::user_list))
@@ -130,6 +132,14 @@ fn api_routers() -> Router {
         .route("/system/config/ssh/authorized_keys", get(ssh_keys::list_authorized_keys))
         .route("/system/config/ssh/authorize", post(ssh_keys::authorize_key))
         .route("/system/config/ssh/deauthorize", post(ssh_keys::deauthorize_key))
+        // SSH terminal
+        .route("/terminal/connections", get(ssh_terminal::list_connections))
+        .route("/terminal/connections/{id}", get(ssh_terminal::get_connection))
+        .route("/terminal/connections/create", post(ssh_terminal::create_connection))
+        .route("/terminal/connections/{id}/update", post(ssh_terminal::update_connection))
+        .route("/terminal/connections/{id}/delete", post(ssh_terminal::delete_connection))
+        .route("/terminal/connections/test", get(ssh_terminal::test_connection))
+        .route("/terminal/ws/{id}", get(ssh_terminal::ws_terminal))
         // System
         .route("/system/info", get(system_info::system_info))
         .route("/system/status", get(system_info::system_status))
