@@ -6,3 +6,6 @@ server:
 jwt:
   jwt_secure: da8966cc5ad82529c56a75b9e7a03b2f9aec51ae381150a4360fdb49061b0c60
   jwt_expire: 3600
+exec:
+  socket_path: /run/zap/exec.sock
+  secret_path: /etc/zap/exec.key

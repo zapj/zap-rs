@@ -1,0 +1,16 @@
+[Unit]
+Description=zap privileged exec daemon (root)
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/local/zap/zapexec --socket /run/zap/exec.sock --secret /etc/zap/exec.key --client-user zapadm
+RuntimeDirectory=zap
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

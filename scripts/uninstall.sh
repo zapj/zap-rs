@@ -9,9 +9,14 @@ fi
 #stop service
 systemctl stop zapd.service
 systemctl disable zapd.service
+systemctl stop zapexec.service
+systemctl disable zapexec.service
 systemctl daemon-reload
 sleep 2
 rm -rf /etc/systemd/system/zapd.service
+rm -rf /etc/systemd/system/zapexec.service
 rm -rf /usr/local/bin/zapd
 rm -rf /usr/local/bin/zapctl
+rm -rf /usr/local/bin/zapexec
 rm -rf /usr/local/zap
+rm -rf /etc/zap

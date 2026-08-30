@@ -74,19 +74,30 @@ if [ -d "$TARGET/zap" ];then
      #update
      cp -Rf zap/zapctl "$TARGET/zap/"   
      cp -Rf zap/zapd "$TARGET/zap/"   
+     cp -Rf zap/zapexec "$TARGET/zap/"   
      cp -Rf zap/scripts "$TARGET/zap/"
      cp -Rf zap/data/appstore "$TARGET/zap/data/appstore"
 else
     cp -Rf zap "$TARGET/"
     chmod +x "$TARGET/zap/zapd"
     chmod +x "$TARGET/zap/zapctl"
+    chmod +x "$TARGET/zap/zapexec"
     ln -s -f "$TARGET/zap/zapctl" /usr/local/bin/zapctl
     ln -s -f "$TARGET/zap/zapd" /usr/local/bin/zapd
+    ln -s -f "$TARGET/zap/zapexec" /usr/local/bin/zapexec
     cp -Rf zap/scripts/systemd/zapd.service /etc/systemd/system/
     systemctl enable zapd.service
     systemctl start zapd.service
     systemctl status zapd.service  
 fi
 
+#install zapexec (privileged exec daemon, runs as root)
+mkdir -p /etc/zap
+chown root:zapadm /etc/zap
+chmod 0750 /etc/zap
+cp -Rf zap/scripts/systemd/zapexec.service /etc/systemd/system/
+systemctl enable zapexec.service
+systemctl restart zapexec.service
+systemctl status zapexec.service
 
 echo "zap install complete"
