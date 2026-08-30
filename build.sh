@@ -1,63 +1,86 @@
-#! /usr/bin/env sh
+#!/usr/bin/env bash
+# ZAP 发布打包脚本：构建 zapd / zapctl / zapexec，打包并上传至 zap mirror
+set -euo pipefail
 
-# 打包zap并上传至zapmirror
-
-set -e
+# ── 终端颜色 ────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info() { echo -e "${BLUE}[*]${NC} $*"; }
+ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+die()  { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 
 CUR_DIR=$(pwd)
-OS_ARCH=$(uname -m)
+
+# ── 架构与 Rust target 映射 ─────────────────────────────────
 OS_NAME=$(uname -s | tr '[:upper:]' '[:lower:]')
-echo "OS: $OS_NAME, ARCH: $OS_ARCH"
+MACHINE=$(uname -m)
+case "$MACHINE" in
+    x86_64)        ARCH="amd64"; TARGET="x86_64-unknown-linux-gnu" ;;
+    aarch64|arm64) ARCH="arm64"; TARGET="aarch64-unknown-linux-gnu" ;;
+    *) die "不支持的架构: $MACHINE" ;;
+esac
+[ "$OS_NAME" = "linux" ] || die "仅支持在 Linux 上构建（当前: $OS_NAME）"
+info "OS: ${OS_NAME}   架构: ${ARCH} (${TARGET})"
 
-if ! command -v wget >/dev/null 2>&1; then
-  echo "wget could not be found, please install wget first...."
-  exit 1
-fi
+# ── 依赖检查 ────────────────────────────────────────────────
+command -v cargo >/dev/null 2>&1 || die "未找到 cargo，请先安装 Rust"
+command -v wget  >/dev/null 2>&1 || die "未找到 wget，请先安装"
 
-# test zapfile command is exist
 if ! command -v zapfile >/dev/null 2>&1; then
-  echo "zapfile could not be found, install zapfile...."
-  wget -qO- https://mirrors.zap.cn/zapfile/zapfile-linux-amd64 -O /usr/bin/zapfile
-  chmod +x /usr/bin/zapfile
-  echo "zapfile installed successfully...."
+    info "未找到 zapfile，正在安装..."
+    wget -qO- https://mirrors.zap.cn/zapfile/zapfile-linux-amd64 -O /usr/bin/zapfile \
+        || die "zapfile 下载失败"
+    chmod +x /usr/bin/zapfile
+    ok "zapfile 安装完成"
 fi
 
-# check env variables
-if [ -z "$COS_ID" ]; then
-  echo "COS_ID is not set, please set it first...."
-  exit 1
-fi
-if [ -z "$COS_KEY" ]; then
-  echo "COS_KEY is not set, please set it first...."
-  exit 1
-fi
+# ── 上传凭据 ────────────────────────────────────────────────
+[ -n "${COS_ID:-}" ]  || die "环境变量 COS_ID 未设置"
+[ -n "${COS_KEY:-}" ] || die "环境变量 COS_KEY 未设置"
 
-if [ -d "$CUR_DIR/dist" ]; then
-  rm -rf "$CUR_DIR/dist"
-fi
-mkdir "$CUR_DIR/dist"
+# ── 版本号（从 zapd/Cargo.toml 读取，避免依赖二进制输出格式）─
+VERSION=$(awk -F'"' '/^version/{print $2; exit}' zapd/Cargo.toml)
+[ -n "$VERSION" ] || die "无法从 zapd/Cargo.toml 解析版本号"
+info "版本: ${VERSION}"
 
-# run zapd
+# ── 构建 ────────────────────────────────────────────────────
+info "构建 release 二进制（${TARGET}）..."
+cargo build --release --target "$TARGET" || die "构建失败"
 
-# upload zapd to zapmirror
+# ── 打包 ────────────────────────────────────────────────────
+DIST_DIR="$CUR_DIR/dist"
+rm -rf "$DIST_DIR"
+mkdir -p "$DIST_DIR"
 
-case "$OS_NAME" in
-  "linux")
-    echo "linux"
-    cargo build --release --target x86_64-unknown-linux-gnu
-    cp -Rf "$CUR_DIR/target/x86_64-unknown-linux-gnu/release/zapd" "$CUR_DIR/dist/"
-    cp -Rf "$CUR_DIR/scripts" "$CUR_DIR/dist/"
-    cp -Rf "$CUR_DIR/data" "$CUR_DIR/dist/"
-    cp -Rf "$CUR_DIR/conf" "$CUR_DIR/dist/"
-    cp "$CUR_DIR/target/x86_64-unknown-linux-gnu/release/zapd" "$CUR_DIR/dist/"
-    cd "$CUR_DIR/dist" || exit 1
-    VERSION=$(./zapd -v | awk '{print $3}')
-    ZAP_FILE_NAME="zap-v${VERSION}-${OS_NAME}-${OS_ARCH}.tar.gz"
-    tar -czvf "$ZAP_FILE_NAME" *
-    echo "zapd package created successfully...."
-    echo $VERSION
-    zapfile upload zap/releases/ "$ZAP_FILE_NAME"
-    zapfile put zap/releases/version.txt "$VERSION"
-    echo "zapd package uploaded successfully...."
-    ;;
-esac  
+BIN_DIR="$CUR_DIR/target/$TARGET/release"
+for bin in zapd zapctl zapexec; do
+    cp -f "$BIN_DIR/$bin" "$DIST_DIR/" || die "复制 $bin 失败"
+done
+ok "二进制复制完成: zapd / zapctl / zapexec"
+
+# 脚本、数据与配置模板（排除运行时生成的 TLS 私钥/证书）
+cp -Rf "$CUR_DIR/scripts" "$DIST_DIR/"
+cp -Rf "$CUR_DIR/data" "$DIST_DIR/"
+mkdir -p "$DIST_DIR/conf"
+cp -f "$CUR_DIR/conf/zap.yaml" "$DIST_DIR/conf/" 2>/dev/null || warn "无 conf/zap.yaml 模板，跳过"
+ok "资源复制完成"
+
+cd "$DIST_DIR" || die "无法进入 dist 目录"
+ZAP_FILE_NAME="zap-v${VERSION}-${OS_NAME}-${ARCH}.tar.gz"
+info "打包 ${ZAP_FILE_NAME} ..."
+tar -czf "$ZAP_FILE_NAME" * || die "打包失败"
+ok "打包完成"
+
+# ── 上传 ────────────────────────────────────────────────────
+info "上传 ${ZAP_FILE_NAME} ..."
+zapfile upload zap/releases/ "$ZAP_FILE_NAME" || die "上传失败"
+info "更新版本文件 latest.txt ..."
+zapfile put zap/releases/latest.txt "$VERSION" || die "更新版本文件失败"
+ok "上传完成"
+
+# ── 完成总结 ────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}   ZAP v${VERSION} (${ARCH}) 发布完成${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo "  包名: ${ZAP_FILE_NAME}"
