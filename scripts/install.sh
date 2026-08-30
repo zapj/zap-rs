@@ -1,103 +1,101 @@
 #!/bin/bash
+# ZAP 服务器/VPS 管理系统 一键安装脚本
+set -euo pipefail
 
+# ── 终端颜色 ────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info() { echo -e "${BLUE}[*]${NC} $*"; }
+ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+die()  { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 
-if [ $(id -u) -ne 0 ]
-then
-  echo "Must be root to run this script."
-  exit 1
-fi  
+# ── 权限检查 ────────────────────────────────────────────────
+[ "$(id -u)" -eq 0 ] || die "请以 root 身份运行：sudo bash $0"
 
-# Linux
-OS=`uname`
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}   ZAP 服务器/VPS 管理系统 · 安装程序${NC}"
+echo -e "${GREEN}========================================${NC}"
 
-# x86_64  / ARM64 /ppc64le / s390x
+# ── 解析版本与架构 ─────────────────────────────────────────
+VERSION="${1:-latest}"
 ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)              ARCH="amd64" ;;
+    aarch64|arm64|arm*)  ARCH="arm64" ;;
+    ppc64le)             ;;
+    s390x)               ;;
+    *) die "不支持的架构: $ARCH" ;;
+esac
+info "目标版本: ${VERSION}   架构: ${ARCH}"
 
-
-VERSION="latest"
-
-if [[ $ARCH == x86_64* ]]; then
-    ARCH="amd64"
-elif  [[ $arch == arm* ]] || [[ $arch = aarch64 ]]; then
-    ARCH="arm64"
-fi
-
-if [ "$OS" = "Linux" ];then
-    OS="linux"
-fi
-
-if [ -n "$1" ];then
-    VERSION="$1"
-fi
-
+# ── 解析 latest 版本号 ──────────────────────────────────────
 DOWNLOAD_ZAP_URL="https://mirrors.zap.cn/zap/dist"
-UNIXTIME=$(date +%s)
-ZAP_LATEST="${DOWNLOAD_ZAP_URL}/latest.txt?t=${UNIXTIME}"
-
-if [ "$VERSION" = "latest" ];then  
-    LATEST_VERSION=`wget -q -O - ${ZAP_LATEST}`
-    if [ "$?" -eq "0" ];then
-        VERSION=$LATEST_VERSION
-    fi
-fi
-echo "use $VERSION"
-
-ZAP_FILENAME="zap-v${VERSION}-${OS}-${ARCH}.tar.gz"
-
-if [ ! -f "$ZAP_FILENAME" ];then
-    wget "${DOWNLOAD_ZAP_URL}/${ZAP_FILENAME}"
-    if [ "$?" -ne "0" ];then
-        echo "zap-v${VERSION}-${OS}-${ARCH}.tar.gz 下载失败"
-        exit 1
+if [ "$VERSION" = "latest" ]; then
+    info "查询最新版本..."
+    if LATEST=$(wget -q -O - "${DOWNLOAD_ZAP_URL}/latest.txt?t=$(date +%s)") && [ -n "$LATEST" ]; then
+        VERSION="$LATEST"
+        info "最新版本: ${VERSION}"
+    else
+        warn "无法查询最新版本，使用 latest 标签"
     fi
 fi
 
-# if [ ! -f "$ZAP_FILENAME" ];then
-#     echo 
-# fi
-id www > /dev/null 2>&1
-if [ $? -ne 0 ];then
-    echo "创建用户www"
-    adduser --shell /bin/false --no-create-home --disabled-password --disabled-login --group www
-fi
-id zapadm > /dev/null 2>&1
-if [ $? -ne 0 ];then
-    echo "创建用户zapadm"
-    adduser --system --shell /bin/false --no-create-home --disabled-password --disabled-login --group  zapadm
-fi
+ZAP_FILENAME="zap-v${VERSION}-linux-${ARCH}.tar.gz"
 
-tar zxf "$ZAP_FILENAME"
-
-#install zap
-TARGET="/usr/local"
-if [ -d "$TARGET/zap" ];then
-     #update
-     cp -Rf zap/zapctl "$TARGET/zap/"   
-     cp -Rf zap/zapd "$TARGET/zap/"   
-     cp -Rf zap/zapexec "$TARGET/zap/"   
-     cp -Rf zap/scripts "$TARGET/zap/"
-     cp -Rf zap/data/appstore "$TARGET/zap/data/appstore"
+# ── 下载 ────────────────────────────────────────────────────
+if [ -f "$ZAP_FILENAME" ]; then
+    info "使用已存在的安装包 ${ZAP_FILENAME}"
 else
-    cp -Rf zap "$TARGET/"
-    chmod +x "$TARGET/zap/zapd"
-    chmod +x "$TARGET/zap/zapctl"
-    chmod +x "$TARGET/zap/zapexec"
-    ln -s -f "$TARGET/zap/zapctl" /usr/local/bin/zapctl
-    ln -s -f "$TARGET/zap/zapd" /usr/local/bin/zapd
-    ln -s -f "$TARGET/zap/zapexec" /usr/local/bin/zapexec
-    cp -Rf zap/scripts/systemd/zapd.service /etc/systemd/system/
-    systemctl enable zapd.service
-    systemctl start zapd.service
-    systemctl status zapd.service  
+    info "下载 ${ZAP_FILENAME} ..."
+    wget "${DOWNLOAD_ZAP_URL}/${ZAP_FILENAME}" || die "下载失败，请检查网络或版本号"
 fi
 
-#install zapexec (privileged exec daemon, runs as root)
+# ── 创建运行用户 ───────────────────────────────────────────
+if id www >/dev/null 2>&1; then
+    ok "用户 www 已存在"
+else
+    info "创建用户 www"
+    adduser --shell /bin/false --no-create-home --disabled-password --disabled-login --group www || die "创建 www 用户失败"
+fi
+
+if id zapadm >/dev/null 2>&1; then
+    ok "用户 zapadm 已存在"
+else
+    info "创建用户 zapadm"
+    adduser --system --shell /bin/false --no-create-home --disabled-password --disabled-login --group zapadm || die "创建 zapadm 用户失败"
+fi
+
+# ── 解压 ────────────────────────────────────────────────────
+info "解压安装包..."
+tar zxf "$ZAP_FILENAME" || die "解压失败，安装包可能已损坏"
+
+# ── 部署程序 ────────────────────────────────────────────────
+TARGET="/usr/local"
+if [ -d "$TARGET/zap" ]; then
+    info "检测到已安装版本，执行升级..."
+    cp -Rf zap/zapctl "$TARGET/zap/"    || die "部署 zapctl 失败"
+    cp -Rf zap/zapd "$TARGET/zap/"      || die "部署 zapd 失败"
+    cp -Rf zap/zapexec "$TARGET/zap/"   || die "部署 zapexec 失败"
+    cp -Rf zap/scripts "$TARGET/zap/"   || true
+    [ -d zap/data/appstore ] && cp -Rf zap/data/appstore "$TARGET/zap/data/appstore"
+else
+    info "部署程序到 ${TARGET}/zap ..."
+    cp -Rf zap "$TARGET/"
+    chmod +x "$TARGET/zap/zapd" "$TARGET/zap/zapctl" "$TARGET/zap/zapexec"
+    ln -sf "$TARGET/zap/zapctl"   /usr/local/bin/zapctl
+    ln -sf "$TARGET/zap/zapd"     /usr/local/bin/zapd
+    ln -sf "$TARGET/zap/zapexec"  /usr/local/bin/zapexec
+fi
+ok "程序部署完成"
+
+# ── 配置与凭据目录（/etc/zap）───────────────────────────────
+info "准备配置目录 /etc/zap ..."
 mkdir -p /etc/zap /etc/zap/ssh
 chown root:zapadm /etc/zap /etc/zap/ssh
 chmod 0750 /etc/zap /etc/zap/ssh
 
-# 配置与 TLS 证书统一到 /etc/zap（与程序分离，升级不覆盖）
 if [ ! -f /etc/zap/zap.yaml ]; then
+    info "生成默认配置 /etc/zap/zap.yaml"
     cat > /etc/zap/zap.yaml <<'EOF'
 server:
   address: 0.0.0.0
@@ -116,16 +114,41 @@ chown root:zapadm /etc/zap/zap.yaml
 chmod 0660 /etc/zap/zap.yaml
 
 if [ ! -f /etc/zap/zap.crt ] || [ ! -f /etc/zap/zap.key ]; then
-    openssl req -x509 -newkey rsa:4096 -keyout /etc/zap/zap.key -out /etc/zap/zap.crt \
+    info "生成自签名 TLS 证书..."
+    if ! openssl req -x509 -newkey rsa:4096 -keyout /etc/zap/zap.key -out /etc/zap/zap.crt \
         -days 3650 -nodes -subj "/CN=zap-local" \
-        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null || true
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null; then
+        warn "openssl 不可用，证书将在 zapd 首次启动时生成"
+    fi
 fi
 chown root:zapadm /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
 chmod 0640 /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
+ok "配置准备完成"
 
-cp -Rf zap/scripts/systemd/zapexec.service /etc/systemd/system/
-systemctl enable zapexec.service
-systemctl restart zapexec.service
-systemctl status zapexec.service
+# ── systemd 服务 ────────────────────────────────────────────
+info "安装 systemd 服务..."
+cp -Rf zap/scripts/systemd/zapd.service    /etc/systemd/system/ || die "安装 zapd.service 失败"
+cp -Rf zap/scripts/systemd/zapexec.service /etc/systemd/system/ || die "安装 zapexec.service 失败"
+systemctl daemon-reload
+systemctl enable zapd.service zapexec.service >/dev/null 2>&1 || warn "服务 enable 失败"
+systemctl restart zapexec.service || warn "zapexec 启动失败"
+systemctl restart zapd.service    || warn "zapd 启动失败"
+ok "systemd 服务已启用"
 
-echo "zap install complete"
+# ── 清理临时文件 ────────────────────────────────────────────
+rm -f "$ZAP_FILENAME"
+rm -rf zap
+
+# ── 完成总结 ────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}           ZAP 安装完成${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo "  版本:      ${VERSION}"
+echo "  程序目录:  /usr/local/zap"
+echo "  配置目录:  /etc/zap"
+echo "  访问地址:  https://<服务器IP>:2600"
+echo "  默认账号:  admin"
+echo "  默认密码:  123456"
+echo ""
+echo -e "${YELLOW}  ⚠ 首次登录后请立即修改默认密码！${NC}"
