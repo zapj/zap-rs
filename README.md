@@ -52,9 +52,11 @@ exec:
   secret_path: /etc/zap/exec.key    # HMAC 共享密钥（首次启动自动生成）
 ```
 
-生产环境约定：
+生产环境约定（配置/凭据统一在 `/etc/zap`，程序在 `/usr/local/zap`，运行时数据在 `/run/zap`）：
 
-- socket 目录 `/run/zap`：`root:zapadm` 0750（`zapexec.service` 的 `RuntimeDirectory` 创建）
-- 密钥文件 `/etc/zap/exec.key`：`root:zapadm` 0640，首次启动由 `zapexec` 自动生成
+- 配置 `/etc/zap/zap.yaml`：`root:zapadm` 0660，首次安装由 `install.sh` 生成（升级不覆盖）
+- TLS 证书 `/etc/zap/zap.crt`、`/etc/zap/zap.key`：`root:zapadm` 0640，首次安装由 `install.sh` 生成
+- HMAC 密钥 `/etc/zap/exec.key`：`root:zapadm` 0640，首次启动由 `zapexec` 自动生成
 - SSH 密钥目录 `/etc/zap/ssh`：`root:zapadm` 0750，密钥由 `zapexec` 写入、`zapd` 读取
+- socket 目录 `/run/zap`：`root:zapadm` 0750（`zapexec.service` 的 `RuntimeDirectory` 创建）
 - 服务单元：`scripts/systemd/zapexec.service`（以 root 运行）

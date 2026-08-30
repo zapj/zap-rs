@@ -95,6 +95,34 @@ fi
 mkdir -p /etc/zap /etc/zap/ssh
 chown root:zapadm /etc/zap /etc/zap/ssh
 chmod 0750 /etc/zap /etc/zap/ssh
+
+# 配置与 TLS 证书统一到 /etc/zap（与程序分离，升级不覆盖）
+if [ ! -f /etc/zap/zap.yaml ]; then
+    cat > /etc/zap/zap.yaml <<'EOF'
+server:
+  address: 0.0.0.0
+  port: 2600
+  cert_file: /etc/zap/zap.crt
+  key_file: /etc/zap/zap.key
+jwt:
+  jwt_secure: secure-key-zap-default
+  jwt_expire: 3600
+exec:
+  socket_path: /run/zap/exec.sock
+  secret_path: /etc/zap/exec.key
+EOF
+fi
+chown root:zapadm /etc/zap/zap.yaml
+chmod 0660 /etc/zap/zap.yaml
+
+if [ ! -f /etc/zap/zap.crt ] || [ ! -f /etc/zap/zap.key ]; then
+    openssl req -x509 -newkey rsa:4096 -keyout /etc/zap/zap.key -out /etc/zap/zap.crt \
+        -days 3650 -nodes -subj "/CN=zap-local" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null || true
+fi
+chown root:zapadm /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
+chmod 0640 /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
+
 cp -Rf zap/scripts/systemd/zapexec.service /etc/systemd/system/
 systemctl enable zapexec.service
 systemctl restart zapexec.service
