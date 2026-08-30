@@ -1,6 +1,7 @@
 use std::{
     fs::OpenOptions,
     io::Read,
+    path::PathBuf,
     sync::{OnceLock, RwLock},
 };
 
@@ -11,6 +12,8 @@ use tracing::info;
 pub struct ZapConfig {
     pub server: ServerConfig,
     pub jwt: JWTConfig,
+    #[serde(default)]
+    pub exec: ExecConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -27,6 +30,22 @@ pub struct JWTConfig {
     pub jwt_expire: u64,
 }
 
+/// `zapd` 与 `zapexec` 之间的 IPC 配置。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExecConfig {
+    pub socket_path: String,
+    pub secret_path: String,
+}
+
+impl Default for ExecConfig {
+    fn default() -> Self {
+        Self {
+            socket_path: "/run/zap/exec.sock".to_string(),
+            secret_path: "/etc/zap/exec.key".to_string(),
+        }
+    }
+}
+
 const DEFAULT_JWT_SECURE: &str = "secure-key-zap-default";
 
 pub fn new() -> ZapConfig {
@@ -41,7 +60,25 @@ pub fn new() -> ZapConfig {
             jwt_secure: DEFAULT_JWT_SECURE.to_string(),
             jwt_expire: 3600,
         },
+        exec: ExecConfig::default(),
     }
+}
+
+/// 配置文件路径：
+/// 1. 环境变量 `ZAP_CONFIG`（若设置）
+/// 2. 生产默认 `/etc/zap/zap.yaml`（若存在）
+/// 3. 开发回退 `conf/zap.yaml`
+fn config_path() -> PathBuf {
+    if let Ok(p) = std::env::var("ZAP_CONFIG") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    let prod = PathBuf::from("/etc/zap/zap.yaml");
+    if prod.exists() {
+        return prod;
+    }
+    PathBuf::from("conf/zap.yaml")
 }
 
 /// Generate a random hex string of given byte length
@@ -61,7 +98,7 @@ fn write_config_to_file(config: &ZapConfig) {
         .write(true)
         .create(true)
         .truncate(true)
-        .open("conf/zap.yaml");
+        .open(config_path());
     match file {
         Ok(f) => {
             if let Err(e) = serde_yaml::to_writer(f, config) {
@@ -80,7 +117,10 @@ pub fn get_config() -> &'static RwLock<ZapConfig> {
         let mut default_conf = new();
         let mut needs_write = false;
 
-        let file = OpenOptions::new().read(true).write(true).open("conf/zap.yaml");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(config_path());
         match file {
             Ok(mut f) => {
                 let mut buffer = String::new();
@@ -91,6 +131,7 @@ pub fn get_config() -> &'static RwLock<ZapConfig> {
                         default_conf.server.port = cnf.server.port;
                         default_conf.server.cert_file = cnf.server.cert_file;
                         default_conf.server.key_file = cnf.server.key_file;
+                        default_conf.exec = cnf.exec;
 
                         // Rotate JWT secret if still using default
                         if needs_jwt_rotation(&cnf.jwt.jwt_secure) {

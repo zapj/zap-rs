@@ -3995,6 +3995,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-proto"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.2.16",
+ "hex",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "zapctl"
 version = "0.1.0"
 dependencies = [
@@ -4043,6 +4056,22 @@ dependencies = [
  "tower-service",
  "tracing",
  "tracing-subscriber",
+ "zap-proto",
+]
+
+[[package]]
+name = "zapexec"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zap-proto",
 ]
 
 [[package]]

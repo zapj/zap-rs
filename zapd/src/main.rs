@@ -25,6 +25,7 @@ mod config;
 mod db;
 mod routers;
 pub mod zap;
+pub mod zapexec;
 
 #[derive(clap::Parser)]
 struct Cli {
