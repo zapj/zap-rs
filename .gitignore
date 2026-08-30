@@ -5,3 +5,8 @@
 conf/zap.crt
 conf/zap.key
 conf/zap.yaml
+
+# Runtime / dev artifacts — do not commit
+/data/run/
+data/zap.db*
+web/a.html
