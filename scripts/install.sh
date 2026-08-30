@@ -92,9 +92,9 @@ else
 fi
 
 #install zapexec (privileged exec daemon, runs as root)
-mkdir -p /etc/zap
-chown root:zapadm /etc/zap
-chmod 0750 /etc/zap
+mkdir -p /etc/zap /etc/zap/ssh
+chown root:zapadm /etc/zap /etc/zap/ssh
+chmod 0750 /etc/zap /etc/zap/ssh
 cp -Rf zap/scripts/systemd/zapexec.service /etc/systemd/system/
 systemctl enable zapexec.service
 systemctl restart zapexec.service

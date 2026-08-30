@@ -3998,6 +3998,7 @@ dependencies = [
 name = "zap-proto"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "getrandom 0.2.16",
  "hex",
  "hmac",

@@ -8,12 +8,12 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use tokio::fs;
 
 use crate::zap::{
     jwt::{is_admin, Claims},
     ZapError, ZapJsonResult,
 };
+use zap_proto::Request;
 
 // ── request types ──────────────────────────────────────────
 
@@ -42,6 +42,7 @@ pub struct DeletePayload {
 }
 
 // ── path helpers ───────────────────────────────────────────
+// 授权（基于 JWT 角色）仍在 zapd 完成；实际文件操作转发给 zapexec（root）。
 
 /// Resolve and sanitize a path, preventing directory traversal.
 fn resolve_path(requested: &str) -> Result<PathBuf, ZapError> {
@@ -101,54 +102,6 @@ fn check_write_access(claims: &Claims, path: &Path) -> Result<(), ZapError> {
     Err(ZapError::New(-1, "没有写入该路径的权限".to_string()))
 }
 
-// ── file info ──────────────────────────────────────────────
-
-#[derive(serde::Serialize)]
-struct FileInfo {
-    name: String,
-    path: String,
-    is_dir: bool,
-    size: u64,
-    modified: String,
-    permissions: String,
-}
-
-async fn get_file_info(path: &Path) -> Option<FileInfo> {
-    let metadata = fs::metadata(path).await.ok()?;
-    let modified = metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| {
-            let secs = d.as_secs();
-            chrono::DateTime::from_timestamp(secs as i64, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
-
-    let perms = if metadata.is_dir() {
-        "drwxr-xr-x".to_string()
-    } else if cfg!(unix) {
-        use std::os::unix::fs::PermissionsExt;
-        format!("{:o}", metadata.permissions().mode())
-    } else {
-        "-rw-r--r--".to_string()
-    };
-
-    Some(FileInfo {
-        name: path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string_lossy().to_string()),
-        path: path.to_string_lossy().to_string(),
-        is_dir: metadata.is_dir(),
-        size: metadata.len(),
-        modified,
-        permissions: perms,
-    })
-}
-
 // ── handlers ───────────────────────────────────────────────
 
 /// GET /system/files/list?path=/
@@ -160,35 +113,14 @@ pub async fn file_list(
     let resolved = resolve_path(raw_path)?;
     check_access(&claims, &resolved)?;
 
-    let md = fs::metadata(&resolved).await?;
-    if !md.is_dir() {
-        return Err(ZapError::New(-1, "路径不是目录".to_string()));
+    let resp = crate::zapexec::call(Request::FileList {
+        path: resolved.to_string_lossy().to_string(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
     }
-
-    let mut entries: Vec<FileInfo> = Vec::new();
-    let mut read_dir = fs::read_dir(&resolved).await?;
-
-    while let Ok(Some(entry)) = read_dir.next_entry().await {
-        if let Some(info) = get_file_info(&entry.path()).await {
-            entries.push(info);
-        }
-    }
-
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-
-    Ok(Json(json!({
-        "code": 0,
-        "message": "ok",
-        "data": {
-            "current_path": resolved.to_string_lossy(),
-            "parent_path": resolved.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or("/".to_string()),
-            "entries": entries
-        }
-    })))
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": resp.data })))
 }
 
 /// GET /system/files/read?path=...
@@ -203,25 +135,14 @@ pub async fn file_read(
     let resolved = resolve_path(raw_path)?;
     check_access(&claims, &resolved)?;
 
-    let md = fs::metadata(&resolved).await?;
-    if md.is_dir() {
-        return Err(ZapError::New(-1, "不能读取目录".to_string()));
+    let resp = crate::zapexec::call(Request::FileRead {
+        path: resolved.to_string_lossy().to_string(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
     }
-
-    let content = fs::read_to_string(&resolved).await.map_err(|e| {
-        ZapError::New(-1, format!("读取文件失败: {}", e))
-    })?;
-
-    Ok(Json(json!({
-        "code": 0,
-        "message": "ok",
-        "data": {
-            "path": resolved.to_string_lossy(),
-            "content": content,
-            "size": content.len()
-        }
-    }))
-    .into_response())
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": resp.data })).into_response())
 }
 
 /// POST /system/files/write
@@ -232,23 +153,15 @@ pub async fn file_write(
     let resolved = resolve_path(&payload.path)?;
     check_write_access(&claims, &resolved)?;
 
-    if let Ok(md) = fs::metadata(&resolved).await {
-        if md.is_dir() {
-            return Err(ZapError::New(-1, "不能覆盖目录".to_string()));
-        }
+    let resp = crate::zapexec::call(Request::FileWrite {
+        path: resolved.to_string_lossy().to_string(),
+        content: payload.content,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
     }
-
-    if let Some(parent) = resolved.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-
-    fs::write(&resolved, &payload.content).await?;
-
-    Ok(Json(json!({
-        "code": 0,
-        "message": "保存成功",
-        "data": { "path": resolved.to_string_lossy() }
-    })))
+    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
 }
 
 /// POST /system/files/delete
@@ -259,20 +172,14 @@ pub async fn file_delete(
     let resolved = resolve_path(&payload.path)?;
     check_write_access(&claims, &resolved)?;
 
-    // Safety: block critical paths
-    let path_str = resolved.to_string_lossy().to_string();
-    if path_str == "/" || path_str == "/etc" || path_str == "/root" || path_str == "/boot" {
-        return Err(ZapError::New(-1, "不能删除系统关键目录".to_string()));
+    let resp = crate::zapexec::call(Request::FileDelete {
+        path: resolved.to_string_lossy().to_string(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
     }
-
-    let md = fs::metadata(&resolved).await?;
-    if md.is_dir() {
-        fs::remove_dir_all(&resolved).await?;
-    } else {
-        fs::remove_file(&resolved).await?;
-    }
-
-    Ok(Json(json!({ "code": 0, "message": "删除成功" })))
+    Ok(Json(json!({ "code": 0, "message": resp.message })))
 }
 
 /// POST /system/files/mkdir
@@ -283,17 +190,14 @@ pub async fn file_mkdir(
     let resolved = resolve_path(&payload.path)?;
     check_write_access(&claims, &resolved)?;
 
-    if resolved.exists() {
-        return Err(ZapError::New(-1, "目录已存在".to_string()));
+    let resp = crate::zapexec::call(Request::FileMkdir {
+        path: resolved.to_string_lossy().to_string(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
     }
-
-    fs::create_dir_all(&resolved).await?;
-
-    Ok(Json(json!({
-        "code": 0,
-        "message": "创建成功",
-        "data": { "path": resolved.to_string_lossy() }
-    })))
+    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
 }
 
 /// POST /system/files/rename
@@ -311,20 +215,15 @@ pub async fn file_rename(
     let new_path = resolve_path(&payload.new_path)?;
     check_write_access(&claims, &new_path)?;
 
-    if new_path.exists() {
-        return Err(ZapError::New(-1, "目标已存在".to_string()));
+    let resp = crate::zapexec::call(Request::FileRename {
+        path: old_path.to_string_lossy().to_string(),
+        new_path: new_path.to_string_lossy().to_string(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
     }
-
-    fs::rename(&old_path, &new_path).await?;
-
-    Ok(Json(json!({
-        "code": 0,
-        "message": "重命名成功",
-        "data": {
-            "old_path": old_path.to_string_lossy(),
-            "new_path": new_path.to_string_lossy()
-        }
-    })))
+    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
 }
 
 /// GET /system/files/download?path=...
@@ -339,19 +238,23 @@ pub async fn file_download(
     let resolved = resolve_path(raw_path)?;
     check_access(&claims, &resolved)?;
 
-    let md = fs::metadata(&resolved).await?;
-    if md.is_dir() {
-        return Err(ZapError::New(-1, "不能下载目录".to_string()));
+    let resp = crate::zapexec::call(Request::FileDownload {
+        path: resolved.to_string_lossy().to_string(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
     }
 
-    let file_name = resolved
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "download".to_string());
-
-    let content = fs::read(&resolved).await.map_err(|e| {
-        ZapError::New(-1, format!("读取文件失败: {}", e))
-    })?;
+    let data = resp.data.unwrap_or_else(|| json!({}));
+    let file_name = data
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("download")
+        .to_string();
+    let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let bytes = zap_proto::b64_decode(content)
+        .map_err(|e| ZapError::Error(format!("内容解码失败: {e}")))?;
 
     let mime = mime_guess::from_path(&resolved).first_or_octet_stream();
 
@@ -361,7 +264,7 @@ pub async fn file_download(
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"{}\"", file_name),
         )
-        .body(Body::from(content))
+        .body(Body::from(bytes))
         .unwrap())
 }
 
@@ -375,15 +278,6 @@ pub async fn file_upload(
     let resolved_dir = resolve_path(target_dir)?;
     check_write_access(&claims, &resolved_dir)?;
 
-    if !resolved_dir.exists() {
-        fs::create_dir_all(&resolved_dir).await?;
-    }
-
-    let md = fs::metadata(&resolved_dir).await?;
-    if !md.is_dir() {
-        return Err(ZapError::New(-1, "目标路径不是目录".to_string()));
-    }
-
     let mut uploaded: Vec<String> = Vec::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -393,11 +287,19 @@ pub async fn file_upload(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unnamed".to_string());
 
-        let dest = resolved_dir.join(&safe_name);
         let data = field.bytes().await.map_err(|e| {
             ZapError::New(-1, format!("上传失败: {}", e))
         })?;
-        fs::write(&dest, &data).await?;
+
+        let resp = crate::zapexec::call(Request::FileUpload {
+            path: resolved_dir.to_string_lossy().to_string(),
+            name: safe_name.clone(),
+            content: zap_proto::b64_encode(&data),
+        })
+        .await?;
+        if resp.code != 0 {
+            return Err(ZapError::New(resp.code, resp.message));
+        }
         uploaded.push(safe_name);
     }
 
@@ -422,8 +324,12 @@ pub async fn file_info(
     let resolved = resolve_path(raw_path)?;
     check_access(&claims, &resolved)?;
 
-    match get_file_info(&resolved).await {
-        Some(info) => Ok(Json(json!({ "code": 0, "message": "ok", "data": info }))),
-        None => Err(ZapError::New(-1, "文件不存在".to_string())),
+    let resp = crate::zapexec::call(Request::FileInfo {
+        path: resolved.to_string_lossy().to_string(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
     }
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": resp.data })))
 }

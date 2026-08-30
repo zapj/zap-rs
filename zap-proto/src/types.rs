@@ -22,6 +22,66 @@ pub enum Request {
     /// 重启 SSH 服务
     #[serde(rename = "ssh.restart")]
     SshRestart,
+    /// 列出 SSH 密钥
+    #[serde(rename = "ssh_key.list")]
+    SshKeyList,
+    /// 读取公钥内容
+    #[serde(rename = "ssh_key.get")]
+    SshKeyGet { name: String },
+    /// 生成 SSH 密钥
+    #[serde(rename = "ssh_key.generate")]
+    SshKeyGenerate {
+        name: String,
+        key_type: Option<String>,
+        bits: Option<u32>,
+        comment: Option<String>,
+    },
+    /// 导入 SSH 密钥
+    #[serde(rename = "ssh_key.import")]
+    SshKeyImport {
+        name: String,
+        private_key: String,
+        public_key: Option<String>,
+    },
+    /// 删除 SSH 密钥
+    #[serde(rename = "ssh_key.delete")]
+    SshKeyDelete { name: String },
+    /// 列出 authorized_keys 条目
+    #[serde(rename = "ssh_key.authorized_list")]
+    SshKeyAuthorizedList,
+    /// 授权密钥（加入 authorized_keys）
+    #[serde(rename = "ssh_key.authorize")]
+    SshKeyAuthorize { name: String },
+    /// 取消授权（按 authorized_keys 索引）
+    #[serde(rename = "ssh_key.deauthorize")]
+    SshKeyDeauthorize { index: usize },
+    /// 列出目录
+    #[serde(rename = "file.list")]
+    FileList { path: String },
+    /// 读文件（文本）
+    #[serde(rename = "file.read")]
+    FileRead { path: String },
+    /// 写文件（文本）
+    #[serde(rename = "file.write")]
+    FileWrite { path: String, content: String },
+    /// 删除文件/目录
+    #[serde(rename = "file.delete")]
+    FileDelete { path: String },
+    /// 建目录
+    #[serde(rename = "file.mkdir")]
+    FileMkdir { path: String },
+    /// 重命名
+    #[serde(rename = "file.rename")]
+    FileRename { path: String, new_path: String },
+    /// 下载（base64 字节）
+    #[serde(rename = "file.download")]
+    FileDownload { path: String },
+    /// 上传（base64 字节）
+    #[serde(rename = "file.upload")]
+    FileUpload { path: String, name: String, content: String },
+    /// 文件信息
+    #[serde(rename = "file.info")]
+    FileInfo { path: String },
 }
 
 /// `zapexec` -> `zapd` 的响应。

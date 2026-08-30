@@ -25,6 +25,14 @@ enum ClientVerb {
     TimeSetTimezone { timezone: String },
     SshStatus,
     SshRestart,
+    SshKeyList,
+    SshKeyGenerate { name: String },
+    SshKeyAuthorizedList,
+    FileList { path: String },
+    FileRead { path: String },
+    FileWrite { path: String, content: String },
+    FileDelete { path: String },
+    FileInfo { path: String },
 }
 
 pub async fn run(args: ClientArgs) {
@@ -54,6 +62,19 @@ pub async fn run(args: ClientArgs) {
         ClientVerb::TimeSetTimezone { timezone } => Request::TimeSetTimezone { timezone },
         ClientVerb::SshStatus => Request::SshStatus,
         ClientVerb::SshRestart => Request::SshRestart,
+        ClientVerb::SshKeyList => Request::SshKeyList,
+        ClientVerb::SshKeyGenerate { name } => Request::SshKeyGenerate {
+            name,
+            key_type: None,
+            bits: None,
+            comment: None,
+        },
+        ClientVerb::SshKeyAuthorizedList => Request::SshKeyAuthorizedList,
+        ClientVerb::FileList { path } => Request::FileList { path },
+        ClientVerb::FileRead { path } => Request::FileRead { path },
+        ClientVerb::FileWrite { path, content } => Request::FileWrite { path, content },
+        ClientVerb::FileDelete { path } => Request::FileDelete { path },
+        ClientVerb::FileInfo { path } => Request::FileInfo { path },
     };
 
     frame::send(&mut wr, &Message::Request(req))

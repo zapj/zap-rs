@@ -554,9 +554,8 @@ async fn load_connection_info(id: i64) -> Result<ConnectionInfo, ZapError> {
 }
 
 fn get_key_path(key_name: &str) -> Option<std::path::PathBuf> {
-    let ssh_dir = std::env::var("HOME")
-        .map(|h| std::path::PathBuf::from(h).join(".ssh"))
-        .unwrap_or_else(|_| std::path::PathBuf::from("/root/.ssh"));
+    // 密钥由 zapexec 写入 /etc/zap/ssh（root:zapadm 0640），zapd 以 zapadm 身份直接读取
+    let ssh_dir = std::path::PathBuf::from(zap_proto::SSH_KEY_DIR);
 
     let key_path = ssh_dir.join(key_name);
     if key_path.exists() {

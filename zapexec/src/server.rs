@@ -39,7 +39,7 @@ pub async fn serve(socket: &Path, secret: &[u8], identity: ClientIdentity) {
             Ok((stream, _)) => {
                 let secret = secret.to_vec();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_conn(stream, &secret, identity.uid).await {
+                    if let Err(e) = handle_conn(stream, &secret, identity.uid, identity.gid).await {
                         debug!("连接结束: {e}");
                     }
                 });
@@ -49,7 +49,7 @@ pub async fn serve(socket: &Path, secret: &[u8], identity: ClientIdentity) {
     }
 }
 
-async fn handle_conn(stream: UnixStream, secret: &[u8], expected_uid: u32) -> std::io::Result<()> {
+async fn handle_conn(stream: UnixStream, secret: &[u8], expected_uid: u32, gid: u32) -> std::io::Result<()> {
     // 1) SO_PEERCRED：只允许 zapadm 用户连接
     let uid = match peer_uid(stream.as_raw_fd()) {
         Some(u) => u,
@@ -90,7 +90,7 @@ async fn handle_conn(stream: UnixStream, secret: &[u8], expected_uid: u32) -> st
     loop {
         match frame::recv(&mut rd).await {
             Ok(Message::Request(req)) => {
-                let resp = verbs::dispatch(req).await;
+                let resp = verbs::dispatch(req, gid).await;
                 if frame::send(&mut wr, &Message::Response(resp)).await.is_err() {
                     break;
                 }
