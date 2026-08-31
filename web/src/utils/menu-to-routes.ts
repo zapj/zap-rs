@@ -80,6 +80,6 @@ export function menuTreeToRoutes(menuTree: MenuItem[]): RouteRecordRaw[] {
   return menuTree
     .filter((menu) => menu.type !== 'button') // 过滤掉按钮类型
     .filter((menu) => menu.status !== 0) // 过滤掉禁用的菜单
-    .filter((menu) => menu.meta.hidden !== false) // 只处理启用的菜单
+    .filter((menu) => !menu.meta.hidden) // 过滤掉隐藏的菜单
     .map((menu) => menuToRoute(menu))
 }

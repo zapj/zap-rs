@@ -13,6 +13,12 @@ pub async fn init_schema() {
 
     // Migration: fix empty path on existing child menus
     fix_empty_menu_paths().await;
+    // Migration: ensure reseller role + base permissions exist on upgraded DBs
+    ensure_reseller_role().await;
+    // Migration: add owner_id column to user table (reseller customer ownership)
+    ensure_user_owner_id().await;
+    // Migration: rename 系统管理 -> 系统设置
+    fix_system_menu_title().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -35,6 +41,7 @@ async fn init_system_user_table_schema() {
         status INTEGER DEFAULT 1,
         roles TEXT,
         permissions TEXT,
+        owner_id INTEGER DEFAULT 0,
         created_at INTEGER,
         updated_at INTEGER
     )
@@ -133,6 +140,8 @@ async fn init_roles_table() {
     VALUES ('管理员', 'admin', '系统最高权限角色', 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO roles (name, role_key, description, status, created_at, updated_at)
     VALUES ('普通用户', 'user', '普通用户角色', 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO roles (name, role_key, description, status, created_at, updated_at)
+    VALUES ('经销商', 'reseller', '经销商角色', 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -170,7 +179,7 @@ async fn init_menus_table() {
 
     -- System dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统管理', 'ep:setting', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统设置', 'ep:setting', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- System children
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -195,6 +204,12 @@ async fn init_menus_table() {
     VALUES (3, 0, 'files', '/files', 'Layout', '/files', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (31, 3, 'file-manager', 'index', 'files/index', 'menu', '文件管理器', 'ep:folder-opened', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- Reseller customer management (Layout + child page)
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (5, 0, 'reseller-users', '/reseller/users', 'Layout', '/reseller/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 5, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', '', 1, 'reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -232,6 +247,14 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 41);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 4);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 41);
+    -- Reseller: same base permissions as user + customer management
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 1);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 3);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 31);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 4);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 41);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 5);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 51);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -256,6 +279,86 @@ async fn fix_empty_menu_paths() {
     }
 }
 
+/// Ensure reseller role and its base menu permissions exist (idempotent).
+/// Needed for databases created before the reseller role was introduced.
+async fn ensure_reseller_role() {
+    let pool = get_db_pool().await;
+    let now = chrono::Local::now().timestamp();
+
+    // 0. Ensure the customer-management menu exists with Layout wrapper (upgraded DBs)
+    let _ = sqlx::query(
+        "INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+         VALUES (5, 0, 'reseller-users', '/reseller/users', 'Layout', '/reseller/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 5, 1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            parent_id = 0, name = 'reseller-users', path = '/reseller/users', component = 'Layout', redirect = '/reseller/users/index', type = 'menu', title = '客户管理', icon = 'ep:user-filled', affix = 1, roles = 'reseller', sort_order = 5, status = 1",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+         VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', '', 1, 'reseller', 1, 1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            parent_id = 5, name = 'reseller-users-index', path = 'index', component = 'system/users/index', type = 'menu', title = '客户管理', icon = '', affix = 1, roles = 'reseller', sort_order = 1, status = 1",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    // 1. Ensure the reseller role exists
+    let _ = sqlx::query(
+        "INSERT OR IGNORE INTO roles (name, role_key, description, status, created_at, updated_at)
+         VALUES ('经销商', 'reseller', '经销商角色', 1, ?, ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    // 2. Resolve the role id (roles uses AUTOINCREMENT)
+    let role_id: i64 = match sqlx::query_as("SELECT id FROM roles WHERE role_key = 'reseller'")
+        .fetch_optional(pool)
+        .await
+    {
+        Ok(Some((id,))) => id,
+        _ => return,
+    };
+
+    // 3. Ensure base menu permissions (same as user + customer management)
+    for menu_id in [1i64, 3, 31, 4, 41, 5, 51] {
+        let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (?, ?)")
+            .bind(role_id)
+            .bind(menu_id)
+            .execute(pool)
+            .await;
+    }
+}
+
+/// Add owner_id column to the user table for existing databases (idempotent).
+async fn ensure_user_owner_id() {
+    if column_exists("user", "owner_id").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let _ = sqlx::query("ALTER TABLE user ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+    tracing::info!("Added user.owner_id column");
+}
+
+/// Rename the "系统管理" top menu to "系统设置" for existing databases.
+async fn fix_system_menu_title() {
+    let pool = get_db_pool().await;
+    let _ = sqlx::query(
+        "UPDATE menus SET title = '系统设置' WHERE name = 'system' AND title = '系统管理'",
+    )
+    .execute(pool)
+    .await;
+}
+
 // ── helper ─────────────────────────────────────────────────
 
 async fn table_exists(table_name: &str) -> bool {
@@ -266,4 +369,15 @@ async fn table_exists(table_name: &str) -> bool {
             .fetch_one(pool)
             .await;
     result.is_ok()
+}
+
+async fn column_exists(table_name: &str, column_name: &str) -> bool {
+    let pool = get_db_pool().await;
+    let sql = format!(
+        "SELECT name FROM pragma_table_info('{}') WHERE name = '{}'",
+        table_name, column_name
+    );
+    let result: Result<Option<String>, sqlx::Error> =
+        sqlx::query_scalar(&sql).fetch_optional(pool).await;
+    matches!(result, Ok(Some(_)))
 }

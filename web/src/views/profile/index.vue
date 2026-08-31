@@ -3,6 +3,7 @@ import { onMounted, ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { updateUser } from '@/api/user'
+import { roleLabel } from '@/utils/role'
 
 const userStore = useUserStore()
 const { userInfo } = userStore
@@ -93,7 +94,7 @@ async function changePassword() {
                 :key="r"
                 style="margin-right: 6px"
               >
-                {{ r === 'admin' ? '管理员' : '普通用户' }}
+                {{ roleLabel(r) }}
               </el-tag>
               <span v-if="!userInfo.roles?.length" style="color: #909399">-</span>
             </el-form-item>

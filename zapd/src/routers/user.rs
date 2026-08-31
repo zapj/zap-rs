@@ -23,6 +23,7 @@ struct UserInfo {
     status: i32,
     roles: String,
     permissions: String,
+    owner_id: i64,
     created_at: i64,
     updated_at: i64,
 }
@@ -34,6 +35,7 @@ pub struct CreateUserPayload {
     pub email: String,
     pub nickname: Option<String>,
     pub roles: Option<String>,
+    pub owner_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +60,16 @@ fn require_admin(claims: &jwt::Claims) -> Result<(), ZapError> {
     } else {
         Err(ZapError::New(-1, "权限不足，需要管理员权限".to_string()))
     }
+}
+
+/// Fetch the owner_id of a user. Returns -1 when the user does not exist.
+async fn get_user_owner_id(id: i64) -> Result<i64, ZapError> {
+    let pool = db::get_db_pool().await;
+    let row: Option<(i64,)> = sqlx::query_as("SELECT owner_id FROM user WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(o,)| o).unwrap_or(-1))
 }
 
 pub async fn user_info(claims: Claims) -> Json<Value> {
@@ -90,15 +102,22 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
     }))
 }
 
-/// List all users — admin only
+/// List users — admin sees all, reseller sees only own customers
 pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
-    require_admin(&claims)?;
+    let is_admin = jwt::is_admin(&claims);
+    let is_reseller = jwt::is_reseller(&claims);
+    if !is_admin && !is_reseller {
+        return Err(ZapError::New(-1, "权限不足".to_string()));
+    }
 
     let pool = db::get_db_pool().await;
 
     let mut querybuilder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
-        "SELECT id,username,email,nickname,last_login_ip,last_login_time,status,roles,permissions,created_at,updated_at FROM user",
+        "SELECT id,username,email,nickname,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
     );
+    if is_reseller && !is_admin {
+        querybuilder.push(" WHERE owner_id = ").push_bind(claims.id as i64);
+    }
     querybuilder.push(" order by id desc");
     let users: Vec<UserInfo> = querybuilder.build_query_as().fetch_all(pool).await?;
 
@@ -116,6 +135,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
                 "status": user.status,
                 "roles": user.roles.split(',').collect::<Vec<&str>>(),
                 "permissions": user.permissions.split(',').collect::<Vec<&str>>(),
+                "owner_id": user.owner_id,
                 "created_at": user.created_at,
                 "updated_at": user.updated_at,
             })
@@ -124,23 +144,38 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
     })))
 }
 
-/// Create a new user — admin only
+/// Create a new user — admin or reseller (own customer only)
 pub async fn user_add(
     claims: ValidatedClaims,
     Json(payload): Json<CreateUserPayload>,
 ) -> ZapJsonResult {
-    require_admin(&claims)?;
+    let is_admin = jwt::is_admin(&claims);
+    let is_reseller = jwt::is_reseller(&claims);
+    if !is_admin && !is_reseller {
+        return Err(ZapError::New(-1, "权限不足".to_string()));
+    }
 
     let hashed = bcrypt::hash(&payload.password, bcrypt::DEFAULT_COST)
         .map_err(|e| ZapError::Error(format!("密码加密失败: {}", e)))?;
 
     let now = chrono::Local::now().timestamp();
-    let roles = payload.roles.unwrap_or_else(|| "user".to_string());
+    // reseller 只能创建普通用户客户；admin 可指定角色
+    let roles = if is_admin {
+        payload.roles.unwrap_or_else(|| "user".to_string())
+    } else {
+        "user".to_string()
+    };
+    // reseller 创建的客户归属自己；admin 可指定归属（默认系统直属）
+    let owner_id: i64 = if is_admin {
+        payload.owner_id.unwrap_or(0)
+    } else {
+        claims.id as i64
+    };
     let nickname = payload.nickname.unwrap_or_else(|| payload.username.clone());
 
     let pool = db::get_db_pool().await;
     let result = sqlx::query(
-        "INSERT INTO user (username, password, email, nickname, roles, permissions, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        "INSERT INTO user (username, password, email, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
     )
     .bind(&payload.username)
     .bind(&hashed)
@@ -148,6 +183,7 @@ pub async fn user_add(
     .bind(&nickname)
     .bind(&roles)
     .bind("")
+    .bind(owner_id)
     .bind(now)
     .bind(now)
     .execute(pool)
@@ -172,8 +208,10 @@ pub async fn user_add(
     }
 }
 
-/// Update an existing user — admin only.
-/// Default-password users may only update their own password.
+/// Update an existing user.
+/// - admin: any user
+/// - reseller: own customers only, and cannot change roles
+/// - default-password users: only their own password
 pub async fn user_update(
     claims: Claims,
     Json(payload): Json<UpdateUserPayload>,
@@ -191,9 +229,24 @@ pub async fn user_update(
         {
             return Err(ZapError::New(-1, "请先修改默认密码，当前只能修改密码".to_string()));
         }
-    } else {
-        // Normal users need admin to update others
-        if payload.id != claims.id as i64 {
+    }
+
+    // 非管理员不能修改角色（防止提权，admin 除外）
+    if !jwt::is_admin(&claims) && payload.roles.is_some() {
+        return Err(ZapError::New(-1, "权限不足，不能修改角色".to_string()));
+    }
+
+    // 更新他人时的归属/权限校验
+    if !claims.pwd_is_default && payload.id != claims.id as i64 {
+        if jwt::is_admin(&claims) {
+            // admin: full access
+        } else if jwt::is_reseller(&claims) {
+            // reseller: own customers only
+            let owner_id = get_user_owner_id(payload.id).await?;
+            if owner_id != claims.id as i64 {
+                return Err(ZapError::New(-1, "权限不足，只能管理自己的客户".to_string()));
+            }
+        } else {
             require_admin(&claims)?;
         }
     }
@@ -247,12 +300,22 @@ pub async fn user_update(
     })))
 }
 
-/// Delete a user — admin only
+/// Delete a user — admin: any; reseller: own customers only
 pub async fn user_delete(
     claims: ValidatedClaims,
     Json(payload): Json<DeleteUserPayload>,
 ) -> ZapJsonResult {
-    require_admin(&claims)?;
+    if jwt::is_admin(&claims) {
+        // admin: full access (still cannot delete self)
+    } else if jwt::is_reseller(&claims) {
+        // reseller: own customers only
+        let owner_id = get_user_owner_id(payload.id).await?;
+        if owner_id != claims.id as i64 {
+            return Err(ZapError::New(-1, "权限不足，只能删除自己的客户".to_string()));
+        }
+    } else {
+        require_admin(&claims)?;
+    }
 
     if payload.id == claims.id as i64 {
         return Err(ZapError::New(-1, "不能删除自己".to_string()));
@@ -272,5 +335,25 @@ pub async fn user_delete(
     Ok(Json(json!({
         "code": 0,
         "message": "用户删除成功"
+    })))
+}
+
+/// List all reseller users — admin only (used to assign customer ownership)
+pub async fn reseller_list(claims: ValidatedClaims) -> ZapJsonResult {
+    require_admin(&claims)?;
+
+    let pool = db::get_db_pool().await;
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT id, username, nickname FROM user WHERE roles LIKE '%reseller%' ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": rows.iter().map(|(id, username, nickname)| {
+            json!({ "id": id, "username": username, "nickname": nickname })
+        }).collect::<Vec<Value>>(),
     })))
 }

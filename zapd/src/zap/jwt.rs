@@ -92,6 +92,11 @@ pub fn is_admin(claims: &Claims) -> bool {
     claims.roles.split(',').any(|r| r.trim() == "admin")
 }
 
+/// Check if the claims contain the reseller role
+pub fn is_reseller(claims: &Claims) -> bool {
+    claims.roles.split(',').any(|r| r.trim() == "reseller")
+}
+
 // ── Claims extractor (allows default-password users through) ────────────────
 
 impl<S> FromRequestParts<S> for Claims

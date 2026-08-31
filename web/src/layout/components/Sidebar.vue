@@ -12,6 +12,7 @@
     <el-scrollbar>
       <el-menu
         :default-active="activeMenu"
+        :default-openeds="defaultOpeneds"
         :collapse="isCollapse"
         :unique-opened="true"
         :collapse-transition="false"
@@ -46,13 +47,25 @@ const permissionStore = usePermissionStore()
 const isCollapse = computed(() => !appStore.sidebar.opened)
 // permissionStore.generateRoutes(['admin', 'editor', 'test'])
 // 当前激活的菜单
-const activeMenu = computed(() => {
+const activeMenu = computed<string>(() => {
   const { meta, path } = route
   // 如果设置了activeMenu，则使用activeMenu
   if (meta.activeMenu) {
-    return meta.activeMenu
+    return meta.activeMenu as string
   }
   return path
+})
+
+// 当前激活菜单的父级路径，刷新/直接访问深层路由时自动展开分组
+const defaultOpeneds = computed(() => {
+  const parts = activeMenu.value.split('/').filter(Boolean)
+  const res: string[] = []
+  let acc = ''
+  for (const p of parts.slice(0, -1)) {
+    acc += `/${p}`
+    res.push(acc)
+  }
+  return res
 })
 </script>
 

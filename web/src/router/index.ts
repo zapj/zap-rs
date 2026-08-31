@@ -69,7 +69,7 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
     path: '/system',
     component: Layout,
     redirect: '/system/users',
-    meta: { title: '系统管理', icon: 'Setting', roles: ['admin'] },
+    meta: { title: '系统设置', icon: 'Setting', roles: ['admin'] },
     children: [
       {
         path: 'users',

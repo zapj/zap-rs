@@ -1,6 +1,10 @@
 <template>
   <div class="users-container">
     <el-card>
+      <template #header>
+        <span>{{ pageTitle }}</span>
+      </template>
+
       <!-- 搜索 -->
       <el-form :inline="true" :model="searchForm">
         <el-form-item label="用户名">
@@ -13,7 +17,7 @@
       </el-form>
 
       <el-button type="primary" @click="handleAdd" style="margin-bottom: 16px">
-        <el-icon><Plus /></el-icon>新增用户
+        <el-icon><Plus /></el-icon>{{ isAdmin ? '新增用户' : '新增客户' }}
       </el-button>
 
       <el-table :data="tableData" v-loading="loading" stripe>
@@ -21,11 +25,17 @@
         <el-table-column prop="username" label="用户名" width="120" />
         <el-table-column prop="nickname" label="昵称" width="120" />
         <el-table-column prop="email" label="邮箱" min-width="180" />
-        <el-table-column label="角色" width="140">
+        <el-table-column label="角色" width="120">
           <template #default="{ row }">
             <el-tag v-for="r in row.roles" :key="r" size="small" style="margin-right: 4px">
-              {{ r === 'admin' ? '管理员' : '普通用户' }}
+              {{ roleLabel(r) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="isAdmin" label="归属" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.owner_id === 0" size="small" type="info">系统</el-tag>
+            <el-tag v-else size="small">{{ ownerName(row.owner_id) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="80">
@@ -59,7 +69,7 @@
     <!-- 新增 / 编辑 对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="dialogType === 'add' ? '新增用户' : '编辑用户'"
+      :title="dialogType === 'add' ? (isAdmin ? '新增用户' : '新增客户') : '编辑'"
       width="480px"
       @closed="resetForm"
     >
@@ -76,10 +86,25 @@
         <el-form-item v-if="dialogType === 'add'" label="密码" prop="password">
           <el-input v-model="form.password" type="password" show-password />
         </el-form-item>
-        <el-form-item label="角色" prop="roles">
+        <el-form-item v-if="isAdmin" label="角色" prop="roles">
           <el-select v-model="form.roles">
-            <el-option label="管理员" value="admin" />
-            <el-option label="普通用户" value="user" />
+            <el-option
+              v-for="opt in ROLE_OPTIONS"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="isAdmin && dialogType === 'add'" label="归属">
+          <el-select v-model="form.owner_id">
+            <el-option label="系统直属" :value="0" />
+            <el-option
+              v-for="r in resellerList"
+              :key="r.id"
+              :label="r.username"
+              :value="r.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -98,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -107,8 +132,19 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  getResellerList,
   type UserListItem,
+  type ResellerItem,
+  type CreateUserPayload,
+  type UpdateUserPayload,
 } from '@/api/user'
+import { roleLabel, ROLE_OPTIONS } from '@/utils/role'
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.roles.includes('admin'))
+const isReseller = computed(() => userStore.roles.includes('reseller'))
+const pageTitle = computed(() => (isReseller.value ? '客户管理' : '用户管理'))
 
 // ── 搜索 ───────────────────────────────────────────────────
 const searchForm = reactive({ username: '' })
@@ -116,6 +152,7 @@ const searchForm = reactive({ username: '' })
 // ── 表格 ───────────────────────────────────────────────────
 const loading = ref(false)
 const tableData = ref<UserListItem[]>([])
+const resellerList = ref<ResellerItem[]>([])
 
 async function loadList() {
   loading.value = true
@@ -127,6 +164,21 @@ async function loadList() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadResellers() {
+  if (!isAdmin.value) return
+  try {
+    const res = await getResellerList()
+    resellerList.value = res.data ?? []
+  } catch {
+    // 拦截器已弹窗
+  }
+}
+
+function ownerName(ownerId: number) {
+  const r = resellerList.value.find((x) => x.id === ownerId)
+  return r ? r.username : `#${ownerId}`
 }
 
 function handleSearch() {
@@ -151,6 +203,7 @@ interface FormData {
   email: string
   password: string
   roles: string
+  owner_id: number
   status: number
 }
 
@@ -160,6 +213,7 @@ const defaultForm = (): FormData => ({
   email: '',
   password: '',
   roles: 'user',
+  owner_id: 0,
   status: 1,
 })
 
@@ -197,6 +251,7 @@ function handleEdit(row: UserListItem) {
     email: row.email,
     password: '',
     roles: row.roles?.[0] ?? 'user',
+    owner_id: row.owner_id ?? 0,
     status: row.status,
   })
   dialogVisible.value = true
@@ -213,22 +268,29 @@ async function submitForm() {
   submitting.value = true
   try {
     if (dialogType.value === 'add') {
-      await createUser({
+      const payload: CreateUserPayload = {
         username: form.username,
         password: form.password,
         email: form.email,
         nickname: form.nickname,
-        roles: form.roles,
-      })
+      }
+      if (isAdmin.value) {
+        payload.roles = form.roles
+        payload.owner_id = form.owner_id || 0
+      }
+      await createUser(payload)
       ElMessage.success('新增成功')
     } else {
-      await updateUser({
+      const payload: UpdateUserPayload = {
         id: editingId.value!,
         email: form.email,
         nickname: form.nickname,
-        roles: form.roles,
         status: form.status,
-      })
+      }
+      if (isAdmin.value) {
+        payload.roles = form.roles
+      }
+      await updateUser(payload)
       ElMessage.success('更新成功')
     }
     dialogVisible.value = false
@@ -285,7 +347,10 @@ function fmtTime(ts: number) {
   return new Date(ts * 1000).toLocaleString('zh-CN')
 }
 
-onMounted(loadList)
+onMounted(() => {
+  loadList()
+  loadResellers()
+})
 </script>
 
 <style scoped>

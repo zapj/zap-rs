@@ -28,6 +28,7 @@ export interface UserListItem {
   status: number
   roles: string[]
   permissions: string[]
+  owner_id: number
   created_at: number
   updated_at: number
 }
@@ -44,12 +45,24 @@ export function getUserList(params?: { username?: string; status?: string }) {
   return http.get<UserListResponse>('/system/user/list', { params })
 }
 
+export interface ResellerItem {
+  id: number
+  username: string
+  nickname: string
+}
+
+/** 获取经销商列表（admin 用于分配客户归属） */
+export function getResellerList() {
+  return http.get<ApiResponse<ResellerItem[]>>('/system/user/resellers')
+}
+
 export interface CreateUserPayload {
   username: string
   password: string
   email: string
   nickname?: string
   roles?: string
+  owner_id?: number
 }
 
 /** 新增用户 */

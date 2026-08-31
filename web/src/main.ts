@@ -1,5 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import { addCollection } from '@iconify/vue'
+import { icons as epIcons } from '@iconify-json/ep'
 import 'element-plus/dist/index.css'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import App from './App.vue'
@@ -9,6 +11,9 @@ import 'virtual:uno.css'
 import './assets/styles/index.css'
 // 使用Element Plus的消息提示
 import { ElMessage } from 'element-plus'
+
+// 离线注册 Element Plus 图标集合（ep:xxx），避免菜单图标依赖外网 API
+addCollection(epIcons)
 
 const app = createApp(App)
 

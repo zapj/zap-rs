@@ -155,7 +155,7 @@ pub async fn role_delete(
         .fetch_one(pool)
         .await?;
 
-    if role.role_key == "admin" || role.role_key == "user" {
+    if role.role_key == "admin" || role.role_key == "reseller" || role.role_key == "user" {
         return Err(ZapError::New(-1, "系统内置角色不可删除".to_string()));
     }
 
