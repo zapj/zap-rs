@@ -6,3 +6,10 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5.47", features = ["derive"] }
 clap_derive = "4.5.47"
+libc = "0.2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+bcrypt = "0.17.1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+rpassword = "7"
+chrono = "0.4"

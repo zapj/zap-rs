@@ -108,6 +108,8 @@ jwt:
 exec:
   socket_path: /run/zap/exec.sock
   secret_path: /etc/zap/exec.key
+db:
+  path: /usr/local/zap/data/zap.db
 EOF
 fi
 chown root:zapadm /etc/zap/zap.yaml

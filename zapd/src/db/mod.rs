@@ -8,7 +8,7 @@ pub static DB_POOL: OnceCell<Pool<Sqlite>> = OnceCell::const_new();
 
 pub async fn get_db_pool() -> &'static SqlitePool {
     DB_POOL.get_or_init(|| async {
-        let filename = "data/zap.db";
+        let filename = crate::config::get_config().read().unwrap().db.path.clone();
         let options = SqliteConnectOptions::new()
         .filename(filename)
         .create_if_missing(true);

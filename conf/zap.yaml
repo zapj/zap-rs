@@ -9,3 +9,5 @@ jwt:
 exec:
   socket_path: /run/zap/exec.sock
   secret_path: /etc/zap/exec.key
+db:
+  path: data/zap.db

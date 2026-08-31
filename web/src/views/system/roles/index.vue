@@ -67,6 +67,7 @@
       <el-tree
         ref="treeRef"
         :data="permTree"
+        :props="treeProps"
         show-checkbox
         node-key="id"
         :default-checked-keys="checkedPerms"
@@ -81,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -175,6 +176,12 @@ const permTree = ref<any[]>([])
 const checkedPerms = ref<number[]>([])
 let permRoleId = 0
 
+// 菜单节点文本在 meta.title（显示名），回退到 name（路由名）
+const treeProps = {
+  children: 'children',
+  label: (data: any) => data?.meta?.title || data?.name || '',
+}
+
 async function handlePermission(row: RoleItem) {
   permRoleId = row.id
   try {
@@ -185,6 +192,9 @@ async function handlePermission(row: RoleItem) {
     permTree.value = menusRes.data ?? []
     checkedPerms.value = permsRes.data ?? []
     permVisible.value = true
+    // dialog 非销毁式，第二次打开需手动同步勾选状态
+    await nextTick()
+    treeRef.value?.setCheckedKeys(checkedPerms.value)
   } catch { /* handled */ }
 }
 

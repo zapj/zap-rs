@@ -14,6 +14,8 @@ pub struct ZapConfig {
     pub jwt: JWTConfig,
     #[serde(default)]
     pub exec: ExecConfig,
+    #[serde(default)]
+    pub db: DbConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -46,6 +48,20 @@ impl Default for ExecConfig {
     }
 }
 
+/// SQLite 数据库配置（`zapd` 与 `zapctl` 共用）。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DbConfig {
+    pub path: String,
+}
+
+impl Default for DbConfig {
+    fn default() -> Self {
+        Self {
+            path: "data/zap.db".to_string(),
+        }
+    }
+}
+
 const DEFAULT_JWT_SECURE: &str = "secure-key-zap-default";
 
 pub fn new() -> ZapConfig {
@@ -61,6 +77,7 @@ pub fn new() -> ZapConfig {
             jwt_expire: 3600,
         },
         exec: ExecConfig::default(),
+        db: DbConfig::default(),
     }
 }
 
@@ -143,6 +160,7 @@ pub fn get_config() -> &'static RwLock<ZapConfig> {
                             default_conf.jwt.jwt_secure = cnf.jwt.jwt_secure;
                         }
                         default_conf.jwt.jwt_expire = cnf.jwt.jwt_expire;
+                        default_conf.db = cnf.db;
                     }
                     Err(_) => {
                         info!("failed to parse zap.yaml, using defaults");

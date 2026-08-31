@@ -109,6 +109,8 @@ jwt:
 exec:
   socket_path: $EXEC_SOCKET
   secret_path: $EXEC_SECRET
+db:
+  path: $ROOT_DIR/data/zap.db
 EOF
   ok "开发配置已生成"
 fi
