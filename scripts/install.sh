@@ -84,7 +84,8 @@ deploy_appstore() {
     [ -f "$DEST/repos.yaml" ]       || cp -f zap/data/appstore/repos.yaml "$DEST/repos.yaml" 2>/dev/null || true
     [ -f "$DEST/custom/README.md" ] || cp -f zap/data/appstore/custom/README.md "$DEST/custom/README.md" 2>/dev/null || true
 
-    # 种子官方包（内置源）：仅当 repos/zap-appstore 无 .git 时复制发行包内置包（离线兜底）
+    # 种子官方包（内置源）：复制发行包内置包（构建时从独立 git 仓库同步）作为离线兜底；
+    # 发行包无内置包时留空，交由下方 git clone 拉取（离线则面板中可重试更新）
     if [ ! -d "$BUILTIN/.git" ] && [ ! -d "$BUILTIN/database" ]; then
         mkdir -p "$BUILTIN"
         for c in database application webserver library; do

@@ -58,6 +58,24 @@ for bin in zapd zapctl zapexec; do
 done
 ok "二进制复制完成: zapd / zapctl / zapexec"
 
+# ── 同步内置 AppStore 源（独立 git 仓库 → 发行包）──────────
+# 内置源内容由独立仓库管理（默认与 zap-rs 同级的 zap-appstore），打包前 git pull 更新
+APPSTORE_SEED_DIR="${APPSTORE_SEED_DIR:-$CUR_DIR/../zap-appstore}"
+APPSTORE_BUILTIN="$CUR_DIR/data/appstore/repos/zap-appstore"
+if [ -d "$APPSTORE_SEED_DIR/.git" ]; then
+    info "同步内置 AppStore 源（$APPSTORE_SEED_DIR）..."
+    git -C "$APPSTORE_SEED_DIR" pull -q --ff-only 2>/dev/null \
+        || warn "内置源 git pull 失败，使用本地现有内容"
+    rm -rf "$APPSTORE_BUILTIN"
+    mkdir -p "$APPSTORE_BUILTIN"
+    for c in database application webserver library; do
+        [ -d "$APPSTORE_SEED_DIR/$c" ] && cp -Rf "$APPSTORE_SEED_DIR/$c" "$APPSTORE_BUILTIN/" || true
+    done
+    ok "内置 AppStore 源已同步"
+else
+    warn "未找到内置 AppStore 源仓库（$APPSTORE_SEED_DIR），发行包将不含内置包，可在面板中添加源"
+fi
+
 # 脚本、数据与配置模板（排除运行时生成的 TLS 私钥/证书）
 cp -Rf "$CUR_DIR/scripts" "$DIST_DIR/"
 cp -Rf "$CUR_DIR/data" "$DIST_DIR/"
