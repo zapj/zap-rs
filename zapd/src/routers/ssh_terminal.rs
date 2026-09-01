@@ -1,10 +1,10 @@
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, Query,
+        Extension, Path, Query,
     },
     http::StatusCode,
     response::IntoResponse,
@@ -20,6 +20,8 @@ use tracing::{error, info, warn};
 
 use crate::config;
 use crate::db;
+use crate::zap::audit;
+use crate::zap::crypto;
 use crate::zap::jwt::{Claims, ValidatedClaims};
 use crate::zap::{ZapError, ZapJsonResult};
 
@@ -147,7 +149,11 @@ pub async fn list_connections(_claims: ValidatedClaims) -> ZapJsonResult {
     .fetch_all(pool)
     .await?;
 
-    let connections: Vec<SshConnection> = rows.iter().map(|r| row_to_conn(r)).collect();
+    let mut connections: Vec<SshConnection> = rows.iter().map(|r| row_to_conn(r)).collect();
+    // 敏感信息脱敏：不回传已加密的密码字段
+    for c in connections.iter_mut() {
+        c.password = String::new();
+    }
     Ok(Json(json!({ "code": 0, "data": connections })))
 }
 
@@ -166,13 +172,18 @@ pub async fn get_connection(
     .await?;
 
     match row {
-        Some(r) => Ok(Json(json!({ "code": 0, "data": row_to_conn(&r) }))),
+        Some(r) => {
+            let mut conn = row_to_conn(&r);
+            conn.password = String::new(); // 脱敏
+            Ok(Json(json!({ "code": 0, "data": conn })))
+        }
         None => Err(ZapError::New(-1, "连接不存在".to_string())),
     }
 }
 
 pub async fn create_connection(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<CreateConnectionPayload>,
 ) -> ZapJsonResult {
     if payload.name.trim().is_empty() {
@@ -194,6 +205,9 @@ pub async fn create_connection(
     let pool = db::get_db_pool().await;
     let now = chrono::Utc::now().timestamp();
 
+    // 密码加密后入库，杜绝明文存储
+    let encrypted_password = crypto::encrypt_password(&payload.password);
+
     sqlx::query(
         "INSERT INTO ssh_connections (name, host, port, username, auth_type, password, ssh_key_name, remark, status, sort_order, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)"
@@ -201,22 +215,32 @@ pub async fn create_connection(
     .bind(payload.name.trim())
     .bind(payload.host.trim())
     .bind(payload.port)
-    .bind(payload.username)
-    .bind(payload.auth_type)
-    .bind(payload.password)
-    .bind(payload.ssh_key_name)
-    .bind(payload.remark)
+    .bind(&payload.username)
+    .bind(&payload.auth_type)
+    .bind(encrypted_password)
+    .bind(&payload.ssh_key_name)
+    .bind(&payload.remark)
     .bind(now)
     .bind(now)
     .execute(pool)
     .await?;
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "ssh_connection_create",
+        &format!("{}@{}:{}", payload.username, payload.host, payload.port),
+        &payload.name,
+    )
+    .await;
 
     info!("SSH connection created: {}", payload.name);
     Ok(Json(json!({ "code": 0, "message": "创建成功" })))
 }
 
 pub async fn update_connection(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Path(id): Path<i64>,
     Json(payload): Json<UpdateConnectionPayload>,
 ) -> ZapJsonResult {
@@ -253,8 +277,10 @@ pub async fn update_connection(
             .bind(v).bind(now).bind(id).execute(pool).await?;
     }
     if let Some(v) = payload.password {
+        // 密码加密后入库
+        let encrypted = crypto::encrypt_password(&v);
         sqlx::query("UPDATE ssh_connections SET password = ?, updated_at = ? WHERE id = ?")
-            .bind(v).bind(now).bind(id).execute(pool).await?;
+            .bind(encrypted).bind(now).bind(id).execute(pool).await?;
     }
     if let Some(v) = payload.ssh_key_name {
         sqlx::query("UPDATE ssh_connections SET ssh_key_name = ?, updated_at = ? WHERE id = ?")
@@ -274,11 +300,20 @@ pub async fn update_connection(
     }
 
     info!("SSH connection updated: id={}", id);
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "ssh_connection_update",
+        &format!("id={}", id),
+        "",
+    )
+    .await;
     Ok(Json(json!({ "code": 0, "message": "更新成功" })))
 }
 
 pub async fn delete_connection(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Path(id): Path<i64>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
@@ -291,6 +326,15 @@ pub async fn delete_connection(
     if result.rows_affected() == 0 {
         return Err(ZapError::New(-1, "连接不存在".to_string()));
     }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "ssh_connection_delete",
+        &format!("id={}", id),
+        "",
+    )
+    .await;
 
     info!("SSH connection deleted: id={}", id);
     Ok(Json(json!({ "code": 0, "message": "删除成功" })))
@@ -541,14 +585,18 @@ async fn load_connection_info(id: i64) -> Result<ConnectionInfo, ZapError> {
     .await?;
 
     match row {
-        Some(r) => Ok(ConnectionInfo {
-            host: r.get("host"),
-            port: r.get("port"),
-            username: r.get("username"),
-            auth_type: r.get("auth_type"),
-            password: r.try_get("password").unwrap_or_default(),
-            ssh_key_name: r.try_get("ssh_key_name").unwrap_or_default(),
-        }),
+        Some(r) => {
+            let stored: String = r.try_get("password").unwrap_or_default();
+            Ok(ConnectionInfo {
+                host: r.get("host"),
+                port: r.get("port"),
+                username: r.get("username"),
+                auth_type: r.get("auth_type"),
+                // 解密后用于 SSH 认证；旧明文数据同样兼容
+                password: crypto::decrypt_password(&stored),
+                ssh_key_name: r.try_get("ssh_key_name").unwrap_or_default(),
+            })
+        }
         None => Err(ZapError::New(-1, "连接不存在或已禁用".to_string())),
     }
 }

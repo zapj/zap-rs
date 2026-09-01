@@ -1,12 +1,14 @@
-use axum::Json;
+use axum::{extract::Extension, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Sqlite;
+use std::net::SocketAddr;
 use tracing::info;
 
 use crate::{
     db,
     zap::{
+        audit,
         jwt::ValidatedClaims,
         ZapError, ZapJsonResult,
     },
@@ -161,7 +163,8 @@ pub async fn menu_list(_claims: ValidatedClaims) -> ZapJsonResult {
 
 /// Create menu
 pub async fn menu_add(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<CreateMenuPayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
@@ -190,13 +193,22 @@ pub async fn menu_add(
     .execute(pool)
     .await?;
 
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "menu_create",
+        &format!("id={}", result.last_insert_rowid()),
+        &payload.name,
+    )
+    .await;
     info!("Menu created: {} (id: {})", payload.name, result.last_insert_rowid());
     Ok(Json(json!({ "code": 0, "message": "创建成功", "data": { "id": result.last_insert_rowid() } })))
 }
 
 /// Update menu
 pub async fn menu_update(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<UpdateMenuPayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
@@ -227,12 +239,21 @@ pub async fn menu_update(
     if result.rows_affected() == 0 {
         return Err(ZapError::New(-1, "菜单不存在".to_string()));
     }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "menu_update",
+        &format!("id={}", payload.id),
+        "",
+    )
+    .await;
     Ok(Json(json!({ "code": 0, "message": "更新成功" })))
 }
 
 /// Delete menu (and children)
 pub async fn menu_delete(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<DeleteMenuPayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
@@ -256,12 +277,22 @@ pub async fn menu_delete(
         .execute(pool)
         .await;
 
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "menu_delete",
+        &format!("id={}", payload.id),
+        "",
+    )
+    .await;
+
     Ok(Json(json!({ "code": 0, "message": "删除成功" })))
 }
 
 /// Toggle menu status
 pub async fn menu_status(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<MenuStatusPayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
@@ -274,5 +305,13 @@ pub async fn menu_status(
     if result.rows_affected() == 0 {
         return Err(ZapError::New(-1, "菜单不存在".to_string()));
     }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "menu_status",
+        &format!("id={}, status={}", payload.id, payload.status),
+        "",
+    )
+    .await;
     Ok(Json(json!({ "code": 0, "message": "OK" })))
 }

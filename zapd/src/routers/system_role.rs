@@ -1,12 +1,14 @@
-use axum::Json;
+use axum::{extract::Extension, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Sqlite;
+use std::net::SocketAddr;
 use tracing::info;
 
 use crate::{
     db,
     zap::{
+        audit,
         jwt::ValidatedClaims,
         ZapError, ZapJsonResult,
     },
@@ -81,7 +83,8 @@ pub async fn role_list(_claims: ValidatedClaims) -> ZapJsonResult {
 }
 
 pub async fn role_add(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<CreateRolePayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
@@ -101,6 +104,14 @@ pub async fn role_add(
 
     match result {
         Ok(r) => {
+            audit::log(
+                Some(&claims),
+                Some(client_addr.ip().to_string().as_str()),
+                "role_create",
+                &format!("id={}", r.last_insert_rowid()),
+                &format!("name={}, key={}", payload.name, payload.role_key),
+            )
+            .await;
             info!("Role created: {} (id: {})", payload.name, r.last_insert_rowid());
             Ok(Json(json!({ "code": 0, "message": "创建成功", "data": { "id": r.last_insert_rowid() } })))
         }
@@ -112,7 +123,8 @@ pub async fn role_add(
 }
 
 pub async fn role_update(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<UpdateRolePayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
@@ -141,11 +153,20 @@ pub async fn role_update(
     if result.rows_affected() == 0 {
         return Err(ZapError::New(-1, "角色不存在".to_string()));
     }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "role_update",
+        &format!("id={}", payload.id),
+        "",
+    )
+    .await;
     Ok(Json(json!({ "code": 0, "message": "更新成功" })))
 }
 
 pub async fn role_delete(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<DeleteRolePayload>,
 ) -> ZapJsonResult {
     // Prevent deleting built-in roles
@@ -174,6 +195,15 @@ pub async fn role_delete(
         .execute(pool)
         .await;
 
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "role_delete",
+        &format!("id={}", payload.id),
+        &format!("name={}", role.name),
+    )
+    .await;
+
     info!("Role deleted: id={}", payload.id);
     Ok(Json(json!({ "code": 0, "message": "删除成功" })))
 }
@@ -200,7 +230,8 @@ pub async fn role_permissions_get(
 
 /// Set role permissions
 pub async fn role_permissions_set(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<SetRolePermissionsPayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
@@ -219,6 +250,15 @@ pub async fn role_permissions_set(
             .execute(pool)
             .await;
     }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "role_permissions_set",
+        &format!("role_id={}", payload.role_id),
+        &format!("menu_ids={:?}", payload.menu_ids),
+    )
+    .await;
 
     Ok(Json(json!({ "code": 0, "message": "权限设置成功" })))
 }

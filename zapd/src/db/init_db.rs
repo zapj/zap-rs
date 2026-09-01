@@ -9,6 +9,9 @@ pub async fn init_schema() {
     init_roles_table().await;
     init_menus_table().await;
     init_role_menus_table().await;
+    init_audit_table().await;
+    init_login_attempts_table().await;
+    init_hourly_stats_tables().await;
     crate::routers::ssh_terminal::init_table().await;
 
     // Migration: fix empty path on existing child menus
@@ -19,6 +22,10 @@ pub async fn init_schema() {
     ensure_user_owner_id().await;
     // Migration: rename 系统管理 -> 系统设置
     fix_system_menu_title().await;
+    // Migration: add TOTP 2FA columns to user table
+    ensure_user_totp_columns().await;
+    // Migration: encrypt legacy plaintext SSH passwords
+    crate::zap::crypto::migrate_legacy_passwords().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -357,6 +364,105 @@ async fn fix_system_menu_title() {
     )
     .execute(pool)
     .await;
+}
+
+// ── audit logs ─────────────────────────────────────────────
+
+async fn init_audit_table() {
+    if table_exists("audit_logs").await {
+        return;
+    }
+    let sql = r#"
+    CREATE TABLE audit_logs (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL DEFAULT 0,
+        username VARCHAR(128) NOT NULL DEFAULT '',
+        action VARCHAR(64) NOT NULL DEFAULT '',
+        target TEXT NOT NULL DEFAULT '',
+        detail TEXT NOT NULL DEFAULT '',
+        ip VARCHAR(64) NOT NULL DEFAULT '',
+        created_at INTEGER
+    );
+    CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+    CREATE INDEX idx_audit_logs_user ON audit_logs(username);
+    CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+// ── login attempt lockout ──────────────────────────────────
+
+async fn init_login_attempts_table() {
+    if table_exists("login_attempts").await {
+        return;
+    }
+    let sql = r#"
+    CREATE TABLE login_attempts (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        username VARCHAR(128) NOT NULL DEFAULT '',
+        ip VARCHAR(64) NOT NULL DEFAULT '',
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        locked_until INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER,
+        UNIQUE(username, ip)
+    );
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+// ── hourly aggregated monitoring stats ─────────────────────
+
+async fn init_hourly_stats_tables() {
+    if !table_exists("system_stats_hourly").await {
+        let sql = r#"
+        CREATE TABLE system_stats_hourly (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            hour_start INTEGER NOT NULL,
+            avg_loadavg_one REAL,
+            avg_cpu_usage REAL,
+            max_cpu_usage REAL,
+            avg_memory_usage REAL,
+            max_memory_usage REAL,
+            avg_swap_usage REAL,
+            UNIQUE(hour_start)
+        );
+        "#;
+        let _ = get_db_pool().await.execute(sql).await;
+    }
+    if !table_exists("networks_stats_hourly").await {
+        let sql = r#"
+        CREATE TABLE networks_stats_hourly (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            hour_start INTEGER NOT NULL,
+            avg_received REAL,
+            avg_transmitted REAL,
+            max_received REAL,
+            max_transmitted REAL,
+            UNIQUE(name, hour_start)
+        );
+        "#;
+        let _ = get_db_pool().await.execute(sql).await;
+    }
+}
+
+// ── migrations ─────────────────────────────────────────────
+
+/// Add TOTP 2FA columns to the user table (idempotent).
+async fn ensure_user_totp_columns() {
+    let pool = get_db_pool().await;
+    if !column_exists("user", "totp_secret").await {
+        let _ = sqlx::query("ALTER TABLE user ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''")
+            .execute(pool)
+            .await;
+        tracing::info!("Added user.totp_secret column");
+    }
+    if !column_exists("user", "totp_enabled").await {
+        let _ = sqlx::query("ALTER TABLE user ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await;
+        tracing::info!("Added user.totp_enabled column");
+    }
 }
 
 // ── helper ─────────────────────────────────────────────────

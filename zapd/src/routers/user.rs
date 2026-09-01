@@ -1,12 +1,14 @@
-use axum::Json;
+use axum::{extract::Extension, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::{QueryBuilder, Sqlite};
+use std::net::SocketAddr;
 use tracing::info;
 
 use crate::{
     db,
     zap::{
+        audit,
         jwt::{self, Claims, ValidatedClaims},
         ZapError, ZapJsonResult,
     },
@@ -147,6 +149,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
 /// Create a new user — admin or reseller (own customer only)
 pub async fn user_add(
     claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<CreateUserPayload>,
 ) -> ZapJsonResult {
     let is_admin = jwt::is_admin(&claims);
@@ -191,6 +194,14 @@ pub async fn user_add(
 
     match result {
         Ok(r) => {
+            audit::log(
+                Some(&claims),
+                Some(client_addr.ip().to_string().as_str()),
+                "user_create",
+                &format!("id={}", r.last_insert_rowid()),
+                &format!("username={}", payload.username),
+            )
+            .await;
             info!("User created: {} (id: {})", payload.username, r.last_insert_rowid());
             Ok(Json(json!({
                 "code": 0,
@@ -214,6 +225,7 @@ pub async fn user_add(
 /// - default-password users: only their own password
 pub async fn user_update(
     claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<UpdateUserPayload>,
 ) -> ZapJsonResult {
     // Default-password users: only allow changing their own password
@@ -294,6 +306,15 @@ pub async fn user_update(
         return Err(ZapError::New(-1, "用户不存在".to_string()));
     }
 
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "user_update",
+        &format!("id={}", payload.id),
+        "",
+    )
+    .await;
+
     Ok(Json(json!({
         "code": 0,
         "message": "用户更新成功"
@@ -303,6 +324,7 @@ pub async fn user_update(
 /// Delete a user — admin: any; reseller: own customers only
 pub async fn user_delete(
     claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<DeleteUserPayload>,
 ) -> ZapJsonResult {
     if jwt::is_admin(&claims) {
@@ -330,6 +352,15 @@ pub async fn user_delete(
     if result.rows_affected() == 0 {
         return Err(ZapError::New(-1, "用户不存在".to_string()));
     }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "user_delete",
+        &format!("id={}", payload.id),
+        "",
+    )
+    .await;
 
     info!("User deleted: id={}", payload.id);
     Ok(Json(json!({

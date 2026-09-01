@@ -11,6 +11,7 @@ use serde_json::json;
 pub mod auth;
 pub mod ssh_keys;
 pub mod ssh_terminal;
+pub mod system_audit;
 pub mod system_config;
 pub mod system_info;
 pub mod system_file;
@@ -96,6 +97,11 @@ fn api_routers() -> Router {
         .route("/auth/logout", get(auth::logout))
         .route("/auth/reflash_token", post(auth::reflash_token))
         .route("/auth/change_password", post(auth::change_password))
+        // TOTP 2FA
+        .route("/auth/totp/setup", get(auth::totp_setup))
+        .route("/auth/totp/verify", post(auth::totp_verify))
+        .route("/auth/totp/disable", post(auth::totp_disable))
+        .route("/auth/totp/status", get(auth::totp_status))
         .route("/user/info", get(user::user_info))
         // User management (admin + reseller)
         .route("/system/user/list", get(user::user_list))
@@ -146,6 +152,8 @@ fn api_routers() -> Router {
         .route("/system/status", get(system_info::system_status))
         .route("/system/job/stop", get(system_job::stop_job))
         .route("/system/job/start", get(system_job::start_job))
+        // Audit logs (admin only)
+        .route("/system/audit/list", get(system_audit::audit_list))
         // File manager
         .route("/system/files/list", get(system_file::file_list))
         .route("/system/files/read", get(system_file::file_read))

@@ -1,15 +1,17 @@
 use axum::{
     body::Body,
-    extract::{Multipart, Query},
+    extract::{Extension, Multipart, Query},
     http::header,
     response::{IntoResponse, Response},
     Json,
 };
 use serde::Deserialize;
 use serde_json::json;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use crate::zap::{
+    audit,
     jwt::{is_admin, Claims},
     ZapError, ZapJsonResult,
 };
@@ -71,35 +73,36 @@ fn resolve_path(requested: &str) -> Result<PathBuf, ZapError> {
     }
 }
 
+/// 非管理员可访问的私有目录前缀（自己的 home 与私有临时目录）。
+fn user_allowed_prefix(username: &str) -> (String, String) {
+    (format!("/home/{username}"), format!("/tmp/zap-{username}"))
+}
+
 /// Check if user has read access to a path.
+///
+/// 权限模型：
+/// - 管理员：任意路径；
+/// - 普通用户：仅自己 home（`/home/{username}`）与私有临时目录（`/tmp/zap-{username}`）。
+///   彻底移除此前"所有人可读 /var/www、/var/log"的越权隐患。
 fn check_access(claims: &Claims, path: &Path) -> Result<(), ZapError> {
     if is_admin(claims) {
         return Ok(());
     }
     let path_str = path.to_string_lossy().to_string();
-    let allowed: &[&str] = &["/home", "/tmp", "/var/www", "/var/log"];
-    let readonly: &[&str] = &["/etc", "/usr", "/opt", "/srv"];
-    for prefix in allowed.iter().chain(readonly) {
-        if path_str.starts_with(prefix) {
-            return Ok(());
-        }
+    let (home, tmp) = user_allowed_prefix(&claims.sub);
+    if path_str == home
+        || path_str.starts_with(&format!("{home}/"))
+        || path_str == tmp
+        || path_str.starts_with(&format!("{tmp}/"))
+    {
+        return Ok(());
     }
     Err(ZapError::New(-1, "没有访问该路径的权限".to_string()))
 }
 
-/// Check if user can write to a path.
+/// Check if user can write to a path（与读权限同一套隔离规则）。
 fn check_write_access(claims: &Claims, path: &Path) -> Result<(), ZapError> {
-    if is_admin(claims) {
-        return Ok(());
-    }
-    let path_str = path.to_string_lossy().to_string();
-    let allowed: &[&str] = &["/home", "/tmp", "/var/www"];
-    for prefix in allowed {
-        if path_str.starts_with(prefix) {
-            return Ok(());
-        }
-    }
-    Err(ZapError::New(-1, "没有写入该路径的权限".to_string()))
+    check_access(claims, path)
 }
 
 // ── handlers ───────────────────────────────────────────────
@@ -109,9 +112,22 @@ pub async fn file_list(
     claims: Claims,
     Query(query): Query<PathQuery>,
 ) -> ZapJsonResult {
-    let raw_path = query.path.as_deref().unwrap_or("/");
-    let resolved = resolve_path(raw_path)?;
+    // 非管理员默认进入自己的 home 目录
+    let raw_path = match (is_admin(&claims), query.path.as_deref()) {
+        (false, None) | (false, Some("/")) => format!("/home/{}", claims.sub),
+        (_, Some(p)) => p.to_string(),
+        (_, None) => "/".to_string(),
+    };
+    let resolved = resolve_path(&raw_path)?;
     check_access(&claims, &resolved)?;
+
+    // 首次访问自己的 home 时自动创建（zapexec 以 root 执行）
+    if !is_admin(&claims) {
+        let home = format!("/home/{}", claims.sub);
+        if resolved.to_string_lossy() == home && !resolved.exists() {
+            let _ = crate::zapexec::call(Request::FileMkdir { path: home }).await;
+        }
+    }
 
     let resp = crate::zapexec::call(Request::FileList {
         path: resolved.to_string_lossy().to_string(),
@@ -148,6 +164,7 @@ pub async fn file_read(
 /// POST /system/files/write
 pub async fn file_write(
     claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<FileOpPayload>,
 ) -> ZapJsonResult {
     let resolved = resolve_path(&payload.path)?;
@@ -161,12 +178,21 @@ pub async fn file_write(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_write",
+        &resolved.to_string_lossy(),
+        "",
+    )
+    .await;
     Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
 }
 
 /// POST /system/files/delete
 pub async fn file_delete(
     claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<DeletePayload>,
 ) -> ZapJsonResult {
     let resolved = resolve_path(&payload.path)?;
@@ -179,12 +205,21 @@ pub async fn file_delete(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_delete",
+        &resolved.to_string_lossy(),
+        "",
+    )
+    .await;
     Ok(Json(json!({ "code": 0, "message": resp.message })))
 }
 
 /// POST /system/files/mkdir
 pub async fn file_mkdir(
     claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<MkdirPayload>,
 ) -> ZapJsonResult {
     let resolved = resolve_path(&payload.path)?;
@@ -197,12 +232,21 @@ pub async fn file_mkdir(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_mkdir",
+        &resolved.to_string_lossy(),
+        "",
+    )
+    .await;
     Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
 }
 
 /// POST /system/files/rename
 pub async fn file_rename(
     claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<FileOpPayload>,
 ) -> ZapJsonResult {
     let old_path = resolve_path(&payload.path)?;
@@ -223,6 +267,14 @@ pub async fn file_rename(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_rename",
+        &format!("{} → {}", old_path.to_string_lossy(), new_path.to_string_lossy()),
+        "",
+    )
+    .await;
     Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
 }
 
@@ -271,6 +323,7 @@ pub async fn file_download(
 /// POST /system/files/upload
 pub async fn file_upload(
     claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
     Query(query): Query<PathQuery>,
     mut multipart: Multipart,
 ) -> Result<Response, ZapError> {
@@ -307,6 +360,15 @@ pub async fn file_upload(
         return Err(ZapError::New(-1, "没有上传文件".to_string()));
     }
 
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_upload",
+        &resolved_dir.to_string_lossy(),
+        &uploaded.join(", "),
+    )
+    .await;
+
     Ok(Json(json!({
         "code": 0,
         "message": "上传成功",
@@ -332,4 +394,75 @@ pub async fn file_info(
         return Err(ZapError::New(resp.code, resp.message));
     }
     Ok(Json(json!({ "code": 0, "message": "ok", "data": resp.data })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::zap::jwt::Claims;
+
+    fn claims_for(username: &str) -> Claims {
+        Claims {
+            id: 1,
+            iat: 0,
+            sub: username.to_string(),
+            iss: "Zap".to_string(),
+            exp: 0,
+            roles: String::new(),
+            pwd_is_default: false,
+        }
+    }
+
+    fn admin_claims() -> Claims {
+        let mut c = claims_for("admin");
+        c.roles = "admin".to_string();
+        c
+    }
+
+    #[test]
+    fn admin_can_access_any_path() {
+        let c = admin_claims();
+        assert!(check_access(&c, Path::new("/etc/shadow")).is_ok());
+        assert!(check_access(&c, Path::new("/var/www")).is_ok());
+    }
+
+    #[test]
+    fn user_can_access_own_home() {
+        let c = claims_for("alice");
+        assert!(check_access(&c, Path::new("/home/alice")).is_ok());
+        assert!(check_access(&c, Path::new("/home/alice/www/index.html")).is_ok());
+    }
+
+    #[test]
+    fn user_cannot_access_others_home() {
+        let c = claims_for("alice");
+        assert!(check_access(&c, Path::new("/home/bob")).is_err());
+        assert!(check_access(&c, Path::new("/home/bob/secret")).is_err());
+        // 前缀混淆攻击：/home/aliceevil 不属于 alice
+        assert!(check_access(&c, Path::new("/home/aliceevil")).is_err());
+    }
+
+    #[test]
+    fn user_cannot_access_system_paths() {
+        let c = claims_for("alice");
+        // 此前普通用户可读 /var/www、/var/log，现已禁止
+        for p in ["/var/www", "/var/log", "/etc/passwd", "/root", "/tmp"] {
+            assert!(check_access(&c, Path::new(p)).is_err(), "{p} 应被拒绝");
+        }
+    }
+
+    #[test]
+    fn user_can_access_private_tmp() {
+        let c = claims_for("alice");
+        assert!(check_access(&c, Path::new("/tmp/zap-alice")).is_ok());
+        assert!(check_access(&c, Path::new("/tmp/zap-alice/t.txt")).is_ok());
+        assert!(check_access(&c, Path::new("/tmp/zap-bob/t.txt")).is_err());
+    }
+
+    #[test]
+    fn write_access_same_as_read() {
+        let c = claims_for("alice");
+        assert!(check_write_access(&c, Path::new("/home/alice/x")).is_ok());
+        assert!(check_write_access(&c, Path::new("/var/www")).is_err());
+    }
 }

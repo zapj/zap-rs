@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::{job::job_data::Uuid, Job, JobScheduler};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::db::get_db_pool;
 
@@ -159,6 +159,66 @@ async fn system_scheduled_task() {
     .await;
 }
 
+/// 监控原始数据保留天数（超过即被每日任务清理）。
+const MONITOR_RETENTION_DAYS: i64 = 30;
+
+/// 聚合上一整点小时的数据到小时级汇总表（报表/长周期图表使用）。
+async fn aggregate_hourly_stats() {
+    let pool = get_db_pool().await;
+    let now = chrono::Local::now().timestamp();
+    let hour_start = (now / 3600 - 1) * 3600;
+    let hour_end = hour_start + 3600;
+
+    let _ = sqlx::query(
+        "INSERT INTO system_stats_hourly
+            (hour_start, avg_loadavg_one, avg_cpu_usage, max_cpu_usage, avg_memory_usage, max_memory_usage, avg_swap_usage)
+         SELECT ?, AVG(loadavg_one), AVG(cpu_usage), MAX(cpu_usage), AVG(memory_usage), MAX(memory_usage), AVG(swap_usage)
+         FROM system_stats WHERE created_at >= ? AND created_at < ?
+         ON CONFLICT(hour_start) DO NOTHING",
+    )
+    .bind(hour_start)
+    .bind(hour_start)
+    .bind(hour_end)
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO networks_stats_hourly
+            (name, hour_start, avg_received, avg_transmitted, max_received, max_transmitted)
+         SELECT name, ?, AVG(received), AVG(transmitted), MAX(received), MAX(transmitted)
+         FROM networks_stats WHERE created_at >= ? AND created_at < ?
+         GROUP BY name
+         ON CONFLICT(name, hour_start) DO NOTHING",
+    )
+    .bind(hour_start)
+    .bind(hour_start)
+    .bind(hour_end)
+    .execute(pool)
+    .await;
+}
+
+/// 清理超过保留期的监控原始数据，防止库无限膨胀。
+async fn cleanup_monitor_data() {
+    let pool = get_db_pool().await;
+    let cutoff = chrono::Local::now().timestamp() - MONITOR_RETENTION_DAYS * 24 * 3600;
+    let r1 = sqlx::query("DELETE FROM system_stats WHERE created_at < ?")
+        .bind(cutoff)
+        .execute(pool)
+        .await;
+    let r2 = sqlx::query("DELETE FROM networks_stats WHERE created_at < ?")
+        .bind(cutoff)
+        .execute(pool)
+        .await;
+    match (r1, r2) {
+        (Ok(a), Ok(b)) => info!(
+            "监控数据清理完成: system_stats {} 行, networks_stats {} 行",
+            a.rows_affected(),
+            b.rows_affected()
+        ),
+        _ => warn!("监控数据清理任务执行异常"),
+    }
+}
+
 pub async fn init_system_jobs() {
     let sched: JobScheduler = JobScheduler::new()
         .await
@@ -168,6 +228,10 @@ pub async fn init_system_jobs() {
     if sched.start().await.is_err() {
         info!("scheduled start failed")
     }
+    // 启动时立即执行一次存量数据清理
+    tokio::spawn(async move {
+        cleanup_monitor_data().await;
+    });
     let mut sched_map = GLOBAL_SCHEDULED_MAP.write().await;
     sched_map.insert("zap".to_string(), sched);
 }
@@ -180,6 +244,20 @@ pub async fn add_jobs(sched: &JobScheduler) {
     let system_job_uuid = sched.add(job).await.unwrap();
     let mut job_map = GLOBAL_JOB_MAP.write().await;
     job_map.insert("system".to_string(), system_job_uuid.into());
+
+    // 每小时过 5 分：聚合上一整点小时数据
+    let agg = Job::new_async("5 * * * * *", |_uuid, _lock| {
+        Box::pin(aggregate_hourly_stats())
+    })
+    .expect("invalid cron: hourly aggregate");
+    let _ = sched.add(agg).await;
+
+    // 每日 01:00:00：清理超期监控原始数据
+    let clean = Job::new_async("0 0 1 * * *", |_uuid, _lock| {
+        Box::pin(cleanup_monitor_data())
+    })
+    .expect("invalid cron: daily cleanup");
+    let _ = sched.add(clean).await;
 }
 
 pub async fn stop_system_job() {

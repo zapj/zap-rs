@@ -8,6 +8,9 @@ pub mod certmgr;
 pub mod global;
 pub mod job;
 pub mod types;
+pub mod crypto;
+pub mod totp;
+pub mod audit;
 
 #[derive(Error,Debug)]
 pub enum ZapError {
