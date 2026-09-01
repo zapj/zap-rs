@@ -479,13 +479,13 @@ function closeTab(tabId: string) {
   tabs.value.splice(idx, 1)
 
   if (activeTabId.value === tabId) {
-    activeTabId.value = tabs.value.length > 0 ? tabs.value[tabIdx(idx)] : null
+    activeTabId.value = tabs.value.length > 0 ? tabIdx(idx) : null
   }
 }
 
-function tabIdx(idx: number): string {
+function tabIdx(idx: number): string | null {
   const newIdx = Math.min(idx, tabs.value.length - 1)
-  return tabs.value[newIdx]?.id || null as any
+  return tabs.value[newIdx]?.id ?? null
 }
 
 // ── 生命周期 ───────────────────────────────────────────────

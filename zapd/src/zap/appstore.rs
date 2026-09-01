@@ -196,57 +196,73 @@ struct AppYaml {
     scripts: Option<Value>,
 }
 
-/// 扫描官方 + 自定义包，custom 同名覆盖官方。返回 Pkg JSON 列表。
+/// 扫描全部 Git 源 + 自定义包。同名覆盖顺序（优先级从低到高）：
+/// 内置源 < 后添加的源 < custom。
 pub async fn scan_packages() -> Vec<Value> {
-    // 官方目录：按 repo.yaml 的 source_type 决定 git/ 或 dist/
-    let official = match read_repo_yaml_value().await {
-        Some(v) if v.get("source_type").and_then(|x| x.as_str()) == Some("zip") => {
-            appstore_dir().join("dist")
-        }
-        _ => appstore_dir().join("git"),
-    };
+    let repos_root = appstore_dir().join("repos");
+    let custom_dir = appstore_dir().join("custom");
+    let repo_list = read_repos_value().await.unwrap_or_default();
     tokio::task::spawn_blocking(move || {
         let mut by_path: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
-        for dir in [&official, &appstore_dir().join("custom")] {
-            let source = if dir == &official { "official" } else { "custom" };
-            for category in ["database", "application", "webserver", "library"] {
-                let cat_dir = dir.join(category);
-                let Ok(entries) = std::fs::read_dir(&cat_dir) else {
+        // 先扫各 Git 源（按 repos.yaml 顺序，内置源排最前 → 优先级最低）
+        if let Some(repos) = repo_list.get("repos").and_then(|r| r.as_array()) {
+            for repo in repos {
+                let id = repo.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                if id.is_empty() {
                     continue;
-                };
-                for entry in entries.flatten() {
-                    let pkg_dir = entry.path();
-                    if !pkg_dir.is_dir() {
-                        continue;
-                    }
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    let app_yaml = match parse_app_yaml(&pkg_dir.join("app.yaml")) {
-                        Some(a) => a,
-                        None => continue,
-                    };
-                    let pkg_path = format!("{category}/{name}");
-                    by_path.insert(
-                        pkg_path.clone(),
-                        json!({
-                            "pkg_path": pkg_path,
-                            "category": app_yaml.category.clone().unwrap_or_else(|| category.to_string()),
-                            "name": app_yaml.name.clone().unwrap_or(name),
-                            "title": app_yaml.title.clone().unwrap_or_default(),
-                            "description": app_yaml.description.clone().unwrap_or_default(),
-                            "version": app_yaml.version.clone().unwrap_or_default(),
-                            "deps": app_yaml.deps.clone().unwrap_or_default(),
-                            "default_port": app_yaml.default_port,
-                            "scripts": app_yaml.scripts.clone().unwrap_or(Value::Null),
-                            "source": source,
-                        }),
-                    );
                 }
+                let dir = repos_root.join(id);
+                scan_source_dir(&dir, "official", Some(id), &mut by_path);
             }
         }
+        // custom 最后扫描，覆盖同名官方包
+        scan_source_dir(&custom_dir, "custom", None, &mut by_path);
         by_path.into_values().collect()
     })
     .await
     .unwrap_or_default()
+}
+
+fn scan_source_dir(
+    dir: &Path,
+    source: &str,
+    repo_id: Option<&str>,
+    by_path: &mut std::collections::BTreeMap<String, Value>,
+) {
+    for category in ["database", "application", "webserver", "library"] {
+        let cat_dir = dir.join(category);
+        let Ok(entries) = std::fs::read_dir(&cat_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let pkg_dir = entry.path();
+            if !pkg_dir.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let app_yaml = match parse_app_yaml(&pkg_dir.join("app.yaml")) {
+                Some(a) => a,
+                None => continue,
+            };
+            let pkg_path = format!("{category}/{name}");
+            by_path.insert(
+                pkg_path.clone(),
+                json!({
+                    "pkg_path": pkg_path,
+                    "category": app_yaml.category.clone().unwrap_or_else(|| category.to_string()),
+                    "name": app_yaml.name.clone().unwrap_or(name),
+                    "title": app_yaml.title.clone().unwrap_or_default(),
+                    "description": app_yaml.description.clone().unwrap_or_default(),
+                    "version": app_yaml.version.clone().unwrap_or_default(),
+                    "deps": app_yaml.deps.clone().unwrap_or_default(),
+                    "default_port": app_yaml.default_port,
+                    "scripts": app_yaml.scripts.clone().unwrap_or(Value::Null),
+                    "source": source,
+                    "repo_id": repo_id,
+                }),
+            );
+        }
+    }
 }
 
 /// 扫描已安装包（apps/ 下 meta.yaml）。
@@ -290,15 +306,60 @@ pub async fn installed_version_of(pkg_path: &str) -> Option<String> {
     .unwrap_or(None)
 }
 
-/// 读取 repo.yaml 并返回 Value（不存在/解析失败返回 None）。
-pub async fn read_repo_yaml_value() -> Option<Value> {
-    let path = appstore_dir().join("repo.yaml");
+/// 读取 repos.yaml 并返回 Value；不存在时兜底返回内置源（不落盘，写盘由 zapexec 负责）。
+pub async fn read_repos_value() -> Option<Value> {
+    let path = appstore_dir().join("repos.yaml");
     tokio::task::spawn_blocking(move || {
-        let content = std::fs::read_to_string(&path).ok()?;
-        serde_yaml::from_str(&content).ok()
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(v) = serde_yaml::from_str::<Value>(&content) {
+                return Some(v);
+            }
+        }
+        Some(json!({
+            "repos": [{
+                "id": "zap-appstore",
+                "name": "Zap 官方应用商店",
+                "url": "https://github.com/zapj/zap-appstore.git",
+                "builtin": true,
+                "enabled": true,
+                "version": "",
+                "commit": "",
+                "updated_at": 0,
+            }]
+        }))
     })
     .await
     .unwrap_or(None)
+}
+
+/// 读取 Git 源列表，附加每个源目录是否存在的信息，供前端展示。
+pub async fn list_repos() -> Vec<Value> {
+    let repos_root = appstore_dir().join("repos");
+    let value = read_repos_value().await;
+    tokio::task::spawn_blocking(move || {
+        let mut items = Vec::new();
+        if let Some(v) = value {
+            if let Some(repos) = v.get("repos").and_then(|r| r.as_array()) {
+                for repo in repos {
+                    let id = repo.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                    items.push(json!({
+                        "id": id,
+                        "name": repo.get("name").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "url": repo.get("url").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "builtin": repo.get("builtin").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "enabled": repo.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+                        "version": repo.get("version").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "commit": repo.get("commit").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "updated_at": repo.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(0),
+                        "exists": repos_root.join(id).is_dir(),
+                    }));
+                }
+            }
+        }
+        items
+    })
+    .await
+    .unwrap_or_default()
 }
 
 fn parse_app_yaml(path: &Path) -> Option<AppYaml> {

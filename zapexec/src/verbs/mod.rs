@@ -36,17 +36,28 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::FileDownload { path } => file::download(path).await,
         Request::FileUpload { path, name, content } => file::upload(path, name, content).await,
         Request::FileInfo { path } => file::info(path).await,
-        Request::AppstoreRepoUpdate { source_type, source_url, sha256, run_id } => {
-            appstore::repo_update(source_type, source_url, sha256, run_id).await
+        Request::AppstoreRepoAdd { name, url, run_id } => {
+            appstore::repo_add(name, url, run_id).await
         }
-        Request::AppstoreInstall { pkg_path, source, version, run_id } => {
-            appstore::install(pkg_path, source, version, run_id).await
+        Request::AppstoreRepoRemove { id } => appstore::repo_remove(id).await,
+        Request::AppstoreRepoUpdate { id, run_id } => {
+            appstore::repo_update(id, run_id).await
+        }
+        Request::AppstoreInstall { pkg_path, source, repo_id, version, run_id } => {
+            appstore::install(pkg_path, source, repo_id, version, run_id).await
         }
         Request::AppstoreUninstall { pkg_path, run_id } => {
             appstore::uninstall(pkg_path, run_id).await
         }
-        Request::AppstoreUpgrade { pkg_path, source, version, old_version, run_id } => {
-            appstore::upgrade(pkg_path, source, version, old_version, run_id).await
+        Request::AppstoreUpgrade {
+            pkg_path,
+            source,
+            repo_id,
+            version,
+            old_version,
+            run_id,
+        } => {
+            appstore::upgrade(pkg_path, source, repo_id, version, old_version, run_id).await
         }
         Request::AppstoreScriptRun { path, run_id } => appstore::script_run(path, run_id).await,
         Request::AppstoreScriptStop { run_id } => appstore::script_stop(run_id).await,

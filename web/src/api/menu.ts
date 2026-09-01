@@ -1,5 +1,6 @@
 import { http } from '@/utils/request'
 import type { ApiResponse } from '@/types/api_response'
+import type { MenuItem as MenuTreeNode } from '@/types/menu'
 
 export interface MenuItem {
   id: number
@@ -40,7 +41,7 @@ export interface MenuForm {
 
 /** Get menu tree for sidebar rendering */
 export function getMenuTree() {
-  return http.get<ApiResponse<MenuItem[]>>('/system/menus/tree')
+  return http.get<ApiResponse<MenuTreeNode[]>>('/system/menus/tree')
 }
 
 /** Get menu tree for admin management */

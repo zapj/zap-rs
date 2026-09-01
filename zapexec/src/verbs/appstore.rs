@@ -1,7 +1,8 @@
 //! AppStore 特权动词（全部以 root 执行）。
 //!
 //! 职责：
-//! - `repo_update`：git clone/pull 或 zip 下载解压，原子替换官方仓库，刷新 repo.yaml
+//! - `repo_add` / `repo_remove` / `repo_update`：多 Git 源管理
+//!   （clone/fetch 到 data/appstore/repos/<id>/，刷新 repos.yaml）
 //! - `install` / `uninstall` / `upgrade`：运行包脚本，日志写入 logs/run-{id}.log
 //! - `script_run` / `script_stop`：运行/停止自定义脚本（进程组管理）
 //! - `script_read` / `script_write`：读写 appstore 内脚本（写仅限 custom/）
@@ -18,6 +19,12 @@ use serde_json::json;
 use super::root_cmd;
 use std::os::unix::process::CommandExt;
 use zap_proto::Response;
+
+// ── 内置源（跟随 zap 发行包发布）────────────────────────────
+
+pub const BUILTIN_REPO_ID: &str = "zap-appstore";
+pub const BUILTIN_REPO_NAME: &str = "Zap 官方应用商店";
+pub const BUILTIN_REPO_URL: &str = "https://github.com/zapj/zap-appstore.git";
 
 // ── 目录定位 ───────────────────────────────────────────────
 
@@ -39,16 +46,13 @@ fn logs_dir() -> PathBuf {
     appstore_dir().join("logs")
 }
 
-fn repo_yaml_path() -> PathBuf {
-    appstore_dir().join("repo.yaml")
+/// 所有 Git 源根目录：repos/<id>/
+fn repos_dir() -> PathBuf {
+    appstore_dir().join("repos")
 }
 
-/// 官方包目录：git 模式为 git/，zip 模式为 dist/（以 repo.yaml 的 source_type 为准）
-fn official_dir() -> PathBuf {
-    match read_repo_meta().ok().and_then(|m| m.source_type) {
-        Some(t) if t == "zip" => appstore_dir().join("dist"),
-        _ => appstore_dir().join("git"),
-    }
+fn repos_yaml_path() -> PathBuf {
+    appstore_dir().join("repos.yaml")
 }
 
 // ── 路径安全 ───────────────────────────────────────────────
@@ -92,8 +96,9 @@ fn validate_pkg_path(pkg_path: &str) -> Result<(String, String), String> {
     Ok((parts[0].to_string(), parts[1].to_string()))
 }
 
-/// 定位包目录：custom 优先于官方。
-fn find_package(pkg_path: &str, source: &str) -> Result<PathBuf, String> {
+/// 定位包目录：custom 优先于官方源；官方源按 repo_id 定位到 repos/<repo_id>/，
+/// 未指定 repo_id 时遍历所有源目录。
+fn find_package(pkg_path: &str, source: &str, repo_id: Option<&str>) -> Result<PathBuf, String> {
     let (cat, name) = validate_pkg_path(pkg_path)?;
     if source == "custom" {
         let dir = safe_join(&appstore_dir().join("custom"), &format!("{cat}/{name}"))?;
@@ -102,19 +107,26 @@ fn find_package(pkg_path: &str, source: &str) -> Result<PathBuf, String> {
         }
         return Err(format!("自定义包不存在: {pkg_path}"));
     }
-    let primary = official_dir();
-    let fallback = if primary == appstore_dir().join("git") {
-        appstore_dir().join("dist")
-    } else {
-        appstore_dir().join("git")
-    };
-    for base in [primary, fallback] {
-        let dir = base.join(&cat).join(&name);
+    if let Some(rid) = repo_id {
+        let rid = safe_rel(rid)?;
+        let rid_str = rid.to_string_lossy().to_string();
+        let dir = repos_dir().join(rid).join(&cat).join(&name);
         if dir.is_dir() {
             return Ok(dir);
         }
+        return Err(format!("官方包不存在: {pkg_path}（源 {rid_str}）"));
     }
-    Err(format!("官方包不存在: {pkg_path}"))
+    let mut found: Option<PathBuf> = None;
+    if let Ok(entries) = std::fs::read_dir(repos_dir()) {
+        for entry in entries.flatten() {
+            let dir = entry.path().join(&cat).join(&name);
+            if dir.is_dir() {
+                found = Some(dir);
+                break;
+            }
+        }
+    }
+    found.ok_or_else(|| format!("官方包不存在: {pkg_path}"))
 }
 
 /// 包脚本文件名：app.yaml 的 `scripts.{install|uninstall|upgrade}` 可覆盖默认约定。
@@ -138,28 +150,101 @@ fn script_file(pkg_dir: &Path, key: &str, default: &str) -> Result<PathBuf, Stri
     Ok(p)
 }
 
-// ── repo.yaml / meta.yaml ──────────────────────────────────
+// ── repos.yaml / meta.yaml ─────────────────────────────────
+
+/// 单个 Git 源配置项。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoEntry {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    /// 系统内置源（随 zap 发行包发布，禁止删除）
+    #[serde(default)]
+    pub builtin: bool,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    /// 最近一次同步的 commit 短哈希
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub commit: String,
+    #[serde(default)]
+    pub updated_at: i64,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+impl RepoEntry {
+    fn builtin() -> RepoEntry {
+        RepoEntry {
+            id: BUILTIN_REPO_ID.into(),
+            name: BUILTIN_REPO_NAME.into(),
+            url: BUILTIN_REPO_URL.into(),
+            builtin: true,
+            enabled: true,
+            version: String::new(),
+            commit: String::new(),
+            updated_at: 0,
+        }
+    }
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct RepoMeta {
-    pub source_type: Option<String>,
-    pub source_url: Option<String>,
-    pub version: Option<String>,
-    pub updated_at: Option<i64>,
-    pub commit: Option<String>,
-    pub sha256: Option<String>,
+pub struct ReposFile {
+    #[serde(default)]
+    pub repos: Vec<RepoEntry>,
 }
 
-fn read_repo_meta() -> Result<RepoMeta, String> {
-    let content =
-        std::fs::read_to_string(repo_yaml_path()).map_err(|e| format!("读取 repo.yaml 失败: {e}"))?;
-    serde_yaml::from_str(&content).map_err(|e| format!("解析 repo.yaml 失败: {e}"))
+/// 读取源列表；repos.yaml 不存在或为空时自动补内置源记录。
+fn read_repos() -> Result<Vec<RepoEntry>, String> {
+    let mut file = match std::fs::read_to_string(repos_yaml_path()) {
+        Ok(content) => serde_yaml::from_str::<ReposFile>(&content)
+            .map_err(|e| format!("解析 repos.yaml 失败: {e}"))?,
+        Err(_) => ReposFile::default(),
+    };
+    if file.repos.is_empty() {
+        file.repos.push(RepoEntry::builtin());
+        write_repos(&file.repos)?;
+    }
+    Ok(file.repos)
 }
 
-fn write_repo_meta(meta: &RepoMeta) -> Result<(), String> {
+fn write_repos(repos: &[RepoEntry]) -> Result<(), String> {
     std::fs::create_dir_all(appstore_dir()).map_err(|e| e.to_string())?;
-    let yaml = serde_yaml::to_string(meta).map_err(|e| format!("序列化 repo.yaml 失败: {e}"))?;
-    std::fs::write(repo_yaml_path(), yaml).map_err(|e| format!("写入 repo.yaml 失败: {e}"))
+    let file = ReposFile {
+        repos: repos.to_vec(),
+    };
+    let yaml = serde_yaml::to_string(&file).map_err(|e| format!("序列化 repos.yaml 失败: {e}"))?;
+    std::fs::write(repos_yaml_path(), yaml).map_err(|e| format!("写入 repos.yaml 失败: {e}"))
+}
+
+/// 从 Git URL 末段生成源 id（去 .git，保留 [a-z0-9-]）。
+fn id_from_url(url: &str) -> String {
+    let base = url
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("store")
+        .trim_end_matches(".git");
+    let mut id = String::new();
+    for c in base.to_ascii_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            id.push(c);
+        } else {
+            id.push('-');
+        }
+    }
+    while id.contains("--") {
+        id = id.replace("--", "-");
+    }
+    let id = id.trim_matches('-').to_string();
+    if id.is_empty() {
+        "store".into()
+    } else {
+        id
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -168,6 +253,8 @@ pub struct MetaInfo {
     pub version: String,
     pub category: String,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
     pub installed_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upgraded_from: Option<String>,
@@ -303,12 +390,27 @@ fn base_env() -> Vec<(String, String)> {
 
 // ── 动词实现 ───────────────────────────────────────────────
 
-/// 更新软件库（后台执行，进度写入 run-{run_id}.log，结束写 `__ZAP_DONE__ <code>`）。
-pub async fn repo_update(
-    source_type: String,
-    source_url: String,
-    sha256: Option<String>,
+/// 校验 Git 源 URL：只允许 http(s) 或 git@ 形式，禁止命令注入。
+fn validate_repo_url(url: &str) -> Result<(), String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("Git 地址不能为空".into());
+    }
+    if trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("git@")
+    {
+        Ok(())
+    } else {
+        Err("Git 地址必须以 http(s):// 或 git@ 开头".into())
+    }
+}
+
+/// 后台执行仓库操作，进度写入 run-{run_id}.log，结束写 `__ZAP_DONE__ <code>`。
+fn spawn_repo_task(
     run_id: String,
+    op: impl FnOnce() -> Result<String, String> + Send + 'static,
+    title: String,
 ) -> Response {
     let log_path = logs_dir().join(format!("run-{run_id}.log"));
     let ret_log = log_path.clone();
@@ -320,130 +422,160 @@ pub async fn repo_update(
             .append(true)
             .open(&log_path)
             .unwrap_or_else(|_| std::fs::OpenOptions::new().append(true).open("/dev/null").unwrap());
-        let _ = writeln!(
-            log,
-            "=== 开始更新软件库 [{}] {source_url} ===",
-            source_type.to_uppercase()
-        );
-        match repo_update_inner(&source_type, &source_url, sha256.as_deref()) {
-            Ok(meta) => {
-                let _ = writeln!(
-                    log,
-                    "更新成功: version={} updated_at={}",
-                    meta.version.unwrap_or_default(),
-                    meta.updated_at.unwrap_or_default()
-                );
+        let _ = writeln!(log, "=== {title} ===");
+        match op() {
+            Ok(detail) => {
+                let _ = writeln!(log, "成功: {detail}");
                 let _ = writeln!(log, "\n__ZAP_DONE__ 0");
             }
             Err(e) => {
-                let _ = writeln!(log, "更新失败: {e}");
+                let _ = writeln!(log, "失败: {e}");
                 let _ = writeln!(log, "\n__ZAP_DONE__ -1");
             }
         }
     });
     Response::ok(
-        "软件库更新已启动",
+        "任务已启动",
         Some(json!({ "run_id": run_id, "log": ret_log })),
     )
 }
 
-fn repo_update_inner(
-    source_type: &str,
-    source_url: &str,
-    sha256: Option<&str>,
-) -> Result<RepoMeta, String> {
-    let appstore = appstore_dir();
-    let tmp = appstore.join("tmp");
-    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-
-        let mut meta = match source_type {
-            "git" => {
-                let git_dir = appstore.join("git");
-                if git_dir.join(".git").exists() {
-                    run_capture("git", &["-C", git_dir.to_str().unwrap(), "fetch", "origin"])?;
-                    run_capture("git", &["-C", git_dir.to_str().unwrap(), "reset", "--hard", "FETCH_HEAD"])?;
-                } else {
-                    let tmp_clone = tmp.join("repo.clone");
-                    let _ = std::fs::remove_dir_all(&tmp_clone);
-                    run_capture(
-                        "git",
-                        &["clone", "--depth", "1", &source_url, tmp_clone.to_str().unwrap()],
-                    )?;
-                    let old = tmp.join("repo.old");
-                    let _ = std::fs::remove_dir_all(&old);
-                    if git_dir.exists() {
-                        std::fs::rename(&git_dir, &old).map_err(|e| e.to_string())?;
-                    }
-                    std::fs::rename(&tmp_clone, &git_dir).map_err(|e| e.to_string())?;
-                    std::fs::remove_dir_all(&old).ok();
-                }
-                let commit = run_capture("git", &["-C", git_dir.to_str().unwrap(), "rev-parse", "HEAD"])?;
-                let short = commit.chars().take(7).collect::<String>();
-                RepoMeta {
-                    source_type: Some("git".into()),
-                    source_url: Some(source_url.to_string()),
-                    version: Some(short),
-                    updated_at: Some(now_ts()),
-                    commit: Some(commit),
-                    sha256: None,
-                }
-            }
-            "zip" => {
-                let cache = appstore.join("cache");
-                std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
-                let zip_path = cache.join("appstore.zip");
-                run_capture(
-                    "curl",
-                    &["-fsSL", "-o", zip_path.to_str().unwrap(), &source_url],
-                )?;
-                if let Some(expected) = &sha256 {
-                    let actual = run_capture("sha256sum", &[zip_path.to_str().unwrap()])?;
-                    let actual = actual.split_whitespace().next().unwrap_or_default().to_string();
-                    if !actual.eq_ignore_ascii_case(expected) {
-                        return Err(format!("sha256 校验失败: 期望 {expected} 实际 {actual}"));
-                    }
-                }
-                let new = tmp.join("dist.new");
-                let _ = std::fs::remove_dir_all(&new);
-                std::fs::create_dir_all(&new).map_err(|e| e.to_string())?;
-                run_capture(
-                    "unzip",
-                    &["-q", "-o", zip_path.to_str().unwrap(), "-d", new.to_str().unwrap()],
-                )?;
-                let dist = appstore.join("dist");
-                let old = tmp.join("dist.old");
-                let _ = std::fs::remove_dir_all(&old);
-                if dist.exists() {
-                    std::fs::rename(&dist, &old).map_err(|e| e.to_string())?;
-                }
-                std::fs::rename(&new, &dist).map_err(|e| e.to_string())?;
-                std::fs::remove_dir_all(&old).ok();
-                RepoMeta {
-                    source_type: Some("zip".into()),
-                    source_url: Some(source_url.to_string()),
-                    version: Some(
-                        zip_path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown")
-                            .to_string(),
-                    ),
-                    updated_at: Some(now_ts()),
-                    commit: None,
-                    sha256: sha256.map(|s| s.to_string()),
-                }
-            }
-            other => return Err(format!("不支持的 source_type: {other}")),
-        };
-        meta.source_url = Some(source_url.to_string());
-        write_repo_meta(&meta)?;
-        Ok(meta)
+/// 添加 Git 源（后台执行）：clone 到 repos/<id>/，并写入 repos.yaml。
+pub async fn repo_add(name: String, url: String, run_id: String) -> Response {
+    validate_repo_url(&url).map_or_else(
+        |e| Response::err(-1, e),
+        |_| {
+            let title = format!("添加 Git 源: {name} ({url})");
+            spawn_repo_task(run_id.clone(), move || repo_add_inner(&name, &url), title)
+        },
+    )
 }
 
-pub async fn install(pkg_path: String, source: String, version: String, run_id: String) -> Response {
+fn repo_add_inner(name: &str, url: &str) -> Result<String, String> {
+    let mut repos = read_repos()?;
+    // 生成唯一 id（来自 URL 末段，冲突自动加后缀）
+    let base_id = id_from_url(url);
+    let mut id = base_id.clone();
+    let mut n = 2;
+    while repos.iter().any(|r| r.id == id) {
+        id = format!("{base_id}-{n}");
+        n += 1;
+    }
+    let dir = repos_dir().join(&id);
+    if dir.exists() {
+        return Err(format!("源目录已存在: {}", dir.display()));
+    }
+    std::fs::create_dir_all(repos_dir()).map_err(|e| e.to_string())?;
+    let tmp_clone = repos_dir().join(format!(".tmp-{id}"));
+    let _ = std::fs::remove_dir_all(&tmp_clone);
+    run_capture("git", &["clone", "--depth", "1", url, tmp_clone.to_str().unwrap()])?;
+    // 临时目录非空校验，防止克隆出空目录
+    if std::fs::read_dir(&tmp_clone).map_err(|e| e.to_string())?.next().is_none() {
+        let _ = std::fs::remove_dir_all(&tmp_clone);
+        return Err("克隆结果为空".into());
+    }
+    std::fs::rename(&tmp_clone, &dir).map_err(|e| format!("移动到源目录失败: {e}"))?;
+    let commit = run_capture("git", &["-C", dir.to_str().unwrap(), "rev-parse", "HEAD"])?;
+    let short = commit.chars().take(7).collect::<String>();
+    repos.push(RepoEntry {
+        id: id.clone(),
+        name: name.to_string(),
+        url: url.to_string(),
+        builtin: false,
+        enabled: true,
+        version: short.clone(),
+        commit: commit.clone(),
+        updated_at: now_ts(),
+    });
+    write_repos(&repos)?;
+    Ok(format!("id={id} commit={short}"))
+}
+
+/// 删除 Git 源（同步执行）：内置源禁止删除。
+pub async fn repo_remove(id: String) -> Response {
+    tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        let id = safe_rel(&id)?.to_string_lossy().to_string();
+        let mut repos = read_repos()?;
+        let Some(idx) = repos.iter().position(|r| r.id == id) else {
+            return Err(format!("源不存在: {id}"));
+        };
+        if repos[idx].builtin {
+            return Err("内置源不可删除".into());
+        }
+        let dir = repos_dir().join(&id);
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).map_err(|e| format!("删除源目录失败: {e}"))?;
+        }
+        repos.remove(idx);
+        write_repos(&repos)?;
+        Ok(Response::ok("源已删除", Some(json!({ "id": id }))))
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .map_or_else(|e| Response::err(-1, e), |r| r)
+}
+
+/// 更新单个 Git 源（后台执行）：fetch + reset，或首次 clone。
+pub async fn repo_update(id: String, run_id: String) -> Response {
+    let valid = safe_rel(&id).and_then(|_| {
+        read_repos().map(|repos| repos.iter().any(|r| r.id == id))
+    });
+    match valid {
+        Ok(true) => {
+            let title = format!("更新 Git 源: {id}");
+            spawn_repo_task(run_id.clone(), move || repo_update_inner(&id), title)
+        }
+        Ok(false) => Response::err(-1, format!("源不存在: {id}")),
+        Err(e) => Response::err(-1, e),
+    }
+}
+
+fn repo_update_inner(id: &str) -> Result<String, String> {
+    let repos = read_repos()?;
+    let Some(entry) = repos.iter().find(|r| r.id == id) else {
+        return Err(format!("源不存在: {id}"));
+    };
+    let dir = repos_dir().join(id);
+    if !dir.exists() || !dir.join(".git").exists() {
+        // 首次 clone（内置源发行时无 .git，直接重建）
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(repos_dir()).map_err(|e| e.to_string())?;
+        let tmp_clone = repos_dir().join(format!(".tmp-{id}"));
+        let _ = std::fs::remove_dir_all(&tmp_clone);
+        run_capture(
+            "git",
+            &["clone", "--depth", "1", &entry.url, tmp_clone.to_str().unwrap()],
+        )?;
+        std::fs::rename(&tmp_clone, &dir).map_err(|e| format!("移动到源目录失败: {e}"))?;
+    } else {
+        run_capture("git", &["-C", dir.to_str().unwrap(), "fetch", "origin"])?;
+        run_capture(
+            "git",
+            &["-C", dir.to_str().unwrap(), "reset", "--hard", "FETCH_HEAD"],
+        )?;
+    }
+    let commit = run_capture("git", &["-C", dir.to_str().unwrap(), "rev-parse", "HEAD"])?;
+    let short = commit.chars().take(7).collect::<String>();
+    let mut new_repos = repos;
+    if let Some(r) = new_repos.iter_mut().find(|r| r.id == id) {
+        r.version = short.clone();
+        r.commit = commit.clone();
+        r.updated_at = now_ts();
+    }
+    write_repos(&new_repos)?;
+    Ok(format!("commit={short}"))
+}
+
+pub async fn install(
+    pkg_path: String,
+    source: String,
+    repo_id: Option<String>,
+    version: String,
+    run_id: String,
+) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
         let (cat, name) = validate_pkg_path(&pkg_path)?;
-        let pkg_dir = find_package(&pkg_path, &source)?;
+        let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
         let script = script_file(&pkg_dir, "install", "bin.sh")?;
         let mut env = base_env();
         env.push(("PKG_PATH".into(), pkg_dir.to_string_lossy().into_owned()));
@@ -452,13 +584,16 @@ pub async fn install(pkg_path: String, source: String, version: String, run_id: 
         let app_path = apps_dir().join(&pkg_path);
         let done_run_id = run_id.clone();
         let done_pkg_path = pkg_path.clone();
+        let done_source = source.clone();
+        let done_repo_id = repo_id.clone();
         let on_done = Box::new(move |code: i32| {
             if code == 0 {
                 let meta = MetaInfo {
                     name: name.clone(),
                     version: version.clone(),
                     category: cat.clone(),
-                    source: source.clone(),
+                    source: done_source.clone(),
+                    repo_id: done_repo_id.clone(),
                     installed_at: now_ts(),
                     upgraded_from: None,
                     run_id: done_run_id.clone(),
@@ -486,10 +621,10 @@ pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
         if !app_path.is_dir() {
             return Err("该包未安装".into());
         }
-        let source = read_meta(&app_path)
-            .map(|m| m.source)
-            .unwrap_or_else(|_| "official".into());
-        let pkg_dir = find_package(&pkg_path, &source)?;
+        let (source, repo_id) = read_meta(&app_path)
+            .map(|m| (m.source, m.repo_id))
+            .unwrap_or_else(|_| ("official".into(), None));
+        let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
         let script = script_file(&pkg_dir, "uninstall", "uninstall.sh")?;
         let mut env = base_env();
         env.push(("PKG_PATH".into(), pkg_dir.to_string_lossy().into_owned()));
@@ -513,6 +648,7 @@ pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
 pub async fn upgrade(
     pkg_path: String,
     source: String,
+    repo_id: Option<String>,
     version: String,
     old_version: String,
     run_id: String,
@@ -523,7 +659,7 @@ pub async fn upgrade(
         if !app_path.is_dir() {
             return Err("该包未安装，无法升级".into());
         }
-        let pkg_dir = find_package(&pkg_path, &source)?;
+        let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
         let mut env = base_env();
         env.push(("PKG_PATH".into(), pkg_dir.to_string_lossy().into_owned()));
         env.push(("APP_ID".into(), run_id.clone()));
@@ -549,13 +685,16 @@ pub async fn upgrade(
         }
         let done_run_id = run_id.clone();
         let done_pkg_path = pkg_path.clone();
+        let done_source = source.clone();
+        let done_repo_id = repo_id.clone();
         let on_done = Box::new(move |code: i32| {
             if code == 0 {
                 let meta = MetaInfo {
                     name: name.clone(),
                     version: version.clone(),
                     category: cat.clone(),
-                    source: source.clone(),
+                    source: done_source.clone(),
+                    repo_id: done_repo_id.clone(),
                     installed_at: now_ts(),
                     upgraded_from: Some(old_version.clone()),
                     run_id: done_run_id.clone(),
@@ -691,6 +830,7 @@ pub async fn installed() -> Response {
                         "version": meta.version,
                         "category": meta.category,
                         "source": meta.source,
+                        "repo_id": meta.repo_id,
                         "installed_at": meta.installed_at,
                         "upgraded_from": meta.upgraded_from,
                         "run_id": meta.run_id,
@@ -773,6 +913,7 @@ mod tests {
         .unwrap();
         std::fs::write(pkg.join("setup.sh"), "#!/bin/bash\n").unwrap();
         std::fs::write(pkg.join("remove.sh"), "#!/bin/bash\n").unwrap();
+        std::fs::write(pkg.join("upgrade.sh"), "#!/bin/bash\n").unwrap();
 
         let install = script_file(&pkg, "install", "bin.sh").unwrap();
         assert_eq!(install.file_name().unwrap(), "setup.sh");
@@ -785,21 +926,48 @@ mod tests {
     }
 
     #[test]
-    fn repo_meta_round_trip() {
+    fn repos_round_trip_and_builtin_fallback() {
         let (_g, _root) = with_zap_root();
-        let meta = RepoMeta {
-            source_type: Some("git".into()),
-            source_url: Some("https://example.com/store.git".into()),
-            version: Some("abc1234".into()),
-            updated_at: Some(1_700_000_000),
-            commit: Some("abc1234".repeat(8)),
-            sha256: None,
-        };
-        write_repo_meta(&meta).unwrap();
-        let back = read_repo_meta().unwrap();
-        assert_eq!(back.source_type.as_deref(), Some("git"));
-        assert_eq!(back.version.as_deref(), Some("abc1234"));
-        assert_eq!(back.updated_at, Some(1_700_000_000));
+        // 空 repos.yaml（不存在）→ 自动补内置源
+        let repos = read_repos().unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].id, BUILTIN_REPO_ID);
+        assert!(repos[0].builtin);
+        // 往返写入
+        let mut repos = repos;
+        repos.push(RepoEntry {
+            id: "my-store".into(),
+            name: "My Store".into(),
+            url: "https://github.com/user/store.git".into(),
+            builtin: false,
+            enabled: true,
+            version: "abc1234".into(),
+            commit: "abc1234".repeat(8),
+            updated_at: 1_700_000_000,
+        });
+        write_repos(&repos).unwrap();
+        let back = read_repos().unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[1].id, "my-store");
+        assert_eq!(back[1].version, "abc1234");
+    }
+
+    #[test]
+    fn id_from_url_extracts_repo_name() {
+        assert_eq!(id_from_url("https://github.com/zapj/zap-appstore.git"), "zap-appstore");
+        assert_eq!(id_from_url("https://gitlab.com/org/store"), "store");
+        assert_eq!(id_from_url("git@github.com:user/store.git"), "store");
+        assert_eq!(id_from_url("https://x.io/A_B-C.d/"), "a-b-c-d");
+    }
+
+    #[test]
+    fn validate_repo_url_rules() {
+        assert!(validate_repo_url("https://github.com/a/b.git").is_ok());
+        assert!(validate_repo_url("git@github.com:a/b.git").is_ok());
+        assert!(validate_repo_url("http://x/y.git").is_ok());
+        assert!(validate_repo_url("").is_err());
+        assert!(validate_repo_url("; rm -rf /").is_err());
+        assert!(validate_repo_url("/tmp/store").is_err());
     }
 
     #[test]
@@ -811,6 +979,7 @@ mod tests {
             version: "11.4.4".into(),
             category: "database".into(),
             source: "official".into(),
+            repo_id: Some("zap-appstore".into()),
             installed_at: 1_700_000_000,
             upgraded_from: None,
             run_id: "r1".into(),
@@ -819,21 +988,7 @@ mod tests {
         let back = read_meta(&app).unwrap();
         assert_eq!(back.version, "11.4.4");
         assert_eq!(back.source, "official");
+        assert_eq!(back.repo_id.as_deref(), Some("zap-appstore"));
         assert!(back.upgraded_from.is_none());
-    }
-
-    #[test]
-    fn official_dir_follows_source_type() {
-        let (_g, root) = with_zap_root();
-        let repo = RepoMeta {
-            source_type: Some("zip".into()),
-            source_url: Some("https://x/z.zip".into()),
-            version: Some("v1".into()),
-            updated_at: Some(1),
-            commit: None,
-            sha256: None,
-        };
-        write_repo_meta(&repo).unwrap();
-        assert_eq!(official_dir(), root.join("data/appstore/dist"));
     }
 }

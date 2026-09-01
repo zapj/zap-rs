@@ -70,40 +70,41 @@ info "解压安装包..."
 tar zxf "$ZAP_FILENAME" || die "解压失败，安装包可能已损坏"
 
 # ── AppStore 官方仓库地址 ──────────────────────────────────
-# 官方包脚本存放于独立 git 仓库，便于单独升级；可在面板中更换地址
-APPSTORE_REPO_URL="${APPSTORE_REPO_URL:-https://github.com/zap-rs/zap-appstore.git}"
+# 官方包脚本存放于独立 git 仓库，便于单独升级；面板中可添加/更换其他源
+APPSTORE_REPO_URL="${APPSTORE_REPO_URL:-https://github.com/zapj/zap-appstore.git}"
 
-# ── AppStore 目录部署（幂等：不覆盖 git/.git 与 custom/）─────
+# ── AppStore 目录部署（多 Git 源，幂等：不覆盖 repos/.git 与 custom/）──
 deploy_appstore() {
     local DEST="$TARGET/zap/data/appstore"
-    mkdir -p "$DEST"/{git,custom,cache,tmp,logs}
+    local BUILTIN="$DEST/repos/zap-appstore"
+    mkdir -p "$DEST"/{repos,custom,cache,tmp,logs}
     mkdir -p "$TARGET/zap/data/apps"
 
-    # 仅在缺失时复制模板/说明文件，避免覆盖用户修改
-    [ -f "$DEST/repo.yaml" ]        || cp -f zap/data/appstore/repo.yaml "$DEST/repo.yaml" 2>/dev/null || true
-    [ -f "$DEST/git/README.md" ]    || cp -f zap/data/appstore/git/README.md "$DEST/git/README.md" 2>/dev/null || true
+    # 仅在缺失时复制模板/配置文件，避免覆盖用户修改
+    [ -f "$DEST/repos.yaml" ]       || cp -f zap/data/appstore/repos.yaml "$DEST/repos.yaml" 2>/dev/null || true
     [ -f "$DEST/custom/README.md" ] || cp -f zap/data/appstore/custom/README.md "$DEST/custom/README.md" 2>/dev/null || true
 
-    # 种子官方包：仅当 git/ 无 .git 且 dist/ 为空时复制内置包（离线兜底）
-    if [ ! -d "$DEST/git/.git" ] && [ -z "$(ls -A "$DEST/dist" 2>/dev/null)" ]; then
+    # 种子官方包（内置源）：仅当 repos/zap-appstore 无 .git 时复制发行包内置包（离线兜底）
+    if [ ! -d "$BUILTIN/.git" ] && [ ! -d "$BUILTIN/database" ]; then
+        mkdir -p "$BUILTIN"
         for c in database application webserver library; do
-            [ -d "zap/data/appstore/$c" ] && cp -Rf "zap/data/appstore/$c" "$DEST/git/" 2>/dev/null || true
+            [ -d "zap/data/appstore/repos/zap-appstore/$c" ] && cp -Rf "zap/data/appstore/repos/zap-appstore/$c" "$BUILTIN/" 2>/dev/null || true
         done
     fi
 
-    # 首次初始化官方 git 仓库（离线时保留种子包，面板中可重试升级）
-    if [ ! -d "$DEST/git/.git" ] && command -v git >/dev/null 2>&1; then
+    # 首次初始化官方 git 仓库（离线时保留种子包，面板中可重试更新）
+    if [ ! -d "$BUILTIN/.git" ] && command -v git >/dev/null 2>&1; then
         info "初始化 AppStore 官方仓库..."
-        if git clone -q --depth 1 "$APPSTORE_REPO_URL" "$DEST/git.repo" 2>/dev/null; then
+        if git clone -q --depth 1 "$APPSTORE_REPO_URL" "$DEST/repos/.tmp-zap-appstore" 2>/dev/null; then
             local has_seed
-            has_seed=$(find "$DEST/git" -mindepth 1 -maxdepth 1 ! -name 'README.md' 2>/dev/null | head -1)
-            [ -n "$has_seed" ] && mv "$DEST/git" "$DEST/git.seed" 2>/dev/null || true
-            mv "$DEST/git.repo" "$DEST/git"
-            rm -rf "$DEST/git.seed" 2>/dev/null || true
+            has_seed=$(find "$BUILTIN" -mindepth 1 -maxdepth 1 2>/dev/null | head -1)
+            [ -n "$has_seed" ] && mv "$BUILTIN" "$DEST/repos/.seed-zap-appstore" 2>/dev/null || true
+            mv "$DEST/repos/.tmp-zap-appstore" "$BUILTIN"
+            rm -rf "$DEST/repos/.seed-zap-appstore" 2>/dev/null || true
             ok "AppStore 官方仓库同步完成"
         else
-            rm -rf "$DEST/git.repo" 2>/dev/null || true
-            warn "无法克隆 AppStore 仓库（网络不可达？），已保留内置种子包，可在面板中重试升级"
+            rm -rf "$DEST/repos/.tmp-zap-appstore" 2>/dev/null || true
+            warn "无法克隆 AppStore 仓库（网络不可达？），已保留内置种子包，可在面板中重试更新"
         fi
     fi
     chmod -R 755 "$DEST" 2>/dev/null || true

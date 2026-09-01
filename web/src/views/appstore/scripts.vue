@@ -29,7 +29,7 @@
       </el-scrollbar>
       <div class="sidebar-tip">
         <el-icon><InfoFilled /></el-icon>
-        <span>自定义脚本位于 custom/scripts/，升级软件库时不会被覆盖</span>
+        <span>自定义脚本位于 custom/scripts/，更新 Git 源时不会被覆盖</span>
       </div>
     </div>
 

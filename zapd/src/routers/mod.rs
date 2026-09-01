@@ -165,9 +165,11 @@ fn api_routers() -> Router {
         .route("/system/files/download", get(system_file::file_download))
         .route("/system/files/upload", post(system_file::file_upload))
         .route("/system/files/info", get(system_file::file_info))
-        // AppStore
-        .route("/appstore/repo/info", get(appstore::repo_info))
-        .route("/appstore/repo/update", post(appstore::repo_update))
+        // AppStore（多 Git 源）
+        .route("/appstore/repos", get(appstore::list_repos))
+        .route("/appstore/repos/add", post(appstore::repo_add))
+        .route("/appstore/repos/remove", post(appstore::repo_remove))
+        .route("/appstore/repos/update", post(appstore::repo_update))
         .route("/appstore/packages", get(appstore::packages))
         .route("/appstore/install", post(appstore::install))
         .route("/appstore/uninstall", post(appstore::uninstall))

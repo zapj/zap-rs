@@ -32,8 +32,11 @@ pub enum Request {
     #[serde(rename = "ssh_key.generate")]
     SshKeyGenerate {
         name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
         key_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         bits: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         comment: Option<String>,
     },
     /// 导入 SSH 密钥
@@ -41,6 +44,7 @@ pub enum Request {
     SshKeyImport {
         name: String,
         private_key: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
         public_key: Option<String>,
     },
     /// 删除 SSH 密钥
@@ -82,14 +86,19 @@ pub enum Request {
     /// 文件信息
     #[serde(rename = "file.info")]
     FileInfo { path: String },
-    /// 更新 AppStore 软件库（git clone/pull 或 zip 下载解压）
-    #[serde(rename = "appstore.repo_update")]
-    AppstoreRepoUpdate {
-        source_type: String,
-        source_url: String,
-        sha256: Option<String>,
+    /// 添加 AppStore Git 源（clone 到 data/appstore/repos/<id>/）
+    #[serde(rename = "appstore.repo_add")]
+    AppstoreRepoAdd {
+        name: String,
+        url: String,
         run_id: String,
     },
+    /// 删除 AppStore Git 源（内置源禁止删除）
+    #[serde(rename = "appstore.repo_remove")]
+    AppstoreRepoRemove { id: String },
+    /// 更新单个 AppStore Git 源（clone/fetch + reset）
+    #[serde(rename = "appstore.repo_update")]
+    AppstoreRepoUpdate { id: String, run_id: String },
     /// 安装包：执行包的 bin.sh（或 app.yaml 指定脚本）
     #[serde(rename = "appstore.install")]
     AppstoreInstall {
@@ -97,6 +106,9 @@ pub enum Request {
         pkg_path: String,
         /// custom | official
         source: String,
+        /// 包来源的 git 源 id（source=official 时定位 repos/<repo_id>/）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        repo_id: Option<String>,
         version: String,
         run_id: String,
     },
@@ -108,6 +120,9 @@ pub enum Request {
     AppstoreUpgrade {
         pkg_path: String,
         source: String,
+        /// 包来源的 git 源 id（source=official 时定位 repos/<repo_id>/）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        repo_id: Option<String>,
         version: String,
         old_version: String,
         run_id: String,
@@ -220,21 +235,36 @@ mod tests {
             serde_json::to_string(&Request::AppstoreInstall {
                 pkg_path: "database/mariadb".into(),
                 source: "official".into(),
+                repo_id: Some("zap-appstore".into()),
                 version: "11.4.4".into(),
                 run_id: "r1".into(),
             })
             .unwrap(),
-            r#"{"verb":"appstore.install","pkg_path":"database/mariadb","source":"official","version":"11.4.4","run_id":"r1"}"#
+            r#"{"verb":"appstore.install","pkg_path":"database/mariadb","source":"official","repo_id":"zap-appstore","version":"11.4.4","run_id":"r1"}"#
         );
         assert_eq!(
-            serde_json::to_string(&Request::AppstoreRepoUpdate {
-                source_type: "zip".into(),
-                source_url: "https://example.com/store.zip".into(),
-                sha256: Some("abc".into()),
+            serde_json::to_string(&Request::AppstoreRepoAdd {
+                name: "My Store".into(),
+                url: "https://github.com/user/store.git".into(),
                 run_id: "r9".into(),
             })
             .unwrap(),
-            r#"{"verb":"appstore.repo_update","source_type":"zip","source_url":"https://example.com/store.zip","sha256":"abc","run_id":"r9"}"#
+            r#"{"verb":"appstore.repo_add","name":"My Store","url":"https://github.com/user/store.git","run_id":"r9"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::AppstoreRepoRemove {
+                id: "my-store".into(),
+            })
+            .unwrap(),
+            r#"{"verb":"appstore.repo_remove","id":"my-store"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::AppstoreRepoUpdate {
+                id: "zap-appstore".into(),
+                run_id: "r9".into(),
+            })
+            .unwrap(),
+            r#"{"verb":"appstore.repo_update","id":"zap-appstore","run_id":"r9"}"#
         );
     }
 

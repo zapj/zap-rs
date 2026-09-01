@@ -70,9 +70,9 @@ exec:
 
 ```
 data/appstore/
-├── repo.yaml      # 软件库配置 + 同步状态（源类型 / 地址 / 版本 / 更新时间 / commit）
-├── git/           # 官方软件库（独立 git 仓库 clone 目标，含 .git）
-├── dist/          # ZIP 方式解压产物（与 git/ 二选一，由 repo.yaml 决定）
+├── repos.yaml     # Git 源配置列表（多源：id / 名称 / 地址 / 同步状态）
+├── repos/         # 所有 Git 源（一个源一个目录，目录名 = 源 id）
+│   └── zap-appstore/   # ★ 内置官方源（随 zap 发行包发布，可更新不可删除）
 ├── custom/        # ★ 用户自定义包与脚本（升级永不覆盖）
 │   └── scripts/{username}/   # 按用户隔离的自定义脚本
 ├── cache/ tmp/    # 下载缓存与原子升级暂存
@@ -99,11 +99,12 @@ scripts:                  # 可选，缺省走约定文件名
 
 脚本由 `zapexec` 以 root 运行，注入环境变量：`ZAP_PATH` / `ZAPCTL` / `APPS_DIR` / `PKG_PATH` / `APP_ID` / `APP_VERSION`（升级另有 `APP_OLD_VERSION`）。无 `upgrade.sh` 时升级缺省 = 先 `uninstall.sh` 再 `bin.sh`。
 
-### 软件库升级
+### Git 源管理（多源）
 
-- **git 方式**：`git clone`（首次）/ `git fetch + reset --hard`（后续），记录 commit 到 `repo.yaml`
-- **zip 方式**：下载 → sha256 校验 → `tmp/` 原子替换 `dist/`
-- 两种方式均不触碰 `custom/`；官方仓库建议单独建 `zap-appstore` 仓库，与主程序仓库分离
+- 初始数据来自内置源 `zap-appstore`（`https://github.com/zapj/zap-appstore.git`），随 zap 发行包发布，离线可用
+- 管理员可在面板中添加 / 删除自己的 Git 源：添加时 `git clone --depth 1` 到 `repos/<id>/`，更新时 `git fetch + reset --hard`
+- 内置源不可删除；所有源同步均不触碰 `custom/`
+- 包冲突优先级：内置源 < 后添加的源 < `custom/`（custom 最高）
 
 ### 运行与安全
 

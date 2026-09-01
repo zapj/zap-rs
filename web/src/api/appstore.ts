@@ -1,13 +1,16 @@
 import { http } from '@/utils/request'
 import { getToken } from '@/utils/auth'
 
-export interface RepoInfo {
-  exists: boolean
-  source_type: string
-  source_url: string
+export interface RepoSource {
+  id: string
+  name: string
+  url: string
+  builtin: boolean
+  enabled: boolean
   version: string
-  updated_at: number
   commit: string
+  updated_at: number
+  exists: boolean
 }
 
 export interface AppPackage {
@@ -21,6 +24,7 @@ export interface AppPackage {
   default_port: number | null
   scripts: any
   source: 'official' | 'custom'
+  repo_id?: string
   installed: boolean
   installed_version?: string
   installed_source?: string
@@ -40,28 +44,39 @@ export interface RunItem {
   finished_at: number
 }
 
-// ── 仓库 ────────────────────────────────────────────────────
+// ── Git 源（多源）───────────────────────────────────────────
 
-export const getRepoInfo = () => http.get<any>('/appstore/repo/info')
+export const getRepos = () => http.get<any>('/appstore/repos')
 
-export const updateRepo = (data: {
-  source_type?: string
-  source_url?: string
-  sha256?: string
-}) => http.post<any>('/appstore/repo/update', data)
+export const addRepo = (data: { name: string; url: string }) =>
+  http.post<any>('/appstore/repos/add', data)
+
+export const removeRepo = (data: { id: string }) =>
+  http.post<any>('/appstore/repos/remove', data)
+
+export const updateRepo = (data: { id: string }) =>
+  http.post<any>('/appstore/repos/update', data)
 
 // ── 包 ──────────────────────────────────────────────────────
 
 export const getPackages = () => http.get<any>('/appstore/packages')
 
-export const installPackage = (data: { pkg_path: string; source: string; version: string }) =>
-  http.post<any>('/appstore/install', data)
+export const installPackage = (data: {
+  pkg_path: string
+  source: string
+  repo_id?: string
+  version: string
+}) => http.post<any>('/appstore/install', data)
 
 export const uninstallPackage = (data: { pkg_path: string }) =>
   http.post<any>('/appstore/uninstall', data)
 
-export const upgradePackage = (data: { pkg_path: string; source: string; version: string }) =>
-  http.post<any>('/appstore/upgrade', data)
+export const upgradePackage = (data: {
+  pkg_path: string
+  source: string
+  repo_id?: string
+  version: string
+}) => http.post<any>('/appstore/upgrade', data)
 
 // ── 脚本 ────────────────────────────────────────────────────
 

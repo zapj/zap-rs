@@ -1,26 +1,55 @@
 <template>
   <div class="appstore-page">
-    <!-- 仓库信息卡片 -->
+    <!-- 多 Git 源管理卡片 -->
     <el-card shadow="never" class="repo-card">
-      <div class="repo-info">
-        <div class="repo-left">
-          <el-icon :size="28" color="#409eff"><Goods /></el-icon>
+      <div class="repo-head">
+        <div class="repo-title-wrap">
+          <el-icon :size="24" color="#409eff"><Goods /></el-icon>
           <div class="repo-detail">
-            <div class="repo-title">应用商店软件库</div>
-            <div class="repo-meta">
-              <el-tag size="small" type="info">{{ repo.source_type === 'zip' ? 'ZIP 源' : 'Git 源' }}</el-tag>
-              <span class="repo-version">版本: {{ repo.version || '未初始化' }}</span>
-              <span class="repo-time">更新时间: {{ fmtTime(repo.updated_at) }}</span>
-              <span v-if="repo.commit" class="repo-commit">commit: {{ repo.commit.slice(0, 7) }}</span>
-            </div>
+            <div class="repo-title">应用商店软件库（Git 源）</div>
+            <div class="repo-sub">包数据来自多个 Git 源，可随时添加 / 删除 / 更新</div>
           </div>
         </div>
-        <div class="repo-actions">
-          <el-button type="primary" :loading="updating" :disabled="!isAdmin" @click="handleUpdateRepo">
-            更新软件库
-          </el-button>
-          <el-button :disabled="!isAdmin" @click="showRepoDialog = true">仓库设置</el-button>
+        <el-button type="primary" :disabled="!isAdmin" @click="showAddDialog = true">
+          添加源
+        </el-button>
+      </div>
+
+      <div class="repo-list">
+        <div v-for="r in repos" :key="r.id" class="repo-item">
+          <div class="repo-item-left">
+            <div class="repo-item-name">
+              {{ r.name || r.id }}
+              <el-tag v-if="r.builtin" size="small" type="primary" effect="plain">内置</el-tag>
+              <el-tag v-if="!r.exists" size="small" type="danger" effect="plain">目录缺失</el-tag>
+            </div>
+            <div class="repo-item-url">{{ r.url }}</div>
+            <div class="repo-item-meta">
+              <span>id: {{ r.id }}</span>
+              <span v-if="r.version">版本: {{ r.version }}</span>
+              <span v-if="r.commit">commit: {{ r.commit.slice(0, 7) }}</span>
+              <span>更新时间: {{ fmtTime(r.updated_at) }}</span>
+            </div>
+          </div>
+          <div class="repo-item-actions">
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :disabled="!isAdmin"
+              @click="handleUpdateRepo(r)"
+            >更新</el-button>
+            <el-button
+              v-if="!r.builtin"
+              size="small"
+              type="danger"
+              plain
+              :disabled="!isAdmin"
+              @click="handleRemoveRepo(r)"
+            >删除</el-button>
+          </div>
         </div>
+        <el-empty v-if="repos.length === 0" description="暂无 Git 源" :image-size="60" />
       </div>
     </el-card>
 
@@ -53,7 +82,10 @@
             <el-tag v-if="pkg.installed" size="small" type="success" effect="light">已安装</el-tag>
             <el-tag v-else size="small" type="info" effect="plain">未安装</el-tag>
           </div>
-          <el-tag v-if="pkg.source === 'custom'" size="small" type="warning" effect="light">自定义</el-tag>
+          <div class="pkg-tags">
+            <el-tag v-if="pkg.source === 'custom'" size="small" type="warning" effect="light">自定义</el-tag>
+            <el-tag v-else-if="pkg.repo_id" size="small" type="info" effect="plain">{{ pkg.repo_id }}</el-tag>
+          </div>
         </div>
         <div class="pkg-title">{{ pkg.title || pkg.name }}</div>
         <div class="pkg-desc">{{ pkg.description || '暂无描述' }}</div>
@@ -103,7 +135,7 @@
         </div>
       </template>
       <el-table :data="runs" size="small" v-loading="runsLoading">
-        <el-table-column prop="action" label="操作" width="120" />
+        <el-table-column prop="action" label="操作" width="130" />
         <el-table-column prop="pkg" label="对象" min-width="180" show-overflow-tooltip />
         <el-table-column prop="username" label="发起人" width="110" />
         <el-table-column label="状态" width="100">
@@ -132,28 +164,22 @@
       />
     </el-card>
 
-    <!-- 仓库设置对话框 -->
-    <el-dialog v-model="showRepoDialog" title="软件库设置" width="480px">
-      <el-form label-width="90px">
-        <el-form-item label="源类型" required>
-          <el-radio-group v-model="repoForm.source_type">
-            <el-radio value="git">Git</el-radio>
-            <el-radio value="zip">ZIP</el-radio>
-          </el-radio-group>
+    <!-- 添加源对话框 -->
+    <el-dialog v-model="showAddDialog" title="添加 Git 源" width="520px">
+      <el-form label-width="80px">
+        <el-form-item label="名称" required>
+          <el-input v-model="addForm.name" placeholder="例如: 我的应用商店" maxlength="32" />
         </el-form-item>
-        <el-form-item label="仓库地址" required>
+        <el-form-item label="Git 地址" required>
           <el-input
-            v-model="repoForm.source_url"
-            :placeholder="repoForm.source_type === 'zip' ? 'https://example.com/appstore.zip' : 'https://github.com/org/repo.git'"
+            v-model="addForm.url"
+            placeholder="https://github.com/org/repo.git"
           />
-        </el-form-item>
-        <el-form-item v-if="repoForm.source_type === 'zip'" label="SHA256">
-          <el-input v-model="repoForm.sha256" placeholder="zip 包校验值（可选）" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showRepoDialog = false">取消</el-button>
-        <el-button type="primary" :loading="updating" @click="handleUpdateRepo(true)">保存并更新</el-button>
+        <el-button @click="showAddDialog = false">取消</el-button>
+        <el-button type="primary" :loading="adding" @click="handleAddRepo">添加并拉取</el-button>
       </template>
     </el-dialog>
 
@@ -168,7 +194,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Goods, Search } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import {
-  getRepoInfo,
+  getRepos,
+  addRepo,
+  removeRepo,
   updateRepo,
   getPackages,
   installPackage,
@@ -176,7 +204,7 @@ import {
   upgradePackage,
   getRuns,
   type AppPackage,
-  type RepoInfo,
+  type RepoSource,
   type RunItem,
 } from '@/api/appstore'
 import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
@@ -184,61 +212,82 @@ import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 
-// ── 仓库 ────────────────────────────────────────────────────
+// ── Git 源（多源）───────────────────────────────────────────
 
-const repo = ref<RepoInfo>({
-  exists: false,
-  source_type: 'git',
-  source_url: '',
-  version: '',
-  updated_at: 0,
-  commit: '',
-})
-const updating = ref(false)
-const showRepoDialog = ref(false)
-const repoForm = ref({ source_type: 'git', source_url: '', sha256: '' })
+const repos = ref<RepoSource[]>([])
+const updatingId = ref('')
+const adding = ref(false)
+const showAddDialog = ref(false)
+const addForm = ref({ name: '', url: '' })
 
-async function loadRepo() {
+async function loadRepos() {
   try {
-    const resp = await getRepoInfo()
-    repo.value = resp.data
-    repoForm.value = {
-      source_type: resp.data.source_type || 'git',
-      source_url: resp.data.source_url || '',
-      sha256: '',
-    }
-  } catch {
-    // ignore
+    const resp = await getRepos()
+    repos.value = resp.data.repos || []
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载 Git 源失败')
   }
 }
 
-async function handleUpdateRepo(useDialog = false) {
-  if (useDialog) {
-    if (!repoForm.value.source_url.trim()) {
-      ElMessage.warning('请输入仓库地址')
-      return
-    }
+async function handleAddRepo() {
+  const name = addForm.value.name.trim()
+  const url = addForm.value.url.trim()
+  if (!name) {
+    ElMessage.warning('请输入源名称')
+    return
   }
-  updating.value = true
+  if (!url) {
+    ElMessage.warning('请输入 Git 地址')
+    return
+  }
+  adding.value = true
   try {
-    const data = useDialog
-      ? {
-          source_type: repoForm.value.source_type,
-          source_url: repoForm.value.source_url.trim(),
-          sha256: repoForm.value.sha256 || undefined,
-        }
-      : {
-          source_type: repo.value.source_type,
-          source_url: repo.value.source_url,
-        }
-    const resp = await updateRepo(data)
-    ElMessage.success('软件库更新已启动')
-    showRepoDialog.value = false
-    logDrawerRef.value?.openDrawer(resp.data.run_id, '软件库更新')
+    const resp = await addRepo({ name, url })
+    ElMessage.success('添加源已启动')
+    showAddDialog.value = false
+    addForm.value = { name: '', url: '' }
+    logDrawerRef.value?.openDrawer(resp.data.run_id, '添加 Git 源')
+    setTimeout(() => {
+      loadRepos()
+      loadPackages()
+    }, 3000)
+  } catch (e: any) {
+    ElMessage.error(e.message || '添加失败')
+  } finally {
+    adding.value = false
+  }
+}
+
+async function handleUpdateRepo(r: RepoSource) {
+  updatingId.value = r.id
+  try {
+    const resp = await updateRepo({ id: r.id })
+    ElMessage.success('更新源已启动')
+    logDrawerRef.value?.openDrawer(resp.data.run_id, `更新源 ${r.name || r.id}`)
+    setTimeout(() => {
+      loadRepos()
+      loadPackages()
+    }, 3000)
   } catch (e: any) {
     ElMessage.error(e.message || '更新失败')
   } finally {
-    updating.value = false
+    updatingId.value = ''
+  }
+}
+
+async function handleRemoveRepo(r: RepoSource) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除源「${r.name || r.id}」？该源目录将被删除，包将不再显示。`,
+      '删除源确认',
+      { type: 'warning' },
+    )
+    const resp = await removeRepo({ id: r.id })
+    ElMessage.success(resp.message || '源已删除')
+    loadRepos()
+    loadPackages()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e.message || '删除失败')
   }
 }
 
@@ -290,6 +339,7 @@ async function handleInstall(pkg: AppPackage) {
     const resp = await installPackage({
       pkg_path: pkg.pkg_path,
       source: pkg.source,
+      repo_id: pkg.source === 'official' ? pkg.repo_id : undefined,
       version: pkg.version,
     })
     ElMessage.success('安装已启动')
@@ -324,6 +374,7 @@ async function handleUpgrade(pkg: AppPackage) {
     const resp = await upgradePackage({
       pkg_path: pkg.pkg_path,
       source: pkg.source,
+      repo_id: pkg.source === 'official' ? pkg.repo_id : undefined,
       version: pkg.version,
     })
     ElMessage.success('升级已启动')
@@ -386,7 +437,7 @@ function fmtTime(ts: number | null | undefined): string {
 const logDrawerRef = ref<InstanceType<typeof AppStoreLogDrawer> | null>(null)
 
 onMounted(() => {
-  loadRepo()
+  loadRepos()
   loadPackages()
   loadRuns()
 })
@@ -403,16 +454,17 @@ onMounted(() => {
   margin-bottom: 4px;
 }
 
-.repo-info {
+.repo-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 14px;
 }
 
-.repo-left {
+.repo-title-wrap {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .repo-title {
@@ -421,13 +473,62 @@ onMounted(() => {
   color: #303133;
 }
 
-.repo-meta {
+.repo-sub {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.repo-item {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.repo-item-left {
+  min-width: 0;
+}
+
+.repo-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.repo-item-url {
+  font-size: 12px;
+  color: #606266;
+  margin-top: 4px;
+  word-break: break-all;
+}
+
+.repo-item-meta {
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 6px;
   font-size: 12px;
   color: #909399;
+}
+
+.repo-item-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .filter-bar {
@@ -461,6 +562,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.pkg-tags {
+  display: flex;
+  gap: 4px;
 }
 
 .pkg-title {

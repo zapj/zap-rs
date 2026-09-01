@@ -51,71 +51,118 @@ fn validate_script_path(claims: &Claims, path: &str) -> Result<(), ZapError> {
     Ok(())
 }
 
-// ── 仓库信息 / 更新 ─────────────────────────────────────────
+// ── Git 源管理（多源）───────────────────────────────────────
 
-pub async fn repo_info(_claims: ValidatedClaims) -> ZapJsonResult {
-    let repo = ast::read_repo_yaml_value().await;
-    let data = match repo {
-        Some(v) => json!({
-            "exists": true,
-            "source_type": v.get("source_type").and_then(|x| x.as_str()).unwrap_or("git"),
-            "source_url": v.get("source_url").and_then(|x| x.as_str()).unwrap_or(""),
-            "version": v.get("version").and_then(|x| x.as_str()).unwrap_or(""),
-            "updated_at": v.get("updated_at").and_then(|x| x.as_i64()).unwrap_or(0),
-            "commit": v.get("commit").and_then(|x| x.as_str()).unwrap_or(""),
-        }),
-        None => json!({
-            "exists": false,
-            "source_type": "git",
-            "source_url": "",
-            "version": "",
-            "updated_at": 0,
-            "commit": "",
-        }),
-    };
-    Ok(Json(json!({ "code": 0, "message": "OK", "data": data })))
+/// 列出全部 Git 源（含内置源）。
+pub async fn list_repos(_claims: ValidatedClaims) -> ZapJsonResult {
+    let repos = ast::list_repos().await;
+    Ok(Json(json!({ "code": 0, "message": "OK", "data": { "repos": repos } })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RepoAddPayload {
+    pub name: String,
+    pub url: String,
+}
+
+/// 添加 Git 源：clone 到 repos/<id>/ 并写入 repos.yaml。
+pub async fn repo_add(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<RepoAddPayload>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    let name = payload.name.trim().to_string();
+    let url = payload.url.trim().to_string();
+    if name.is_empty() || url.is_empty() {
+        return Err(ZapError::New(-1, "名称和 Git 地址均不能为空".to_string()));
+    }
+
+    let run_id = ast::generate_run_id();
+    let log_path = ast::log_path_for(&run_id);
+    ast::register_run(&run_id, "repo_add", &url, &claims.sub, &log_path).await?;
+
+    let resp = zapexec::call(Request::AppstoreRepoAdd {
+        name: name.clone(),
+        url: url.clone(),
+        run_id: run_id.clone(),
+    })
+    .await?;
+    if resp.code != 0 {
+        ast::finish_run(&run_id, "failed", resp.code as i64).await;
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    ast::watch_log(run_id.clone(), log_path.clone());
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "appstore_repo_add",
+        &name,
+        &url,
+    )
+    .await;
+    info!("AppStore repo add started: {name} ({url})");
+    Ok(Json(json!({
+        "code": 0,
+        "message": "添加源已启动",
+        "data": { "run_id": run_id, "log": log_path }
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RepoRemovePayload {
+    pub id: String,
+}
+
+/// 删除 Git 源（内置源禁止删除）。
+pub async fn repo_remove(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<RepoRemovePayload>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    let id = payload.id.trim().to_string();
+    if id.is_empty() {
+        return Err(ZapError::New(-1, "缺少源 id".to_string()));
+    }
+    let resp = zapexec::call(Request::AppstoreRepoRemove { id: id.clone() }).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "appstore_repo_remove",
+        &id,
+        "",
+    )
+    .await;
+    info!("AppStore repo removed: {id}");
+    Ok(Json(json!({ "code": 0, "message": "源已删除", "data": { "id": id } })))
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RepoUpdatePayload {
-    pub source_type: Option<String>,
-    pub source_url: Option<String>,
-    pub sha256: Option<String>,
+    pub id: String,
 }
 
+/// 更新单个 Git 源（fetch + reset，首次则 clone）。
 pub async fn repo_update(
     claims: ValidatedClaims,
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<RepoUpdatePayload>,
 ) -> ZapJsonResult {
     require_admin(&claims)?;
-    let repo = ast::read_repo_yaml_value().await;
-    let (source_type, source_url) = match repo {
-        Some(v) => (
-            payload
-                .source_type
-                .unwrap_or_else(|| v.get("source_type").and_then(|x| x.as_str()).unwrap_or("git").to_string()),
-            payload.source_url.unwrap_or_else(|| {
-                v.get("source_url").and_then(|x| x.as_str()).unwrap_or_default().to_string()
-            }),
-        ),
-        None => (
-            payload.source_type.unwrap_or_else(|| "git".to_string()),
-            payload.source_url.unwrap_or_default(),
-        ),
-    };
-    if source_url.is_empty() {
-        return Err(ZapError::New(-1, "缺少软件库地址 source_url".to_string()));
+    let id = payload.id.trim().to_string();
+    if id.is_empty() {
+        return Err(ZapError::New(-1, "缺少源 id".to_string()));
     }
-
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
-    ast::register_run(&run_id, "repo_update", &source_url, &claims.sub, &log_path).await?;
+    ast::register_run(&run_id, "repo_update", &id, &claims.sub, &log_path).await?;
 
     let resp = zapexec::call(Request::AppstoreRepoUpdate {
-        source_type: source_type.clone(),
-        source_url: source_url.clone(),
-        sha256: payload.sha256,
+        id: id.clone(),
         run_id: run_id.clone(),
     })
     .await?;
@@ -128,14 +175,14 @@ pub async fn repo_update(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
         "appstore_repo_update",
-        &source_type,
-        &source_url,
+        &id,
+        "",
     )
     .await;
-    info!("AppStore repo update started: {source_url} ({source_type})");
+    info!("AppStore repo update started: {id}");
     Ok(Json(json!({
         "code": 0,
-        "message": "软件库更新已启动",
+        "message": "更新源已启动",
         "data": { "run_id": run_id, "log": log_path }
     })))
 }
@@ -182,6 +229,7 @@ pub async fn packages(_claims: ValidatedClaims) -> ZapJsonResult {
 pub struct InstallPayload {
     pub pkg_path: String,
     pub source: String,
+    pub repo_id: Option<String>,
     pub version: String,
 }
 
@@ -201,6 +249,7 @@ pub async fn install(
     let resp = zapexec::call(Request::AppstoreInstall {
         pkg_path: payload.pkg_path.clone(),
         source: payload.source.clone(),
+        repo_id: payload.repo_id.clone(),
         version: payload.version.clone(),
         run_id: run_id.clone(),
     })
@@ -270,6 +319,7 @@ pub async fn uninstall(
 pub struct UpgradePayload {
     pub pkg_path: String,
     pub source: String,
+    pub repo_id: Option<String>,
     pub version: String,
 }
 
@@ -288,6 +338,7 @@ pub async fn upgrade(
     let resp = zapexec::call(Request::AppstoreUpgrade {
         pkg_path: payload.pkg_path.clone(),
         source: payload.source.clone(),
+        repo_id: payload.repo_id.clone(),
         version: payload.version.clone(),
         old_version,
         run_id: run_id.clone(),

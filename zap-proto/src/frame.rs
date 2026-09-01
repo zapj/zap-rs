@@ -100,6 +100,8 @@ mod tests {
         // 长度前缀声明 100 字节，但只写 3 字节
         a.write_u32(100).await.unwrap();
         a.write_all(b"abc").await.unwrap();
+        // 关闭写端：缓冲排空后读端收到 EOF，read_exact 才能返回 UnexpectedEof
+        drop(a);
         let err = recv(&mut b).await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
     }
