@@ -1,0 +1,336 @@
+//! AppStore 运行任务管理：DB 记录 + 日志监控 + 本地目录扫描。
+
+use serde::Serialize;
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+
+use crate::{config, db, zap::ZapError};
+
+/// 日志结束标记：`__ZAP_DONE__ <exit_code>`（zapexec 写入）
+pub const DONE_MARKER: &str = "__ZAP_DONE__";
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AppstoreRun {
+    pub id: i64,
+    pub run_id: String,
+    pub action: String,
+    pub pkg: String,
+    pub username: String,
+    pub status: String,
+    pub exit_code: i64,
+    pub log_path: String,
+    pub started_at: i64,
+    pub finished_at: i64,
+}
+
+/// AppStore 根目录（与 zap.db 同级的 appstore/）
+pub fn appstore_dir() -> PathBuf {
+    let cfg = config::get_config().read().unwrap();
+    let db_path = Path::new(&cfg.db.path);
+    db_path
+        .parent()
+        .map(|p| p.join("appstore"))
+        .unwrap_or_else(|| PathBuf::from("data/appstore"))
+}
+
+/// 已安装软件目录（apps/）
+pub fn apps_dir() -> PathBuf {
+    let cfg = config::get_config().read().unwrap();
+    let db_path = Path::new(&cfg.db.path);
+    db_path
+        .parent()
+        .map(|p| p.join("apps"))
+        .unwrap_or_else(|| PathBuf::from("data/apps"))
+}
+
+pub fn logs_dir() -> PathBuf {
+    appstore_dir().join("logs")
+}
+
+pub fn log_path_for(run_id: &str) -> String {
+    logs_dir()
+        .join(format!("run-{run_id}.log"))
+        .to_string_lossy()
+        .into_owned()
+}
+
+pub fn generate_run_id() -> String {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let rand_part: u64 = rand::random();
+    format!("{millis:x}{rand_part:x}")
+}
+
+/// 登记一条运行记录（status=running）。
+pub async fn register_run(
+    run_id: &str,
+    action: &str,
+    pkg: &str,
+    username: &str,
+    log_path: &str,
+) -> Result<(), ZapError> {
+    let now = chrono::Utc::now().timestamp();
+    let pool = db::get_db_pool().await;
+    sqlx::query(
+        "INSERT INTO appstore_runs (run_id, action, pkg, username, status, exit_code, log_path, started_at, finished_at) \
+         VALUES (?, ?, ?, ?, 'running', -1, ?, ?, 0)",
+    )
+    .bind(run_id)
+    .bind(action)
+    .bind(pkg)
+    .bind(username)
+    .bind(log_path)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn finish_run(run_id: &str, status: &str, exit_code: i64) {
+    let now = chrono::Utc::now().timestamp();
+    let pool = db::get_db_pool().await;
+    let _ = sqlx::query(
+        "UPDATE appstore_runs SET status = ?, exit_code = ?, finished_at = ? WHERE run_id = ?",
+    )
+    .bind(status)
+    .bind(exit_code)
+    .bind(now)
+    .bind(run_id)
+    .execute(pool)
+    .await;
+}
+
+pub async fn get_run(run_id: &str) -> Result<Option<AppstoreRun>, sqlx::Error> {
+    let pool = db::get_db_pool().await;
+    sqlx::query_as::<_, AppstoreRun>("SELECT * FROM appstore_runs WHERE run_id = ?")
+        .bind(run_id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn list_runs(page: i64, page_size: i64) -> Result<(Vec<AppstoreRun>, i64), sqlx::Error> {
+    let pool = db::get_db_pool().await;
+    let page = page.max(1);
+    let page_size = page_size.clamp(1, 100);
+    let offset = (page - 1) * page_size;
+    let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM appstore_runs")
+        .fetch_one(pool)
+        .await?;
+    let rows = sqlx::query_as::<_, AppstoreRun>(
+        "SELECT * FROM appstore_runs ORDER BY id DESC LIMIT ? OFFSET ?",
+    )
+    .bind(page_size)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    Ok((rows, total))
+}
+
+/// 后台监控日志直到出现 `__ZAP_DONE__ <code>`，随后更新运行状态。
+pub fn watch_log(run_id: String, log_path: String) {
+    tokio::spawn(async move {
+        let interval = std::time::Duration::from_millis(500);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(24 * 3600);
+        loop {
+            match read_done_marker(&log_path).await {
+                Some(code) => {
+                    let status = if code == 0 { "success" } else { "failed" };
+                    finish_run(&run_id, status, code).await;
+                    break;
+                }
+                None => {
+                    if std::time::Instant::now() > deadline {
+                        finish_run(&run_id, "failed", -2).await;
+                        break;
+                    }
+                    tokio::time::sleep(interval).await;
+                }
+            }
+        }
+    });
+}
+
+/// 从日志末尾探测完成标记，返回退出码。
+async fn read_done_marker(log_path: &str) -> Option<i64> {
+    let content = tokio::fs::read_to_string(log_path).await.ok()?;
+    let tail = content.rsplit(DONE_MARKER).next()?.trim();
+    let code: i64 = tail.split_whitespace().next()?.parse().ok()?;
+    Some(code)
+}
+
+/// 读取日志 offset 之后的内容，同时返回是否已完成。
+pub async fn read_log(
+    log_path: &str,
+    offset: u64,
+) -> Result<(String, Option<i64>, bool), ZapError> {
+    let content = tokio::fs::read_to_string(log_path).await?;
+    let bytes = content.as_bytes();
+    let start = (offset as usize).min(bytes.len());
+    let text = String::from_utf8_lossy(&bytes[start..]).to_string();
+    let done = read_done_marker(log_path).await;
+    Ok((text, done, done.is_some()))
+}
+
+/// 去掉日志尾部完成标记，供最终展示。
+pub fn strip_done_marker(content: &str) -> String {
+    match content.rfind(DONE_MARKER) {
+        Some(idx) => content[..idx].trim_end().to_string(),
+        None => content.to_string(),
+    }
+}
+
+// ── 本地目录扫描（包列表 / 已安装列表）──────────────────────
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct AppYaml {
+    name: Option<String>,
+    version: Option<String>,
+    category: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    deps: Option<Vec<String>>,
+    default_port: Option<u16>,
+    #[serde(default)]
+    scripts: Option<Value>,
+}
+
+/// 扫描官方 + 自定义包，custom 同名覆盖官方。返回 Pkg JSON 列表。
+pub async fn scan_packages() -> Vec<Value> {
+    // 官方目录：按 repo.yaml 的 source_type 决定 git/ 或 dist/
+    let official = match read_repo_yaml_value().await {
+        Some(v) if v.get("source_type").and_then(|x| x.as_str()) == Some("zip") => {
+            appstore_dir().join("dist")
+        }
+        _ => appstore_dir().join("git"),
+    };
+    tokio::task::spawn_blocking(move || {
+        let mut by_path: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+        for dir in [&official, &appstore_dir().join("custom")] {
+            let source = if dir == &official { "official" } else { "custom" };
+            for category in ["database", "application", "webserver", "library"] {
+                let cat_dir = dir.join(category);
+                let Ok(entries) = std::fs::read_dir(&cat_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let pkg_dir = entry.path();
+                    if !pkg_dir.is_dir() {
+                        continue;
+                    }
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let app_yaml = match parse_app_yaml(&pkg_dir.join("app.yaml")) {
+                        Some(a) => a,
+                        None => continue,
+                    };
+                    let pkg_path = format!("{category}/{name}");
+                    by_path.insert(
+                        pkg_path.clone(),
+                        json!({
+                            "pkg_path": pkg_path,
+                            "category": app_yaml.category.clone().unwrap_or_else(|| category.to_string()),
+                            "name": app_yaml.name.clone().unwrap_or(name),
+                            "title": app_yaml.title.clone().unwrap_or_default(),
+                            "description": app_yaml.description.clone().unwrap_or_default(),
+                            "version": app_yaml.version.clone().unwrap_or_default(),
+                            "deps": app_yaml.deps.clone().unwrap_or_default(),
+                            "default_port": app_yaml.default_port,
+                            "scripts": app_yaml.scripts.clone().unwrap_or(Value::Null),
+                            "source": source,
+                        }),
+                    );
+                }
+            }
+        }
+        by_path.into_values().collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// 扫描已安装包（apps/ 下 meta.yaml）。
+pub async fn scan_installed() -> Vec<Value> {
+    tokio::task::spawn_blocking(|| {
+        let mut items = Vec::new();
+        let Ok(entries) = std::fs::read_dir(apps_dir()) else {
+            return items;
+        };
+        for entry in entries.flatten() {
+            let app_path = entry.path();
+            if !app_path.is_dir() {
+                continue;
+            }
+            let Some(meta) = parse_meta_yaml(&app_path.join("meta.yaml")) else {
+                continue;
+            };
+            items.push(meta);
+        }
+        items.sort_by(|a, b| {
+            a.get("pkg_path")
+                .and_then(|x| x.as_str())
+                .cmp(&b.get("pkg_path").and_then(|x| x.as_str()))
+        });
+        items
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// 读取某个已安装包的版本（升级时获取 old_version）。
+pub async fn installed_version_of(pkg_path: &str) -> Option<String> {
+    let apps = apps_dir();
+    let pkg_path = pkg_path.to_string();
+    tokio::task::spawn_blocking(move || {
+        let p = apps.join(&pkg_path).join("meta.yaml");
+        parse_meta_yaml(&p)
+            .and_then(|m| m.get("version").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    })
+    .await
+    .unwrap_or(None)
+}
+
+/// 读取 repo.yaml 并返回 Value（不存在/解析失败返回 None）。
+pub async fn read_repo_yaml_value() -> Option<Value> {
+    let path = appstore_dir().join("repo.yaml");
+    tokio::task::spawn_blocking(move || {
+        let content = std::fs::read_to_string(&path).ok()?;
+        serde_yaml::from_str(&content).ok()
+    })
+    .await
+    .unwrap_or(None)
+}
+
+fn parse_app_yaml(path: &Path) -> Option<AppYaml> {
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_yaml::from_str(&content).ok()
+}
+
+fn parse_meta_yaml(path: &Path) -> Option<Value> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let v: Value = serde_yaml::from_str(&content).ok()?;
+    // meta.yaml 位于 apps/{category}/{name}/meta.yaml，pkg_path 取其父目录的相对路径
+    let pkg_path = path
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|cat_dir| cat_dir.file_name())
+        .map(|cat| {
+            let name = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            format!("{}/{}", cat.to_string_lossy(), name)
+        })
+        .unwrap_or_default();
+    Some(json!({
+        "pkg_path": pkg_path,
+        "name": v.get("name"),
+        "version": v.get("version"),
+        "category": v.get("category"),
+        "source": v.get("source"),
+        "installed_at": v.get("installed_at"),
+        "upgraded_from": v.get("upgraded_from"),
+        "run_id": v.get("run_id"),
+    }))
+}

@@ -11,6 +11,7 @@ pub mod types;
 pub mod crypto;
 pub mod totp;
 pub mod audit;
+pub mod appstore;
 
 #[derive(Error,Debug)]
 pub enum ZapError {

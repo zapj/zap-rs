@@ -82,6 +82,51 @@ pub enum Request {
     /// 文件信息
     #[serde(rename = "file.info")]
     FileInfo { path: String },
+    /// 更新 AppStore 软件库（git clone/pull 或 zip 下载解压）
+    #[serde(rename = "appstore.repo_update")]
+    AppstoreRepoUpdate {
+        source_type: String,
+        source_url: String,
+        sha256: Option<String>,
+        run_id: String,
+    },
+    /// 安装包：执行包的 bin.sh（或 app.yaml 指定脚本）
+    #[serde(rename = "appstore.install")]
+    AppstoreInstall {
+        /// 形如 database/mariadb 的包相对路径
+        pkg_path: String,
+        /// custom | official
+        source: String,
+        version: String,
+        run_id: String,
+    },
+    /// 卸载包：执行 uninstall.sh 并删除已安装目录
+    #[serde(rename = "appstore.uninstall")]
+    AppstoreUninstall { pkg_path: String, run_id: String },
+    /// 升级包：执行 upgrade.sh（缺省时先 uninstall.sh 再 bin.sh）
+    #[serde(rename = "appstore.upgrade")]
+    AppstoreUpgrade {
+        pkg_path: String,
+        source: String,
+        version: String,
+        old_version: String,
+        run_id: String,
+    },
+    /// 运行自定义脚本（仅限 appstore/custom/ 内）
+    #[serde(rename = "appstore.script_run")]
+    AppstoreScriptRun { path: String, run_id: String },
+    /// 停止运行中的任务（按 run_id 杀进程组）
+    #[serde(rename = "appstore.script_stop")]
+    AppstoreScriptStop { run_id: String },
+    /// 读取 appstore 内脚本内容（编辑前读取）
+    #[serde(rename = "appstore.script_read")]
+    AppstoreScriptRead { path: String },
+    /// 写自定义脚本（仅限 appstore/custom/ 内）
+    #[serde(rename = "appstore.script_write")]
+    AppstoreScriptWrite { path: String, content: String },
+    /// 扫描已安装包列表（data/apps/*/meta.yaml）
+    #[serde(rename = "appstore.installed")]
+    AppstoreInstalled,
 }
 
 /// `zapexec` -> `zapd` 的响应。
@@ -159,6 +204,45 @@ mod tests {
         let req = Request::FileWrite {
             path: "/tmp/a.txt".into(),
             content: "hello".into(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(format!("{req:?}"), format!("{back:?}"));
+    }
+
+    #[test]
+    fn appstore_verbs_tagging() {
+        assert_eq!(
+            serde_json::to_string(&Request::AppstoreInstalled).unwrap(),
+            r#"{"verb":"appstore.installed"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::AppstoreInstall {
+                pkg_path: "database/mariadb".into(),
+                source: "official".into(),
+                version: "11.4.4".into(),
+                run_id: "r1".into(),
+            })
+            .unwrap(),
+            r#"{"verb":"appstore.install","pkg_path":"database/mariadb","source":"official","version":"11.4.4","run_id":"r1"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::AppstoreRepoUpdate {
+                source_type: "zip".into(),
+                source_url: "https://example.com/store.zip".into(),
+                sha256: Some("abc".into()),
+                run_id: "r9".into(),
+            })
+            .unwrap(),
+            r#"{"verb":"appstore.repo_update","source_type":"zip","source_url":"https://example.com/store.zip","sha256":"abc","run_id":"r9"}"#
+        );
+    }
+
+    #[test]
+    fn appstore_verbs_round_trip() {
+        let req = Request::AppstoreScriptWrite {
+            path: "scripts/admin/backup.sh".into(),
+            content: "#!/bin/bash\necho hi".into(),
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: Request = serde_json::from_str(&json).unwrap();

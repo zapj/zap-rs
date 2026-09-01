@@ -8,6 +8,7 @@ use axum::{
 use rust_embed::RustEmbed;
 use serde_json::json;
 
+pub mod appstore;
 pub mod auth;
 pub mod ssh_keys;
 pub mod ssh_terminal;
@@ -164,4 +165,19 @@ fn api_routers() -> Router {
         .route("/system/files/download", get(system_file::file_download))
         .route("/system/files/upload", post(system_file::file_upload))
         .route("/system/files/info", get(system_file::file_info))
+        // AppStore
+        .route("/appstore/repo/info", get(appstore::repo_info))
+        .route("/appstore/repo/update", post(appstore::repo_update))
+        .route("/appstore/packages", get(appstore::packages))
+        .route("/appstore/install", post(appstore::install))
+        .route("/appstore/uninstall", post(appstore::uninstall))
+        .route("/appstore/upgrade", post(appstore::upgrade))
+        .route("/appstore/scripts/tree", get(appstore::scripts_tree))
+        .route("/appstore/script/read", get(appstore::script_read))
+        .route("/appstore/script/write", post(appstore::script_write))
+        .route("/appstore/script/run", post(appstore::script_run))
+        .route("/appstore/script/stop", post(appstore::script_stop))
+        .route("/appstore/runs", get(appstore::runs))
+        .route("/appstore/log/{run_id}", get(appstore::log))
+        .route("/appstore/ws/{run_id}", get(appstore::ws_log))
 }

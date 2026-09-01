@@ -26,6 +26,9 @@ pub async fn init_schema() {
     ensure_user_totp_columns().await;
     // Migration: encrypt legacy plaintext SSH passwords
     crate::zap::crypto::migrate_legacy_passwords().await;
+    // AppStore: run records table + menu
+    init_appstore_runs_table().await;
+    ensure_appstore_menu().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -462,6 +465,80 @@ async fn ensure_user_totp_columns() {
             .execute(pool)
             .await;
         tracing::info!("Added user.totp_enabled column");
+    }
+}
+
+// ── appstore ────────────────────────────────────────────────
+
+async fn init_appstore_runs_table() {
+    if table_exists("appstore_runs").await {
+        return;
+    }
+    let sql = r#"
+    CREATE TABLE appstore_runs (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL UNIQUE,
+        action TEXT NOT NULL DEFAULT '',
+        pkg TEXT NOT NULL DEFAULT '',
+        username TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'running',
+        exit_code INTEGER NOT NULL DEFAULT -1,
+        log_path TEXT NOT NULL DEFAULT '',
+        started_at INTEGER NOT NULL DEFAULT 0,
+        finished_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_appstore_runs_started ON appstore_runs(started_at);
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+/// 确保 AppStore 菜单存在（幂等，兼容已存在的数据库）。
+async fn ensure_appstore_menu() {
+    let pool = get_db_pool().await;
+    let now = chrono::Local::now().timestamp();
+
+    let _ = sqlx::query(
+        "INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+         VALUES (6, 0, 'appstore', '/appstore', 'Layout', '/appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 6, 1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            parent_id = 0, name = 'appstore', path = '/appstore', component = 'Layout', redirect = '/appstore/index', type = 'menu', title = '应用商店', icon = 'ep:goods', affix = 1, roles = 'admin,user', sort_order = 6, status = 1",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+         VALUES (61, 6, 'appstore-index', 'index', 'appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 1, 1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            parent_id = 6, name = 'appstore-index', path = 'index', component = 'appstore/index', type = 'menu', title = '应用商店', icon = 'ep:goods', affix = 1, roles = 'admin,user', sort_order = 1, status = 1",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+         VALUES (62, 6, 'appstore-scripts', 'scripts', 'appstore/scripts', 'menu', '脚本管理', 'ep:document', 1, 'admin,user', 2, 1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            parent_id = 6, name = 'appstore-scripts', path = 'scripts', component = 'appstore/scripts', type = 'menu', title = '脚本管理', icon = 'ep:document', affix = 1, roles = 'admin,user', sort_order = 2, status = 1",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    // admin / user / reseller 均可访问应用商店与脚本管理
+    for role_id in [1i64, 2, 3] {
+        for menu_id in [6i64, 61, 62] {
+            let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (?, ?)")
+                .bind(role_id)
+                .bind(menu_id)
+                .execute(pool)
+                .await;
+        }
     }
 }
 

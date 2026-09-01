@@ -1,0 +1,16 @@
+# AppStore 仓库配置与同步状态（本机）
+# 由 zapd 在升级/初始化时读写，请勿手工编辑冲突。
+
+# 源类型：git | zip
+source_type: git
+# 官方仓库地址（独立 git 仓库）
+source_url: https://github.com/zap-rs/zap-appstore.git
+# 官方仓库所在目录（按 source_type 自动决定：git → git/，zip → dist/）
+
+# 仓库同步状态（更新后由 zapd 刷新）
+version: ""        # git: commit 短哈希 / zip: 仓库版本号
+updated_at: 0      # 最近一次同步的 Unix 时间戳
+commit: ""         # git 完整 commit（zip 模式留空）
+sha256: ""         # zip 模式下载包校验值
+
+# 官方包目录与自定义包同名时，custom 优先显示

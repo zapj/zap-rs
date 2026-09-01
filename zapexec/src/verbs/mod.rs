@@ -1,3 +1,4 @@
+mod appstore;
 mod file;
 mod ssh;
 mod ssh_key;
@@ -35,6 +36,25 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::FileDownload { path } => file::download(path).await,
         Request::FileUpload { path, name, content } => file::upload(path, name, content).await,
         Request::FileInfo { path } => file::info(path).await,
+        Request::AppstoreRepoUpdate { source_type, source_url, sha256, run_id } => {
+            appstore::repo_update(source_type, source_url, sha256, run_id).await
+        }
+        Request::AppstoreInstall { pkg_path, source, version, run_id } => {
+            appstore::install(pkg_path, source, version, run_id).await
+        }
+        Request::AppstoreUninstall { pkg_path, run_id } => {
+            appstore::uninstall(pkg_path, run_id).await
+        }
+        Request::AppstoreUpgrade { pkg_path, source, version, old_version, run_id } => {
+            appstore::upgrade(pkg_path, source, version, old_version, run_id).await
+        }
+        Request::AppstoreScriptRun { path, run_id } => appstore::script_run(path, run_id).await,
+        Request::AppstoreScriptStop { run_id } => appstore::script_stop(run_id).await,
+        Request::AppstoreScriptRead { path } => appstore::script_read(path).await,
+        Request::AppstoreScriptWrite { path, content } => {
+            appstore::script_write(path, content).await
+        }
+        Request::AppstoreInstalled => appstore::installed().await,
     }
 }
 
