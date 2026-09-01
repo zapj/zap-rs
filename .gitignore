@@ -10,4 +10,6 @@ conf/zap.yaml
 /data/run/
 data/zap.db*
 web/a.html
-data/appstore/repos/
+#data/appstore/repos/
+data/appstore/logs/*.log
+data/appstore/tmp/*

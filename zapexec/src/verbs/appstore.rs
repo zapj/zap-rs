@@ -284,10 +284,18 @@ fn now_ts() -> i64 {
 // ── 命令执行 ───────────────────────────────────────────────
 
 fn run_capture(program: &str, args: &[&str]) -> Result<String, String> {
-    let out = root_cmd(program)
+    // git 远程操作（clone/fetch）在网络不可达时可能无限挂起，导致任务永久 running。
+    // 统一用 timeout 限时；同时禁止 git 交互式认证提示（避免等待输入用户名/密码）。
+    let out = root_cmd("timeout")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .arg("180")
+        .arg(program)
         .args(args)
         .output()
         .map_err(|e| format!("{program} 执行失败: {e}"))?;
+    if out.status.code() == Some(124) {
+        return Err(format!("{program} 执行超时(180s)"));
+    }
     if !out.status.success() {
         return Err(format!(
             "{program} 失败: {}",
@@ -319,6 +327,9 @@ fn spawn_background(
         .open(&log_path)
         .map_err(|e| format!("打开日志失败: {e}"))?;
     let ret_path = log_path.clone();
+    let cpu_num = std::thread::available_parallelism()
+        .map(|n| n.get().to_string())
+        .unwrap_or_else(|_| "1".into());
 
     std::thread::spawn(move || {
         use std::io::Write;
@@ -330,6 +341,8 @@ fn spawn_background(
                 .env("ZAP_PATH", zap_path())
                 .env("ZAPCTL", zap_path().join("zapctl"))
                 .env("APPS_DIR", apps_dir())
+                .env("LOG_FILE", &log_path)
+                .env("CPU_NUM", &cpu_num)
                 .stdout(std::process::Stdio::from(log.try_clone().unwrap_or_else(|_| {
                     std::fs::OpenOptions::new().append(true).open(&log_path).unwrap()
                 })))
@@ -388,6 +401,43 @@ fn base_env() -> Vec<(String, String)> {
     ]
 }
 
+/// 构造包脚本执行环境：在 base_env 基础上补齐脚本通用变量。
+/// - PKG_PATH 为包源目录（含脚本/app.yaml），APP_PATH 为安装目录
+/// - version 为 Some 时注入 APP_VERSION 及由其解析的 MAJOR_VERSION/MINOR_VERSION
+/// - LOG_FILE / CPU_NUM 由 spawn_background 统一注入
+fn task_env(
+    pkg_dir: &Path,
+    app_path: &Path,
+    app_name: &str,
+    version: Option<&str>,
+    run_id: &str,
+) -> Vec<(String, String)> {
+    let mut env = base_env();
+    env.push(("PKG_PATH".into(), pkg_dir.to_string_lossy().into_owned()));
+    env.push(("APP_ID".into(), run_id.to_string()));
+    env.push(("APP_NAME".into(), app_name.to_string()));
+    env.push(("APP_PATH".into(), app_path.to_string_lossy().into_owned()));
+    env.push((
+        "BUILD_PATH".into(),
+        apps_dir().join(".build").join(app_name).to_string_lossy().into_owned(),
+    ));
+    env.push((
+        "ZAP_DATA_PATH".into(),
+        zap_path().join("data").to_string_lossy().into_owned(),
+    ));
+    if let Some(v) = version {
+        env.push(("APP_VERSION".into(), v.to_string()));
+        if let Some((major, rest)) = v.split_once('.') {
+            env.push(("MAJOR_VERSION".into(), major.to_string()));
+            env.push((
+                "MINOR_VERSION".into(),
+                rest.split('.').next().unwrap_or("").to_string(),
+            ));
+        }
+    }
+    env
+}
+
 // ── 动词实现 ───────────────────────────────────────────────
 
 /// 校验 Git 源 URL：只允许 http(s) 或 git@ 形式，禁止命令注入。
@@ -414,6 +464,18 @@ fn spawn_repo_task(
 ) -> Response {
     let log_path = logs_dir().join(format!("run-{run_id}.log"));
     let ret_log = log_path.clone();
+    // 同步创建日志文件，确保接口返回时文件已存在（WebSocket 立即读日志不会 ENOENT）
+    if let Err(e) = std::fs::create_dir_all(logs_dir())
+        .and_then(|_| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .map(|_| ())
+        })
+    {
+        return Response::err(-1, format!("创建日志失败: {e}"));
+    }
     tokio::task::spawn_blocking(move || {
         use std::io::Write;
         let _ = std::fs::create_dir_all(logs_dir());
@@ -577,11 +639,8 @@ pub async fn install(
         let (cat, name) = validate_pkg_path(&pkg_path)?;
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
         let script = script_file(&pkg_dir, "install", "bin.sh")?;
-        let mut env = base_env();
-        env.push(("PKG_PATH".into(), pkg_dir.to_string_lossy().into_owned()));
-        env.push(("APP_ID".into(), run_id.clone()));
-        env.push(("APP_VERSION".into(), version.clone()));
         let app_path = apps_dir().join(&pkg_path);
+        let env = task_env(&pkg_dir, &app_path, &name, Some(&version), &run_id);
         let done_run_id = run_id.clone();
         let done_pkg_path = pkg_path.clone();
         let done_source = source.clone();
@@ -616,7 +675,7 @@ pub async fn install(
 
 pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
-        validate_pkg_path(&pkg_path)?;
+        let (_, name) = validate_pkg_path(&pkg_path)?;
         let app_path = apps_dir().join(&pkg_path);
         if !app_path.is_dir() {
             return Err("该包未安装".into());
@@ -626,9 +685,9 @@ pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
             .unwrap_or_else(|_| ("official".into(), None));
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
         let script = script_file(&pkg_dir, "uninstall", "uninstall.sh")?;
-        let mut env = base_env();
-        env.push(("PKG_PATH".into(), pkg_dir.to_string_lossy().into_owned()));
-        env.push(("APP_ID".into(), run_id.clone()));
+        // 卸载脚本可能需要版本信息（如按版本计算安装目录），注入 meta 中记录的版本
+        let meta_version = read_meta(&app_path).ok().map(|m| m.version);
+        let env = task_env(&pkg_dir, &app_path, &name, meta_version.as_deref(), &run_id);
         let on_done = Box::new(move |code: i32| {
             if code == 0 {
                 let _ = std::fs::remove_dir_all(&app_path);
@@ -660,10 +719,7 @@ pub async fn upgrade(
             return Err("该包未安装，无法升级".into());
         }
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
-        let mut env = base_env();
-        env.push(("PKG_PATH".into(), pkg_dir.to_string_lossy().into_owned()));
-        env.push(("APP_ID".into(), run_id.clone()));
-        env.push(("APP_VERSION".into(), version.clone()));
+        let mut env = task_env(&pkg_dir, &app_path, &name, Some(&version), &run_id);
         env.push(("APP_OLD_VERSION".into(), old_version.clone()));
 
         let mut steps = Vec::new();

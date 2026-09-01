@@ -18,7 +18,7 @@ OS_MACHINE="$(uname -s)"
 
 preInstallation() {
 
-  if [ id -u "www" > /dev/null 2>&1 ]; then
+  if id -u "www" > /dev/null 2>&1; then
     echo "www user already exists"
   else
     useradd --no-create-home --shell /bin/false www

@@ -56,10 +56,12 @@ async fn main() {
         .unwrap_or_else(|| panic!("无法解析用户 {}，请确认其存在", cli.client_user));
     let secret = load_or_create_secret(&cli.secret, identity);
 
+    let zap_path = std::env::var("ZAP_PATH").unwrap_or_else(|_| "/usr/local/zap".to_string());
     info!(
         socket = %cli.socket.display(),
         uid = identity.uid,
         gid = identity.gid,
+        zap_path = %zap_path,
         "zapexec 以 root 启动"
     );
 

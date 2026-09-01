@@ -6,6 +6,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+Environment=ZAP_PATH=/usr/local/zap
 ExecStart=/usr/local/zap/zapexec --socket /run/zap/exec.sock --secret /etc/zap/exec.key --client-user zapadm
 RuntimeDirectory=zap
 RuntimeDirectoryMode=0750

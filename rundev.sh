@@ -136,7 +136,9 @@ trap cleanup EXIT INT TERM
 
 # ── 4. 启动 zapexec (root) ──────────────────────────────────
 info "启动 zapexec (root)：socket=$EXEC_SOCKET client-user=$DEV_USER"
-"${SUDO_CMD[@]}" "$BIN_DIR/zapexec" \
+# 注入 ZAP_PATH 使 zapexec 数据目录（$ZAP_PATH/data）与 zapd 配置 db.path 的父目录保持一致，
+# 否则 zapexec 默认 /usr/local/zap 会导致日志/源/安装目录错位。
+"${SUDO_CMD[@]}" env ZAP_PATH="$ROOT_DIR" "$BIN_DIR/zapexec" \
   --socket "$EXEC_SOCKET" \
   --secret "$EXEC_SECRET" \
   --client-user "$DEV_USER" &

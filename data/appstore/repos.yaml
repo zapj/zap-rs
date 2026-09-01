@@ -1,12 +1,9 @@
-# AppStore 多 Git 源配置
-# 每个源对应 data/appstore/repos/<id>/ 目录
-# builtin 源为系统内置（随 zap 发布），不可删除，可更新
 repos:
-  - id: zap-appstore
-    name: Zap 官方应用商店
-    url: https://github.com/zapj/zap-appstore.git
-    builtin: true
-    enabled: true
-    version: ""
-    commit: ""
-    updated_at: 0
+- id: zap-appstore
+  name: Zap 官方应用商店
+  url: https://github.com/zapj/zap-appstore.git
+  builtin: true
+  enabled: true
+  version: 5d42463
+  commit: 5d424637b24f0122de50f626a374d167b269ca75
+  updated_at: 1788276444

@@ -165,7 +165,13 @@ pub async fn read_log(
     log_path: &str,
     offset: u64,
 ) -> Result<(String, Option<i64>, bool), ZapError> {
-    let content = tokio::fs::read_to_string(log_path).await?;
+    let content = match tokio::fs::read_to_string(log_path).await {
+        Ok(c) => c,
+        // 日志文件尚未生成（后台任务刚启动的竞态窗口），视为空日志，
+        // 由调用方（WebSocket / HTTP 轮询）继续等待而非直接失败。
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
     let bytes = content.as_bytes();
     let start = (offset as usize).min(bytes.len());
     let text = String::from_utf8_lossy(&bytes[start..]).to_string();
