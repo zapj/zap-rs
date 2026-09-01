@@ -127,3 +127,105 @@ pub enum Message {
     /// server -> client：响应
     Response(Response),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_uses_whitelist_verbs() {
+        assert_eq!(
+            serde_json::to_string(&Request::TimeSync).unwrap(),
+            r#"{"verb":"time.sync"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::SshKeyList).unwrap(),
+            r#"{"verb":"ssh_key.list"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::SshKeyGenerate {
+                name: "k".into(),
+                key_type: Some("ed25519".into()),
+                bits: None,
+                comment: None,
+            })
+            .unwrap(),
+            r#"{"verb":"ssh_key.generate","name":"k","key_type":"ed25519"}"#
+        );
+    }
+
+    #[test]
+    fn request_round_trip() {
+        let req = Request::FileWrite {
+            path: "/tmp/a.txt".into(),
+            content: "hello".into(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(format!("{req:?}"), format!("{back:?}"));
+    }
+
+    #[test]
+    fn unknown_verb_rejected() {
+        // 白名单之外（例如任意 shell 执行）必须被拒绝
+        let err = serde_json::from_str::<Request>(r#"{"verb":"shell.exec","cmd":"id"}"#);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn missing_field_rejected() {
+        let err = serde_json::from_str::<Request>(r#"{"verb":"file.read"}"#);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn response_helpers() {
+        let ok = Response::ok("done", Some(serde_json::json!({ "a": 1 })));
+        assert_eq!(ok.code, 0);
+        assert_eq!(ok.message, "done");
+        assert!(ok.data.is_some());
+
+        let err = Response::err(7, "boom");
+        assert_eq!(err.code, 7);
+        assert_eq!(err.message, "boom");
+        assert!(err.data.is_none());
+    }
+
+    #[test]
+    fn response_omits_none_data() {
+        let err = Response::err(1, "x");
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(!json.contains("data"), "data=None 时不应序列化该字段: {json}");
+    }
+
+    #[test]
+    fn message_round_trip_all_variants() {
+        let msgs = vec![
+            Message::Challenge {
+                challenge: "abc".into(),
+            },
+            Message::Auth { mac: "def".into() },
+            Message::Welcome,
+            Message::Request(Request::TimeSetTimezone {
+                timezone: "Asia/Shanghai".into(),
+            }),
+            Message::Response(Response::ok("ok", None)),
+        ];
+        for m in msgs {
+            let json = serde_json::to_string(&m).unwrap();
+            let back: Message = serde_json::from_str(&json).unwrap();
+            assert_eq!(format!("{m:?}"), format!("{back:?}"), "json: {json}");
+        }
+    }
+
+    #[test]
+    fn message_type_tagging() {
+        assert_eq!(
+            serde_json::to_string(&Message::Welcome).unwrap(),
+            r#"{"type":"welcome"}"#
+        );
+        let m: Message =
+            serde_json::from_str(r#"{"type":"challenge","challenge":"x"}"#).unwrap();
+        assert!(matches!(m, Message::Challenge { challenge } if challenge == "x"));
+    }
+}

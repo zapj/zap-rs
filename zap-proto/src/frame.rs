@@ -33,3 +33,74 @@ pub async fn recv<R: AsyncRead + Unpin>(r: &mut R) -> io::Result<Message> {
 fn serde_err(e: impl std::fmt::Display) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Request, Response};
+
+    #[tokio::test]
+    async fn round_trip_request() {
+        let (mut a, mut b) = tokio::io::duplex(4096);
+        let msg = Message::Request(Request::FileRead {
+            path: "/etc/hostname".into(),
+        });
+        send(&mut a, &msg).await.unwrap();
+        let got = recv(&mut b).await.unwrap();
+        assert!(matches!(
+            got,
+            Message::Request(Request::FileRead { path }) if path == "/etc/hostname"
+        ));
+    }
+
+    #[tokio::test]
+    async fn round_trip_response() {
+        let (mut a, mut b) = tokio::io::duplex(4096);
+        let msg = Message::Response(Response::err(7, "boom"));
+        send(&mut a, &msg).await.unwrap();
+        let got = recv(&mut b).await.unwrap();
+        match got {
+            Message::Response(r) => {
+                assert_eq!(r.code, 7);
+                assert_eq!(r.message, "boom");
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_recv_frame_rejected() {
+        let (mut a, mut b) = tokio::io::duplex(4096);
+        a.write_u32(MAX_FRAME + 1).await.unwrap();
+        let err = recv(&mut b).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn oversized_send_payload_rejected() {
+        let (mut a, _b) = tokio::io::duplex(64);
+        let big = "x".repeat(MAX_FRAME as usize + 1);
+        let msg = Message::Response(Response::ok("ok", Some(serde_json::json!({ "big": big }))));
+        let err = send(&mut a, &msg).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn invalid_json_rejected() {
+        let (mut a, mut b) = tokio::io::duplex(4096);
+        a.write_u32(4).await.unwrap();
+        a.write_all(b"nope").await.unwrap();
+        let err = recv(&mut b).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn truncated_frame_rejected() {
+        let (mut a, mut b) = tokio::io::duplex(4096);
+        // 长度前缀声明 100 字节，但只写 3 字节
+        a.write_u32(100).await.unwrap();
+        a.write_all(b"abc").await.unwrap();
+        let err = recv(&mut b).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+}

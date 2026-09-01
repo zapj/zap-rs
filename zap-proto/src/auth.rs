@@ -52,3 +52,104 @@ pub fn verify_hex(secret: &[u8], data: &[u8], mac_hex: &str) -> bool {
     mac.update(data);
     mac.verify_slice(&expected).is_ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 临时目录辅助：每个测试独立目录，避免并发冲突。
+    fn temp_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "zap-proto-auth-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn secret_hex_is_32_bytes() {
+        let s = generate_secret_hex().unwrap();
+        assert_eq!(s.len(), 64, "必须是 64 个 hex 字符");
+        assert_eq!(hex::decode(&s).unwrap().len(), SECRET_LEN);
+    }
+
+    #[test]
+    fn secret_is_random() {
+        let a = generate_secret_hex().unwrap();
+        let b = generate_secret_hex().unwrap();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn challenge_is_16_bytes_hex() {
+        let c = challenge_hex().unwrap();
+        assert_eq!(c.len(), 32);
+        assert_eq!(hex::decode(&c).unwrap().len(), 16);
+    }
+
+    #[test]
+    fn load_secret_accepts_valid_hex() {
+        let dir = temp_dir();
+        let path = dir.join("secret.key");
+        std::fs::write(&path, "abcd".repeat(16)).unwrap(); // 32 字节
+        assert_eq!(load_secret(path.to_str().unwrap()).unwrap().len(), SECRET_LEN);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_secret_rejects_bad_hex() {
+        let dir = temp_dir();
+        let path = dir.join("secret.key");
+        std::fs::write(&path, "zzzzzzzz").unwrap();
+        let err = load_secret(path.to_str().unwrap()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_secret_rejects_wrong_len() {
+        let dir = temp_dir();
+        let path = dir.join("secret.key");
+        std::fs::write(&path, "abcd").unwrap(); // 只有 2 字节
+        let err = load_secret(path.to_str().unwrap()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hmac_is_deterministic() {
+        let secret = b"0123456789abcdef";
+        assert_eq!(hmac_hex(secret, b"data"), hmac_hex(secret, b"data"));
+        assert_ne!(hmac_hex(secret, b"data"), hmac_hex(secret, b"data2"));
+    }
+
+    #[test]
+    fn verify_accepts_correct_and_rejects_wrong() {
+        let secret = b"0123456789abcdef";
+        let mac = hmac_hex(secret, b"challenge");
+        assert!(verify_hex(secret, b"challenge", &mac));
+        // 数据不同
+        assert!(!verify_hex(secret, b"challenge-x", &mac));
+        // 密钥不同
+        assert!(!verify_hex(b"0123456789abcdeg", b"challenge", &mac));
+    }
+
+    #[test]
+    fn verify_rejects_tampered_mac() {
+        let secret = b"0123456789abcdef";
+        let mac = hmac_hex(secret, b"challenge");
+        let mut bad: Vec<u8> = mac.clone().into_bytes();
+        bad[0] = if bad[0] == b'0' { b'1' } else { b'0' };
+        let bad = String::from_utf8(bad).unwrap();
+        assert!(!verify_hex(secret, b"challenge", &bad));
+    }
+
+    #[test]
+    fn verify_rejects_non_hex_mac() {
+        let secret = b"0123456789abcdef";
+        assert!(!verify_hex(secret, b"challenge", "not-hex"));
+        assert!(!verify_hex(secret, b"challenge", ""));
+    }
+}
