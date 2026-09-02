@@ -243,6 +243,7 @@ fn api_routers() -> Router {
         // System
         .route("/system/info", get(system_info::system_info))
         .route("/system/status", get(system_info::system_status))
+        .route("/system/overview", get(system_info::system_overview))
         .route("/system/job/stop", get(system_job::stop_job))
         .route("/system/job/start", get(system_job::start_job))
         // Audit logs (admin only)

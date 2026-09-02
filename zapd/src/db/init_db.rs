@@ -239,17 +239,19 @@ async fn init_menus_table() {
 
     -- Server status dir（应用商店之后）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (8, 0, 'server-status', '/server-status', 'Layout', '/server-status/load', 'dir', '服务器状态', 'ep:data-line', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (8, 0, 'server-status', '/server-status', 'Layout', '/server-status/info', 'dir', '服务器状态', 'ep:data-line', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (81, 8, 'server-status-load', 'load', 'server-status/load/index', 'menu', '系统负载', 'ep:odometer', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (81, 8, 'server-status-info', 'info', 'server-status/info/index', 'menu', '服务器信息', 'ep:info-filled', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (82, 8, 'server-status-network', 'network', 'server-status/network/index', 'menu', '网络', 'ep:share', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (82, 8, 'server-status-load', 'load', 'server-status/load/index', 'menu', '系统负载', 'ep:odometer', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (83, 8, 'server-status-memory', 'memory', 'server-status/memory/index', 'menu', '内存', 'ep:coin', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (83, 8, 'server-status-network', 'network', 'server-status/network/index', 'menu', '网络', 'ep:share', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (84, 8, 'server-status-cpu', 'cpu', 'server-status/cpu/index', 'menu', 'CPU', 'ep:cpu', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (84, 8, 'server-status-memory', 'memory', 'server-status/memory/index', 'menu', '内存', 'ep:coin', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (85, 8, 'server-status-disk', 'disk', 'server-status/disk/index', 'menu', '硬盘', 'ep:box', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (85, 8, 'server-status-cpu', 'cpu', 'server-status/cpu/index', 'menu', 'CPU', 'ep:cpu', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (86, 8, 'server-status-disk', 'disk', 'server-status/disk/index', 'menu', '硬盘', 'ep:box', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -321,6 +323,7 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 83);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 84);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 85);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 86);
     -- Server config: admin 专属
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 7);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 71);

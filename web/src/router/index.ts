@@ -149,9 +149,15 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
   {
     path: '/server-status',
     component: Layout,
-    redirect: '/server-status/load',
+    redirect: '/server-status/info',
     meta: { title: '服务器状态', icon: 'ep:data-line', roles: ['admin'] },
     children: [
+      {
+        path: 'info',
+        name: 'ServerStatusInfo',
+        component: () => import('@/views/server-status/info/index.vue'),
+        meta: { title: '服务器信息', icon: 'ep:info-filled', affix: true },
+      },
       {
         path: 'load',
         name: 'ServerStatusLoad',

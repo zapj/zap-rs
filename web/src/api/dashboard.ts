@@ -12,3 +12,7 @@ export async function getSystemInfo() {
 export async function getRTStatus(){
   return http.get<ApiResponse>('/system/status')
 }
+
+export async function getSystemOverview() {
+  return http.get<ApiResponse>('/system/overview')
+}
