@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElNotification } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -13,7 +13,12 @@ const userStore = useUserStore()
 const loginForm = reactive<LoginForm>({
   username: '',
   password: '',
+  totp_code: '',
 })
+
+// 两步验证（TOTP）第二步是否可见
+const showTotp = ref(false)
+const totpInputRef = ref()
 
 // 密码强度计算
 const passwordStrength = computed(() => {
@@ -55,14 +60,24 @@ const loginRules = reactive<FormRules>({
   password: [
     { required: true, validator: validatePassword, trigger: 'blur' },
   ],
+  totp_code: [
+    { pattern: /^\d{6}$/, message: '请输入6位数字验证码', trigger: 'blur' },
+  ],
 })
 
 const loginFormRef = ref<FormInstance>()
 const loading = ref(false)
 
-// 登录方法
+// 登录方法（两步验证：密码正确但未提交验证码时进入第二步）
 const handleLogin = async (formEl: FormInstance | undefined) => {
   if (!formEl) return
+
+  // 已进入第二步时必须先填写验证码
+  if (showTotp.value && !/^\d{6}$/.test(loginForm.totp_code || '')) {
+    ElMessage.warning('请输入6位数字验证码')
+    totpInputRef.value?.focus()
+    return
+  }
 
   await formEl.validate(async (valid) => {
     if (valid) {
@@ -93,10 +108,23 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
           router.push({ path: '/' })
         }
       } catch (error: any) {
+        // 密码正确但账号已启用两步验证 → 展示验证码输入框进入第二步
+        if (error?.code === 1002) {
+          showTotp.value = true
+          loginForm.totp_code = ''
+          nextTick(() => totpInputRef.value?.focus())
+          return
+        }
         ElMessage.error(error.message || '登录失败，请稍后重试')
-        loginForm.password = ''
-        if (formEl) {
-          formEl.clearValidate('password')
+        if (showTotp.value) {
+          // 第二步失败（如验证码错误）：保留验证码框，仅清空验证码
+          loginForm.totp_code = ''
+          totpInputRef.value?.focus()
+        } else {
+          loginForm.password = ''
+          if (formEl) {
+            formEl.clearValidate('password')
+          }
         }
       } finally {
         loading.value = false
@@ -168,6 +196,25 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
         </div>
       </el-form-item>
 
+      <el-form-item v-if="showTotp" prop="totp_code">
+        <el-input
+          ref="totpInputRef"
+          v-model="loginForm.totp_code"
+          placeholder="两步验证码"
+          type="text"
+          maxlength="6"
+          tabindex="3"
+          autocomplete="one-time-code"
+          inputmode="numeric"
+          @keyup.enter="handleLogin(loginFormRef)"
+        >
+          <template #prefix>
+            <el-icon><icon-ep-key /></el-icon>
+          </template>
+        </el-input>
+        <div class="totp-tip">该账号已启用两步验证，请输入身份验证器中显示的 6 位动态码</div>
+      </el-form-item>
+
       <el-button
         :loading="loading"
         type="primary"
@@ -210,6 +257,13 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
       margin: 0;
       font-weight: bold;
     }
+  }
+
+  .totp-tip {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #909399;
+    line-height: 1.5;
   }
 
   .password-strength {

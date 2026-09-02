@@ -61,6 +61,7 @@ declare module 'vue' {
     IconEpClose: typeof import('~icons/ep/close')['default']
     IconEpCpu: typeof import('~icons/ep/cpu')['default']
     IconEpFold: typeof import('~icons/ep/fold')['default']
+    IconEpKey: typeof import('~icons/ep/key')['default']
     IconEpLock: typeof import('~icons/ep/lock')['default']
     IconEpSwitchButton: typeof import('~icons/ep/switch-button')['default']
     IconEpUser: typeof import('~icons/ep/user')['default']

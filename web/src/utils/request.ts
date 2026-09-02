@@ -61,9 +61,11 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   (response) => {
     const res = response.data
-    // 业务错误码：只 reject，由调用方自行处理 UI 提示
+    // 业务错误码：只 reject，由调用方自行处理 UI 提示（错误对象携带 code，供两步验证等场景判断）
     if (res.code !== 0) {
-      return Promise.reject(new Error(res.message || '系统错误'))
+      const err: Error & { code?: number } = new Error(res.message || '系统错误')
+      err.code = res.code
+      return Promise.reject(err)
     }
     return res
   },

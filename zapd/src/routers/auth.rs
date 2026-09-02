@@ -168,6 +168,13 @@ pub async fn login(
             // TOTP 两步验证（已启用时校验）
             if row.totp_enabled == 1 {
                 let code = payload.totp_code.unwrap_or_default();
+                if code.is_empty() {
+                    // 密码正确但未提供验证码：通知前端进入第二步（展示验证码输入）
+                    return Err(ZapError::New(
+                        1002,
+                        "该账号已启用两步验证，请输入验证码".to_string(),
+                    ));
+                }
                 if !totp::verify(&row.totp_secret, &code) {
                     audit::log(None, Some(&ip), "login_2fa_failed", &row.username, "").await;
                     return Err(ZapError::New(-1, "两步验证码错误或已失效".to_string()));

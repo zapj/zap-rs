@@ -61,6 +61,7 @@ export const useUserStore = defineStore('user', () => {
         roles.value = res.data.roles
         permissions.value = res.data.permissions
         email.value = res.data.email ?? ''
+        phone.value = res.data.phone ?? ''
         return Promise.resolve(res)
       }
       return Promise.reject(new Error('获取用户信息失败'))

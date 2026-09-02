@@ -30,7 +30,7 @@ async fn init_system_user_table_schema() {
         username VARCHAR(128) UNIQUE NOT NULL,
         password VARCHAR(256) NOT NULL,
         email VARCHAR(256) UNIQUE NOT NULL,
-        phone VARCHAR(32) UNIQUE NOT NULL,
+        phone VARCHAR(32) UNIQUE,
         nickname TEXT,
         last_login_time INTEGER,
         last_login_ip TEXT,

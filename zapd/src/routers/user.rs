@@ -19,6 +19,7 @@ struct UserInfo {
     id: i64,
     username: String,
     email: String,
+    phone: Option<String>,
     nickname: String,
     last_login_ip: String,
     last_login_time: i64,
@@ -35,6 +36,7 @@ pub struct CreateUserPayload {
     pub username: String,
     pub password: String,
     pub email: String,
+    pub phone: Option<String>,
     pub nickname: Option<String>,
     pub roles: Option<String>,
     pub owner_id: Option<i64>,
@@ -44,6 +46,7 @@ pub struct CreateUserPayload {
 pub struct UpdateUserPayload {
     pub id: i64,
     pub email: Option<String>,
+    pub phone: Option<String>,
     pub nickname: Option<String>,
     pub roles: Option<String>,
     pub status: Option<i32>,
@@ -90,6 +93,7 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
+                "phone": user.phone.clone().unwrap_or_default(),
                 "nickname": user.nickname,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
@@ -115,7 +119,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
 
     let mut querybuilder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
-        "SELECT id,username,email,nickname,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
+        "SELECT id,username,email,phone,nickname,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
     );
     if is_reseller && !is_admin {
         querybuilder.push(" WHERE owner_id = ").push_bind(claims.id as i64);
@@ -131,6 +135,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
+                "phone": user.phone.clone().unwrap_or_default(),
                 "nickname": user.nickname,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
@@ -175,14 +180,20 @@ pub async fn user_add(
         claims.id as i64
     };
     let nickname = payload.nickname.unwrap_or_else(|| payload.username.clone());
+    // 空手机号存 NULL，避免 UNIQUE 约束下多个空串互相冲突
+    let phone = payload
+        .phone
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
 
     let pool = db::get_db_pool().await;
     let result = sqlx::query(
-        "INSERT INTO user (username, password, email, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        "INSERT INTO user (username, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
     )
     .bind(&payload.username)
     .bind(&hashed)
     .bind(&payload.email)
+    .bind(phone)
     .bind(&nickname)
     .bind(&roles)
     .bind("")
@@ -210,8 +221,20 @@ pub async fn user_add(
             })))
         }
         Err(e) => {
+            if let sqlx::Error::Database(db_err) = &e {
+                let msg = db_err.message();
+                if msg.contains("user.phone") {
+                    return Err(ZapError::New(-1, "手机号已被其他用户使用".to_string()));
+                }
+                if msg.contains("user.email") {
+                    return Err(ZapError::New(-1, "邮箱已存在".to_string()));
+                }
+                if msg.contains("user.username") {
+                    return Err(ZapError::New(-1, "用户名已存在".to_string()));
+                }
+            }
             if e.to_string().contains("UNIQUE") {
-                Err(ZapError::New(-1, "用户名或邮箱已存在".to_string()))
+                Err(ZapError::New(-1, "用户名、邮箱或手机号已存在".to_string()))
             } else {
                 Err(ZapError::from(e))
             }
@@ -235,6 +258,7 @@ pub async fn user_update(
         }
         // Only allow password updates for default-password users
         if payload.email.is_some()
+            || payload.phone.is_some()
             || payload.nickname.is_some()
             || payload.roles.is_some()
             || payload.status.is_some()
@@ -267,6 +291,7 @@ pub async fn user_update(
     let now = chrono::Local::now().timestamp();
 
     let has_any_field = payload.email.is_some()
+        || payload.phone.is_some()
         || payload.nickname.is_some()
         || payload.roles.is_some()
         || payload.status.is_some()
@@ -281,6 +306,15 @@ pub async fn user_update(
 
     if let Some(ref email) = payload.email {
         separated.push("email = ").push_bind_unseparated(email);
+    }
+    if let Some(ref phone) = payload.phone {
+        let p = phone.trim();
+        if p.is_empty() {
+            // 空手机号清空为 NULL
+            separated.push("phone = ").push_bind_unseparated(Option::<String>::None);
+        } else {
+            separated.push("phone = ").push_bind_unseparated(p);
+        }
     }
     if let Some(ref nickname) = payload.nickname {
         separated.push("nickname = ").push_bind_unseparated(nickname);
@@ -300,7 +334,16 @@ pub async fn user_update(
 
     qb.push(" WHERE id = ").push_bind(payload.id);
 
-    let result = qb.build().execute(pool).await?;
+    let result = match qb.build().execute(pool).await {
+        Ok(r) => r,
+        Err(sqlx::Error::Database(db_err)) if db_err.message().contains("user.phone") => {
+            return Err(ZapError::New(-1, "手机号已被其他用户使用".to_string()));
+        }
+        Err(sqlx::Error::Database(db_err)) if db_err.message().contains("user.email") => {
+            return Err(ZapError::New(-1, "邮箱已被其他用户使用".to_string()));
+        }
+        Err(e) => return Err(ZapError::from(e)),
+    };
 
     if result.rows_affected() == 0 {
         return Err(ZapError::New(-1, "用户不存在".to_string()));

@@ -22,6 +22,7 @@ export interface UserListItem {
   id: number
   username: string
   email: string
+  phone: string
   nickname: string
   last_login_ip: string
   last_login_time: number
@@ -60,6 +61,7 @@ export interface CreateUserPayload {
   username: string
   password: string
   email: string
+  phone?: string
   nickname?: string
   roles?: string
   owner_id?: number
@@ -73,6 +75,7 @@ export function createUser(data: CreateUserPayload) {
 export interface UpdateUserPayload {
   id: number
   email?: string
+  phone?: string
   nickname?: string
   roles?: string
   status?: number
@@ -98,4 +101,31 @@ export function deleteUser(id: number) {
 /** 修改当前用户密码 */
 export function changeMyPassword(newPassword: string) {
   return http.post<ApiResponse>('/system/user/update', { password: newPassword })
+}
+
+// ── TOTP 两步验证 ───────────────────────────────────────────
+
+export interface TotpSetupResult {
+  secret: string
+  otpauth_url: string
+}
+
+/** 生成两步验证密钥与 otpauth URL */
+export function totpSetup() {
+  return http.get<ApiResponse<TotpSetupResult>>('/auth/totp/setup')
+}
+
+/** 提交验证码启用两步验证 */
+export function totpVerify(code: string) {
+  return http.post<ApiResponse>('/auth/totp/verify', { code })
+}
+
+/** 校验验证码后关闭两步验证 */
+export function totpDisable(code: string) {
+  return http.post<ApiResponse>('/auth/totp/disable', { code })
+}
+
+/** 查询两步验证开启状态 */
+export function totpStatus() {
+  return http.get<ApiResponse<{ enabled: boolean }>>('/auth/totp/status')
 }

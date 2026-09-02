@@ -6,6 +6,8 @@ export interface LoginForm {
   password: string
   captcha?: string
   rememberMe?: boolean
+  /** 两步验证动态码（启用 TOTP 后第二步输入） */
+  totp_code?: string
 }
 
 
