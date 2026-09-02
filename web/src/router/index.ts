@@ -128,7 +128,7 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         path: 'services',
         name: 'ServerServices',
         component: () => import('@/views/server/services/index.vue'),
-        meta: { title: '服务', icon: 'ep:service', affix: true },
+        meta: { title: '系统服务', icon: 'ep:tools', affix: true },
       },
       {
         path: 'ssh',

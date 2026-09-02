@@ -22,6 +22,9 @@ pub enum Request {
     /// 重启 SSH 服务
     #[serde(rename = "ssh.restart")]
     SshRestart,
+    /// 安装 SSH 服务端（openssh-server），日志写 run-{id}.log
+    #[serde(rename = "ssh.install")]
+    SshInstall { run_id: String },
     /// 列出系统服务（systemd）
     #[serde(rename = "service.list")]
     ServiceList,

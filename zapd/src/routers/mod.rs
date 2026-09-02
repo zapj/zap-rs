@@ -131,6 +131,8 @@ fn api_routers() -> Router {
         .route("/system/config/time/timezones", get(system_config::list_timezones))
         .route("/system/config/ssh/status", get(system_config::ssh_status))
         .route("/system/config/ssh/restart", post(system_config::ssh_restart))
+        .route("/system/config/ssh/install", post(system_config::ssh_install))
+        .route("/system/config/ssh/install/log/{run_id}", get(system_config::ssh_install_log))
         .route("/system/config/services", get(system_config::list_services))
         .route("/system/config/services/action", post(system_config::service_action))
         // SSH key management (admin only)

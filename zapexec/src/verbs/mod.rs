@@ -16,6 +16,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::TimeGet => time::get().await,
         Request::SshStatus => ssh::status().await,
         Request::SshRestart => ssh::restart().await,
+        Request::SshInstall { run_id } => ssh::install(run_id).await,
         Request::ServiceList => service::list().await,
         Request::ServiceAction { name, action } => service::action(&name, &action).await,
         Request::SshKeyList => ssh_key::list(gid).await,

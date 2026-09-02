@@ -25,6 +25,7 @@ enum ClientVerb {
     TimeSetTimezone { timezone: String },
     SshStatus,
     SshRestart,
+    SshInstall,
     ServiceList,
     ServiceAction { name: String, action: String },
     SshKeyList,
@@ -64,6 +65,15 @@ pub async fn run(args: ClientArgs) {
         ClientVerb::TimeSetTimezone { timezone } => Request::TimeSetTimezone { timezone },
         ClientVerb::SshStatus => Request::SshStatus,
         ClientVerb::SshRestart => Request::SshRestart,
+        ClientVerb::SshInstall => Request::SshInstall {
+            run_id: format!(
+                "cli-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+            ),
+        },
         ClientVerb::ServiceList => Request::ServiceList,
         ClientVerb::ServiceAction { name, action } => Request::ServiceAction { name, action },
         ClientVerb::SshKeyList => Request::SshKeyList,
