@@ -29,7 +29,6 @@ rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", 
 tower-service = "0.3.3"
 
 public-ip-address = { version = "0.3" }
-httparse = "1.10"
 getrandom = "0.2"
 hex = "0.4"
 rust-embed = "8.7.2"

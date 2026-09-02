@@ -4271,7 +4271,6 @@ dependencies = [
  "getrandom 0.2.16",
  "hex",
  "hmac",
- "httparse",
  "human_bytes",
  "humantime",
  "hyper",
