@@ -143,6 +143,12 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         component: () => import('@/views/server/process/index.vue'),
         meta: { title: '进程管理', icon: 'ep:cpu', affix: true },
       },
+      {
+        path: 'network',
+        name: 'ServerNetwork',
+        component: () => import('@/views/server/network/index.vue'),
+        meta: { title: '网络设置', icon: 'ep:link', affix: true },
+      },
     ],
   },
   // 服务器状态

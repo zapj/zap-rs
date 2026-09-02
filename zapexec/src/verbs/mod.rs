@@ -1,5 +1,6 @@
 mod appstore;
 mod file;
+mod network;
 mod process;
 mod service;
 mod ssh;
@@ -15,6 +16,12 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::TimeSetTimezone { timezone } => time::set_timezone(&timezone).await,
         Request::TimeListTimezones => time::list_timezones().await,
         Request::TimeGet => time::get().await,
+        Request::NetworkGet => network::get().await,
+        Request::NetworkSetHostname { hostname } => network::set_hostname(&hostname).await,
+        Request::NetworkSetResolver {
+            nameservers,
+            search,
+        } => network::set_resolver(&nameservers, &search).await,
         Request::SshStatus => ssh::status().await,
         Request::SshRestart => ssh::restart().await,
         Request::SshInstall { run_id } => ssh::install(run_id).await,

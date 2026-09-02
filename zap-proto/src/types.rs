@@ -77,6 +77,19 @@ pub enum Request {
     /// 把公钥写入本机系统用户的 ~/.ssh/authorized_keys（root 特权，仅本地回环连接用）
     #[serde(rename = "ssh_key.install_local")]
     SshKeyInstallLocal { username: String, key_name: String },
+    /// 读取主机名与 DNS 解析器配置
+    #[serde(rename = "network.get")]
+    NetworkGet,
+    /// 设置主机名
+    #[serde(rename = "network.set_hostname")]
+    NetworkSetHostname { hostname: String },
+    /// 设置 DNS Resolver（nameserver / search 写入 /etc/resolv.conf）
+    #[serde(rename = "network.set_resolver")]
+    NetworkSetResolver {
+        nameservers: Vec<String>,
+        #[serde(default)]
+        search: Vec<String>,
+    },
     /// 列出目录
     #[serde(rename = "file.list")]
     FileList { path: String },

@@ -224,3 +224,70 @@ pub async fn ssh_install_log(
         "data": { "content": content, "exit_code": exit_code, "done": done, "status": run.status }
     })))
 }
+
+// ── Network（主机名 / DNS Resolver）─────────────────────────
+
+/// 读取主机名与 DNS 解析器配置
+pub async fn network_get(_claims: ValidatedClaims) -> ZapJsonResult {
+    let resp = crate::zapexec::call(Request::NetworkGet).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({ "code": 0, "data": resp.data })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetHostnamePayload {
+    pub hostname: String,
+}
+
+/// 设置主机名
+pub async fn network_set_hostname(
+    _claims: ValidatedClaims,
+    Json(payload): Json<SetHostnamePayload>,
+) -> ZapJsonResult {
+    let hostname = payload.hostname.trim().to_string();
+    if hostname.is_empty() {
+        return Err(ZapError::New(-1, "主机名不能为空".to_string()));
+    }
+    let resp = crate::zapexec::call(Request::NetworkSetHostname { hostname }).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({ "code": 0, "message": resp.message })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetResolverPayload {
+    pub nameservers: Vec<String>,
+    #[serde(default)]
+    pub search: Vec<String>,
+}
+
+/// 设置 DNS Resolver（nameserver / search）
+pub async fn network_set_resolver(
+    _claims: ValidatedClaims,
+    Json(payload): Json<SetResolverPayload>,
+) -> ZapJsonResult {
+    let nameservers: Vec<String> = payload
+        .nameservers
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let search: Vec<String> = payload
+        .search
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let resp = crate::zapexec::call(Request::NetworkSetResolver {
+        nameservers,
+        search,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({ "code": 0, "message": resp.message })))
+}

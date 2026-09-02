@@ -163,6 +163,15 @@ fn api_routers() -> Router {
             "/system/config/time/timezones",
             get(system_config::list_timezones),
         )
+        .route("/system/config/network", get(system_config::network_get))
+        .route(
+            "/system/config/network/hostname",
+            post(system_config::network_set_hostname),
+        )
+        .route(
+            "/system/config/network/resolver",
+            post(system_config::network_set_resolver),
+        )
         .route("/system/config/ssh/status", get(system_config::ssh_status))
         .route(
             "/system/config/ssh/restart",
