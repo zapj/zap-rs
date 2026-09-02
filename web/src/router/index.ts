@@ -136,6 +136,12 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         component: () => import('@/views/server/ssh/index.vue'),
         meta: { title: 'SSH 服务', icon: 'ep:connection', affix: true },
       },
+      {
+        path: 'process',
+        name: 'ServerProcess',
+        component: () => import('@/views/server/process/index.vue'),
+        meta: { title: '进程管理', icon: 'ep:cpu', affix: true },
+      },
     ],
   },
   // 终端管理

@@ -135,6 +135,8 @@ fn api_routers() -> Router {
         .route("/system/config/ssh/install/log/{run_id}", get(system_config::ssh_install_log))
         .route("/system/config/services", get(system_config::list_services))
         .route("/system/config/services/action", post(system_config::service_action))
+        .route("/system/config/processes", get(system_config::list_processes))
+        .route("/system/config/processes/kill", post(system_config::process_kill))
         // SSH key management (admin only)
         .route("/system/config/ssh/keys", get(ssh_keys::list_keys))
         .route("/system/config/ssh/keys/content", get(ssh_keys::get_key_content))

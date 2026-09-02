@@ -122,6 +122,40 @@ pub async fn service_action(
     Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
 }
 
+// ── Process Management ─────────────────────────────────────
+
+/// 获取运行中的进程列表
+pub async fn list_processes(_claims: ValidatedClaims) -> ZapJsonResult {
+    let resp = crate::zapexec::call(Request::ProcessList).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({ "code": 0, "data": resp.data })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProcessKillPayload {
+    pub pid: u32,
+    #[serde(default)]
+    pub signal: Option<String>,
+}
+
+/// 终止进程（缺省 TERM，signal=9 为 KILL）
+pub async fn process_kill(
+    _claims: ValidatedClaims,
+    Json(payload): Json<ProcessKillPayload>,
+) -> ZapJsonResult {
+    let resp = crate::zapexec::call(Request::ProcessKill {
+        pid: payload.pid,
+        signal: payload.signal,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+}
+
 // ── SSH Install ──────────────────────────────────────────────
 
 /// 安装 openssh-server（后台异步，日志写入 run 记录，供前端轮询）

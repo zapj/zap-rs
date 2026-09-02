@@ -31,6 +31,12 @@ pub enum Request {
     /// 对系统服务执行操作（start/stop/restart/reload/enable/disable）
     #[serde(rename = "service.action")]
     ServiceAction { name: String, action: String },
+    /// 列出系统进程（ps）
+    #[serde(rename = "process.list")]
+    ProcessList,
+    /// 终止进程（signal 缺省为 TERM，9 表示 KILL）
+    #[serde(rename = "process.kill")]
+    ProcessKill { pid: u32, signal: Option<String> },
     /// 列出 SSH 密钥
     #[serde(rename = "ssh_key.list")]
     SshKeyList,

@@ -1,5 +1,6 @@
 mod appstore;
 mod file;
+mod process;
 mod service;
 mod ssh;
 mod ssh_key;
@@ -19,6 +20,8 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::SshInstall { run_id } => ssh::install(run_id).await,
         Request::ServiceList => service::list().await,
         Request::ServiceAction { name, action } => service::action(&name, &action).await,
+        Request::ProcessList => process::list().await,
+        Request::ProcessKill { pid, signal } => process::kill(pid, signal).await,
         Request::SshKeyList => ssh_key::list(gid).await,
         Request::SshKeyGet { name } => ssh_key::get(name, gid).await,
         Request::SshKeyGenerate { name, key_type, bits, comment } => {

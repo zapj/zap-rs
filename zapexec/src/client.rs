@@ -28,6 +28,8 @@ enum ClientVerb {
     SshInstall,
     ServiceList,
     ServiceAction { name: String, action: String },
+    ProcessList,
+    ProcessKill { pid: u32, signal: Option<String> },
     SshKeyList,
     SshKeyGenerate { name: String },
     SshKeyAuthorizedList,
@@ -76,6 +78,8 @@ pub async fn run(args: ClientArgs) {
         },
         ClientVerb::ServiceList => Request::ServiceList,
         ClientVerb::ServiceAction { name, action } => Request::ServiceAction { name, action },
+        ClientVerb::ProcessList => Request::ProcessList,
+        ClientVerb::ProcessKill { pid, signal } => Request::ProcessKill { pid, signal },
         ClientVerb::SshKeyList => Request::SshKeyList,
         ClientVerb::SshKeyGenerate { name } => Request::SshKeyGenerate {
             name,
