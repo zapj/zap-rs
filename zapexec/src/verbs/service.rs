@@ -72,9 +72,7 @@ pub async fn action(name: &str, action: &str) -> Response {
     let name = name.to_string();
     let action = action.to_string();
     tokio::task::spawn_blocking(move || {
-        let out = root_cmd("systemctl")
-            .args([&action, &name])
-            .output();
+        let out = root_cmd("systemctl").args([&action, &name]).output();
         match out {
             Ok(o) if o.status.success() => {
                 // 读取操作后的实际状态
@@ -90,10 +88,7 @@ pub async fn action(name: &str, action: &str) -> Response {
             }
             Ok(o) => Response::err(
                 -1,
-                format!(
-                    "操作失败: {}",
-                    String::from_utf8_lossy(&o.stderr).trim()
-                ),
+                format!("操作失败: {}", String::from_utf8_lossy(&o.stderr).trim()),
             ),
             Err(e) => Response::err(-1, format!("命令执行失败: {e}")),
         }

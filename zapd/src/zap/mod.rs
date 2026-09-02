@@ -1,19 +1,22 @@
-use axum::{response::{IntoResponse, Response}, Json};
+use axum::{
+    Json,
+    response::{IntoResponse, Response},
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub mod jwt;
-pub mod system_info;
+pub mod appstore;
+pub mod audit;
 pub mod certmgr;
+pub mod crypto;
 pub mod global;
 pub mod job;
-pub mod types;
-pub mod crypto;
+pub mod jwt;
+pub mod system_info;
 pub mod totp;
-pub mod audit;
-pub mod appstore;
+pub mod types;
 
-#[derive(Error,Debug)]
+#[derive(Error, Debug)]
 pub enum ZapError {
     /// 处理io错误
     #[error("IO Error: {0}")]
@@ -37,36 +40,36 @@ pub enum ZapError {
     #[error("{0}")]
     Error(String),
 
-
     #[error("{1}")]
-    New(i64,String),
-
+    New(i64, String),
 }
 
-#[derive(Serialize,Deserialize,Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ZapErrorResponse {
-    pub code : i64,
+    pub code: i64,
     pub message: String,
 }
 
-pub type ZapJsonResult = Result<axum::Json<serde_json::Value>,ZapError>;
-pub type ZapResult<T> = Result<T,ZapError>;
-
-
+pub type ZapJsonResult = Result<axum::Json<serde_json::Value>, ZapError>;
+pub type ZapResult<T> = Result<T, ZapError>;
 
 impl IntoResponse for ZapError {
     fn into_response(self) -> Response {
-        let (code,message) = match self {
-            ZapError::Error(msg) => (1,msg.to_string()),
-            ZapError::JsonParseError(e) => (2,e.to_string()),
-            ZapError::JsonWebTokenError(e) => (3,e.to_string()),
-            ZapError::DataBaseError(e) => (4,e.to_string()),
-            ZapError::IOError(e) => (5,e.to_string()),
-            ZapError::NotFound => (404,self.to_string()),
-            ZapError::Message(msg) => (0,msg.to_string()),
-            ZapError::New(code,msg) => (code,msg.to_string()),
+        let (code, message) = match self {
+            ZapError::Error(msg) => (1, msg.to_string()),
+            ZapError::JsonParseError(e) => (2, e.to_string()),
+            ZapError::JsonWebTokenError(e) => (3, e.to_string()),
+            ZapError::DataBaseError(e) => (4, e.to_string()),
+            ZapError::IOError(e) => (5, e.to_string()),
+            ZapError::NotFound => (404, self.to_string()),
+            ZapError::Message(msg) => (0, msg.to_string()),
+            ZapError::New(code, msg) => (code, msg.to_string()),
         };
-        (hyper::StatusCode::OK, Json(ZapErrorResponse{code,message})).into_response()
+        (
+            hyper::StatusCode::OK,
+            Json(ZapErrorResponse { code, message }),
+        )
+            .into_response()
     }
 }
 
@@ -75,4 +78,3 @@ impl ZapError {
         Err(ZapError::New(code, message))
     }
 }
-

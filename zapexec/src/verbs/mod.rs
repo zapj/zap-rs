@@ -24,12 +24,17 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::ProcessKill { pid, signal } => process::kill(pid, signal).await,
         Request::SshKeyList => ssh_key::list(gid).await,
         Request::SshKeyGet { name } => ssh_key::get(name, gid).await,
-        Request::SshKeyGenerate { name, key_type, bits, comment } => {
-            ssh_key::generate(name, key_type, bits, comment, gid).await
-        }
-        Request::SshKeyImport { name, private_key, public_key } => {
-            ssh_key::import(name, private_key, public_key, gid).await
-        }
+        Request::SshKeyGenerate {
+            name,
+            key_type,
+            bits,
+            comment,
+        } => ssh_key::generate(name, key_type, bits, comment, gid).await,
+        Request::SshKeyImport {
+            name,
+            private_key,
+            public_key,
+        } => ssh_key::import(name, private_key, public_key, gid).await,
         Request::SshKeyDelete { name } => ssh_key::delete(name).await,
         Request::SshKeyAuthorizedList => ssh_key::authorized_list().await,
         Request::SshKeyAuthorize { name } => ssh_key::authorize(name, gid).await,
@@ -44,18 +49,24 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::FileMkdir { path } => file::mkdir(path).await,
         Request::FileRename { path, new_path } => file::rename(path, new_path).await,
         Request::FileDownload { path } => file::download(path).await,
-        Request::FileUpload { path, name, content } => file::upload(path, name, content).await,
+        Request::FileUpload {
+            path,
+            name,
+            content,
+        } => file::upload(path, name, content).await,
         Request::FileInfo { path } => file::info(path).await,
         Request::AppstoreRepoAdd { name, url, run_id } => {
             appstore::repo_add(name, url, run_id).await
         }
         Request::AppstoreRepoRemove { id } => appstore::repo_remove(id).await,
-        Request::AppstoreRepoUpdate { id, run_id } => {
-            appstore::repo_update(id, run_id).await
-        }
-        Request::AppstoreInstall { pkg_path, source, repo_id, version, run_id } => {
-            appstore::install(pkg_path, source, repo_id, version, run_id).await
-        }
+        Request::AppstoreRepoUpdate { id, run_id } => appstore::repo_update(id, run_id).await,
+        Request::AppstoreInstall {
+            pkg_path,
+            source,
+            repo_id,
+            version,
+            run_id,
+        } => appstore::install(pkg_path, source, repo_id, version, run_id).await,
         Request::AppstoreUninstall { pkg_path, run_id } => {
             appstore::uninstall(pkg_path, run_id).await
         }
@@ -66,9 +77,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             version,
             old_version,
             run_id,
-        } => {
-            appstore::upgrade(pkg_path, source, repo_id, version, old_version, run_id).await
-        }
+        } => appstore::upgrade(pkg_path, source, repo_id, version, old_version, run_id).await,
         Request::AppstoreScriptRun { path, run_id } => appstore::script_run(path, run_id).await,
         Request::AppstoreScriptStop { run_id } => appstore::script_stop(run_id).await,
         Request::AppstoreScriptRead { path } => appstore::script_read(path).await,

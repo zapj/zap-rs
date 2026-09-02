@@ -1,13 +1,12 @@
 //! 审计日志查询接口（仅管理员）。
 
-use axum::{extract::Query, Json};
+use axum::{Json, extract::Query};
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::zap::{
-    audit,
-    jwt::{is_admin, ValidatedClaims},
-    ZapError, ZapJsonResult,
+    ZapError, ZapJsonResult, audit,
+    jwt::{ValidatedClaims, is_admin},
 };
 
 #[derive(Deserialize)]

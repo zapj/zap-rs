@@ -101,7 +101,11 @@ pub fn verify(secret: &str, code: &str) -> bool {
     }
     let now = now_secs();
     for offset in 0..=1u64 {
-        let ts = if offset == 0 { now } else { now.saturating_sub(offset * STEP) };
+        let ts = if offset == 0 {
+            now
+        } else {
+            now.saturating_sub(offset * STEP)
+        };
         if let Ok(c) = totp_code(secret, ts) {
             if c == code {
                 return true;

@@ -1,126 +1,115 @@
+use crate::{db, zap::ZapJsonResult};
 use axum::Json;
 use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::{db, zap::ZapJsonResult};
 
 use human_bytes::human_bytes;
 /// System Info
-/// 
-/// 
-use sysinfo::{
-    Disks, Networks, Product, System
-};
+///
+///
+use sysinfo::{Disks, Networks, Product, System};
 use systemstat::Platform;
 
-
-#[derive(Debug,Deserialize,Default,Serialize)]
+#[derive(Debug, Deserialize, Default, Serialize)]
 pub struct SystemInfo {
-    pub total_memory : u64,
-    pub used_memory : u64,
-    pub total_swap : u64,
-    pub used_swap : u64,
+    pub total_memory: u64,
+    pub used_memory: u64,
+    pub total_swap: u64,
+    pub used_swap: u64,
 
-    pub name : String,
-    pub kernel_version : String,
-    pub os_version : String,
-    pub host_name : String,
+    pub name: String,
+    pub kernel_version: String,
+    pub os_version: String,
+    pub host_name: String,
 
-    pub cpu_num : usize,
+    pub cpu_num: usize,
 
     pub disks: Vec<DiskInfo>,
 
     pub networks: Vec<NetWorkInfo>,
 
-    pub loadavg : (f32,f32,f32),
+    pub loadavg: (f32, f32, f32),
 
-    pub uptime : String,
+    pub uptime: String,
 
-    pub boot_time : String,
-    
+    pub boot_time: String,
 }
 
-#[derive(Deserialize,Debug,Default,Serialize)]
+#[derive(Deserialize, Debug, Default, Serialize)]
 pub struct OsInfo {
-    pub name : String,
-    pub kernel_version : String,
-    pub os_version : String,
-    pub host_name : String,
-    pub uptime : String,
-    pub boot_time : String,
+    pub name: String,
+    pub kernel_version: String,
+    pub os_version: String,
+    pub host_name: String,
+    pub uptime: String,
+    pub boot_time: String,
 }
 
-#[derive(Deserialize,Debug,Default,Serialize)]
+#[derive(Deserialize, Debug, Default, Serialize)]
 pub struct MemoryInfo {
-    pub total_memory : u64,
-    pub used_memory : u64,
-    pub total_swap : u64,
-    pub used_swap : u64,
+    pub total_memory: u64,
+    pub used_memory: u64,
+    pub total_swap: u64,
+    pub used_swap: u64,
 }
 
-#[derive(Deserialize,Debug,Default,Serialize)]
+#[derive(Deserialize, Debug, Default, Serialize)]
 pub struct DiskInfo {
-    pub name : String,
-    pub file_system : String,
-    pub available_space : u64,
-    pub total_space : u64,
-    pub mount_point : String,
+    pub name: String,
+    pub file_system: String,
+    pub available_space: u64,
+    pub total_space: u64,
+    pub mount_point: String,
 }
 
-#[derive(Deserialize,Debug,Default,Serialize)]
+#[derive(Deserialize, Debug, Default, Serialize)]
 pub struct NetWorkInfo {
-    pub interface_name : String,
-    pub mtu : u64,
+    pub interface_name: String,
+    pub mtu: u64,
     // B bit
-    pub up : u64,
+    pub up: u64,
     // B bit
-    pub down : u64,
+    pub down: u64,
 
-    pub ipaddrs : Vec<String>,
+    pub ipaddrs: Vec<String>,
 }
-
 
 pub async fn get_system_info() -> ZapJsonResult {
     let mut sys = System::new_all();
     let load_avg = System::load_average();
     let pub_ip_address = match public_ip_address::perform_lookup(None).await {
-        Ok(ip) => {
-            ip.ip.to_string()
-        }
-        Err(_) => {
-            match local_ip_address::local_ip() {
-                Ok(ip) => ip.to_string(),
-                Err(_)=> "127.0.0.1".to_string(),
-            }
-        }
+        Ok(ip) => ip.ip.to_string(),
+        Err(_) => match local_ip_address::local_ip() {
+            Ok(ip) => ip.to_string(),
+            Err(_) => "127.0.0.1".to_string(),
+        },
     };
 
-    let mut disk_info:Vec<DiskInfo> = Vec::new();
+    let mut disk_info: Vec<DiskInfo> = Vec::new();
     let disks = Disks::new_with_refreshed_list();
     sys.refresh_cpu_usage();
     for disk in &disks {
         // disk.name();
-        disk_info.push(DiskInfo{
+        disk_info.push(DiskInfo {
             name: disk.name().to_string_lossy().to_string(),
             file_system: disk.file_system().to_string_lossy().to_string(),
             available_space: disk.available_space(),
             total_space: disk.total_space(),
             mount_point: disk.mount_point().to_string_lossy().to_string(),
         });
-        
     }
 
     let systat = systemstat::System::new();
     let uptime = match systat.uptime() {
-        Ok(uptime)=> humantime::format_duration(uptime).to_string(),
+        Ok(uptime) => humantime::format_duration(uptime).to_string(),
         Err(_) => "0 s".to_string(),
     };
 
     let boot_time = systat.boot_time().unwrap();
-    
-    
-    let boot_time = format!("{} {}",boot_time.date(),boot_time.time());
-    
+
+    let boot_time = format!("{} {}", boot_time.date(), boot_time.time());
+
     return Ok(Json(json!({
         "code":0,
         "message":"OK",
@@ -136,7 +125,7 @@ pub async fn get_system_info() -> ZapJsonResult {
             "product_vender_name":Product::vendor_name().unwrap_or("".to_string()),
             "uptime":uptime,
             "boot_time":boot_time,
-            
+
             // 初始化 cpu / memory / disk / loadavg
             "memory_total": human_bytes(sys.total_memory() as f64),
             "memory_total_b":sys.total_memory(),
@@ -161,28 +150,36 @@ pub async fn get_system_info() -> ZapJsonResult {
 pub async fn get_system_status() -> ZapJsonResult {
     let mut sys = System::new_all();
     let load_avg = System::load_average();
-    
+
     let systat = systemstat::System::new();
     let uptime = match systat.uptime() {
-        Ok(uptime)=> humantime::format_duration(uptime).to_string(),
+        Ok(uptime) => humantime::format_duration(uptime).to_string(),
         Err(_) => "0 s".to_string(),
     };
     let current_time = chrono::Local::now();
-    let five_algo = current_time-Duration::minutes(5);
-    
+    let five_algo = current_time - Duration::minutes(5);
+
     let pool = db::get_db_pool().await;
-    let system_stats : Vec<db::models::SystemStatsModel> = sqlx::query_as("select * from system_stats where created_at >= $1").bind(five_algo.timestamp()).fetch_all(pool).await?;
-    let network_stats : Vec<db::models::NetworksStatsForDashboard> = sqlx::query_as("select name, received,transmitted,packets_received,
+    let system_stats: Vec<db::models::SystemStatsModel> =
+        sqlx::query_as("select * from system_stats where created_at >= $1")
+            .bind(five_algo.timestamp())
+            .fetch_all(pool)
+            .await?;
+    let network_stats: Vec<db::models::NetworksStatsForDashboard> = sqlx::query_as(
+        "select name, received,transmitted,packets_received,
     packets_transmitted,total_received,total_transmitted,
-    ipaddrs,created_at from networks_stats where created_at >= $1")
-    .bind(five_algo.timestamp()).fetch_all(pool).await?;
+    ipaddrs,created_at from networks_stats where created_at >= $1",
+    )
+    .bind(five_algo.timestamp())
+    .fetch_all(pool)
+    .await?;
     sys.refresh_cpu_usage();
     return Ok(Json(json!({
         "code":0,
         "message":"OK",
         "data": {
             "uptime":uptime,
-            
+
             // 初始化 cpu / memory / disk / loadavg
             "memory_total": human_bytes(sys.total_memory() as f64),
             "memory_total_b":sys.total_memory(),
@@ -203,79 +200,72 @@ pub async fn get_system_status() -> ZapJsonResult {
     })));
 }
 
-
-
 pub async fn get_os_info() -> SystemInfo {
-    
     let mut sinfo = SystemInfo::default();
-    
+
     let mut sys = System::new_all();
-    
+
     // First we update all information of our `System` struct.
     sys.refresh_all();
-    
+
     sinfo.total_memory = sys.total_memory();
     sinfo.used_memory = sys.used_memory();
     sinfo.total_swap = sys.total_swap();
     sinfo.used_swap = sys.used_swap();
-    
+
     sinfo.name = System::name().unwrap_or("".to_string());
     sinfo.kernel_version = System::kernel_version().unwrap_or("".to_string());
     sinfo.os_version = System::os_version().unwrap_or("".to_string());
     sinfo.host_name = System::host_name().unwrap_or("".to_string());
-    
+
     sinfo.cpu_num = sys.cpus().len();
-    
-    
+
     // Display processes ID, name and disk usage:
     // for (pid, process) in sys.processes() {
-        // println!("[{pid}] {:?} {:?}", process.name(), process.disk_usage());
+    // println!("[{pid}] {:?} {:?}", process.name(), process.disk_usage());
     // }
-    
+
     // We display all disks' information:
     sinfo.disks = Vec::new();
     let disks = Disks::new_with_refreshed_list();
     for disk in &disks {
         // disk.name();
-        sinfo.disks.push(DiskInfo{
+        sinfo.disks.push(DiskInfo {
             name: disk.name().to_string_lossy().to_string(),
             file_system: disk.file_system().to_string_lossy().to_string(),
             available_space: disk.available_space(),
             total_space: disk.total_space(),
             mount_point: disk.mount_point().to_string_lossy().to_string(),
         });
-        
     }
-    
+
     // Network interfaces name, total data received and total data transmitted:
     let networks = Networks::new_with_refreshed_list();
-    
+
     for (interface_name, data) in &networks {
-        let ip =  data.ip_networks().iter().map(|v| v.to_string()).collect();
-        
-        sinfo.networks.push(NetWorkInfo{
+        let ip = data.ip_networks().iter().map(|v| v.to_string()).collect();
+
+        sinfo.networks.push(NetWorkInfo {
             interface_name: interface_name.to_string(),
-            mtu : data.mtu(),
-            up : data.total_transmitted(),
-            down : data.total_received(),
-            ipaddrs : ip,
+            mtu: data.mtu(),
+            up: data.total_transmitted(),
+            down: data.total_received(),
+            ipaddrs: ip,
         });
     }
     let systat = systemstat::System::new();
     sinfo.uptime = match systat.uptime() {
-        Ok(uptime)=> humantime::format_duration(uptime).to_string(),
+        Ok(uptime) => humantime::format_duration(uptime).to_string(),
         Err(_) => "0 s".to_string(),
     };
 
     let boot_time = systat.boot_time().unwrap();
-    
-    
-    sinfo.boot_time = format!("{} {}",boot_time.date(),boot_time.time());
-    
+
+    sinfo.boot_time = format!("{} {}", boot_time.date(), boot_time.time());
+
     sinfo.loadavg = match systat.load_average() {
-        Ok(loadavg) => (loadavg.one,loadavg.five,loadavg.fifteen),
-        Err(_) => (0.0,0.0,0.0)
+        Ok(loadavg) => (loadavg.one, loadavg.five, loadavg.fifteen),
+        Err(_) => (0.0, 0.0, 0.0),
     };
     sinfo
-
 }

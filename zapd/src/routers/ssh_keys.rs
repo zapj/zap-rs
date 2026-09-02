@@ -2,7 +2,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::zap::{jwt::ValidatedClaims, ZapError, ZapJsonResult};
+use crate::zap::{ZapError, ZapJsonResult, jwt::ValidatedClaims};
 use zap_proto::Request;
 
 // ── handlers ───────────────────────────────────────────────
@@ -59,7 +59,9 @@ pub async fn generate_key(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
 }
 
 // ── import ─────────────────────────────────────────────────
@@ -84,7 +86,9 @@ pub async fn import_key(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
 }
 
 // ── delete ─────────────────────────────────────────────────
@@ -143,7 +147,10 @@ pub async fn deauthorize_key(
     _claims: ValidatedClaims,
     Json(payload): Json<DeauthorizeKeyPayload>,
 ) -> ZapJsonResult {
-    let resp = crate::zapexec::call(Request::SshKeyDeauthorize { index: payload.index }).await?;
+    let resp = crate::zapexec::call(Request::SshKeyDeauthorize {
+        index: payload.index,
+    })
+    .await?;
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }

@@ -33,33 +33,34 @@ pub async fn set_timezone(timezone: &str) -> Response {
         return Response::err(-1, "时区不能为空");
     }
     let tz = timezone.to_string();
-    tokio::task::spawn_blocking(move || match root_cmd("timedatectl")
-        .args(["set-timezone", &tz])
-        .output()
-    {
-        Ok(o) if o.status.success() => Response::ok("时区设置成功", None),
-        Ok(o) => Response::err(
-            -1,
-            format!("时区设置失败: {}", String::from_utf8_lossy(&o.stderr)),
-        ),
-        Err(e) => Response::err(-1, format!("命令执行失败: {e}")),
+    tokio::task::spawn_blocking(move || {
+        match root_cmd("timedatectl").args(["set-timezone", &tz]).output() {
+            Ok(o) if o.status.success() => Response::ok("时区设置成功", None),
+            Ok(o) => Response::err(
+                -1,
+                format!("时区设置失败: {}", String::from_utf8_lossy(&o.stderr)),
+            ),
+            Err(e) => Response::err(-1, format!("命令执行失败: {e}")),
+        }
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
 }
 
 pub async fn list_timezones() -> Response {
-    tokio::task::spawn_blocking(|| match root_cmd("timedatectl").args(["list-timezones"]).output() {
-        Ok(o) if o.status.success() => {
-            let zones: Vec<String> = String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            Response::ok("ok", Some(json!(zones)))
+    tokio::task::spawn_blocking(|| {
+        match root_cmd("timedatectl").args(["list-timezones"]).output() {
+            Ok(o) if o.status.success() => {
+                let zones: Vec<String> = String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                Response::ok("ok", Some(json!(zones)))
+            }
+            Ok(o) => Response::err(-1, String::from_utf8_lossy(&o.stderr).to_string()),
+            Err(e) => Response::err(-1, format!("命令执行失败: {e}")),
         }
-        Ok(o) => Response::err(-1, String::from_utf8_lossy(&o.stderr).to_string()),
-        Err(e) => Response::err(-1, format!("命令执行失败: {e}")),
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))

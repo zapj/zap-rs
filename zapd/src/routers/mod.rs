@@ -1,11 +1,11 @@
 use axum::{
+    Json, Router,
     body::Body,
     extract::Request,
-    http::{header, Method, StatusCode, Uri},
+    http::{Method, StatusCode, Uri, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use rust_embed::RustEmbed;
 use serde_json::json;
@@ -36,8 +36,8 @@ pub mod ssh_keys;
 pub mod ssh_terminal;
 pub mod system_audit;
 pub mod system_config;
-pub mod system_info;
 pub mod system_file;
+pub mod system_info;
 pub mod system_job;
 pub mod system_menu;
 pub mod system_role;
@@ -137,8 +137,14 @@ fn api_routers() -> Router {
         .route("/system/role/add", post(system_role::role_add))
         .route("/system/role/update", post(system_role::role_update))
         .route("/system/role/delete", post(system_role::role_delete))
-        .route("/system/role/permissions", get(system_role::role_permissions_get))
-        .route("/system/role/permissions/set", post(system_role::role_permissions_set))
+        .route(
+            "/system/role/permissions",
+            get(system_role::role_permissions_get),
+        )
+        .route(
+            "/system/role/permissions/set",
+            post(system_role::role_permissions_set),
+        )
         // Menu management (admin only)
         .route("/system/menus/tree", get(system_menu::get_menus_tree))
         .route("/system/menus/list", get(system_menu::menu_list))
@@ -149,33 +155,90 @@ fn api_routers() -> Router {
         // Server config (admin only)
         .route("/system/config/time", get(system_config::get_time))
         .route("/system/config/time/sync", post(system_config::sync_time))
-        .route("/system/config/time/timezone", post(system_config::set_timezone))
-        .route("/system/config/time/timezones", get(system_config::list_timezones))
+        .route(
+            "/system/config/time/timezone",
+            post(system_config::set_timezone),
+        )
+        .route(
+            "/system/config/time/timezones",
+            get(system_config::list_timezones),
+        )
         .route("/system/config/ssh/status", get(system_config::ssh_status))
-        .route("/system/config/ssh/restart", post(system_config::ssh_restart))
-        .route("/system/config/ssh/install", post(system_config::ssh_install))
-        .route("/system/config/ssh/install/log/{run_id}", get(system_config::ssh_install_log))
+        .route(
+            "/system/config/ssh/restart",
+            post(system_config::ssh_restart),
+        )
+        .route(
+            "/system/config/ssh/install",
+            post(system_config::ssh_install),
+        )
+        .route(
+            "/system/config/ssh/install/log/{run_id}",
+            get(system_config::ssh_install_log),
+        )
         .route("/system/config/services", get(system_config::list_services))
-        .route("/system/config/services/action", post(system_config::service_action))
-        .route("/system/config/processes", get(system_config::list_processes))
-        .route("/system/config/processes/kill", post(system_config::process_kill))
+        .route(
+            "/system/config/services/action",
+            post(system_config::service_action),
+        )
+        .route(
+            "/system/config/processes",
+            get(system_config::list_processes),
+        )
+        .route(
+            "/system/config/processes/kill",
+            post(system_config::process_kill),
+        )
         // SSH key management (admin only)
         .route("/system/config/ssh/keys", get(ssh_keys::list_keys))
-        .route("/system/config/ssh/keys/content", get(ssh_keys::get_key_content))
-        .route("/system/config/ssh/keys/generate", post(ssh_keys::generate_key))
+        .route(
+            "/system/config/ssh/keys/content",
+            get(ssh_keys::get_key_content),
+        )
+        .route(
+            "/system/config/ssh/keys/generate",
+            post(ssh_keys::generate_key),
+        )
         .route("/system/config/ssh/keys/import", post(ssh_keys::import_key))
         .route("/system/config/ssh/keys/delete", post(ssh_keys::delete_key))
-        .route("/system/config/ssh/authorized_keys", get(ssh_keys::list_authorized_keys))
-        .route("/system/config/ssh/authorize", post(ssh_keys::authorize_key))
-        .route("/system/config/ssh/deauthorize", post(ssh_keys::deauthorize_key))
+        .route(
+            "/system/config/ssh/authorized_keys",
+            get(ssh_keys::list_authorized_keys),
+        )
+        .route(
+            "/system/config/ssh/authorize",
+            post(ssh_keys::authorize_key),
+        )
+        .route(
+            "/system/config/ssh/deauthorize",
+            post(ssh_keys::deauthorize_key),
+        )
         // SSH terminal
         .route("/terminal/connections", get(ssh_terminal::list_connections))
-        .route("/terminal/connections/{id}", get(ssh_terminal::get_connection))
-        .route("/terminal/connections/create", post(ssh_terminal::create_connection))
-        .route("/terminal/connections/{id}/update", post(ssh_terminal::update_connection))
-        .route("/terminal/connections/{id}/delete", post(ssh_terminal::delete_connection))
-        .route("/terminal/connections/test", get(ssh_terminal::test_connection))
-        .route("/terminal/connections/{id}/push-key", post(ssh_terminal::push_key_to_host))
+        .route(
+            "/terminal/connections/{id}",
+            get(ssh_terminal::get_connection),
+        )
+        .route(
+            "/terminal/connections/create",
+            post(ssh_terminal::create_connection),
+        )
+        .route(
+            "/terminal/connections/{id}/update",
+            post(ssh_terminal::update_connection),
+        )
+        .route(
+            "/terminal/connections/{id}/delete",
+            post(ssh_terminal::delete_connection),
+        )
+        .route(
+            "/terminal/connections/test",
+            get(ssh_terminal::test_connection),
+        )
+        .route(
+            "/terminal/connections/{id}/push-key",
+            post(ssh_terminal::push_key_to_host),
+        )
         .route("/terminal/ws/{id}", get(ssh_terminal::ws_terminal))
         // System
         .route("/system/info", get(system_info::system_info))

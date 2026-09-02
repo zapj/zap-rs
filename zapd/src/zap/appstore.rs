@@ -1,7 +1,7 @@
 //! AppStore 运行任务管理：DB 记录 + 日志监控 + 本地目录扫描。
 
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::{config, db, zap::ZapError};
@@ -209,7 +209,8 @@ pub async fn scan_packages() -> Vec<Value> {
     let custom_dir = appstore_dir().join("custom");
     let repo_list = read_repos_value().await.unwrap_or_default();
     tokio::task::spawn_blocking(move || {
-        let mut by_path: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+        let mut by_path: std::collections::BTreeMap<String, Value> =
+            std::collections::BTreeMap::new();
         // 先扫各 Git 源（按 repos.yaml 顺序，内置源排最前 → 优先级最低）
         if let Some(repos) = repo_list.get("repos").and_then(|r| r.as_array()) {
             for repo in repos {
@@ -305,8 +306,11 @@ pub async fn installed_version_of(pkg_path: &str) -> Option<String> {
     let pkg_path = pkg_path.to_string();
     tokio::task::spawn_blocking(move || {
         let p = apps.join(&pkg_path).join("meta.yaml");
-        parse_meta_yaml(&p)
-            .and_then(|m| m.get("version").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        parse_meta_yaml(&p).and_then(|m| {
+            m.get("version")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
     })
     .await
     .unwrap_or(None)

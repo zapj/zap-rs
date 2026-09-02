@@ -9,7 +9,7 @@ use std::time::UNIX_EPOCH;
 
 use serde_json::json;
 
-use zap_proto::{b64_decode, b64_encode, Response};
+use zap_proto::{Response, b64_decode, b64_encode};
 
 #[derive(serde::Serialize)]
 struct FileInfo {
@@ -151,7 +151,10 @@ pub async fn write(path: String, content: String) -> Response {
             let _ = std::fs::create_dir_all(parent);
         }
         match std::fs::write(&resolved, &content) {
-            Ok(_) => Response::ok("保存成功", Some(json!({ "path": resolved.to_string_lossy() }))),
+            Ok(_) => Response::ok(
+                "保存成功",
+                Some(json!({ "path": resolved.to_string_lossy() })),
+            ),
             Err(e) => Response::err(-1, format!("写入失败: {e}")),
         }
     })
@@ -190,7 +193,10 @@ pub async fn mkdir(path: String) -> Response {
             return Response::err(-1, "目录已存在");
         }
         match std::fs::create_dir_all(&resolved) {
-            Ok(_) => Response::ok("创建成功", Some(json!({ "path": resolved.to_string_lossy() }))),
+            Ok(_) => Response::ok(
+                "创建成功",
+                Some(json!({ "path": resolved.to_string_lossy() })),
+            ),
             Err(e) => Response::err(-1, format!("创建失败: {e}")),
         }
     })

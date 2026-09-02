@@ -2,16 +2,16 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 
 use axum::{
+    Json,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Extension, Path, Query,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use futures_util::{SinkExt, StreamExt};
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Executor, Row};
@@ -135,9 +135,15 @@ pub struct UpdateConnectionPayload {
     pub sort_order: Option<i32>,
 }
 
-fn default_port() -> i32 { 22 }
-fn default_username() -> String { "root".to_string() }
-fn default_auth_type() -> String { "password".to_string() }
+fn default_port() -> i32 {
+    22
+}
+fn default_username() -> String {
+    "root".to_string()
+}
+fn default_auth_type() -> String {
+    "password".to_string()
+}
 
 // ── CRUD handlers ──────────────────────────────────────────
 
@@ -146,7 +152,7 @@ pub async fn list_connections(_claims: ValidatedClaims) -> ZapJsonResult {
     let rows = sqlx::query(
         "SELECT id, name, host, port, username, auth_type, password, ssh_key_name,
                 remark, status, sort_order, created_at, updated_at
-         FROM ssh_connections ORDER BY sort_order, id"
+         FROM ssh_connections ORDER BY sort_order, id",
     )
     .fetch_all(pool)
     .await?;
@@ -159,15 +165,12 @@ pub async fn list_connections(_claims: ValidatedClaims) -> ZapJsonResult {
     Ok(Json(json!({ "code": 0, "data": connections })))
 }
 
-pub async fn get_connection(
-    _claims: ValidatedClaims,
-    Path(id): Path<i64>,
-) -> ZapJsonResult {
+pub async fn get_connection(_claims: ValidatedClaims, Path(id): Path<i64>) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
     let row = sqlx::query(
         "SELECT id, name, host, port, username, auth_type, password, ssh_key_name,
                 remark, status, sort_order, created_at, updated_at
-         FROM ssh_connections WHERE id = ?"
+         FROM ssh_connections WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -195,13 +198,19 @@ pub async fn create_connection(
         return Err(ZapError::New(-1, "主机地址不能为空".to_string()));
     }
     if payload.auth_type != "password" && payload.auth_type != "key" {
-        return Err(ZapError::New(-1, "认证类型仅支持 password 或 key".to_string()));
+        return Err(ZapError::New(
+            -1,
+            "认证类型仅支持 password 或 key".to_string(),
+        ));
     }
     if payload.auth_type == "password" && payload.password.is_empty() {
         return Err(ZapError::New(-1, "密码认证时密码不能为空".to_string()));
     }
     if payload.auth_type == "key" && payload.ssh_key_name.is_empty() {
-        return Err(ZapError::New(-1, "密钥认证时必须选择一个 SSH 密钥".to_string()));
+        return Err(ZapError::New(
+            -1,
+            "密钥认证时必须选择一个 SSH 密钥".to_string(),
+        ));
     }
 
     let pool = db::get_db_pool().await;
@@ -260,45 +269,85 @@ pub async fn update_connection(
 
     if let Some(v) = payload.name.as_deref().map(|s| s.trim().to_string()) {
         sqlx::query("UPDATE ssh_connections SET name = ?, updated_at = ? WHERE id = ?")
-            .bind(&v).bind(now).bind(id).execute(pool).await?;
+            .bind(&v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.host.as_deref().map(|s| s.trim().to_string()) {
         sqlx::query("UPDATE ssh_connections SET host = ?, updated_at = ? WHERE id = ?")
-            .bind(&v).bind(now).bind(id).execute(pool).await?;
+            .bind(&v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.port {
         sqlx::query("UPDATE ssh_connections SET port = ?, updated_at = ? WHERE id = ?")
-            .bind(v).bind(now).bind(id).execute(pool).await?;
+            .bind(v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.username {
         sqlx::query("UPDATE ssh_connections SET username = ?, updated_at = ? WHERE id = ?")
-            .bind(v).bind(now).bind(id).execute(pool).await?;
+            .bind(v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.auth_type {
         sqlx::query("UPDATE ssh_connections SET auth_type = ?, updated_at = ? WHERE id = ?")
-            .bind(v).bind(now).bind(id).execute(pool).await?;
+            .bind(v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.password {
         // 密码加密后入库
         let encrypted = crypto::encrypt_password(&v);
         sqlx::query("UPDATE ssh_connections SET password = ?, updated_at = ? WHERE id = ?")
-            .bind(encrypted).bind(now).bind(id).execute(pool).await?;
+            .bind(encrypted)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.ssh_key_name {
         sqlx::query("UPDATE ssh_connections SET ssh_key_name = ?, updated_at = ? WHERE id = ?")
-            .bind(v).bind(now).bind(id).execute(pool).await?;
+            .bind(v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.remark {
         sqlx::query("UPDATE ssh_connections SET remark = ?, updated_at = ? WHERE id = ?")
-            .bind(v).bind(now).bind(id).execute(pool).await?;
+            .bind(v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.status {
         sqlx::query("UPDATE ssh_connections SET status = ?, updated_at = ? WHERE id = ?")
-            .bind(v).bind(now).bind(id).execute(pool).await?;
+            .bind(v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
     if let Some(v) = payload.sort_order {
         sqlx::query("UPDATE ssh_connections SET sort_order = ?, updated_at = ? WHERE id = ?")
-            .bind(v).bind(now).bind(id).execute(pool).await?;
+            .bind(v)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
     }
 
     info!("SSH connection updated: id={}", id);
@@ -382,8 +431,14 @@ pub async fn ws_terminal(
             .unwrap();
     }
 
-    let rows: u32 = params.get("rows").and_then(|v| v.parse().ok()).unwrap_or(24);
-    let cols: u32 = params.get("cols").and_then(|v| v.parse().ok()).unwrap_or(80);
+    let rows: u32 = params
+        .get("rows")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(24);
+    let cols: u32 = params
+        .get("cols")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(80);
 
     ws.on_upgrade(move |socket| handle_terminal(socket, id, rows, cols))
 }
@@ -542,7 +597,9 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
 async fn send_error_and_close(socket: WebSocket, msg: &str) {
     let (mut sender, _) = socket.split();
     let _ = sender
-        .send(Message::Text(axum::extract::ws::Utf8Bytes::from(msg.to_string())))
+        .send(Message::Text(axum::extract::ws::Utf8Bytes::from(
+            msg.to_string(),
+        )))
         .await;
     let _ = sender.close().await;
 }
@@ -591,7 +648,7 @@ async fn load_connection_info(id: i64) -> Result<ConnectionInfo, ZapError> {
     let pool = db::get_db_pool().await;
     let row = sqlx::query(
         "SELECT host, port, username, auth_type, password, ssh_key_name
-         FROM ssh_connections WHERE id = ? AND status = 1"
+         FROM ssh_connections WHERE id = ? AND status = 1",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -674,19 +731,24 @@ pub async fn test_connection(
     let tcp = match TcpStream::connect(&addr) {
         Ok(tcp) => tcp,
         Err(e) => {
-            return Ok(Json(json!({ "code": 0, "success": false, "message": format!("TCP 连接失败: {}", e) })));
+            return Ok(Json(
+                json!({ "code": 0, "success": false, "message": format!("TCP 连接失败: {}", e) }),
+            ));
         }
     };
 
-    let mut session = Session::new()
-        .map_err(|e| ZapError::Error(format!("创建 SSH 会话失败: {}", e)))?;
+    let mut session =
+        Session::new().map_err(|e| ZapError::Error(format!("创建 SSH 会话失败: {}", e)))?;
 
     session.set_tcp_stream(tcp);
-    session.handshake()
+    session
+        .handshake()
         .map_err(|e| ZapError::Error(format!("SSH 握手失败: {}", e)))?;
 
     match authenticate(&mut session, &conn_info) {
-        Ok(()) => Ok(Json(json!({ "code": 0, "success": true, "message": "连接成功" }))),
+        Ok(()) => Ok(Json(
+            json!({ "code": 0, "success": true, "message": "连接成功" }),
+        )),
         Err(e) => Ok(Json(json!({ "code": 0, "success": false, "message": e }))),
     }
 }
@@ -716,7 +778,10 @@ pub async fn push_key_to_host(
 ) -> ZapJsonResult {
     let conn_info = load_connection_info(id).await?;
     if conn_info.auth_type != "key" {
-        return Err(ZapError::New(-1, "仅密钥认证的连接支持推送公钥".to_string()));
+        return Err(ZapError::New(
+            -1,
+            "仅密钥认证的连接支持推送公钥".to_string(),
+        ));
     }
     if conn_info.ssh_key_name.is_empty() {
         return Err(ZapError::New(-1, "连接未绑定 SSH 密钥".to_string()));
@@ -725,7 +790,10 @@ pub async fn push_key_to_host(
     // 本地回环主机：root 特权写本机 authorized_keys，仅 admin
     if is_loopback_host(&conn_info.host) {
         if !crate::zap::jwt::is_admin(&claims) {
-            return Err(ZapError::New(403, "仅 admin 角色可以写入本机 SSH 授权".to_string()));
+            return Err(ZapError::New(
+                403,
+                "仅 admin 角色可以写入本机 SSH 授权".to_string(),
+            ));
         }
         let resp = crate::zapexec::call(Request::SshKeyInstallLocal {
             username: conn_info.username.clone(),
@@ -750,12 +818,13 @@ pub async fn push_key_to_host(
         .ok_or_else(|| ZapError::New(-1, format!("公钥 '{}' 不存在", conn_info.ssh_key_name)))?;
 
     let addr = format!("{}:{}", conn_info.host, conn_info.port);
-    let tcp = TcpStream::connect(&addr)
-        .map_err(|e| ZapError::Error(format!("TCP 连接失败: {}", e)))?;
-    let mut session = Session::new()
-        .map_err(|e| ZapError::Error(format!("创建 SSH 会话失败: {}", e)))?;
+    let tcp =
+        TcpStream::connect(&addr).map_err(|e| ZapError::Error(format!("TCP 连接失败: {}", e)))?;
+    let mut session =
+        Session::new().map_err(|e| ZapError::Error(format!("创建 SSH 会话失败: {}", e)))?;
     session.set_tcp_stream(tcp);
-    session.handshake()
+    session
+        .handshake()
         .map_err(|e| ZapError::Error(format!("SSH 握手失败: {}", e)))?;
     let password = payload
         .password
@@ -789,7 +858,9 @@ pub async fn push_key_to_host(
             if f.read_to_string(&mut content).is_ok()
                 && content.lines().any(|l| l.trim() == pub_content)
             {
-                return Ok(Json(json!({ "code": 0, "message": "公钥已存在于远程主机，无需重复推送" })));
+                return Ok(Json(
+                    json!({ "code": 0, "message": "公钥已存在于远程主机，无需重复推送" }),
+                ));
             }
         }
     }
@@ -812,10 +883,15 @@ pub async fn push_key_to_host(
         Some(&claims),
         None,
         "push_key",
-        &format!("{}@{}:{}", conn_info.username, conn_info.host, conn_info.port),
+        &format!(
+            "{}@{}:{}",
+            conn_info.username, conn_info.host, conn_info.port
+        ),
         "推送公钥到远程主机 authorized_keys",
     )
     .await;
 
-    Ok(Json(json!({ "code": 0, "message": "公钥已推送到远程主机 ~/.ssh/authorized_keys" })))
+    Ok(Json(
+        json!({ "code": 0, "message": "公钥已推送到远程主机 ~/.ssh/authorized_keys" }),
+    ))
 }

@@ -11,7 +11,10 @@ const MAX_FRAME: u32 = 16 * 1024 * 1024;
 pub async fn send<W: AsyncWrite + Unpin>(w: &mut W, msg: &Message) -> io::Result<()> {
     let bytes = serde_json::to_vec(msg).map_err(serde_err)?;
     if bytes.len() > MAX_FRAME as usize {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame too large",
+        ));
     }
     w.write_u32(bytes.len() as u32).await?;
     w.write_all(&bytes).await?;
@@ -23,7 +26,10 @@ pub async fn send<W: AsyncWrite + Unpin>(w: &mut W, msg: &Message) -> io::Result
 pub async fn recv<R: AsyncRead + Unpin>(r: &mut R) -> io::Result<Message> {
     let len = r.read_u32().await?;
     if len > MAX_FRAME {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame too large",
+        ));
     }
     let mut buf = vec![0u8; len as usize];
     r.read_exact(&mut buf).await?;

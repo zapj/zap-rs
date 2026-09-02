@@ -186,7 +186,10 @@ fn manage(verb: &str, service: Service) -> Result<(), String> {
 
 /// 查看状态，无需 root。
 fn status(service: Service) -> Result<(), String> {
-    println!("{:<10} {:<24} {:<10} {:<8}", "SERVICE", "STATE", "ENABLED", "PID");
+    println!(
+        "{:<10} {:<24} {:<10} {:<8}",
+        "SERVICE", "STATE", "ENABLED", "PID"
+    );
     println!("{}", "-".repeat(10 + 1 + 24 + 1 + 10 + 1 + 8));
 
     for unit in service.units() {

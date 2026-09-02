@@ -1,17 +1,13 @@
-use axum::{extract::Extension, Json};
+use axum::{Json, extract::Extension};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Sqlite;
 use std::net::SocketAddr;
 use tracing::info;
 
 use crate::{
     db,
-    zap::{
-        audit,
-        jwt::ValidatedClaims,
-        ZapError, ZapJsonResult,
-    },
+    zap::{ZapError, ZapJsonResult, audit, jwt::ValidatedClaims},
 };
 
 // ── types ──────────────────────────────────────────────────
@@ -138,11 +134,10 @@ fn build_menu_tree(rows: &[MenuRow], parent_id: i64) -> Vec<Value> {
 /// Get full menu tree (for rendering sidebar)
 pub async fn get_menus_tree() -> ZapJsonResult {
     let pool = db::get_db_pool().await;
-    let rows: Vec<MenuRow> = sqlx::query_as(
-        "SELECT * FROM menus WHERE status = 1 ORDER BY sort_order, id",
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<MenuRow> =
+        sqlx::query_as("SELECT * FROM menus WHERE status = 1 ORDER BY sort_order, id")
+            .fetch_all(pool)
+            .await?;
 
     let tree = build_menu_tree(&rows, 0);
     Ok(Json(json!({ "code": 0, "message": "ok", "data": tree })))
@@ -151,11 +146,9 @@ pub async fn get_menus_tree() -> ZapJsonResult {
 /// Get flat menu list (for admin management)
 pub async fn menu_list(_claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
-    let rows: Vec<MenuRow> = sqlx::query_as(
-        "SELECT * FROM menus ORDER BY sort_order, id",
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<MenuRow> = sqlx::query_as("SELECT * FROM menus ORDER BY sort_order, id")
+        .fetch_all(pool)
+        .await?;
 
     let tree = build_menu_tree(&rows, 0);
     Ok(Json(json!({ "code": 0, "message": "ok", "data": tree })))
@@ -201,8 +194,14 @@ pub async fn menu_add(
         &payload.name,
     )
     .await;
-    info!("Menu created: {} (id: {})", payload.name, result.last_insert_rowid());
-    Ok(Json(json!({ "code": 0, "message": "创建成功", "data": { "id": result.last_insert_rowid() } })))
+    info!(
+        "Menu created: {} (id: {})",
+        payload.name,
+        result.last_insert_rowid()
+    );
+    Ok(Json(
+        json!({ "code": 0, "message": "创建成功", "data": { "id": result.last_insert_rowid() } }),
+    ))
 }
 
 /// Update menu
@@ -217,20 +216,48 @@ pub async fn menu_update(
     let mut qb: sqlx::QueryBuilder<'_, Sqlite> = sqlx::QueryBuilder::new("UPDATE menus SET ");
     let mut sep = qb.separated(", ");
 
-    if let Some(v) = payload.parent_id { sep.push("parent_id = ").push_bind_unseparated(v); }
-    if let Some(ref v) = payload.name { sep.push("name = ").push_bind_unseparated(v); }
-    if let Some(ref v) = payload.path { sep.push("path = ").push_bind_unseparated(v); }
-    if let Some(ref v) = payload.component { sep.push("component = ").push_bind_unseparated(v); }
-    if let Some(ref v) = payload.redirect { sep.push("redirect = ").push_bind_unseparated(v); }
-    if let Some(ref v) = payload.menu_type { sep.push("type = ").push_bind_unseparated(v); }
-    if let Some(ref v) = payload.title { sep.push("title = ").push_bind_unseparated(v); }
-    if let Some(ref v) = payload.icon { sep.push("icon = ").push_bind_unseparated(v); }
-    if let Some(v) = payload.hidden { sep.push("hidden = ").push_bind_unseparated(v); }
-    if let Some(v) = payload.keep_alive { sep.push("keep_alive = ").push_bind_unseparated(v); }
-    if let Some(v) = payload.affix { sep.push("affix = ").push_bind_unseparated(v); }
-    if let Some(ref v) = payload.roles { sep.push("roles = ").push_bind_unseparated(v); }
-    if let Some(v) = payload.sort_order { sep.push("sort_order = ").push_bind_unseparated(v); }
-    if let Some(v) = payload.status { sep.push("status = ").push_bind_unseparated(v); }
+    if let Some(v) = payload.parent_id {
+        sep.push("parent_id = ").push_bind_unseparated(v);
+    }
+    if let Some(ref v) = payload.name {
+        sep.push("name = ").push_bind_unseparated(v);
+    }
+    if let Some(ref v) = payload.path {
+        sep.push("path = ").push_bind_unseparated(v);
+    }
+    if let Some(ref v) = payload.component {
+        sep.push("component = ").push_bind_unseparated(v);
+    }
+    if let Some(ref v) = payload.redirect {
+        sep.push("redirect = ").push_bind_unseparated(v);
+    }
+    if let Some(ref v) = payload.menu_type {
+        sep.push("type = ").push_bind_unseparated(v);
+    }
+    if let Some(ref v) = payload.title {
+        sep.push("title = ").push_bind_unseparated(v);
+    }
+    if let Some(ref v) = payload.icon {
+        sep.push("icon = ").push_bind_unseparated(v);
+    }
+    if let Some(v) = payload.hidden {
+        sep.push("hidden = ").push_bind_unseparated(v);
+    }
+    if let Some(v) = payload.keep_alive {
+        sep.push("keep_alive = ").push_bind_unseparated(v);
+    }
+    if let Some(v) = payload.affix {
+        sep.push("affix = ").push_bind_unseparated(v);
+    }
+    if let Some(ref v) = payload.roles {
+        sep.push("roles = ").push_bind_unseparated(v);
+    }
+    if let Some(v) = payload.sort_order {
+        sep.push("sort_order = ").push_bind_unseparated(v);
+    }
+    if let Some(v) = payload.status {
+        sep.push("status = ").push_bind_unseparated(v);
+    }
     sep.push("updated_at = ").push_bind_unseparated(now);
 
     qb.push(" WHERE id = ").push_bind(payload.id);

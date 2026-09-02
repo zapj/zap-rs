@@ -127,15 +127,13 @@ pub async fn status() -> Response {
 pub async fn install(run_id: String) -> Response {
     let log_path = logs_dir().join(format!("run-{run_id}.log"));
     // 同步创建日志文件，确保接口返回时文件已存在
-    if let Err(e) = std::fs::create_dir_all(logs_dir())
-        .and_then(|_| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-                .map(|_| ())
-        })
-    {
+    if let Err(e) = std::fs::create_dir_all(logs_dir()).and_then(|_| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .map(|_| ())
+    }) {
         return Response::err(-1, format!("创建日志失败: {e}"));
     }
 

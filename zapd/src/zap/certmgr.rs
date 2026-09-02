@@ -52,10 +52,7 @@ fn try_openssl_gen(cert_file: &str, key_file: &str) -> bool {
     match output {
         Ok(o) if o.status.success() => true,
         Ok(o) => {
-            warn!(
-                "openssl failed: {}",
-                String::from_utf8_lossy(&o.stderr)
-            );
+            warn!("openssl failed: {}", String::from_utf8_lossy(&o.stderr));
             false
         }
         Err(e) => {

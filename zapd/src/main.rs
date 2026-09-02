@@ -1,15 +1,15 @@
 use std::{env, time::Duration};
 
-use axum::{extract::Request, Router};
+use axum::{Router, extract::Request};
 use clap::Parser;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::net::TcpListener;
 use tokio_rustls::{
-    rustls::{
-        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
-        ServerConfig,
-    },
     TlsAcceptor,
+    rustls::{
+        ServerConfig,
+        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+    },
 };
 use tower_http::compression::CompressionLayer;
 use tower_http::timeout::TimeoutLayer;
@@ -68,12 +68,10 @@ async fn main() {
     }
 
     let tls_acceptor = create_tls_acceptor(cert_file, key_file);
-    let bind = format!(
-        "{}:{}",
-        zap_config.server.address, zap_config.server.port
-    );
+    let bind = format!("{}:{}", zap_config.server.address, zap_config.server.port);
     let tcp_listener = TcpListener::bind(&bind).await.unwrap();
-    let primary_ip = local_ip_address::local_ip().unwrap_or_else(|_| std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
+    let primary_ip = local_ip_address::local_ip()
+        .unwrap_or_else(|_| std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
     info!(
         "listening on https://{}:{}",
         primary_ip, zap_config.server.port
@@ -98,13 +96,11 @@ async fn main() {
     // init job scheduler for system monitoring
     zap::job::init_system_jobs().await;
 
-    let app = Router::new()
-        .merge(routers::routers())
-        .layer((
-            TraceLayer::new_for_http(),
-            TimeoutLayer::new(Duration::from_secs(10)),
-            CompressionLayer::new(),
-        ));
+    let app = Router::new().merge(routers::routers()).layer((
+        TraceLayer::new_for_http(),
+        TimeoutLayer::new(Duration::from_secs(10)),
+        CompressionLayer::new(),
+    ));
 
     loop {
         let (stream, client_addr) = match tcp_listener.accept().await {
@@ -157,12 +153,11 @@ async fn serve_tls_connection(
     };
 
     let stream = TokioIo::new(stream);
-    let hyper_service = hyper::service::service_fn(
-        move |mut request: Request<hyper::body::Incoming>| {
+    let hyper_service =
+        hyper::service::service_fn(move |mut request: Request<hyper::body::Incoming>| {
             request.extensions_mut().insert(client_addr);
             app.clone().call(request)
-        },
-    );
+        });
 
     if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
         .serve_connection_with_upgrades(stream, hyper_service)
@@ -180,15 +175,19 @@ async fn serve_plain_http(
     stream: tokio::net::TcpStream,
     _client_addr: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
-    let redirect = hyper::service::service_fn(
-        move |req: Request<hyper::body::Incoming>| async move {
+    let redirect =
+        hyper::service::service_fn(move |req: Request<hyper::body::Incoming>| async move {
             let host = req
                 .headers()
                 .get(hyper::header::HOST)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_string)
                 .unwrap_or_default();
-            let target = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/");
+            let target = req
+                .uri()
+                .path_and_query()
+                .map(|p| p.as_str())
+                .unwrap_or("/");
 
             let response = if host.is_empty() {
                 // HTTP/1.1 requires a Host header — reject the request otherwise.
@@ -207,8 +206,7 @@ async fn serve_plain_http(
                     .unwrap()
             };
             Ok::<_, std::convert::Infallible>(response)
-        },
-    );
+        });
 
     hyper::server::conn::http1::Builder::new()
         .serve_connection(TokioIo::new(stream), redirect)

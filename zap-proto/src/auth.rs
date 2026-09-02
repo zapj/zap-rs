@@ -11,8 +11,9 @@ pub const SECRET_LEN: usize = 32;
 pub fn load_secret(path: &str) -> io::Result<Vec<u8>> {
     let s = std::fs::read_to_string(path)
         .map_err(|e| io::Error::new(e.kind(), format!("读取密钥 {path}: {e}")))?;
-    let bytes = hex::decode(s.trim())
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("密钥不是合法 hex: {e}")))?;
+    let bytes = hex::decode(s.trim()).map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("密钥不是合法 hex: {e}"))
+    })?;
     if bytes.len() != SECRET_LEN {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -94,7 +95,10 @@ mod tests {
         let dir = temp_dir();
         let path = dir.join("secret.key");
         std::fs::write(&path, "abcd".repeat(16)).unwrap(); // 32 字节
-        assert_eq!(load_secret(path.to_str().unwrap()).unwrap().len(), SECRET_LEN);
+        assert_eq!(
+            load_secret(path.to_str().unwrap()).unwrap().len(),
+            SECRET_LEN
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -1,19 +1,18 @@
 use std::time::{self, UNIX_EPOCH};
 
 use axum::{
-    extract::{FromRequestParts, Request},
-    http::{request::Parts, StatusCode},
-    response::{IntoResponse, Response},
     Json, RequestPartsExt,
+    extract::{FromRequestParts, Request},
+    http::{StatusCode, request::Parts},
+    response::{IntoResponse, Response},
 };
 use axum_extra::{
-    headers::{authorization::Bearer, Authorization},
     TypedHeader,
+    headers::{Authorization, authorization::Bearer},
 };
 use jsonwebtoken::{
-    decode, encode,
+    DecodingKey, EncodingKey, Header, Validation, decode, encode,
     errors::{Error, ErrorKind},
-    DecodingKey, EncodingKey, Header, Validation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -22,12 +21,12 @@ use crate::config;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub id: u64,             // uid
-    pub iat: u64,            // 签发时间
-    pub sub: String,         // 签发给
-    pub iss: String,         // 发布者
-    pub exp: u64,            // 过期时间
-    pub roles: String,       // 用户角色，逗号分隔
+    pub id: u64,       // uid
+    pub iat: u64,      // 签发时间
+    pub sub: String,   // 签发给
+    pub iss: String,   // 发布者
+    pub exp: u64,      // 过期时间
+    pub roles: String, // 用户角色，逗号分隔
     #[serde(default)]
     pub pwd_is_default: bool, // 是否仍在使用默认密码
 }
@@ -179,15 +178,12 @@ impl IntoResponse for AuthError {
         let (status, error_message) = match self {
             AuthError::WrongCredentials => (StatusCode::UNAUTHORIZED, "Wrong credentials"),
             AuthError::MissingCredentials => (StatusCode::BAD_REQUEST, "Missing credentials"),
-            AuthError::TokenCreation => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Token creation error")
-            }
+            AuthError::TokenCreation => (StatusCode::INTERNAL_SERVER_ERROR, "Token creation error"),
             AuthError::InvalidToken => (StatusCode::BAD_REQUEST, "Invalid token"),
             AuthError::ExpiredSignature => (StatusCode::UNAUTHORIZED, "Token 已过期，请重新登录"),
-            AuthError::MustChangePassword => (
-                StatusCode::FORBIDDEN,
-                "请先修改默认密码后再进行操作",
-            ),
+            AuthError::MustChangePassword => {
+                (StatusCode::FORBIDDEN, "请先修改默认密码后再进行操作")
+            }
         };
         let body = Json(json!({
             "code": -1,

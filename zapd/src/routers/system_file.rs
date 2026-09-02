@@ -1,9 +1,9 @@
 use axum::{
+    Json,
     body::Body,
     extract::{Extension, Multipart, Query},
     http::header,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -11,9 +11,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use crate::zap::{
-    audit,
-    jwt::{is_admin, Claims},
-    ZapError, ZapJsonResult,
+    ZapError, ZapJsonResult, audit,
+    jwt::{Claims, is_admin},
 };
 use zap_proto::Request;
 
@@ -108,10 +107,7 @@ fn check_write_access(claims: &Claims, path: &Path) -> Result<(), ZapError> {
 // ── handlers ───────────────────────────────────────────────
 
 /// GET /system/files/list?path=/
-pub async fn file_list(
-    claims: Claims,
-    Query(query): Query<PathQuery>,
-) -> ZapJsonResult {
+pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJsonResult {
     // 非管理员默认进入自己的 home 目录
     let raw_path = match (is_admin(&claims), query.path.as_deref()) {
         (false, None) | (false, Some("/")) => format!("/home/{}", claims.sub),
@@ -136,7 +132,9 @@ pub async fn file_list(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": "ok", "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": "ok", "data": resp.data }),
+    ))
 }
 
 /// GET /system/files/read?path=...
@@ -186,7 +184,9 @@ pub async fn file_write(
         "",
     )
     .await;
-    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
 }
 
 /// POST /system/files/delete
@@ -240,7 +240,9 @@ pub async fn file_mkdir(
         "",
     )
     .await;
-    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
 }
 
 /// POST /system/files/rename
@@ -271,11 +273,17 @@ pub async fn file_rename(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
         "file_rename",
-        &format!("{} → {}", old_path.to_string_lossy(), new_path.to_string_lossy()),
+        &format!(
+            "{} → {}",
+            old_path.to_string_lossy(),
+            new_path.to_string_lossy()
+        ),
         "",
     )
     .await;
-    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
 }
 
 /// GET /system/files/download?path=...
@@ -340,9 +348,10 @@ pub async fn file_upload(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unnamed".to_string());
 
-        let data = field.bytes().await.map_err(|e| {
-            ZapError::New(-1, format!("上传失败: {}", e))
-        })?;
+        let data = field
+            .bytes()
+            .await
+            .map_err(|e| ZapError::New(-1, format!("上传失败: {}", e)))?;
 
         let resp = crate::zapexec::call(Request::FileUpload {
             path: resolved_dir.to_string_lossy().to_string(),
@@ -378,10 +387,7 @@ pub async fn file_upload(
 }
 
 /// GET /system/files/info?path=...
-pub async fn file_info(
-    claims: Claims,
-    Query(query): Query<PathQuery>,
-) -> ZapJsonResult {
+pub async fn file_info(claims: Claims, Query(query): Query<PathQuery>) -> ZapJsonResult {
     let raw_path = query.path.as_deref().unwrap_or("/");
     let resolved = resolve_path(raw_path)?;
     check_access(&claims, &resolved)?;
@@ -393,7 +399,9 @@ pub async fn file_info(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": "ok", "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": "ok", "data": resp.data }),
+    ))
 }
 
 #[cfg(test)]

@@ -1,17 +1,13 @@
-use axum::{extract::Extension, Json};
+use axum::{Json, extract::Extension};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Sqlite;
 use std::net::SocketAddr;
 use tracing::info;
 
 use crate::{
     db,
-    zap::{
-        audit,
-        jwt::ValidatedClaims,
-        ZapError, ZapJsonResult,
-    },
+    zap::{ZapError, ZapJsonResult, audit, jwt::ValidatedClaims},
 };
 
 // ── types ──────────────────────────────────────────────────
@@ -126,8 +122,14 @@ pub async fn role_add(
                 &format!("name={}, key={}", payload.name, payload.role_key),
             )
             .await;
-            info!("Role created: {} (id: {})", payload.name, r.last_insert_rowid());
-            Ok(Json(json!({ "code": 0, "message": "创建成功", "data": { "id": r.last_insert_rowid() } })))
+            info!(
+                "Role created: {} (id: {})",
+                payload.name,
+                r.last_insert_rowid()
+            );
+            Ok(Json(
+                json!({ "code": 0, "message": "创建成功", "data": { "id": r.last_insert_rowid() } }),
+            ))
         }
         Err(e) if e.to_string().contains("UNIQUE") => {
             Err(ZapError::New(-1, "角色名称或标识已存在".to_string()))
@@ -153,7 +155,8 @@ pub async fn role_update(
         return Err(ZapError::New(-1, "角色不存在".to_string()));
     };
     if is_builtin_role(&role.role_key) {
-        if payload.role_key.is_some() && payload.role_key.as_deref() != Some(role.role_key.as_str()) {
+        if payload.role_key.is_some() && payload.role_key.as_deref() != Some(role.role_key.as_str())
+        {
             return Err(ZapError::New(-1, "系统内置角色的标识不可修改".to_string()));
         }
         if payload.status == Some(0) {

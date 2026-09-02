@@ -9,8 +9,7 @@ use tokio::net::UnixStream;
 
 use crate::zap::ZapError;
 use zap_proto::{
-    auth,
-    frame,
+    auth, frame,
     types::{Message, Request, Response},
 };
 

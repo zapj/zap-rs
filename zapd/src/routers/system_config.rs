@@ -1,15 +1,15 @@
 use std::net::SocketAddr;
 
 use axum::{
-    extract::{Extension, Path, Query},
     Json,
+    extract::{Extension, Path, Query},
 };
 use serde::Deserialize;
 use serde_json::json;
 use tracing::info;
 
 use crate::zap::appstore as ast;
-use crate::zap::{audit, jwt::ValidatedClaims, ZapError, ZapJsonResult};
+use crate::zap::{ZapError, ZapJsonResult, audit, jwt::ValidatedClaims};
 use zap_proto::Request;
 
 // ── Time ───────────────────────────────────────────────────
@@ -119,7 +119,9 @@ pub async fn service_action(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
 }
 
 // ── Process Management ─────────────────────────────────────
@@ -153,7 +155,9 @@ pub async fn process_kill(
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
 }
 
 // ── SSH Install ──────────────────────────────────────────────
@@ -165,9 +169,19 @@ pub async fn ssh_install(
 ) -> ZapJsonResult {
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
-    ast::register_run(&run_id, "ssh_install", "openssh-server", &claims.sub, &log_path).await?;
+    ast::register_run(
+        &run_id,
+        "ssh_install",
+        "openssh-server",
+        &claims.sub,
+        &log_path,
+    )
+    .await?;
 
-    let resp = crate::zapexec::call(Request::SshInstall { run_id: run_id.clone() }).await?;
+    let resp = crate::zapexec::call(Request::SshInstall {
+        run_id: run_id.clone(),
+    })
+    .await?;
     if resp.code != 0 {
         ast::finish_run(&run_id, "failed", resp.code as i64).await;
         return Err(ZapError::New(resp.code, resp.message));

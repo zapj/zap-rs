@@ -1,6 +1,6 @@
-use axum::{extract::Extension, Json};
+use axum::{Json, extract::Extension};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::{QueryBuilder, Sqlite};
 use std::net::SocketAddr;
 use tracing::info;
@@ -8,9 +8,8 @@ use tracing::info;
 use crate::{
     db,
     zap::{
-        audit,
+        ZapError, ZapJsonResult, audit,
         jwt::{self, Claims, ValidatedClaims},
-        ZapError, ZapJsonResult,
     },
 };
 
@@ -80,11 +79,10 @@ async fn get_user_owner_id(id: i64) -> Result<i64, ZapError> {
 pub async fn user_info(claims: Claims) -> Json<Value> {
     let uid = claims.id;
     let pool = db::get_db_pool().await;
-    let result: Result<UserInfo, sqlx::Error> =
-        sqlx::query_as("select * from user where id = ?")
-            .bind(uid as i64)
-            .fetch_one(pool)
-            .await;
+    let result: Result<UserInfo, sqlx::Error> = sqlx::query_as("select * from user where id = ?")
+        .bind(uid as i64)
+        .fetch_one(pool)
+        .await;
     if let Ok(user) = result {
         return Json(json!({
             "code": 0,
@@ -122,7 +120,9 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
         "SELECT id,username,email,phone,nickname,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
     );
     if is_reseller && !is_admin {
-        querybuilder.push(" WHERE owner_id = ").push_bind(claims.id as i64);
+        querybuilder
+            .push(" WHERE owner_id = ")
+            .push_bind(claims.id as i64);
     }
     querybuilder.push(" order by id desc");
     let users: Vec<UserInfo> = querybuilder.build_query_as().fetch_all(pool).await?;
@@ -213,7 +213,11 @@ pub async fn user_add(
                 &format!("username={}", payload.username),
             )
             .await;
-            info!("User created: {} (id: {})", payload.username, r.last_insert_rowid());
+            info!(
+                "User created: {} (id: {})",
+                payload.username,
+                r.last_insert_rowid()
+            );
             Ok(Json(json!({
                 "code": 0,
                 "message": "用户创建成功",
@@ -263,7 +267,10 @@ pub async fn user_update(
             || payload.roles.is_some()
             || payload.status.is_some()
         {
-            return Err(ZapError::New(-1, "请先修改默认密码，当前只能修改密码".to_string()));
+            return Err(ZapError::New(
+                -1,
+                "请先修改默认密码，当前只能修改密码".to_string(),
+            ));
         }
     }
 
@@ -280,7 +287,10 @@ pub async fn user_update(
             // reseller: own customers only
             let owner_id = get_user_owner_id(payload.id).await?;
             if owner_id != claims.id as i64 {
-                return Err(ZapError::New(-1, "权限不足，只能管理自己的客户".to_string()));
+                return Err(ZapError::New(
+                    -1,
+                    "权限不足，只能管理自己的客户".to_string(),
+                ));
             }
         } else {
             require_admin(&claims)?;
@@ -311,13 +321,17 @@ pub async fn user_update(
         let p = phone.trim();
         if p.is_empty() {
             // 空手机号清空为 NULL
-            separated.push("phone = ").push_bind_unseparated(Option::<String>::None);
+            separated
+                .push("phone = ")
+                .push_bind_unseparated(Option::<String>::None);
         } else {
             separated.push("phone = ").push_bind_unseparated(p);
         }
     }
     if let Some(ref nickname) = payload.nickname {
-        separated.push("nickname = ").push_bind_unseparated(nickname);
+        separated
+            .push("nickname = ")
+            .push_bind_unseparated(nickname);
     }
     if let Some(ref roles) = payload.roles {
         separated.push("roles = ").push_bind_unseparated(roles);
@@ -379,7 +393,10 @@ pub async fn user_delete(
         // reseller: own customers only
         let owner_id = get_user_owner_id(payload.id).await?;
         if owner_id != claims.id as i64 {
-            return Err(ZapError::New(-1, "权限不足，只能删除自己的客户".to_string()));
+            return Err(ZapError::New(
+                -1,
+                "权限不足，只能删除自己的客户".to_string(),
+            ));
         }
     } else {
         require_admin(&claims)?;

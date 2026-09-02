@@ -5,7 +5,7 @@ use std::path::Path;
 use clap::Subcommand;
 use rusqlite::Connection;
 
-use crate::{ok, BLUE, NC};
+use crate::{BLUE, NC, ok};
 
 #[derive(Subcommand)]
 pub enum DbCommand {
@@ -51,7 +51,9 @@ fn cmd_info(db_path: &str) -> Result<(), String> {
         for name in names {
             let escaped = name.replace('"', "\"\"");
             let count: i64 = conn
-                .query_row(&format!("SELECT COUNT(*) FROM \"{escaped}\""), [], |r| r.get(0))
+                .query_row(&format!("SELECT COUNT(*) FROM \"{escaped}\""), [], |r| {
+                    r.get(0)
+                })
                 .unwrap_or(-1);
             tables.push((name, count));
         }

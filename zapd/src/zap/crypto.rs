@@ -6,10 +6,10 @@
 //! - `decrypt` 对非 `v1:` 前缀的历史明文做兼容返回，用于启动时迁移。
 
 use aes_gcm::{
-    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use once_cell::sync::Lazy;
 use std::{
     fs,
@@ -22,7 +22,10 @@ const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
 
 fn key_paths() -> [PathBuf; 2] {
-    [PathBuf::from("/etc/zap/secret.key"), PathBuf::from("conf/secret.key")]
+    [
+        PathBuf::from("/etc/zap/secret.key"),
+        PathBuf::from("conf/secret.key"),
+    ]
 }
 
 fn load_or_create_key() -> Result<[u8; KEY_LEN], String> {
@@ -35,7 +38,11 @@ fn load_or_create_key() -> Result<[u8; KEY_LEN], String> {
                 key.copy_from_slice(&data);
                 return Ok(key);
             }
-            return Err(format!("密钥文件 {} 长度非法（{}）", path.display(), data.len()));
+            return Err(format!(
+                "密钥文件 {} 长度非法（{}）",
+                path.display(),
+                data.len()
+            ));
         }
     }
     // 2. 生成新密钥：优先写入 /etc/zap，失败（无权限）回退 conf/

@@ -100,7 +100,11 @@ pub enum Request {
     FileDownload { path: String },
     /// 上传（base64 字节）
     #[serde(rename = "file.upload")]
-    FileUpload { path: String, name: String, content: String },
+    FileUpload {
+        path: String,
+        name: String,
+        content: String,
+    },
     /// 文件信息
     #[serde(rename = "file.info")]
     FileInfo { path: String },
@@ -327,7 +331,10 @@ mod tests {
     fn response_omits_none_data() {
         let err = Response::err(1, "x");
         let json = serde_json::to_string(&err).unwrap();
-        assert!(!json.contains("data"), "data=None 时不应序列化该字段: {json}");
+        assert!(
+            !json.contains("data"),
+            "data=None 时不应序列化该字段: {json}"
+        );
     }
 
     #[test]
@@ -356,8 +363,7 @@ mod tests {
             serde_json::to_string(&Message::Welcome).unwrap(),
             r#"{"type":"welcome"}"#
         );
-        let m: Message =
-            serde_json::from_str(r#"{"type":"challenge","challenge":"x"}"#).unwrap();
+        let m: Message = serde_json::from_str(r#"{"type":"challenge","challenge":"x"}"#).unwrap();
         assert!(matches!(m, Message::Challenge { challenge } if challenge == "x"));
     }
 }

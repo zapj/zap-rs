@@ -89,7 +89,10 @@ fn validate_pkg_path(pkg_path: &str) -> Result<(String, String), String> {
         return Err(format!("包路径格式应为 category/name，收到: {pkg_path}"));
     }
     for s in &parts {
-        if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        if !s
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
             return Err(format!("包名含非法字符: {s}"));
         }
     }
@@ -240,11 +243,7 @@ fn id_from_url(url: &str) -> String {
         id = id.replace("--", "-");
     }
     let id = id.trim_matches('-').to_string();
-    if id.is_empty() {
-        "store".into()
-    } else {
-        id
-    }
+    if id.is_empty() { "store".into() } else { id }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -343,12 +342,22 @@ fn spawn_background(
                 .env("APPS_DIR", apps_dir())
                 .env("LOG_FILE", &log_path)
                 .env("CPU_NUM", &cpu_num)
-                .stdout(std::process::Stdio::from(log.try_clone().unwrap_or_else(|_| {
-                    std::fs::OpenOptions::new().append(true).open(&log_path).unwrap()
-                })))
-                .stderr(std::process::Stdio::from(log.try_clone().unwrap_or_else(|_| {
-                    std::fs::OpenOptions::new().append(true).open(&log_path).unwrap()
-                })));
+                .stdout(std::process::Stdio::from(log.try_clone().unwrap_or_else(
+                    |_| {
+                        std::fs::OpenOptions::new()
+                            .append(true)
+                            .open(&log_path)
+                            .unwrap()
+                    },
+                )))
+                .stderr(std::process::Stdio::from(log.try_clone().unwrap_or_else(
+                    |_| {
+                        std::fs::OpenOptions::new()
+                            .append(true)
+                            .open(&log_path)
+                            .unwrap()
+                    },
+                )));
             for (k, v) in &step.env {
                 cmd.env(k, v);
             }
@@ -363,10 +372,7 @@ fn spawn_background(
                 Ok(mut child) => {
                     let pid = child.id();
                     let _ = std::fs::write(&pid_path, pid.to_string());
-                    let code = child
-                        .wait()
-                        .map(|s| s.code().unwrap_or(-1))
-                        .unwrap_or(-1);
+                    let code = child.wait().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
                     if code != 0 {
                         final_code = code;
                         break;
@@ -394,10 +400,7 @@ fn base_env() -> Vec<(String, String)> {
             "ZAPCTL".into(),
             zap_path().join("zapctl").to_string_lossy().into_owned(),
         ),
-        (
-            "APPS_DIR".into(),
-            apps_dir().to_string_lossy().into_owned(),
-        ),
+        ("APPS_DIR".into(), apps_dir().to_string_lossy().into_owned()),
     ]
 }
 
@@ -419,7 +422,11 @@ fn task_env(
     env.push(("APP_PATH".into(), app_path.to_string_lossy().into_owned()));
     env.push((
         "BUILD_PATH".into(),
-        apps_dir().join(".build").join(app_name).to_string_lossy().into_owned(),
+        apps_dir()
+            .join(".build")
+            .join(app_name)
+            .to_string_lossy()
+            .into_owned(),
     ));
     env.push((
         "ZAP_DATA_PATH".into(),
@@ -465,15 +472,13 @@ fn spawn_repo_task(
     let log_path = logs_dir().join(format!("run-{run_id}.log"));
     let ret_log = log_path.clone();
     // 同步创建日志文件，确保接口返回时文件已存在（WebSocket 立即读日志不会 ENOENT）
-    if let Err(e) = std::fs::create_dir_all(logs_dir())
-        .and_then(|_| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-                .map(|_| ())
-        })
-    {
+    if let Err(e) = std::fs::create_dir_all(logs_dir()).and_then(|_| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .map(|_| ())
+    }) {
         return Response::err(-1, format!("创建日志失败: {e}"));
     }
     tokio::task::spawn_blocking(move || {
@@ -483,7 +488,12 @@ fn spawn_repo_task(
             .create(true)
             .append(true)
             .open(&log_path)
-            .unwrap_or_else(|_| std::fs::OpenOptions::new().append(true).open("/dev/null").unwrap());
+            .unwrap_or_else(|_| {
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open("/dev/null")
+                    .unwrap()
+            });
         let _ = writeln!(log, "=== {title} ===");
         match op() {
             Ok(detail) => {
@@ -530,9 +540,16 @@ fn repo_add_inner(name: &str, url: &str) -> Result<String, String> {
     std::fs::create_dir_all(repos_dir()).map_err(|e| e.to_string())?;
     let tmp_clone = repos_dir().join(format!(".tmp-{id}"));
     let _ = std::fs::remove_dir_all(&tmp_clone);
-    run_capture("git", &["clone", "--depth", "1", url, tmp_clone.to_str().unwrap()])?;
+    run_capture(
+        "git",
+        &["clone", "--depth", "1", url, tmp_clone.to_str().unwrap()],
+    )?;
     // 临时目录非空校验，防止克隆出空目录
-    if std::fs::read_dir(&tmp_clone).map_err(|e| e.to_string())?.next().is_none() {
+    if std::fs::read_dir(&tmp_clone)
+        .map_err(|e| e.to_string())?
+        .next()
+        .is_none()
+    {
         let _ = std::fs::remove_dir_all(&tmp_clone);
         return Err("克隆结果为空".into());
     }
@@ -579,9 +596,8 @@ pub async fn repo_remove(id: String) -> Response {
 
 /// 更新单个 Git 源（后台执行）：fetch + reset，或首次 clone。
 pub async fn repo_update(id: String, run_id: String) -> Response {
-    let valid = safe_rel(&id).and_then(|_| {
-        read_repos().map(|repos| repos.iter().any(|r| r.id == id))
-    });
+    let valid =
+        safe_rel(&id).and_then(|_| read_repos().map(|repos| repos.iter().any(|r| r.id == id)));
     match valid {
         Ok(true) => {
             let title = format!("更新 Git 源: {id}");
@@ -606,7 +622,13 @@ fn repo_update_inner(id: &str) -> Result<String, String> {
         let _ = std::fs::remove_dir_all(&tmp_clone);
         run_capture(
             "git",
-            &["clone", "--depth", "1", &entry.url, tmp_clone.to_str().unwrap()],
+            &[
+                "clone",
+                "--depth",
+                "1",
+                &entry.url,
+                tmp_clone.to_str().unwrap(),
+            ],
         )?;
         std::fs::rename(&tmp_clone, &dir).map_err(|e| format!("移动到源目录失败: {e}"))?;
     } else {
@@ -832,8 +854,7 @@ pub async fn script_read(path: String) -> Response {
         if !md.is_file() {
             return Err("不是文件".to_string());
         }
-        let content = std::fs::read_to_string(&resolved)
-            .map_err(|e| format!("读取失败: {e}"))?;
+        let content = std::fs::read_to_string(&resolved).map_err(|e| format!("读取失败: {e}"))?;
         Ok::<_, String>(Response::ok(
             "ok",
             Some(json!({ "path": resolved.to_string_lossy(), "content": content })),
@@ -950,7 +971,10 @@ mod tests {
 
     #[test]
     fn validate_pkg_path_rules() {
-        assert_eq!(validate_pkg_path("database/mariadb").unwrap(), ("database".into(), "mariadb".into()));
+        assert_eq!(
+            validate_pkg_path("database/mariadb").unwrap(),
+            ("database".into(), "mariadb".into())
+        );
         assert!(validate_pkg_path("mariadb").is_err());
         assert!(validate_pkg_path("a/b/c").is_err());
         assert!(validate_pkg_path("db/mariadb;rm").is_err());
@@ -1010,7 +1034,10 @@ mod tests {
 
     #[test]
     fn id_from_url_extracts_repo_name() {
-        assert_eq!(id_from_url("https://github.com/zapj/zap-appstore.git"), "zap-appstore");
+        assert_eq!(
+            id_from_url("https://github.com/zapj/zap-appstore.git"),
+            "zap-appstore"
+        );
         assert_eq!(id_from_url("https://gitlab.com/org/store"), "store");
         assert_eq!(id_from_url("git@github.com:user/store.git"), "store");
         assert_eq!(id_from_url("https://x.io/A_B-C.d/"), "a-b-c-d");

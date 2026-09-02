@@ -1,4 +1,4 @@
-use crate::zap::{self, jwt::ValidatedClaims, ZapJsonResult};
+use crate::zap::{self, ZapJsonResult, jwt::ValidatedClaims};
 
 pub async fn system_info(_: ValidatedClaims) -> ZapJsonResult {
     zap::system_info::get_system_info().await

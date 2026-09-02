@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand};
 use tokio::net::UnixStream;
 
-use zap_proto::{auth, frame, types::Message, Request};
+use zap_proto::{Request, auth, frame, types::Message};
 
 #[derive(Args)]
 pub struct ClientArgs {
@@ -42,7 +42,9 @@ enum ClientVerb {
 
 pub async fn run(args: ClientArgs) {
     let secret = auth::load_secret(args.secret.to_str().unwrap_or_default()).expect("无法读取密钥");
-    let stream = UnixStream::connect(&args.socket).await.expect("无法连接 socket");
+    let stream = UnixStream::connect(&args.socket)
+        .await
+        .expect("无法连接 socket");
     let (mut rd, mut wr) = stream.into_split();
 
     // 握手

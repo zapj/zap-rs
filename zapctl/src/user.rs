@@ -1,9 +1,9 @@
 //! `zapctl user` 子命令与改密。
 
 use clap::{Subcommand, ValueEnum};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
-use crate::{ensure_root, ok, GREEN, NC, RED};
+use crate::{GREEN, NC, RED, ensure_root, ok};
 
 const ADMIN_USERNAME: &str = "admin";
 
@@ -154,8 +154,8 @@ fn cmd_add(
     };
     validate_password(&password)?;
 
-    let hashed = bcrypt::hash(&password, bcrypt::DEFAULT_COST)
-        .map_err(|e| format!("密码加密失败: {e}"))?;
+    let hashed =
+        bcrypt::hash(&password, bcrypt::DEFAULT_COST).map_err(|e| format!("密码加密失败: {e}"))?;
 
     // phone 是 schema 中的 NOT NULL UNIQUE 列；未提供时生成唯一值
     let phone = match phone {
@@ -302,10 +302,9 @@ fn validate_password(pw: &str) -> Result<(), String> {
 }
 
 fn read_new_password() -> Result<String, String> {
-    let p1 =
-        rpassword::prompt_password("新密码: ").map_err(|e| format!("读取密码失败: {e}"))?;
-    let p2 = rpassword::prompt_password("确认新密码: ")
-        .map_err(|e| format!("读取密码失败: {e}"))?;
+    let p1 = rpassword::prompt_password("新密码: ").map_err(|e| format!("读取密码失败: {e}"))?;
+    let p2 =
+        rpassword::prompt_password("确认新密码: ").map_err(|e| format!("读取密码失败: {e}"))?;
     if p1 != p2 {
         return Err("两次输入的密码不一致".to_string());
     }

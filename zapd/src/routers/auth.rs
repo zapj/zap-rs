@@ -11,13 +11,7 @@ use sqlx::query_as;
 use tracing::warn;
 
 use crate::db;
-use crate::zap::{
-    self,
-    audit,
-    jwt::ValidatedClaims,
-    totp,
-    ZapError, ZapJsonResult,
-};
+use crate::zap::{self, ZapError, ZapJsonResult, audit, jwt::ValidatedClaims, totp};
 
 /// Check if the stored password hash is for the default password "123456"
 fn is_default_password(stored_hash: &str) -> bool {
@@ -95,7 +89,10 @@ async fn check_db_lock(ip: &str, username: &str) -> Result<(), ZapError> {
         let remaining = until - now;
         return Err(ZapError::New(
             -1,
-            format!("登录失败次数过多，账号已锁定，请约 {} 分钟后再试", remaining / 60 + 1),
+            format!(
+                "登录失败次数过多，账号已锁定，请约 {} 分钟后再试",
+                remaining / 60 + 1
+            ),
         ));
     }
     Ok(())
@@ -254,8 +251,14 @@ pub async fn change_password(
     match row {
         Ok((stored_hash,)) => {
             if !bcrypt::verify(&payload.old_password, &stored_hash).unwrap_or(false) {
-                audit::log(Some(&claims), None, "password_change_failed", &claims.sub, "旧密码错误")
-                    .await;
+                audit::log(
+                    Some(&claims),
+                    None,
+                    "password_change_failed",
+                    &claims.sub,
+                    "旧密码错误",
+                )
+                .await;
                 return Err(ZapError::New(-1, "旧密码错误".to_string()));
             }
         }
@@ -333,7 +336,10 @@ pub async fn totp_setup(claims: ValidatedClaims) -> ZapJsonResult {
             .fetch_one(pool)
             .await?;
     if enabled == 1 {
-        return Err(ZapError::New(-1, "两步验证已启用，如需更换请先关闭".to_string()));
+        return Err(ZapError::New(
+            -1,
+            "两步验证已启用，如需更换请先关闭".to_string(),
+        ));
     }
     // 复用已有未启用密钥，避免每次打开都更换
     if existing.is_empty() {
@@ -344,10 +350,14 @@ pub async fn totp_setup(claims: ValidatedClaims) -> ZapJsonResult {
             .execute(pool)
             .await;
         let url = totp::otpauth_url(&secret, &claims.sub);
-        return Ok(Json(json!({ "code": 0, "data": { "secret": secret, "otpauth_url": url } })));
+        return Ok(Json(
+            json!({ "code": 0, "data": { "secret": secret, "otpauth_url": url } }),
+        ));
     }
     let url = totp::otpauth_url(&existing, &claims.sub);
-    Ok(Json(json!({ "code": 0, "data": { "secret": existing, "otpauth_url": url } })))
+    Ok(Json(
+        json!({ "code": 0, "data": { "secret": existing, "otpauth_url": url } }),
+    ))
 }
 
 /// POST /auth/totp/verify — 校验验证码并启用两步验证。
@@ -428,5 +438,7 @@ pub async fn totp_status(claims: ValidatedClaims) -> ZapJsonResult {
         .bind(claims.id as i64)
         .fetch_one(pool)
         .await?;
-    Ok(Json(json!({ "code": 0, "data": { "enabled": enabled == 1 } })))
+    Ok(Json(
+        json!({ "code": 0, "data": { "enabled": enabled == 1 } }),
+    ))
 }

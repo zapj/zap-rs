@@ -49,7 +49,12 @@ pub async fn serve(socket: &Path, secret: &[u8], identity: ClientIdentity) {
     }
 }
 
-async fn handle_conn(stream: UnixStream, secret: &[u8], expected_uid: u32, gid: u32) -> std::io::Result<()> {
+async fn handle_conn(
+    stream: UnixStream,
+    secret: &[u8],
+    expected_uid: u32,
+    gid: u32,
+) -> std::io::Result<()> {
     // 1) SO_PEERCRED：只允许 zapadm 用户连接
     let uid = match peer_uid(stream.as_raw_fd()) {
         Some(u) => u,
@@ -67,9 +72,12 @@ async fn handle_conn(stream: UnixStream, secret: &[u8], expected_uid: u32, gid: 
 
     // 2) 挑战/响应 HMAC 握手
     let challenge = auth::challenge_hex()?;
-    frame::send(&mut wr, &Message::Challenge {
-        challenge: challenge.clone(),
-    })
+    frame::send(
+        &mut wr,
+        &Message::Challenge {
+            challenge: challenge.clone(),
+        },
+    )
     .await?;
 
     match frame::recv(&mut rd).await? {
@@ -91,7 +99,10 @@ async fn handle_conn(stream: UnixStream, secret: &[u8], expected_uid: u32, gid: 
         match frame::recv(&mut rd).await {
             Ok(Message::Request(req)) => {
                 let resp = verbs::dispatch(req, gid).await;
-                if frame::send(&mut wr, &Message::Response(resp)).await.is_err() {
+                if frame::send(&mut wr, &Message::Response(resp))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -116,11 +127,7 @@ fn peer_uid(fd: std::os::unix::io::RawFd) -> Option<u32> {
             &mut cred as *mut _ as *mut libc::c_void,
             &mut len,
         );
-        if rc == 0 {
-            Some(cred.uid)
-        } else {
-            None
-        }
+        if rc == 0 { Some(cred.uid) } else { None }
     }
 }
 

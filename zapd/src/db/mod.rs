@@ -1,8 +1,12 @@
-pub mod models;
 pub mod init_db;
+pub mod models;
 
+use sqlx::{
+    Sqlite, SqlitePool,
+    pool::Pool,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
 use tokio::sync::OnceCell;
-use sqlx::{pool::Pool, sqlite::{SqliteConnectOptions, SqlitePoolOptions}, Sqlite, SqlitePool};
 
 pub static DB_POOL: OnceCell<Pool<Sqlite>> = OnceCell::const_new();
 
@@ -26,7 +30,3 @@ pub async fn get_db_pool_opt() -> Option<&'static SqlitePool> {
         .await
         .ok()
 }
-
-
-
-

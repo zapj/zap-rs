@@ -3,27 +3,25 @@
 use std::net::SocketAddr;
 
 use axum::{
+    Json,
     extract::{
-        ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
         Extension, Path, Query,
+        ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use futures_util::SinkExt;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{error, info};
 
 use crate::{
     config,
     zap::{
-        appstore as ast,
-        audit,
+        ZapError, ZapJsonResult, appstore as ast, audit,
         jwt::{self, Claims, ValidatedClaims},
-        ZapError, ZapJsonResult,
     },
     zapexec,
 };
@@ -40,7 +38,10 @@ fn require_admin(claims: &Claims) -> Result<(), ZapError> {
 /// 校验脚本路径：必须位于 custom/scripts/ 下；非管理员只能操作自己的目录。
 fn validate_script_path(claims: &Claims, path: &str) -> Result<(), ZapError> {
     if !path.starts_with("scripts/") {
-        return Err(ZapError::New(-1, "只允许操作 scripts/ 下的脚本".to_string()));
+        return Err(ZapError::New(
+            -1,
+            "只允许操作 scripts/ 下的脚本".to_string(),
+        ));
     }
     if !jwt::is_admin(claims) {
         let prefix = format!("scripts/{}/", claims.sub);
@@ -56,7 +57,9 @@ fn validate_script_path(claims: &Claims, path: &str) -> Result<(), ZapError> {
 /// 列出全部 Git 源（含内置源）。
 pub async fn list_repos(_claims: ValidatedClaims) -> ZapJsonResult {
     let repos = ast::list_repos().await;
-    Ok(Json(json!({ "code": 0, "message": "OK", "data": { "repos": repos } })))
+    Ok(Json(
+        json!({ "code": 0, "message": "OK", "data": { "repos": repos } }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,7 +141,9 @@ pub async fn repo_remove(
     )
     .await;
     info!("AppStore repo removed: {id}");
-    Ok(Json(json!({ "code": 0, "message": "源已删除", "data": { "id": id } })))
+    Ok(Json(
+        json!({ "code": 0, "message": "源已删除", "data": { "id": id } }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,7 +205,11 @@ pub async fn packages(_claims: ValidatedClaims) -> ZapJsonResult {
     }
     let mut items: Vec<Value> = Vec::new();
     for mut pkg in pkgs {
-        let pkg_path = pkg.get("pkg_path").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+        let pkg_path = pkg
+            .get("pkg_path")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string();
         if let Some(inst) = installed_map.get(&pkg_path) {
             pkg["installed"] = json!(true);
             pkg["installed_version"] = inst.get("version").cloned().unwrap_or(Value::Null);
@@ -216,7 +225,11 @@ pub async fn packages(_claims: ValidatedClaims) -> ZapJsonResult {
         a.get("category")
             .and_then(|x| x.as_str())
             .cmp(&b.get("category").and_then(|x| x.as_str()))
-            .then_with(|| a.get("name").and_then(|x| x.as_str()).cmp(&b.get("name").and_then(|x| x.as_str())))
+            .then_with(|| {
+                a.get("name")
+                    .and_then(|x| x.as_str())
+                    .cmp(&b.get("name").and_then(|x| x.as_str()))
+            })
     });
     Ok(Json(json!({
         "code": 0,
@@ -244,7 +257,14 @@ pub async fn install(
     }
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
-    ast::register_run(&run_id, "install", &payload.pkg_path, &claims.sub, &log_path).await?;
+    ast::register_run(
+        &run_id,
+        "install",
+        &payload.pkg_path,
+        &claims.sub,
+        &log_path,
+    )
+    .await?;
 
     let resp = zapexec::call(Request::AppstoreInstall {
         pkg_path: payload.pkg_path.clone(),
@@ -267,7 +287,10 @@ pub async fn install(
         &format!("source={} version={}", payload.source, payload.version),
     )
     .await;
-    info!("AppStore install started: {} ({})", payload.pkg_path, payload.source);
+    info!(
+        "AppStore install started: {} ({})",
+        payload.pkg_path, payload.source
+    );
     Ok(Json(json!({
         "code": 0,
         "message": "安装已启动",
@@ -287,7 +310,14 @@ pub async fn uninstall(
 ) -> ZapJsonResult {
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
-    ast::register_run(&run_id, "uninstall", &payload.pkg_path, &claims.sub, &log_path).await?;
+    ast::register_run(
+        &run_id,
+        "uninstall",
+        &payload.pkg_path,
+        &claims.sub,
+        &log_path,
+    )
+    .await?;
 
     let resp = zapexec::call(Request::AppstoreUninstall {
         pkg_path: payload.pkg_path.clone(),
@@ -333,7 +363,14 @@ pub async fn upgrade(
         .unwrap_or_default();
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
-    ast::register_run(&run_id, "upgrade", &payload.pkg_path, &claims.sub, &log_path).await?;
+    ast::register_run(
+        &run_id,
+        "upgrade",
+        &payload.pkg_path,
+        &claims.sub,
+        &log_path,
+    )
+    .await?;
 
     let resp = zapexec::call(Request::AppstoreUpgrade {
         pkg_path: payload.pkg_path.clone(),
@@ -369,7 +406,10 @@ pub async fn upgrade(
 
 /// 递归构建自定义脚本树（路径相对 custom/）。
 fn build_script_tree(dir: &std::path::Path, rel_base: &std::path::Path) -> Value {
-    let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
     let mut dirs = Vec::new();
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -425,7 +465,9 @@ pub async fn scripts_tree(claims: ValidatedClaims) -> ZapJsonResult {
     })
     .await
     .unwrap_or(Value::Null);
-    Ok(Json(json!({ "code": 0, "message": "OK", "data": { "tree": tree } })))
+    Ok(Json(
+        json!({ "code": 0, "message": "OK", "data": { "tree": tree } }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -433,13 +475,21 @@ pub struct ScriptPathQuery {
     pub path: String,
 }
 
-pub async fn script_read(claims: ValidatedClaims, Query(q): Query<ScriptPathQuery>) -> ZapJsonResult {
+pub async fn script_read(
+    claims: ValidatedClaims,
+    Query(q): Query<ScriptPathQuery>,
+) -> ZapJsonResult {
     validate_script_path(&claims, &q.path)?;
-    let resp = zapexec::call(Request::AppstoreScriptRead { path: q.path.clone() }).await?;
+    let resp = zapexec::call(Request::AppstoreScriptRead {
+        path: q.path.clone(),
+    })
+    .await?;
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": "OK", "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": "OK", "data": resp.data }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -470,7 +520,9 @@ pub async fn script_write(
         "",
     )
     .await;
-    Ok(Json(json!({ "code": 0, "message": "保存成功", "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": "保存成功", "data": resp.data }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -531,7 +583,10 @@ pub async fn script_stop(
             }
         }
     }
-    let resp = zapexec::call(Request::AppstoreScriptStop { run_id: payload.run_id.clone() }).await?;
+    let resp = zapexec::call(Request::AppstoreScriptStop {
+        run_id: payload.run_id.clone(),
+    })
+    .await?;
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
@@ -564,7 +619,9 @@ pub async fn runs(_claims: ValidatedClaims, Query(q): Query<RunsQuery>) -> ZapJs
             })
         })
         .collect();
-    Ok(Json(json!({ "code": 0, "message": "OK", "data": { "items": items, "total": total } })))
+    Ok(Json(
+        json!({ "code": 0, "message": "OK", "data": { "items": items, "total": total } }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -577,7 +634,9 @@ pub async fn log(
     Path(run_id): Path<String>,
     Query(q): Query<LogQuery>,
 ) -> ZapJsonResult {
-    let run = ast::get_run(&run_id).await?.ok_or_else(|| ZapError::New(-1, "任务不存在".to_string()))?;
+    let run = ast::get_run(&run_id)
+        .await?
+        .ok_or_else(|| ZapError::New(-1, "任务不存在".to_string()))?;
     let (content, exit_code, done) = ast::read_log(&run.log_path, q.offset.unwrap_or(0)).await?;
     Ok(Json(json!({
         "code": 0,
@@ -636,7 +695,11 @@ async fn handle_ws_log(mut socket: WebSocket, run_id: String) {
             Ok((text, exit_code, done)) => {
                 if !text.is_empty() {
                     // 去掉完成标记行，避免重复展示
-                    let clean = if done { ast::strip_done_marker(&text) } else { text.clone() };
+                    let clean = if done {
+                        ast::strip_done_marker(&text)
+                    } else {
+                        text.clone()
+                    };
                     if !clean.is_empty() {
                         if socket
                             .send(Message::Text(Utf8Bytes::from(
@@ -651,7 +714,11 @@ async fn handle_ws_log(mut socket: WebSocket, run_id: String) {
                     offset += text.len() as u64;
                 }
                 if done {
-                    let status = if exit_code == Some(0) { "success" } else { "failed" };
+                    let status = if exit_code == Some(0) {
+                        "success"
+                    } else {
+                        "failed"
+                    };
                     let _ = socket
                         .send(Message::Text(Utf8Bytes::from(
                             json!({ "type": "done", "status": status, "exit_code": exit_code })

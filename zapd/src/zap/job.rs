@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, RefreshKind, System};
 use tokio::sync::RwLock;
-use tokio_cron_scheduler::{job::job_data::Uuid, Job, JobScheduler};
+use tokio_cron_scheduler::{Job, JobScheduler, job::job_data::Uuid};
 use tracing::{debug, info, warn};
 
 use crate::db::get_db_pool;
@@ -29,9 +29,8 @@ async fn system_scheduled_task() {
     let load_avg = sysinfo::System::load_average();
     sys.refresh_cpu_usage();
     let cpu_usage = sys.global_cpu_usage();
-    let memory_usage = (sys.total_memory() - sys.available_memory()) as f32
-        / sys.total_memory() as f32
-        * 100.0;
+    let memory_usage =
+        (sys.total_memory() - sys.available_memory()) as f32 / sys.total_memory() as f32 * 100.0;
     let swap_usage = if sys.total_swap() == 0 {
         0.00_f32
     } else {
@@ -82,12 +81,11 @@ async fn system_scheduled_task() {
         } else {
             0
         };
-        let packets_transmitted =
-            if data.packets_transmitted() > last_packets_transmitted {
-                (data.packets_transmitted() - last_packets_transmitted) / per_10s
-            } else {
-                0
-            };
+        let packets_transmitted = if data.packets_transmitted() > last_packets_transmitted {
+            (data.packets_transmitted() - last_packets_transmitted) / per_10s
+        } else {
+            0
+        };
         let ip: Vec<String> = data.ip_networks().iter().map(|v| v.to_string()).collect();
 
         let _ = sqlx::query(
