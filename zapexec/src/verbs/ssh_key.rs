@@ -417,3 +417,107 @@ pub async fn deauthorize(index: usize) -> Response {
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
 }
+
+// ── 本地用户 authorized_keys ────────────────────────────────
+
+/// 校验系统用户名，防路径穿越。
+fn valid_username(username: &str) -> bool {
+    !username.is_empty()
+        && username.len() <= 64
+        && username
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+}
+
+/// 从 /etc/passwd 解析用户 uid/gid/home。
+fn user_info(username: &str) -> Option<(u32, u32, PathBuf)> {
+    if username == "root" {
+        return Some((0, 0, PathBuf::from("/root")));
+    }
+    let content = std::fs::read_to_string("/etc/passwd").ok()?;
+    for line in content.lines() {
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() >= 6 && fields[0] == username {
+            let uid: u32 = fields[2].parse().ok()?;
+            let gid: u32 = fields[3].parse().ok()?;
+            return Some((uid, gid, PathBuf::from(fields[5])));
+        }
+    }
+    None
+}
+
+/// 把 `/etc/zap/ssh/<key_name>.pub` 追加到本机用户 `~/.ssh/authorized_keys`。
+/// authorized_keys 属主必须为登录用户本人（sshd 严格校验），故这里用 root 设置属主后
+/// 以 0600 保存，仅写入公钥，不涉及私钥。
+pub async fn install_local(username: String, key_name: String) -> Response {
+    tokio::task::spawn_blocking(move || {
+        if !valid_username(&username) {
+            return Response::err(-1, "无效的系统用户名");
+        }
+        if !valid_name(&key_name) {
+            return Response::err(-1, "无效的密钥名称");
+        }
+        let pub_path = ssh_dir().join(format!("{key_name}.pub"));
+        let pub_line = match std::fs::read_to_string(&pub_path) {
+            Ok(c) => c.trim().to_string(),
+            Err(_) => return Response::err(-1, "公钥不存在，请先生成或导入密钥"),
+        };
+        if pub_line.is_empty() {
+            return Response::err(-1, "公钥内容为空");
+        }
+        let (uid, gid, home) = match user_info(&username) {
+            Some(v) => v,
+            None => return Response::err(-1, format!("系统用户 '{username}' 不存在")),
+        };
+
+        let ssh_dir = home.join(".ssh");
+        if ssh_dir.exists() {
+            let meta = match std::fs::metadata(&ssh_dir) {
+                Ok(m) => m,
+                Err(e) => return Response::err(-1, format!("读取 ~/.ssh 失败: {e}")),
+            };
+            if !meta.is_dir() {
+                return Response::err(-1, "~/.ssh 不是目录");
+            }
+        } else if let Err(e) = std::fs::create_dir_all(&ssh_dir) {
+            return Response::err(-1, format!("创建 ~/.ssh 失败: {e}"));
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&ssh_dir, std::fs::Permissions::from_mode(0o700));
+        if let Ok(c) = std::ffi::CString::new(ssh_dir.as_os_str().as_encoded_bytes()) {
+            unsafe {
+                libc::chown(c.as_ptr(), uid, gid);
+            }
+        }
+
+        let auth_path = ssh_dir.join("authorized_keys");
+        let mut existing = if auth_path.exists() {
+            std::fs::read_to_string(&auth_path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        if existing.lines().any(|l| l.trim() == pub_line) {
+            return Response::ok(format!("公钥已存在于 {username} 的 authorized_keys"), None);
+        }
+        if !existing.is_empty() && !existing.ends_with('\n') {
+            existing.push('\n');
+        }
+        existing.push_str(&pub_line);
+        existing.push('\n');
+        if let Err(e) = std::fs::write(&auth_path, &existing) {
+            return Response::err(-1, format!("写入 authorized_keys 失败: {e}"));
+        }
+        let _ = std::fs::set_permissions(&auth_path, std::fs::Permissions::from_mode(0o600));
+        if let Ok(c) = std::ffi::CString::new(auth_path.as_os_str().as_encoded_bytes()) {
+            unsafe {
+                libc::chown(c.as_ptr(), uid, gid);
+            }
+        }
+        Response::ok(
+            format!("公钥已写入本机 {username} 的 ~/.ssh/authorized_keys"),
+            None,
+        )
+    })
+    .await
+    .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}

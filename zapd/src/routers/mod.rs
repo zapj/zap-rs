@@ -175,6 +175,7 @@ fn api_routers() -> Router {
         .route("/terminal/connections/{id}/update", post(ssh_terminal::update_connection))
         .route("/terminal/connections/{id}/delete", post(ssh_terminal::delete_connection))
         .route("/terminal/connections/test", get(ssh_terminal::test_connection))
+        .route("/terminal/connections/{id}/push-key", post(ssh_terminal::push_key_to_host))
         .route("/terminal/ws/{id}", get(ssh_terminal::ws_terminal))
         // System
         .route("/system/info", get(system_info::system_info))

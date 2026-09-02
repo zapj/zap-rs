@@ -74,6 +74,9 @@ pub enum Request {
     /// 取消授权（按 authorized_keys 索引）
     #[serde(rename = "ssh_key.deauthorize")]
     SshKeyDeauthorize { index: usize },
+    /// 把公钥写入本机系统用户的 ~/.ssh/authorized_keys（root 特权，仅本地回环连接用）
+    #[serde(rename = "ssh_key.install_local")]
+    SshKeyInstallLocal { username: String, key_name: String },
     /// 列出目录
     #[serde(rename = "file.list")]
     FileList { path: String },

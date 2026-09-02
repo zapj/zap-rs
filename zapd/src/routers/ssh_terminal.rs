@@ -15,8 +15,10 @@ use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Executor, Row};
-use ssh2::Session;
+use ssh2::{OpenFlags, OpenType, Session};
 use tracing::{error, info, warn};
+
+use zap_proto::Request;
 
 use crate::config;
 use crate::db;
@@ -561,8 +563,11 @@ fn authenticate(session: &mut Session, info: &ConnectionInfo) -> Result<(), Stri
             }
             let key_content = std::fs::read_to_string(&key_path.unwrap())
                 .map_err(|e| format!("读取密钥文件失败: {}", e))?;
+            // 显式传入公钥，避免 libssh2 从 OpenSSH 私钥格式推导公钥的兼容性问题
+            let pub_content = get_pub_key_content(&info.ssh_key_name)
+                .ok_or_else(|| format!("公钥 '{}' 不存在", info.ssh_key_name))?;
             session
-                .userauth_pubkey_memory(&info.username, None, &key_content, None)
+                .userauth_pubkey_memory(&info.username, Some(&pub_content), &key_content, None)
                 .map_err(|e| format!("密钥认证失败: {}", e))?;
         }
         _ => return Err(format!("不支持的认证类型: {}", info.auth_type)),
@@ -620,6 +625,38 @@ fn get_key_path(key_name: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+/// 读取公钥内容（优先读 .pub 文件，缺失时用 ssh-keygen 从私钥推导）
+fn get_pub_key_content(key_name: &str) -> Option<String> {
+    let ssh_dir = std::path::PathBuf::from(zap_proto::SSH_KEY_DIR);
+    let pub_path = ssh_dir.join(format!("{key_name}.pub"));
+    if pub_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&pub_path) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    // 兜底：从私钥推导公钥
+    let key_path = ssh_dir.join(key_name);
+    if key_path.exists() {
+        if let Ok(out) = std::process::Command::new("ssh-keygen")
+            .args(["-y", "-f"])
+            .arg(&key_path)
+            .output()
+        {
+            if out.status.success() {
+                let trimmed = String::from_utf8_lossy(&out.stdout);
+                let trimmed = trimmed.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 // ── Test connection ────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -652,4 +689,133 @@ pub async fn test_connection(
         Ok(()) => Ok(Json(json!({ "code": 0, "success": true, "message": "连接成功" }))),
         Err(e) => Ok(Json(json!({ "code": 0, "success": false, "message": e }))),
     }
+}
+
+// ── Push public key to host ────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct PushKeyPayload {
+    pub password: Option<String>,
+}
+
+/// 判断目标主机是否为本地回环（localhost / 127.0.0.1 / ::1）
+fn is_loopback_host(host: &str) -> bool {
+    let h = host.trim().trim_matches(['[', ']']).to_lowercase();
+    h == "localhost" || h == "127.0.0.1" || h == "::1"
+}
+
+/// 把连接绑定的公钥推送到主机 ~/.ssh/authorized_keys
+///
+/// - 本地回环（localhost/127.0.0.1）：直接写入本机系统用户 authorized_keys，
+///   需要 root 特权（经 zapexec），仅 admin 角色可操作，无需密码。
+/// - 远程主机：使用远程密码做一次性认证（SFTP 写入，密码不保存）。
+pub async fn push_key_to_host(
+    claims: ValidatedClaims,
+    Path(id): Path<i64>,
+    Json(payload): Json<PushKeyPayload>,
+) -> ZapJsonResult {
+    let conn_info = load_connection_info(id).await?;
+    if conn_info.auth_type != "key" {
+        return Err(ZapError::New(-1, "仅密钥认证的连接支持推送公钥".to_string()));
+    }
+    if conn_info.ssh_key_name.is_empty() {
+        return Err(ZapError::New(-1, "连接未绑定 SSH 密钥".to_string()));
+    }
+
+    // 本地回环主机：root 特权写本机 authorized_keys，仅 admin
+    if is_loopback_host(&conn_info.host) {
+        if !crate::zap::jwt::is_admin(&claims) {
+            return Err(ZapError::New(403, "仅 admin 角色可以写入本机 SSH 授权".to_string()));
+        }
+        let resp = crate::zapexec::call(Request::SshKeyInstallLocal {
+            username: conn_info.username.clone(),
+            key_name: conn_info.ssh_key_name.clone(),
+        })
+        .await?;
+        if resp.code != 0 {
+            return Err(ZapError::New(resp.code, resp.message));
+        }
+        audit::log(
+            Some(&claims),
+            None,
+            "push_key_local",
+            &format!("{}@{}", conn_info.username, conn_info.host),
+            "将公钥写入本机用户 authorized_keys",
+        )
+        .await;
+        return Ok(Json(json!({ "code": 0, "message": resp.message })));
+    }
+
+    let pub_content = get_pub_key_content(&conn_info.ssh_key_name)
+        .ok_or_else(|| ZapError::New(-1, format!("公钥 '{}' 不存在", conn_info.ssh_key_name)))?;
+
+    let addr = format!("{}:{}", conn_info.host, conn_info.port);
+    let tcp = TcpStream::connect(&addr)
+        .map_err(|e| ZapError::Error(format!("TCP 连接失败: {}", e)))?;
+    let mut session = Session::new()
+        .map_err(|e| ZapError::Error(format!("创建 SSH 会话失败: {}", e)))?;
+    session.set_tcp_stream(tcp);
+    session.handshake()
+        .map_err(|e| ZapError::Error(format!("SSH 握手失败: {}", e)))?;
+    let password = payload
+        .password
+        .as_deref()
+        .ok_or_else(|| ZapError::New(-1, "远程主机密码不能为空".to_string()))?;
+    session
+        .userauth_password(&conn_info.username, password)
+        .map_err(|e| ZapError::Error(format!("远程主机密码认证失败: {}", e)))?;
+    if !session.authenticated() {
+        return Err(ZapError::New(-1, "远程主机密码认证失败".to_string()));
+    }
+
+    // 通过 SFTP 写入 ~/.ssh/authorized_keys
+    let sftp = session
+        .sftp()
+        .map_err(|e| ZapError::Error(format!("SFTP 初始化失败: {}", e)))?;
+    let home = sftp
+        .realpath(std::path::Path::new("."))
+        .map_err(|e| ZapError::Error(format!("获取用户主目录失败: {}", e)))?;
+    let ssh_dir = home.join(".ssh");
+    if sftp.stat(&ssh_dir).is_err() {
+        sftp.mkdir(&ssh_dir, 0o700)
+            .map_err(|e| ZapError::Error(format!("创建远程 ~/.ssh 失败: {}", e)))?;
+    }
+    let auth_path = ssh_dir.join("authorized_keys");
+
+    // 已存在且包含该公钥则跳过
+    if sftp.stat(&auth_path).is_ok() {
+        if let Ok(mut f) = sftp.open(&auth_path) {
+            let mut content = String::new();
+            if f.read_to_string(&mut content).is_ok()
+                && content.lines().any(|l| l.trim() == pub_content)
+            {
+                return Ok(Json(json!({ "code": 0, "message": "公钥已存在于远程主机，无需重复推送" })));
+            }
+        }
+    }
+
+    // 追加公钥（文件不存在则创建，权限 0600）
+    let mut f = sftp
+        .open_mode(
+            &auth_path,
+            OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::APPEND,
+            0o600,
+            OpenType::File,
+        )
+        .map_err(|e| ZapError::Error(format!("打开远程 authorized_keys 失败: {}", e)))?;
+    f.write_all(pub_content.as_bytes())
+        .map_err(|e| ZapError::Error(format!("写入远程 authorized_keys 失败: {}", e)))?;
+    f.write_all(b"\n").ok();
+    drop(f);
+
+    audit::log(
+        Some(&claims),
+        None,
+        "push_key",
+        &format!("{}@{}:{}", conn_info.username, conn_info.host, conn_info.port),
+        "推送公钥到远程主机 authorized_keys",
+    )
+    .await;
+
+    Ok(Json(json!({ "code": 0, "message": "公钥已推送到远程主机 ~/.ssh/authorized_keys" })))
 }

@@ -188,6 +188,7 @@ onMounted(() => {
               v-if="!row.authorized"
               type="success"
               link
+              title="写入本机 /etc/zap/ssh/authorized_keys 标记（不影响远程登录）"
               @click="authorizeKey(row.name)"
             >
               授权
@@ -200,7 +201,13 @@ onMounted(() => {
     </el-card>
 
     <!-- 已授权密钥 -->
-    <el-card header="authorized_keys">
+    <el-card>
+      <template #header>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span>authorized_keys（本机）</span>
+          <span style="font-size:12px;color:#909399">仅记录于 ZAP 本机，不推送到远程主机；登录远程请用「推送公钥」或手动复制公钥</span>
+        </div>
+      </template>
       <el-table :data="authEntries" v-loading="authLoading" stripe>
         <el-table-column label="#" type="index" width="50" />
         <el-table-column prop="key_type" label="类型" width="100" />
@@ -264,7 +271,12 @@ onMounted(() => {
     </el-dialog>
 
     <!-- 公钥查看对话框 -->
-    <el-dialog v-model="pubkeyVisible" :title="`公钥: ${pubkeyName}`" width="600px">
+    <el-dialog v-model="pubkeyVisible" :title="`公钥: ${pubkeyName}`" width="620px">
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px">
+        将此公钥添加到远程主机 <b>~/.ssh/authorized_keys</b> 后即可免密登录。
+        可在「终端」连接中使用「推送公钥到远程主机」一键完成，或手动复制后
+        <code>ssh-copy-id</code> 到目标主机。
+      </el-alert>
       <el-input :model-value="pubkeyContent" type="textarea" :rows="5" readonly />
       <template #footer>
         <el-button @click="pubkeyVisible = false">关闭</el-button>

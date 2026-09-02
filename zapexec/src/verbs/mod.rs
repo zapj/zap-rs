@@ -34,6 +34,9 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::SshKeyAuthorizedList => ssh_key::authorized_list().await,
         Request::SshKeyAuthorize { name } => ssh_key::authorize(name, gid).await,
         Request::SshKeyDeauthorize { index } => ssh_key::deauthorize(index).await,
+        Request::SshKeyInstallLocal { username, key_name } => {
+            ssh_key::install_local(username, key_name).await
+        }
         Request::FileList { path } => file::list(path).await,
         Request::FileRead { path } => file::read(path).await,
         Request::FileWrite { path, content } => file::write(path, content).await,

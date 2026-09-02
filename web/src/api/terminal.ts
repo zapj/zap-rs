@@ -76,3 +76,8 @@ export function testConnection(id: number) {
     params: { id },
   })
 }
+
+/** 推送公钥到远程主机（需要远程密码做一次性认证） */
+export function pushKeyToHost(id: number, password: string) {
+  return http.post<ApiResponse>(`/terminal/connections/${id}/push-key`, { password })
+}

@@ -31,6 +31,15 @@
               title="连接"
             />
             <el-button
+              v-if="conn.auth_type === 'key'"
+              :icon="Key"
+              size="small"
+              text
+              :disabled="isReadOnly || (isLoopbackHost(conn.host) && !isAdmin)"
+              :title="isLoopbackHost(conn.host) ? '写入本机 SSH 授权' : '推送公钥到远程主机'"
+              @click.stop="openPushKey(conn.id)"
+            />
+            <el-button
               :icon="Edit"
               size="small"
               text
@@ -121,14 +130,32 @@
           />
         </el-form-item>
         <el-form-item v-if="form.auth_type === 'key'" label="SSH 密钥">
-          <el-select v-model="form.ssh_key_name" placeholder="选择密钥" clearable>
-            <el-option
-              v-for="key in sshKeys"
-              :key="key.name"
-              :label="key.name"
-              :value="key.name"
-            />
-          </el-select>
+          <div class="key-select-wrap">
+            <el-select v-model="form.ssh_key_name" placeholder="选择密钥" clearable>
+              <el-option
+                v-for="key in sshKeys"
+                :key="key.name"
+                :label="key.name"
+                :value="key.name"
+              />
+            </el-select>
+            <div class="key-tip">
+              <span v-if="form.host && isLoopbackHost(form.host)">
+                本地主机连接：写入本机用户 authorized_keys（需 admin 角色）
+              </span>
+              <span v-else>密钥需添加到主机 ~/.ssh/authorized_keys 才能登录</span>
+              <el-button
+                type="primary"
+                link
+                size="small"
+                :icon="Key"
+                :disabled="!form.ssh_key_name || isReadOnly || (form.host && isLoopbackHost(form.host) && !isAdmin)"
+                @click="openPushKey(editingConn?.id)"
+              >
+                {{ form.host && isLoopbackHost(form.host) ? '写入本机 SSH 授权' : '推送公钥到远程主机' }}
+              </el-button>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可选备注" />
@@ -149,13 +176,55 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 推送公钥到主机对话框 -->
+    <el-dialog
+      v-model="showPushKeyDialog"
+      :title="pushKeyIsLocal ? '写入本机 SSH 授权' : '推送公钥到远程主机'"
+      width="460px"
+      :close-on-click-modal="false"
+    >
+      <el-alert v-if="!pushKeyIsLocal" type="info" :closable="false" show-icon>
+        将连接绑定的公钥追加到远程主机
+        <b style="margin: 0 4px">{{ pushKeyTarget }}</b>
+        的 ~/.ssh/authorized_keys，之后即可用该密钥免密登录。需要输入远程主机的 SSH
+        密码（仅本次使用，不会保存）。
+      </el-alert>
+      <el-alert v-else :type="canLocalPush ? 'warning' : 'error'" :closable="false" show-icon>
+        目标为本地主机（localhost/127.0.0.1），将直接把公钥写入本机用户
+        <b style="margin: 0 4px">{{ pushKeyTarget }}</b>
+        的 ~/.ssh/authorized_keys。该操作需要 root 权限，仅 <b>admin</b> 角色可用，无需输入密码。
+      </el-alert>
+      <el-form v-if="!pushKeyIsLocal" label-width="90px" style="margin-top: 16px">
+        <el-form-item label="SSH 密码" required>
+          <el-input
+            v-model="pushKeyPwd"
+            type="password"
+            show-password
+            placeholder="输入远程主机密码"
+            @keyup.enter="confirmPushKey"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showPushKeyDialog = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="pushing"
+          :disabled="pushKeyIsLocal && !canLocalPush"
+          @click="confirmPushKey"
+        >
+          {{ pushKeyIsLocal ? '写入本机' : '推送' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Edit, Delete, Link, Monitor } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Link, Monitor, Key } from '@element-plus/icons-vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -166,6 +235,7 @@ import {
   updateConnection,
   deleteConnection,
   testConnection,
+  pushKeyToHost,
   type SshConnection,
 } from '@/api/terminal'
 import { getToken } from '@/utils/auth'
@@ -175,6 +245,7 @@ import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
 const isReadOnly = computed(() => userStore.roles.includes('demo'))
+const isAdmin = computed(() => userStore.roles.includes('admin'))
 
 const connections = ref<SshConnection[]>([])
 const sshKeys = ref<{ name: string }[]>([])
@@ -184,6 +255,53 @@ const showAddDialog = ref(false)
 const editingConn = ref<SshConnection | null>(null)
 const saving = ref(false)
 const testing = ref(false)
+
+const showPushKeyDialog = ref(false)
+const pushKeyConnId = ref<number | null>(null)
+const pushKeyTarget = ref('')
+const pushKeyIsLocal = ref(false)
+const pushKeyPwd = ref('')
+const pushing = ref(false)
+
+const canLocalPush = computed(() => pushKeyIsLocal.value && isAdmin.value && !isReadOnly.value)
+
+function isLoopbackHost(host: string): boolean {
+  const h = host.trim().replace(/^\[|\]$/g, '').toLowerCase()
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1'
+}
+
+function openPushKey(connId?: number | null) {
+  if (connId == null) return
+  const conn = connections.value.find(c => c.id === connId)
+  if (!conn) return
+  pushKeyConnId.value = conn.id
+  pushKeyTarget.value = `${conn.username}@${conn.host}:${conn.port}`
+  pushKeyIsLocal.value = isLoopbackHost(conn.host)
+  pushKeyPwd.value = ''
+  showPushKeyDialog.value = true
+}
+
+async function confirmPushKey() {
+  if (pushKeyConnId.value == null) return
+  if (!pushKeyIsLocal.value && !pushKeyPwd.value) {
+    ElMessage.warning('请输入远程主机密码')
+    return
+  }
+  if (pushKeyIsLocal.value && !canLocalPush.value) {
+    ElMessage.warning('仅 admin 角色可以写入本机 SSH 授权')
+    return
+  }
+  pushing.value = true
+  try {
+    await pushKeyToHost(pushKeyConnId.value, pushKeyIsLocal.value ? '' : pushKeyPwd.value)
+    ElMessage.success(pushKeyIsLocal.value ? '公钥已写入本机 authorized_keys' : '公钥已推送到远程主机，现在可以尝试连接了')
+    showPushKeyDialog.value = false
+  } catch (e: any) {
+    ElMessage.error(e.message || '推送失败')
+  } finally {
+    pushing.value = false
+  }
+}
 
 const form = ref({
   name: '',
@@ -602,6 +720,21 @@ onBeforeUnmount(() => {
   gap: 2px;
   opacity: 0;
   transition: opacity 0.2s;
+}
+
+.key-select-wrap {
+  width: 100%;
+}
+
+.key-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .connection-item:hover .conn-actions {
