@@ -1,13 +1,13 @@
-server:
-  address: 0.0.0.0
-  port: 2600
-  cert_file: conf/zap.crt
-  key_file: conf/zap.key
-jwt:
-  jwt_secure: da8966cc5ad82529c56a75b9e7a03b2f9aec51ae381150a4360fdb49061b0c60
-  jwt_expire: 3600
-exec:
-  socket_path: /run/zap/exec.sock
-  secret_path: /etc/zap/exec.key
 db:
   path: data/zap.db
+exec:
+  secret_path: /etc/zap/exec.key
+  socket_path: /run/zap/exec.sock
+jwt:
+  jwt_expire: 3600
+  jwt_secure: da8966cc5ad82529c56a75b9e7a03b2f9aec51ae381150a4360fdb49061b0c60
+server:
+  address: 0.0.0.0
+  cert_file: conf/zap.crt
+  key_file: conf/zap.key
+  port: 2600

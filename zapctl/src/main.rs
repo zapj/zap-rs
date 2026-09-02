@@ -1,7 +1,8 @@
 //! `zapctl` —— ZAP 服务器/VPS 管理系统控制工具。
 //!
-//! 当前职责：管理 `zapd`（业务主进程）与 `zapexec`（root 特权守护进程）的
-//! systemd 服务（start / stop / restart / status / enable / disable / logs）。
+//! 职责：管理 `zapd`（业务主进程）与 `zapexec`（root 特权守护进程）的
+//! systemd 服务（start / stop / restart / status / enable / disable / logs）；
+//! 运维 `zap.db`（db）、用户（user / passwd）、配置文件键值（config）。
 //!
 //! 后续运维能力（如远程任务下发、一键健康检查等）在 [`Command`] 中追加子命令即可。
 
@@ -107,6 +108,14 @@ enum Command {
         /// 用户名
         username: String,
     },
+    /// 查看 / 新增 / 修改 / 删除配置文件（zap.yaml）键值（不带子命令时等价于 `config get`，打印全部配置）
+    Config {
+        /// 目标配置文件（默认：ZAP_CONFIG > /etc/zap/zap.yaml > conf/zap.yaml）
+        #[arg(short = 'f', long)]
+        file: Option<String>,
+        #[command(subcommand)]
+        cmd: Option<config::ConfigCommand>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -159,6 +168,11 @@ fn main() {
         Command::Db { cmd } => db::dispatch(cmd, &db_path),
         Command::User { cmd } => user::dispatch(cmd, &db_path),
         Command::Passwd { username } => user::cmd_self_passwd(&db_path, &username),
+        Command::Config { file, cmd } => {
+            // 缺省子命令时等价于 `config get`（打印整个配置文件）
+            let cmd = cmd.unwrap_or(config::ConfigCommand::Get { key: None });
+            config::dispatch(cmd, file.as_deref())
+        }
     };
 
     if let Err(e) = result {
