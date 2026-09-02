@@ -4,15 +4,15 @@
     <template
       v-if="
         hasOneShowingChild(item.children, item) &&
-        (!onlyOneChild.children || onlyOneChild.noShowingChildren) &&
+        (!onlyOneChild.children?.length || onlyOneChild.noShowingChildren) &&
         !item.alwaysShow
       "
     >
       <app-link v-if="onlyOneChild.meta" :to="resolvePath(onlyOneChild.path)">
         <el-menu-item :index="resolvePath(onlyOneChild.path)">
-          <el-icon v-if="onlyOneChild.meta && onlyOneChild.meta.icon">
-            <!-- <component :is="onlyOneChild.meta.icon" /> -->
-            <Icon :icon="onlyOneChild.meta.icon" />
+          <el-icon v-if="resolvedIcon">
+            <!-- <component :is="resolvedIcon" /> -->
+            <Icon :icon="resolvedIcon" />
           </el-icon>
           <template #title>
             <span>{{ onlyOneChild.meta.title }}</span>
@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { isExternal } from '@/utils/validate'
 import AppLink from './AppLink.vue'
 import path from 'path-browserify'
@@ -67,6 +67,11 @@ const props = defineProps({
 
 // 唯一子菜单
 const onlyOneChild = ref<any>(null)
+
+// 单子菜单显示时：优先子菜单图标，缺失则回退父菜单图标
+const resolvedIcon = computed(() => {
+  return onlyOneChild.value?.meta?.icon || props.item.meta?.icon || ''
+})
 
 /**
  * 判断是否只有一个显示的子菜单

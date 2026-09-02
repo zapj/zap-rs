@@ -97,17 +97,18 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
-  // 文件管理
+  // 文件管理（Layout 包裹 + 一级直链）
   {
     path: '/files',
     component: Layout,
+    redirect: '/files/index',
     meta: { title: '文件管理', icon: 'Folder', roles: ['admin', 'user'] },
     children: [
       {
-        path: '',
+        path: 'index',
         name: 'FileManager',
         component: () => import('@/views/files/index.vue'),
-        meta: { title: '文件管理器', icon: 'FolderOpened', affix: true },
+        meta: { title: '文件管理', icon: 'Folder', affix: true },
       },
     ],
   },
@@ -144,17 +145,18 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
-  // 终端管理
+  // 终端管理（Layout 包裹 + 一级直链）
   {
     path: '/terminal',
     component: Layout,
+    redirect: '/terminal/index',
     meta: { title: '终端', icon: 'Monitor', roles: ['admin', 'user'] },
     children: [
       {
         path: 'index',
         name: 'Terminal',
         component: () => import('@/views/terminal/index.vue'),
-        meta: { title: 'SSH 终端', icon: 'Connection', affix: true },
+        meta: { title: '终端', icon: 'Monitor', affix: true },
       },
     ],
   },

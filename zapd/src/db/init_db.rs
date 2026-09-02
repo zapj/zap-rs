@@ -211,23 +211,23 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (74, 7, 'server-process', 'process', 'server/process/index', 'menu', '进程管理', 'ep:cpu', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
 
-    -- Terminal
+    -- Terminal（Layout 包裹 + 一级直链：单个子菜单）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (4, 0, 'terminal', '/terminal', 'Layout', '/terminal', 'menu', '终端', 'ep:monitor', 1, 'admin,user', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (4, 0, 'terminal', '/terminal', 'Layout', '/terminal/index', 'menu', '终端', 'ep:monitor', 1, 'admin,user', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (41, 4, 'ssh-terminal', 'index', 'terminal/index', 'menu', 'SSH 终端', 'ep:connection', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (41, 4, 'terminal-index', 'index', 'terminal/index', 'menu', '终端', 'ep:monitor', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
-    -- File manager
+    -- File manager（Layout 包裹 + 一级直链：单个子菜单）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (3, 0, 'files', '/files', 'Layout', '/files', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (3, 0, 'files', '/files', 'Layout', '/files/index', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 2, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (31, 3, 'file-manager', 'index', 'files/index', 'menu', '文件管理器', 'ep:folder-opened', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (31, 3, 'files-index', 'index', 'files/index', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Reseller customer management (Layout + child page)
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (5, 0, 'reseller-users', '/reseller/users', 'Layout', '/reseller/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 4, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', '', 1, 'reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- AppStore (Layout + children)
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -264,20 +264,23 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 1);
     -- File manager: admin gets all, user gets read access
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 3);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 31);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 3);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 31);
     -- Terminal: both admin and user
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 4);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 41);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 4);
+    -- Terminal / File manager 子菜单授权（admin/user/reseller/demo）
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 41);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 41);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 41);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 41);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 31);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 31);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 31);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 31);
     -- Reseller: same base permissions as user + customer management
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 1);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 3);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 31);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 4);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 41);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 5);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 51);
     -- AppStore: admin / user / reseller 均可访问
@@ -293,9 +296,7 @@ async fn init_role_menus_table() {
     -- Demo: dashboard, files, terminal, appstore（与普通用户一致）
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 1);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 3);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 31);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 4);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 41);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 6);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 61);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 62);
