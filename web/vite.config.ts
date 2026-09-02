@@ -7,7 +7,7 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import { viteMockServe } from 'vite-plugin-mock'
-import { visualizer } from "rollup-plugin-visualizer";
+// import { visualizer } from "rollup-plugin-visualizer";
 import Icons from 'unplugin-icons/vite'
 import IconsResolver from 'unplugin-icons/resolver'
 
@@ -47,13 +47,13 @@ export default defineConfig(({ mode }) => {
         enable: useMock,
         logger: true,
       }),
-      visualizer({
-        gzipSize: true,
-        brotliSize: true,
-        emitFile: false,
-        filename: "a.html", //分析图生成的文件名
-        open:true //如果存在本地服务端口，将在打包后自动展示
-      }),
+      // visualizer({
+      //   gzipSize: true,
+      //   brotliSize: true,
+      //   emitFile: false,
+      //   filename: "a.html", //分析图生成的文件名
+      //   open:true //如果存在本地服务端口，将在打包后自动展示
+      // }),
       Icons({
         autoInstall: true,
         compiler: 'vue3',
