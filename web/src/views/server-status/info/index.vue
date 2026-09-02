@@ -61,40 +61,9 @@
       </el-col>
     </el-row>
 
-    <!-- 第二行：内存（硬件） + 当前内存使用 -->
+    <!-- 第二行：当前内存使用 -->
     <el-row :gutter="20" class="mt-4">
-      <el-col :xs="24" :sm="12">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>Memory（内存）</span>
-              <span class="card-header-icon"><el-icon><Coin /></el-icon></span>
-            </div>
-          </template>
-          <div class="mem-total">
-            <div class="mem-total-value">{{ formatBytes(info.memory?.total || 0, 1) }}</div>
-            <div class="mem-total-label">已安装内存</div>
-          </div>
-          <el-table
-            v-if="info.memory?.modules?.length"
-            :data="info.memory.modules"
-            size="small"
-            border
-            class="mt-2"
-            max-height="240"
-          >
-            <el-table-column prop="locator" label="插槽" min-width="80" show-overflow-tooltip />
-            <el-table-column label="容量" min-width="80">
-              <template #default="{ row }">{{ row.size || '-' }}</template>
-            </el-table-column>
-            <el-table-column prop="memory_type" label="类型" min-width="70" show-overflow-tooltip />
-            <el-table-column prop="speed" label="速度" min-width="90" show-overflow-tooltip />
-            <el-table-column prop="manufacturer" label="厂商" min-width="90" show-overflow-tooltip />
-          </el-table>
-          <el-empty v-else description="无法获取内存条详情（需 dmidecode 及 root 权限）" :image-size="60" class="mt-2" />
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12">
+      <el-col :xs="24">
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
@@ -194,7 +163,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
-import { Monitor, Cpu, Coin, DataLine, Box, Folder } from '@element-plus/icons-vue'
+import { Monitor, Cpu, DataLine, Box, Folder } from '@element-plus/icons-vue'
 import { getSystemOverview } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt.ts'
 
@@ -277,20 +246,6 @@ onUnmounted(() => {
 .load-label {
   margin-top: 4px;
   font-size: 12px;
-  color: #909399;
-}
-.mem-total {
-  text-align: center;
-  padding: 8px 0 12px;
-}
-.mem-total-value {
-  font-size: 30px;
-  font-weight: bold;
-  color: var(--el-color-primary);
-}
-.mem-total-label {
-  margin-top: 4px;
-  font-size: 13px;
   color: #909399;
 }
 .usage-block {

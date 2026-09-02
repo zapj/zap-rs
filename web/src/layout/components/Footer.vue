@@ -1,7 +1,7 @@
 <template>
   <div class="footer">
     <div class="version-info">
-      ZAP Admin v{{ APP_VERSION }} Build Date: #{{ BUILD_TIME }} @ copyright {{ new Date().getFullYear() }} <br/> Built with ❤️ by <a href="https://github.com/zapj/zap-admin-vue3" target="_blank">Zap-Admin-Vue3</a>
+      ZAP - v{{ APP_VERSION }} Build Date: #{{ BUILD_TIME }} @ copyright {{ new Date().getFullYear() }} 
     </div>
   </div>
 </template>
