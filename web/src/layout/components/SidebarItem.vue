@@ -21,8 +21,8 @@
       </app-link>
     </template>
 
-    <!-- 有子菜单的情况 -->
-    <el-sub-menu v-else :index="resolvePath(item.path)" popper-append-to-body>
+    <!-- 有子菜单的情况（折叠时浮层样式见全局 .el-menu--popup） -->
+    <el-sub-menu v-else :index="resolvePath(item.path)">
       <template #title>
         <el-icon v-if="item.meta && item.meta.icon">
           <!-- <component :is="item.meta.icon" /> -->

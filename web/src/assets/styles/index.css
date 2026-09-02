@@ -5,6 +5,19 @@
   box-sizing: border-box;
 }
 
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 菜单链接：整块可点、无下划线 */
+.app-link {
+  display: block;
+  width: 100%;
+  text-decoration: none;
+  color: inherit;
+}
+
 html,
 body {
   height: 100%;
@@ -43,11 +56,13 @@ body {
   border-right: none !important;
 }
 
+/* 折叠菜单固定宽度，与侧边栏折叠宽度保持一致 */
 .el-menu--collapse {
   width: 64px;
 }
 
-.el-menu-item [class^='el-icon'] {
+.el-menu-item [class^='el-icon'],
+.el-sub-menu__title [class^='el-icon'] {
   margin-right: 5px;
   width: 24px;
   text-align: center;
@@ -55,10 +70,73 @@ body {
   vertical-align: middle;
 }
 
-.el-menu-item span {
+/* 仅对标题文字生效，避免误伤 el-icon 内的 iconify span（避免图标偏移） */
+.el-menu-item > span:not(.el-icon) {
   height: 20px;
   line-height: 20px;
   margin-left: 5px;
+}
+
+/* 折叠状态：只保留图标、隐藏标题文字、图标水平居中 */
+.el-menu--collapse .el-menu-item > span:not(.el-icon),
+.el-menu--collapse .el-sub-menu__title > span:not(.el-icon) {
+  display: none !important;
+}
+
+.el-menu--collapse .el-menu-item .el-icon,
+.el-menu--collapse .el-sub-menu__title .el-icon {
+  margin-right: 0 !important;
+}
+
+/* 折叠状态：隐藏子菜单箭头，避免覆盖在图标上 */
+.el-menu--collapse .el-sub-menu__title .el-sub-menu__icon-arrow {
+  display: none !important;
+}
+
+/* 折叠后子菜单弹出的浮层：暗色主题，与侧边栏统一 */
+.el-popper .el-menu--popup {
+  background-color: #0b1a2e !important;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #c8d4e2;
+  --el-menu-hover-text-color: #fff;
+  --el-menu-active-color: #fff;
+  --el-menu-hover-bg-color: rgba(64, 158, 255, 0.12);
+  --el-menu-item-height: 44px;
+  --el-menu-item-font-size: 14px;
+}
+
+.el-popper .el-menu--popup .el-menu-item {
+  position: relative;
+  margin: 2px 0;
+  border-radius: 6px;
+}
+
+.el-popper .el-menu--popup .el-menu-item:hover {
+  background-color: rgba(64, 158, 255, 0.12) !important;
+}
+
+.el-popper .el-menu--popup .el-menu-item.is-active {
+  background-color: rgba(64, 158, 255, 0.15) !important;
+  color: #fff !important;
+}
+
+.el-popper .el-menu--popup .el-menu-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background-color: #409eff;
+}
+
+.el-popper .el-menu--popup .el-popper__arrow::before {
+  background: #001529 !important;
 }
 
 /* 页面通用样式 */

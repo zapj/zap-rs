@@ -122,14 +122,14 @@ watchDeviceWidth()
   bottom: 0;
   width: 210px;
   height: 100%;
-  background-color: #304156;
+  background-color: #001529;
   transition: width 0.3s;
   z-index: 1001;
   overflow: hidden;
 }
 
 .sidebar-container.hide-sidebar {
-  width: 54px !important;
+  width: 64px !important;
 }
 
 .main-container {
@@ -140,7 +140,7 @@ watchDeviceWidth()
 }
 
 .main-container.hide-sidebar {
-  margin-left: 54px;
+  margin-left: 64px;
 }
 
 .navbar-container {

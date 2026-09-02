@@ -3,8 +3,8 @@
     <!-- Logo -->
     <div class="logo-container">
       <router-link to="/" class="logo-link">
+        <el-icon class="logo-icon"><icon-ep-cpu /></el-icon>
         <div v-if="!isCollapse" class="logo-title">ZAP</div>
-        <div v-else class="logo-short">ZAP</div>
       </router-link>
     </div>
 
@@ -17,9 +17,6 @@
         :unique-opened="true"
         :collapse-transition="false"
         mode="vertical"
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409EFF"
       >
         <sidebar-item
           v-for="route in permissionStore.menus"
@@ -45,7 +42,6 @@ const appStore = useAppStore()
 const permissionStore = usePermissionStore()
 // 是否折叠
 const isCollapse = computed(() => !appStore.sidebar.opened)
-// permissionStore.generateRoutes(['admin', 'editor', 'test'])
 // 当前激活的菜单
 const activeMenu = computed<string>(() => {
   const { meta, path } = route
@@ -69,19 +65,21 @@ const defaultOpeneds = computed(() => {
 })
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
 .sidebar-wrapper {
   height: 100%;
   display: flex;
   flex-direction: column;
+  background-color: #001529;
 }
 
 .logo-container {
   height: 50px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #2b2f3a;
+  background-color: #002140;
   overflow: hidden;
 }
 
@@ -89,31 +87,78 @@ const defaultOpeneds = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   height: 100%;
   width: 100%;
   text-decoration: none;
 }
 
+.logo-icon {
+  font-size: 22px;
+  color: #409eff;
+}
+
 .logo-title {
   color: #fff;
   font-size: 18px;
-  font-weight: bold;
+  font-weight: 700;
+  letter-spacing: 1px;
   white-space: nowrap;
 }
 
-.logo-short {
-  color: #fff;
-  font-size: 20px;
-  font-weight: bold;
+.el-scrollbar {
+  flex: 1;
+  // Element Plus 菜单 CSS 变量：统一暗色主题
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #c8d4e2;
+  --el-menu-hover-text-color: #fff;
+  --el-menu-active-color: #fff;
+  --el-menu-hover-bg-color: rgba(64, 158, 255, 0.12);
+  --el-menu-item-height: 50px;
+  --el-menu-sub-item-height: 44px;
+  --el-menu-item-font-size: 14px;
+  --el-menu-base-level-padding: 22px;
+  --el-menu-level-padding: 22px;
+  --el-menu-icon-width: 24px;
 }
 
 .el-menu {
   border-right: none;
 }
 
-.el-scrollbar {
-  flex: 1;
-  background-color: #304156;
+:deep(.el-menu-item:hover),
+:deep(.el-sub-menu__title:hover) {
+  color: #fff;
+}
+
+:deep(.el-menu-item.is-active) {
+  position: relative;
+  background: linear-gradient(90deg, rgba(64, 158, 255, 0.25), rgba(64, 158, 255, 0.05));
+  color: #fff;
+  font-weight: 600;
+}
+
+:deep(.el-menu-item.is-active::before) {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 22px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background-color: #409eff;
+  box-shadow: 0 0 8px rgba(64, 158, 255, 0.6);
+}
+
+:deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: #fff;
+}
+
+/* 折叠状态：图标水平居中 */
+:deep(.el-menu--collapse .el-menu-item .el-icon),
+:deep(.el-menu--collapse .el-sub-menu__title .el-icon) {
+  margin-right: 0;
 }
 
 :deep(.el-scrollbar__wrap) {
