@@ -38,6 +38,7 @@ pub mod system_audit;
 pub mod system_config;
 pub mod system_file;
 pub mod system_info;
+pub mod system_ip;
 pub mod system_job;
 pub mod system_menu;
 pub mod system_role;
@@ -171,6 +172,15 @@ fn api_routers() -> Router {
         .route(
             "/system/config/network/resolver",
             post(system_config::network_set_resolver),
+        )
+        // ── IP 池管理 ────────────────────────────────
+        .route("/system/ip/list", get(system_ip::ip_list))
+        .route("/system/ip/add", post(system_ip::ip_add))
+        .route("/system/ip/delete", post(system_ip::ip_delete))
+        .route("/system/ip/update", post(system_ip::ip_update))
+        .route(
+            "/system/ip/batch-reserved",
+            post(system_ip::ip_batch_reserved),
         )
         .route("/system/config/ssh/status", get(system_config::ssh_status))
         .route(

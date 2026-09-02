@@ -15,6 +15,8 @@ pub async fn init_schema() {
     crate::routers::ssh_terminal::init_table().await;
     // AppStore: run records table + menu
     init_appstore_runs_table().await;
+    // IP 池管理表
+    init_ip_pool_table().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -212,6 +214,8 @@ async fn init_menus_table() {
     VALUES (74, 7, 'server-process', 'process', 'server/process/index', 'menu', '进程管理', 'ep:cpu', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (75, 7, 'server-network', 'network', 'server/network/index', 'menu', '网络设置', 'ep:link', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (76, 7, 'server-ip', 'ip', 'server/ip/index', 'menu', 'IP 设置', 'ep:postcard', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Terminal（Layout 包裹 + 一级直链：单个子菜单）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -333,6 +337,7 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 73);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 74);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 75);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 76);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -437,6 +442,27 @@ async fn init_appstore_runs_table() {
         finished_at INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX idx_appstore_runs_started ON appstore_runs(started_at);
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+// ── ip_pool（IP 池管理）─────────────────────────────────────
+
+async fn init_ip_pool_table() {
+    if table_exists("ip_pool").await {
+        return;
+    }
+    let sql = r#"
+    CREATE TABLE ip_pool (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        address TEXT NOT NULL UNIQUE,
+        version INTEGER NOT NULL DEFAULT 4,
+        ip_type TEXT NOT NULL DEFAULT 'shared',
+        reserved INTEGER NOT NULL DEFAULT 0,
+        remark TEXT NOT NULL DEFAULT '',
+        created_at INTEGER,
+        updated_at INTEGER
+    );
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
