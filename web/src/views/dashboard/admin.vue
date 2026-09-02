@@ -127,8 +127,10 @@ let loadavg_chart: Chart
 let cpu_chart : Chart
 let memory_chart : Chart
 let network_chart : Chart
+let destroyed = false
 onMounted(async () => {
   await loadSystemInfo()
+  if (destroyed) return
 
   var cpu_container = document.getElementById("cpu_chart") as HTMLCanvasElement;
   var memory_container = document.getElementById("memory_chart") as HTMLCanvasElement;
@@ -250,7 +252,13 @@ onMounted(async () => {
 
 
 onUnmounted(() => {
+  destroyed = true
   window.removeEventListener('resize', resizeChart)
+  if (fetchrt_timer.value) clearInterval(fetchrt_timer.value)
+  loadavg_chart?.destroy()
+  cpu_chart?.destroy()
+  memory_chart?.destroy()
+  network_chart?.destroy()
 })
 const resizeChart = () => {
   loadavg_chart?.resize()
@@ -277,6 +285,7 @@ const loadSystemInfo = async () => {
 }
 const FetchRTStatus = async () => {
   const resp = await getRTStatus()
+  if (destroyed) return
   fetchrt_count.value = fetchrt_secs
   if (resp.code === 0) {
     sysinfo.value = { ...sysinfo.value, ...resp.data }
@@ -359,6 +368,8 @@ const FetchRTStatus = async () => {
     
   }
   
+  if (destroyed) return
+  if (fetchrt_timer.value) clearInterval(fetchrt_timer.value)
   fetchrt_timer.value = setInterval(async () => {
     fetchrt_count.value--
     if (fetchrt_count.value <= 0) {

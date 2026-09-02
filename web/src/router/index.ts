@@ -145,6 +145,45 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
+  // 服务器状态
+  {
+    path: '/server-status',
+    component: Layout,
+    redirect: '/server-status/load',
+    meta: { title: '服务器状态', icon: 'ep:data-line', roles: ['admin'] },
+    children: [
+      {
+        path: 'load',
+        name: 'ServerStatusLoad',
+        component: () => import('@/views/server-status/load/index.vue'),
+        meta: { title: '系统负载', icon: 'ep:odometer', affix: true },
+      },
+      {
+        path: 'network',
+        name: 'ServerStatusNetwork',
+        component: () => import('@/views/server-status/network/index.vue'),
+        meta: { title: '网络', icon: 'ep:share', affix: true },
+      },
+      {
+        path: 'memory',
+        name: 'ServerStatusMemory',
+        component: () => import('@/views/server-status/memory/index.vue'),
+        meta: { title: '内存', icon: 'ep:coin', affix: true },
+      },
+      {
+        path: 'cpu',
+        name: 'ServerStatusCpu',
+        component: () => import('@/views/server-status/cpu/index.vue'),
+        meta: { title: 'CPU', icon: 'ep:cpu', affix: true },
+      },
+      {
+        path: 'disk',
+        name: 'ServerStatusDisk',
+        component: () => import('@/views/server-status/disk/index.vue'),
+        meta: { title: '硬盘', icon: 'ep:box', affix: true },
+      },
+    ],
+  },
   // 终端管理（Layout 包裹 + 一级直链）
   {
     path: '/terminal',
