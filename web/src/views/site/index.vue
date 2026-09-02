@@ -1,0 +1,625 @@
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Delete, Edit, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { http } from '@/utils/request'
+import { useUserStore } from '@/stores/user'
+
+interface SiteItem {
+  id: number
+  user_id: number
+  owner_username: string
+  name: string
+  domains: string[]
+  ips: string[]
+  status: number
+  remark: string
+  created_at: number
+  updated_at: number
+}
+
+interface OwnerOption {
+  id: number
+  username: string
+  nickname: string
+}
+
+const userStore = useUserStore()
+// admin 管理全部、reseller 管理所属客户 → 需要归属用户列/下拉；普通用户只看/归属自己
+const canManageAll = computed(
+  () => userStore.roles.includes('admin') || userStore.roles.includes('reseller')
+)
+// 归属用户（普通用户新增/编辑时固定为当前登录用户）
+const currentUserName = computed(
+  () => `${userStore.userInfo.nickname}（${userStore.userInfo.username}）`
+)
+
+const list = ref<SiteItem[]>([])
+const stats = reactive({ total: 0, running: 0, stopped: 0 })
+const loading = ref(false)
+const selection = ref<SiteItem[]>([])
+
+// 归属用户下拉数据（admin / reseller）
+const ownerOptions = ref<OwnerOption[]>([])
+const ownersLoading = ref(false)
+
+async function loadOwners() {
+  if (!canManageAll.value) return
+  ownersLoading.value = true
+  try {
+    const res = await http.get<{ code: number; data: OwnerOption[] }>('/site/users')
+    ownerOptions.value = res.data || []
+  } catch {
+    /* handled */
+  } finally {
+    ownersLoading.value = false
+  }
+}
+
+// 筛选
+const keyword = ref('')
+const filterStatus = ref<number | ''>('')
+const filterOwner = ref<number | ''>('')
+
+const ownerLabel = (id: number) => {
+  const o = ownerOptions.value.find((it) => it.id === id)
+  return o ? `${o.nickname || o.username} (${o.username})` : ''
+}
+
+const filtered = computed(() => {
+  return list.value.filter((it) => {
+    if (keyword.value) {
+      const k = keyword.value.toLowerCase()
+      const hit =
+        it.name.toLowerCase().includes(k) ||
+        it.domains.some((d) => d.toLowerCase().includes(k)) ||
+        it.ips.some((ip) => ip.toLowerCase().includes(k))
+      if (!hit) return false
+    }
+    if (filterStatus.value !== '' && it.status !== filterStatus.value) return false
+    if (canManageAll.value && filterOwner.value !== '' && it.user_id !== filterOwner.value)
+      return false
+    return true
+  })
+})
+
+// ── 加载 ───────────────────────────────────────────────────
+async function load() {
+  loading.value = true
+  try {
+    const res = await http.get<{
+      code: number
+      data: { total: number; running: number; stopped: number; rows: SiteItem[] }
+    }>('/site/list')
+    list.value = res.data?.rows || []
+    stats.total = res.data?.total || 0
+    stats.running = res.data?.running || 0
+    stats.stopped = res.data?.stopped || 0
+  } catch {
+    /* handled */
+  } finally {
+    loading.value = false
+  }
+}
+
+const fmtTime = (ts: number) => (ts ? new Date(ts * 1000).toLocaleString() : '-')
+
+// ── 新增 ───────────────────────────────────────────────────
+const addVisible = ref(false)
+const addLoading = ref(false)
+const addForm = reactive({
+  user_id: null as number | null,
+  name: '',
+  domains: [] as string[],
+  ips: [] as string[],
+  status: 1,
+  remark: '',
+})
+
+function resetAddForm() {
+  // 归属用户默认当前登录用户（若下拉中存在），否则取第一个客户
+  if (canManageAll.value) {
+    const me = ownerOptions.value.find((o) => o.id === userStore.userInfo.id)
+    addForm.user_id = me ? me.id : ownerOptions.value[0]?.id ?? null
+  } else {
+    addForm.user_id = null // 普通用户归属由后端固定为当前登录用户
+  }
+  addForm.name = ''
+  addForm.domains = []
+  addForm.ips = []
+  addForm.status = 1
+  addForm.remark = ''
+}
+
+function openAdd() {
+  resetAddForm()
+  addVisible.value = true
+}
+
+async function submitAdd() {
+  const domains = addForm.domains.map((s) => s.trim()).filter((s) => s)
+  if (!addForm.name.trim() && !domains.length) {
+    ElMessage.warning('请填写站点名称或至少一个域名（名称留空默认使用域名）')
+    return
+  }
+  if (canManageAll.value && !addForm.user_id) {
+    ElMessage.warning('请先选择站点的归属用户（可先在“客户管理/用户管理”中创建客户账号）')
+    return
+  }
+  addLoading.value = true
+  try {
+    const payload: Record<string, unknown> = {
+      name: addForm.name.trim(),
+      domains,
+      ips: addForm.ips.map((s) => s.trim()).filter((s) => s),
+      status: addForm.status,
+      remark: addForm.remark.trim(),
+    }
+    if (canManageAll.value) payload.user_id = addForm.user_id
+    const res = await http.post<{ code: number; message: string }>('/site/add', payload)
+    ElMessage.success(res.message)
+    addVisible.value = false
+    load()
+  } catch {
+    /* handled */
+  } finally {
+    addLoading.value = false
+  }
+}
+
+// ── 编辑 ───────────────────────────────────────────────────
+const editVisible = ref(false)
+const editLoading = ref(false)
+const editForm = reactive({
+  id: 0,
+  user_id: null as number | null,
+  name: '',
+  domains: [] as string[],
+  ips: [] as string[],
+  status: 1,
+  remark: '',
+})
+
+function openEdit(row: SiteItem) {
+  editForm.id = row.id
+  editForm.user_id = row.user_id
+  editForm.name = row.name
+  editForm.domains = [...(row.domains || [])]
+  editForm.ips = [...(row.ips || [])]
+  editForm.status = row.status
+  editForm.remark = row.remark
+  editVisible.value = true
+}
+
+async function submitEdit() {
+  const domains = editForm.domains.map((s) => s.trim()).filter((s) => s)
+  if (!editForm.name.trim() && !domains.length) {
+    ElMessage.warning('请填写站点名称或至少一个域名（名称留空默认使用域名）')
+    return
+  }
+  if (canManageAll.value && !editForm.user_id) {
+    ElMessage.warning('请选择站点的归属用户')
+    return
+  }
+  editLoading.value = true
+  try {
+    const payload: Record<string, unknown> = {
+      id: editForm.id,
+      name: editForm.name.trim(),
+      domains,
+      ips: editForm.ips.map((s) => s.trim()).filter((s) => s),
+      status: editForm.status,
+      remark: editForm.remark.trim(),
+    }
+    if (canManageAll.value) payload.user_id = editForm.user_id
+    const res = await http.post<{ code: number; message: string }>('/site/update', payload)
+    ElMessage.success(res.message)
+    editVisible.value = false
+    load()
+  } catch {
+    /* handled */
+  } finally {
+    editLoading.value = false
+  }
+}
+
+// ── 行内快捷：状态开关（只更新状态，域名/IP 保持不变）─────
+async function toggleStatus(row: SiteItem) {
+  try {
+    const res = await http.post<{ code: number; message: string }>('/site/update', {
+      id: row.id,
+      status: row.status ? 1 : 0,
+    })
+    ElMessage.success(res.message)
+    load()
+  } catch {
+    /* handled */
+  }
+}
+
+// ── 删除 ───────────────────────────────────────────────────
+async function removeRows(rows: SiteItem[]) {
+  if (!rows.length) {
+    ElMessage.warning('请先选择站点')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${rows.length} 个站点？`, '确认删除', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  const res = await http.post<{ code: number; message: string }>('/site/delete', {
+    ids: rows.map((r) => r.id),
+  })
+  ElMessage.success(res.message)
+  load()
+}
+
+function handleSelectionChange(rows: SiteItem[]) {
+  selection.value = rows
+}
+
+onMounted(() => {
+  loadOwners()
+  load()
+})
+</script>
+
+<template>
+  <div>
+    <!-- 统计卡 -->
+    <el-row :gutter="16" class="stat-row">
+      <el-col :xs="12" :sm="8" :md="8">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-num">{{ stats.total }}</div>
+          <div class="stat-label">站点总数</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :sm="8" :md="8">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-num stat-green">{{ stats.running }}</div>
+          <div class="stat-label">运行中</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :sm="8" :md="8">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-num stat-gray">{{ stats.stopped }}</div>
+          <div class="stat-label">已停止</div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-card shadow="never" class="table-card">
+      <!-- 工具栏 -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <el-input
+            v-model="keyword"
+            placeholder="搜索站点名称 / 域名 / IP"
+            clearable
+            style="width: 240px"
+            :prefix-icon="Search"
+          />
+          <el-select v-model="filterStatus" placeholder="状态" clearable style="width: 120px">
+            <el-option label="运行中" :value="1" />
+            <el-option label="已停止" :value="0" />
+          </el-select>
+          <el-select
+            v-if="canManageAll"
+            v-model="filterOwner"
+            placeholder="归属用户"
+            clearable
+            filterable
+            style="width: 200px"
+            :loading="ownersLoading"
+          >
+            <el-option
+              v-for="o in ownerOptions"
+              :key="o.id"
+              :label="`${o.nickname || o.username} (${o.username})`"
+              :value="o.id"
+            />
+          </el-select>
+          <el-button :icon="Refresh" circle @click="load" />
+        </div>
+        <div class="toolbar-right">
+          <el-button type="danger" plain :icon="Delete" :disabled="!selection.length" @click="removeRows(selection)">
+            删除选中
+          </el-button>
+          <el-button type="primary" :icon="Plus" @click="openAdd">添加站点</el-button>
+        </div>
+      </div>
+
+      <!-- 表格 -->
+      <el-table
+        v-loading="loading"
+        :data="filtered"
+        border
+        stripe
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="46" />
+        <el-table-column prop="name" label="站点名称" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="site-name">{{ row.name || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="域名（可多个）" min-width="200">
+          <template #default="{ row }">
+            <div v-if="row.domains && row.domains.length" class="tag-list">
+              <el-tag v-for="d in row.domains" :key="d" size="small" class="tag-item" type="primary">
+                {{ d }}
+              </el-tag>
+            </div>
+            <span v-else class="dim">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="绑定 IP（可多个）" min-width="180">
+          <template #default="{ row }">
+            <div v-if="row.ips && row.ips.length" class="tag-list">
+              <el-tag v-for="ip in row.ips" :key="ip" size="small" class="tag-item ip-tag" effect="plain">
+                {{ ip }}
+              </el-tag>
+            </div>
+            <span v-else class="dim">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canManageAll" label="归属用户" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.owner_username || ownerLabel(row.user_id) || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-switch
+              :model-value="row.status === 1"
+              inline-prompt
+              active-text="运行"
+              inactive-text="停止"
+              @change="(v: boolean) => { row.status = v ? 1 : 0; toggleStatus(row) }"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="创建时间" min-width="150">
+          <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="130" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="danger" :icon="Delete" @click="removeRows([row])">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <!-- 添加弹窗 -->
+    <el-dialog v-model="addVisible" title="添加站点" width="640px" :close-on-click-modal="false">
+      <el-form label-width="110px">
+        <el-form-item v-if="canManageAll" label="归属用户" required>
+          <el-select
+            v-model="addForm.user_id"
+            placeholder="选择该站点归属的客户账号"
+            filterable
+            style="width: 100%"
+            :loading="ownersLoading"
+          >
+            <el-option
+              v-for="o in ownerOptions"
+              :key="o.id"
+              :label="`${o.nickname || o.username} (${o.username})`"
+              :value="o.id"
+            />
+          </el-select>
+          <div v-if="!ownerOptions.length" class="form-tip">
+            暂无客户账号，请先在“用户/客户管理”中创建
+          </div>
+        </el-form-item>
+        <el-form-item v-else label="归属用户">
+          <el-input :model-value="currentUserName" disabled />
+          <div class="form-tip">站点将归属于当前登录账号</div>
+        </el-form-item>
+        <el-form-item label="站点名称">
+          <el-input
+            v-model="addForm.name"
+            placeholder="可留空，默认使用第一个域名"
+            maxlength="120"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="域名" class="mb-tip">
+          <el-select
+            v-model="addForm.domains"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入域名后回车添加，可绑定多个"
+            style="width: 100%"
+          >
+            <el-option v-for="d in addForm.domains" :key="d" :value="d" :label="d" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="绑定 IP">
+          <el-select
+            v-model="addForm.ips"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入 IP 后回车添加，支持多个 IPv4 / IPv6"
+            style="width: 100%"
+          >
+            <el-option v-for="ip in addForm.ips" :key="ip" :value="ip" :label="ip" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-radio-group v-model="addForm.status">
+            <el-radio :value="1">运行中</el-radio>
+            <el-radio :value="0">已停止</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="addForm.remark"
+            type="textarea"
+            :rows="2"
+            placeholder="站点说明（可选）"
+            maxlength="500"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addVisible = false">取消</el-button>
+        <el-button type="primary" :loading="addLoading" @click="submitAdd">添加</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑弹窗 -->
+    <el-dialog v-model="editVisible" title="编辑站点" width="640px" :close-on-click-modal="false">
+      <el-form label-width="110px">
+        <el-form-item v-if="canManageAll" label="归属用户" required>
+          <el-select
+            v-model="editForm.user_id"
+            placeholder="选择该站点归属的客户账号"
+            filterable
+            style="width: 100%"
+            :loading="ownersLoading"
+          >
+            <el-option
+              v-for="o in ownerOptions"
+              :key="o.id"
+              :label="`${o.nickname || o.username} (${o.username})`"
+              :value="o.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else label="归属用户">
+          <el-input :model-value="currentUserName" disabled />
+          <div class="form-tip">站点归属于当前登录账号</div>
+        </el-form-item>
+        <el-form-item label="站点名称">
+          <el-input
+            v-model="editForm.name"
+            placeholder="留空则默认使用第一个域名"
+            maxlength="120"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="域名">
+          <el-select
+            v-model="editForm.domains"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入域名后回车添加，可绑定多个"
+            style="width: 100%"
+          >
+            <el-option v-for="d in editForm.domains" :key="d" :value="d" :label="d" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="绑定 IP">
+          <el-select
+            v-model="editForm.ips"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入 IP 后回车添加，支持多个 IPv4 / IPv6"
+            style="width: 100%"
+          >
+            <el-option v-for="ip in editForm.ips" :key="ip" :value="ip" :label="ip" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-radio-group v-model="editForm.status">
+            <el-radio :value="1">运行中</el-radio>
+            <el-radio :value="0">已停止</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="editForm.remark" type="textarea" :rows="2" maxlength="500" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editLoading" @click="submitEdit">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<style scoped>
+.stat-row {
+  margin-bottom: 0;
+}
+.stat-card {
+  text-align: center;
+  padding: 4px 0;
+}
+.stat-num {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.stat-label {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #909399;
+}
+.stat-green {
+  color: #67c23a;
+}
+.stat-gray {
+  color: #909399;
+}
+
+.table-card {
+  margin-top: 16px;
+}
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.site-name {
+  font-weight: 500;
+}
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tag-item {
+  max-width: 100%;
+}
+.ip-tag {
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+.dim {
+  color: #c0c4cc;
+}
+.form-tip {
+  width: 100%;
+  font-size: 12px;
+  line-height: 18px;
+  color: #909399;
+}
+</style>

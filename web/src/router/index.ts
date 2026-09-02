@@ -112,6 +112,21 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
+  // 站点管理（Layout 包裹 + 一级直链：admin 全部 / reseller 所属客户 / user 自己的站点）
+  {
+    path: '/site',
+    component: Layout,
+    redirect: '/site/index',
+    meta: { title: '站点', icon: 'ep:aim', roles: ['admin', 'user', 'reseller'] },
+    children: [
+      {
+        path: 'index',
+        name: 'SiteIndex',
+        component: () => import('@/views/site/index.vue'),
+        meta: { title: '站点', icon: 'ep:aim', affix: true },
+      },
+    ],
+  },
   // 服务器配置
   {
     path: '/server',

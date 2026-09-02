@@ -17,6 +17,8 @@ pub async fn init_schema() {
     init_appstore_runs_table().await;
     // IP 池管理表
     init_ip_pool_table().await;
+    // 用户站点管理表
+    init_site_table().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -187,9 +189,15 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (1, 0, 'dashboard', '/dashboard', 'dashboard/index', '', 'menu', '仪表盘', 'ep:house', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
+    -- 站点管理（Layout 包裹 + 一级直链：单个子菜单，位于仪表盘之下）
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (9, 0, 'site', '/site', 'Layout', '/site/index', 'menu', '站点', 'ep:aim', 1, 'admin,user,reseller', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (91, 9, 'site-index', 'index', 'site/index', 'menu', '站点', 'ep:aim', 1, 'admin,user,reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
+
     -- System dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统设置', 'ep:setting', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统设置', 'ep:setting', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- System children
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -203,7 +211,7 @@ async fn init_menus_table() {
 
     -- Server config dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (7, 0, 'server', '/server', 'Layout', '/server/time', 'dir', '服务器配置', 'ep:set-up', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (7, 0, 'server', '/server', 'Layout', '/server/time', 'dir', '服务器配置', 'ep:set-up', 1, 'admin', 9, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (71, 7, 'server-time', 'time', 'server/time/index', 'menu', '服务器时间', 'ep:clock', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -219,25 +227,25 @@ async fn init_menus_table() {
 
     -- Terminal（Layout 包裹 + 一级直链：单个子菜单）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (4, 0, 'terminal', '/terminal', 'Layout', '/terminal/index', 'menu', '终端', 'ep:monitor', 1, 'admin,user', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (4, 0, 'terminal', '/terminal', 'Layout', '/terminal/index', 'menu', '终端', 'ep:monitor', 1, 'admin,user', 4, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (41, 4, 'terminal-index', 'index', 'terminal/index', 'menu', '终端', 'ep:monitor', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- File manager（Layout 包裹 + 一级直链：单个子菜单）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (3, 0, 'files', '/files', 'Layout', '/files/index', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (3, 0, 'files', '/files', 'Layout', '/files/index', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (31, 3, 'files-index', 'index', 'files/index', 'menu', '文件管理', 'ep:folder', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Reseller customer management (Layout + child page)
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (5, 0, 'reseller-users', '/reseller/users', 'Layout', '/reseller/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (5, 0, 'reseller-users', '/reseller/users', 'Layout', '/reseller/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 5, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- AppStore (Layout + children)
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (6, 0, 'appstore', '/appstore', 'Layout', '/appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 5, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (6, 0, 'appstore', '/appstore', 'Layout', '/appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 6, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (61, 6, 'appstore-index', 'index', 'appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -245,7 +253,7 @@ async fn init_menus_table() {
 
     -- Server status dir（应用商店之后）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (8, 0, 'server-status', '/server-status', 'Layout', '/server-status/info', 'dir', '服务器状态', 'ep:data-line', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (8, 0, 'server-status', '/server-status', 'Layout', '/server-status/info', 'dir', '服务器状态', 'ep:data-line', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (81, 8, 'server-status-info', 'info', 'server-status/info/index', 'menu', '服务器信息', 'ep:info-filled', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -338,6 +346,13 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 74);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 75);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 76);
+    -- 站点管理：admin 全部 / user 自己的站点 / reseller 所属客户的站点
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 9);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 9);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 9);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 91);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 91);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 91);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -463,6 +478,43 @@ async fn init_ip_pool_table() {
         created_at INTEGER,
         updated_at INTEGER
     );
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+// ── site（用户站点管理）─────────────────────────────────────
+
+async fn init_site_table() {
+    if table_exists("site").await {
+        return;
+    }
+    let sql = r#"
+    -- 站点主表：一个站点可绑定多个域名 / 多个 IP（见 site_domain / site_ip）
+    CREATE TABLE site (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL DEFAULT 0,
+        name TEXT NOT NULL DEFAULT '',
+        status INTEGER NOT NULL DEFAULT 1,
+        remark TEXT NOT NULL DEFAULT '',
+        created_at INTEGER,
+        updated_at INTEGER
+    );
+    CREATE INDEX idx_site_user_id ON site(user_id);
+
+    CREATE TABLE site_domain (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        site_id INTEGER NOT NULL DEFAULT 0,
+        domain TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX idx_site_domain_site_id ON site_domain(site_id);
+    CREATE UNIQUE INDEX idx_site_domain_domain ON site_domain(domain);
+
+    CREATE TABLE site_ip (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        site_id INTEGER NOT NULL DEFAULT 0,
+        ip TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX idx_site_ip_site_id ON site_ip(site_id);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
