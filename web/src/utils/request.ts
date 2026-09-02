@@ -141,21 +141,23 @@ async function refreshToken(): Promise<string> {
 }
 
 // ── 封装 HTTP 方法 ──────────────────────────────────────────
+// axios 1.20+ 返回类型推断为 AxiosResponseResult,与业务约定的 Promise<T>
+// (响应拦截器已解包 data)不一致,统一显式断言。
 export const http = {
   get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return service.get(url, config)
+    return service.get(url, config) as Promise<T>
   },
 
   post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-    return service.post(url, data, config)
+    return service.post(url, data, config) as Promise<T>
   },
 
   put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-    return service.put(url, data, config)
+    return service.put(url, data, config) as Promise<T>
   },
 
   delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return service.delete(url, config)
+    return service.delete(url, config) as Promise<T>
   },
 
   upload<T = any>(url: string, file: File, config?: AxiosRequestConfig): Promise<T> {
@@ -164,7 +166,7 @@ export const http = {
     return service.post(url, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       ...config,
-    })
+    }) as Promise<T>
   },
 
   download(url: string, config?: AxiosRequestConfig): Promise<Blob> {
