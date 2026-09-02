@@ -10,7 +10,7 @@ use axum::{
 use rust_embed::RustEmbed;
 use serde_json::json;
 
-use crate::zap::jwt::{claims_from_request, is_demo};
+use crate::zap::jwt::{claims_from_token, is_demo};
 
 /// 演示账号只读守卫：demo 角色仅允许 GET 请求（浏览），其余写操作一律拒绝。
 /// /auth/* 为个人账户操作（登录/登出/改密/2FA），放行以免演示账号被锁死。
@@ -18,13 +18,22 @@ async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Respo
     if req.method() == Method::GET || req.uri().path().starts_with("/auth/") {
         return Ok(next.run(req).await);
     }
-    if let Some(claims) = claims_from_request(&req) {
-        if is_demo(&claims) {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({ "code": -1, "message": "演示账号仅支持浏览，不能执行操作" })),
-            )
-                .into_response());
+    // 先拷贝 token 再异步解析（避免借用 req 跨 await）
+    let bearer = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .map(String::from);
+    if let Some(token) = bearer {
+        if let Some(claims) = claims_from_token(&token).await {
+            if is_demo(&claims) {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "code": -1, "message": "演示账号仅支持浏览，不能执行操作" })),
+                )
+                    .into_response());
+            }
         }
     }
     Ok(next.run(req).await)
@@ -32,6 +41,7 @@ async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Respo
 
 pub mod appstore;
 pub mod auth;
+pub mod dev;
 pub mod site;
 pub mod ssh_keys;
 pub mod ssh_terminal;
@@ -301,5 +311,11 @@ fn api_routers() -> Router {
         .route("/site/add", post(site::site_add))
         .route("/site/update", post(site::site_update))
         .route("/site/delete", post(site::site_delete))
+        // 开发：API Token 管理 + API 文档
+        .route("/dev/api-token/list", get(dev::api_token_list))
+        .route("/dev/api-token/create", post(dev::api_token_create))
+        .route("/dev/api-token/update", post(dev::api_token_update))
+        .route("/dev/api-token/delete", post(dev::api_token_delete))
+        .route("/dev/api-docs", get(dev::api_docs))
         .layer(middleware::from_fn(demo_readonly_guard))
 }

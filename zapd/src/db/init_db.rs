@@ -19,6 +19,10 @@ pub async fn init_schema() {
     init_ip_pool_table().await;
     // 用户站点管理表
     init_site_table().await;
+    // API Token 管理表（幂等建表，新旧库均生效）
+    init_api_token_table().await;
+    // 「开发」菜单（API Tokens / API 文档，幂等补插）
+    ensure_dev_menus().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -517,6 +521,93 @@ async fn init_site_table() {
     CREATE INDEX idx_site_ip_site_id ON site_ip(site_id);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
+}
+
+// ── api_token（API Token 管理）──────────────────────────────
+
+async fn init_api_token_table() {
+    let sql = r#"
+    CREATE TABLE IF NOT EXISTS api_token (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL DEFAULT 0,
+        name TEXT NOT NULL DEFAULT '',
+        token_hash TEXT NOT NULL DEFAULT '',
+        prefix TEXT NOT NULL DEFAULT '',
+        last_used_at INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER NOT NULL DEFAULT 0,
+        status INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER,
+        updated_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_api_token_hash ON api_token(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_api_token_user ON api_token(user_id);
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+/// 幂等补插「开发」顶级菜单及子菜单（API Tokens / API 文档），并授权 admin/user/reseller。
+/// 可安全重复执行：已存在则跳过（新库/旧库均适用，无需重置数据库）。
+async fn ensure_dev_menus() {
+    let pool = get_db_pool().await;
+    // 顶级目录：开发（sort_order=10，位于最下方）
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT 0, 'dev', '/dev', 'Layout', '/dev/api-tokens', 'dir', '开发', 'ep:tools', 1, 'admin,user,reseller', 10, 1, strftime('%s','now'), strftime('%s','now')
+        WHERE NOT EXISTS (SELECT 1 FROM menus WHERE parent_id = 0 AND name = 'dev')
+        "#,
+        )
+        .await;
+    // 子菜单：API Tokens
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT id, 'api-tokens', 'api-tokens', 'dev/api-tokens/index', 'menu', 'API Tokens', 'ep:key', 1, 'admin,user,reseller', 1, 1, strftime('%s','now'), strftime('%s','now')
+        FROM menus
+        WHERE parent_id = 0 AND name = 'dev'
+          AND NOT EXISTS (
+              SELECT 1 FROM menus m2
+              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev')
+                AND m2.name = 'api-tokens'
+          )
+        "#,
+        )
+        .await;
+    // 子菜单：API 文档
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT id, 'api-docs', 'api-docs', 'dev/api-docs/index', 'menu', 'API 文档', 'ep:document', 1, 'admin,user,reseller', 2, 1, strftime('%s','now'), strftime('%s','now')
+        FROM menus
+        WHERE parent_id = 0 AND name = 'dev'
+          AND NOT EXISTS (
+              SELECT 1 FROM menus m3
+              WHERE m3.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev')
+                AND m3.name = 'api-docs'
+          )
+        "#,
+        )
+        .await;
+    // role_menus 授权：admin / user / reseller ×（dev、api-tokens、api-docs）
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO role_menus (role_id, menu_id)
+        SELECT r.id, m.id
+        FROM roles r
+        JOIN menus m
+          ON m.name IN ('dev', 'api-tokens', 'api-docs')
+         AND (m.parent_id = 0 OR m.parent_id IN (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev'))
+        WHERE r.role_key IN ('admin', 'user', 'reseller')
+          AND NOT EXISTS (
+              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
+          )
+        "#,
+        )
+        .await;
 }
 
 // ── helper ─────────────────────────────────────────────────

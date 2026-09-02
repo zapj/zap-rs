@@ -1,0 +1,249 @@
+{
+  "title": "Zap 管理后台 API 文档",
+  "version": "0.1.1",
+  "base_path": "/api",
+  "auth_intro": [
+    "所有业务接口需要在请求头携带认证凭据： Authorization: Bearer <token>",
+    "支持两种凭据：1) 登录 /api/auth/login 获取的 JWT（短期有效，过期后重新登录或调用 /api/auth/reflash_token 刷新）；2) 长效 API Token（在“开发 → 管理 API Tokens”中创建，形如 zap_ 开头，可设置有效期，随时可吊销）。",
+    "不同角色可访问的接口范围不同：admin 拥有全部权限；reseller 管理自己的客户；user 管理自己的资源；demo（只读演示）仅允许 GET 浏览，写操作返回 403。",
+    "统一响应结构：{\"code\": 0, \"message\": \"OK\", \"data\": ...}；code 非 0 表示失败，message 为错误说明。",
+    "路径变量用 {name} 表示，调用时替换为实际值。"
+  ],
+  "groups": [
+    {
+      "name": "健康检查",
+      "description": "无需认证",
+      "endpoints": [
+        { "method": "GET", "path": "/health", "summary": "服务健康检查，返回版本与时间戳" }
+      ]
+    },
+    {
+      "name": "认证 Auth",
+      "description": "登录 / 登出 / 修改密码 / 两步验证（TOTP）",
+      "endpoints": [
+        { "method": "POST", "path": "/auth/login", "summary": "账号密码登录，成功后返回 JWT（含用户信息）", "params": [
+          { "name": "username", "type": "string", "required": true, "desc": "用户名" },
+          { "name": "password", "type": "string", "required": true, "desc": "密码" },
+          { "name": "totp_code", "type": "string", "required": false, "desc": "已开启 2FA 时必填的六位验证码" }
+        ] },
+        { "method": "GET", "path": "/auth/logout", "summary": "退出登录" },
+        { "method": "POST", "path": "/auth/reflash_token", "summary": "用现有 JWT 换取新的 JWT" },
+        { "method": "POST", "path": "/auth/change_password", "summary": "修改当前账号密码", "params": [
+          { "name": "old_password", "type": "string", "required": true, "desc": "原密码" },
+          { "name": "new_password", "type": "string", "required": true, "desc": "新密码（不可为默认密码）" }
+        ] },
+        { "method": "GET", "path": "/auth/totp/setup", "summary": "获取 TOTP 密钥、二维码 URI 与人工输入密钥" },
+        { "method": "POST", "path": "/auth/totp/verify", "summary": "校验验证码并开启两步验证", "params": [
+          { "name": "code", "type": "string", "required": true, "desc": "认证器 App 上显示的六位验证码" }
+        ] },
+        { "method": "POST", "path": "/auth/totp/disable", "summary": "关闭两步验证" },
+        { "method": "GET", "path": "/auth/totp/status", "summary": "查询两步验证是否已开启" },
+        { "method": "GET", "path": "/user/info", "summary": "当前登录用户资料" }
+      ]
+    },
+    {
+      "name": "用户管理",
+      "description": "admin / reseller 创建与管理客户账号",
+      "endpoints": [
+        { "method": "GET", "path": "/system/user/list", "summary": "用户分页列表", "params": [
+          { "name": "page", "type": "int", "required": false, "desc": "页码，默认 1" },
+          { "name": "page_size", "type": "int", "required": false, "desc": "每页条数，默认 20" },
+          { "name": "keyword", "type": "string", "required": false, "desc": "按用户名 / 昵称模糊搜索" }
+        ] },
+        { "method": "POST", "path": "/system/user/add", "summary": "新增用户", "params": [
+          { "name": "username", "type": "string", "required": true, "desc": "用户名" },
+          { "name": "password", "type": "string", "required": true, "desc": "初始密码" },
+          { "name": "role", "type": "string", "required": true, "desc": "角色：admin / reseller / user" }
+        ] },
+        { "method": "POST", "path": "/system/user/update", "summary": "修改用户（昵称 / 状态 / 角色 / 重置密码等）" },
+        { "method": "POST", "path": "/system/user/delete", "summary": "删除用户" },
+        { "method": "GET", "path": "/system/user/resellers", "summary": "经销商账号列表（用于选择上级）" }
+      ]
+    },
+    {
+      "name": "角色管理",
+      "description": "admin 专属",
+      "endpoints": [
+        { "method": "GET", "path": "/system/role/list", "summary": "角色列表" },
+        { "method": "POST", "path": "/system/role/add", "summary": "新增角色" },
+        { "method": "POST", "path": "/system/role/update", "summary": "修改角色" },
+        { "method": "POST", "path": "/system/role/delete", "summary": "删除角色" },
+        { "method": "GET", "path": "/system/role/permissions", "summary": "查询角色已分配权限（菜单）" },
+        { "method": "POST", "path": "/system/role/permissions/set", "summary": "给角色分配权限（菜单 ID 列表）" }
+      ]
+    },
+    {
+      "name": "菜单管理",
+      "description": "admin 专属；前端导航 / 路由由该数据动态生成",
+      "endpoints": [
+        { "method": "GET", "path": "/system/menus/tree", "summary": "菜单树（登录后用于渲染侧边栏）" },
+        { "method": "GET", "path": "/system/menus/list", "summary": "菜单列表" },
+        { "method": "POST", "path": "/system/menus/add", "summary": "新增菜单" },
+        { "method": "POST", "path": "/system/menus/update", "summary": "修改菜单" },
+        { "method": "POST", "path": "/system/menus/delete", "summary": "删除菜单" },
+        { "method": "POST", "path": "/system/menus/status", "summary": "启用 / 停用菜单" }
+      ]
+    },
+    {
+      "name": "服务器时间 / 网络",
+      "description": "admin 专属",
+      "endpoints": [
+        { "method": "GET", "path": "/system/config/time", "summary": "查询系统当前时间与时区" },
+        { "method": "POST", "path": "/system/config/time/sync", "summary": "NTP 时间同步" },
+        { "method": "POST", "path": "/system/config/time/timezone", "summary": "设置时区" },
+        { "method": "GET", "path": "/system/config/time/timezones", "summary": "可用时区列表" },
+        { "method": "GET", "path": "/system/config/network", "summary": "查询主机名 / DNS 配置" },
+        { "method": "POST", "path": "/system/config/network/hostname", "summary": "修改主机名" },
+        { "method": "POST", "path": "/system/config/network/resolver", "summary": "修改 DNS 解析器" }
+      ]
+    },
+    {
+      "name": "IP 池管理",
+      "description": "admin 专属；维护可分配 / 保留的 IP 资源",
+      "endpoints": [
+        { "method": "GET", "path": "/system/ip/list", "summary": "IP 池分页列表" },
+        { "method": "POST", "path": "/system/ip/add", "summary": "批量新增 IP（支持网段/范围展开）", "params": [
+          { "name": "addresses", "type": "string[]", "required": true, "desc": "IP 或 网段（如 1.1.1.0/24）" },
+          { "name": "remark", "type": "string", "required": false, "desc": "备注" }
+        ] },
+        { "method": "POST", "path": "/system/ip/delete", "summary": "删除 IP" },
+        { "method": "POST", "path": "/system/ip/update", "summary": "修改 IP（备注等）" },
+        { "method": "POST", "path": "/system/ip/batch-reserved", "summary": "批量设置保留 / 取消保留" }
+      ]
+    },
+    {
+      "name": "系统服务与进程",
+      "description": "admin 专属",
+      "endpoints": [
+        { "method": "GET", "path": "/system/config/services", "summary": "systemd 服务列表与状态" },
+        { "method": "POST", "path": "/system/config/services/action", "summary": "服务操作：start / stop / restart / enable / disable" },
+        { "method": "GET", "path": "/system/config/processes", "summary": "进程列表（含 CPU / 内存）" },
+        { "method": "POST", "path": "/system/config/processes/kill", "summary": "结束进程", "params": [
+          { "name": "pid", "type": "int", "required": true, "desc": "进程 PID" }
+        ] }
+      ]
+    },
+    {
+      "name": "SSH 服务与密钥",
+      "description": "admin 专属",
+      "endpoints": [
+        { "method": "GET", "path": "/system/config/ssh/status", "summary": "SSH 服务状态与端口" },
+        { "method": "POST", "path": "/system/config/ssh/restart", "summary": "重启 SSH 服务" },
+        { "method": "POST", "path": "/system/config/ssh/install", "summary": "安装 / 配置 SSH（密钥登录等）" },
+        { "method": "GET", "path": "/system/config/ssh/install/log/{run_id}", "summary": "安装任务日志" },
+        { "method": "GET", "path": "/system/config/ssh/keys", "summary": "本机 SSH 密钥对列表" },
+        { "method": "GET", "path": "/system/config/ssh/keys/content", "summary": "查看密钥对公钥 / 私钥内容" },
+        { "method": "POST", "path": "/system/config/ssh/keys/generate", "summary": "生成新的密钥对" },
+        { "method": "POST", "path": "/system/config/ssh/keys/import", "summary": "导入密钥对" },
+        { "method": "POST", "path": "/system/config/ssh/keys/delete", "summary": "删除密钥对" },
+        { "method": "GET", "path": "/system/config/ssh/authorized_keys", "summary": "authorized_keys 授权列表" },
+        { "method": "POST", "path": "/system/config/ssh/authorize", "summary": "将公钥加入 authorized_keys" },
+        { "method": "POST", "path": "/system/config/ssh/deauthorize", "summary": "从 authorized_keys 移除公钥" }
+      ]
+    },
+    {
+      "name": "SSH 终端（连接管理）",
+      "description": "保存的主机连接；页面内嵌 Web 终端",
+      "endpoints": [
+        { "method": "GET", "path": "/terminal/connections", "summary": "已保存的连接列表" },
+        { "method": "GET", "path": "/terminal/connections/{id}", "summary": "连接详情" },
+        { "method": "POST", "path": "/terminal/connections/create", "summary": "新增连接（主机 / 端口 / 认证方式等）" },
+        { "method": "POST", "path": "/terminal/connections/{id}/update", "summary": "修改连接" },
+        { "method": "POST", "path": "/terminal/connections/{id}/delete", "summary": "删除连接" },
+        { "method": "GET", "path": "/terminal/connections/test", "summary": "测试连接连通性" },
+        { "method": "POST", "path": "/terminal/connections/{id}/push-key", "summary": "推送本机公钥到目标主机" },
+        { "method": "WS", "path": "/terminal/ws/{id}", "summary": "WebSocket 终端通道（使用 query 携带 JWT）" }
+      ]
+    },
+    {
+      "name": "系统状态与审计",
+      "description": "监控大盘 / 操作审计",
+      "endpoints": [
+        { "method": "GET", "path": "/system/info", "summary": "主机基础信息（CPU / 内存 / 磁盘 / 网络等）" },
+        { "method": "GET", "path": "/system/status", "summary": "实时运行状态快照" },
+        { "method": "GET", "path": "/system/overview", "summary": "大盘概览（图表数据源）" },
+        { "method": "GET", "path": "/system/job/stop", "summary": "停止监控采集任务" },
+        { "method": "GET", "path": "/system/job/start", "summary": "启动监控采集任务" },
+        { "method": "GET", "path": "/system/audit/list", "summary": "操作审计日志（分页 / 按动作与用户过滤）" }
+      ]
+    },
+    {
+      "name": "文件管理",
+      "description": "浏览服务器文件系统",
+      "endpoints": [
+        { "method": "GET", "path": "/system/files/list", "summary": "目录列表", "params": [
+          { "name": "path", "type": "string", "required": true, "desc": "目录绝对路径" }
+        ] },
+        { "method": "GET", "path": "/system/files/read", "summary": "读取文本文件内容" },
+        { "method": "POST", "path": "/system/files/write", "summary": "写入文本文件" },
+        { "method": "POST", "path": "/system/files/delete", "summary": "删除文件 / 目录" },
+        { "method": "POST", "path": "/system/files/mkdir", "summary": "新建目录" },
+        { "method": "POST", "path": "/system/files/rename", "summary": "重命名 / 移动" },
+        { "method": "GET", "path": "/system/files/download", "summary": "下载文件（二进制流）" },
+        { "method": "POST", "path": "/system/files/upload", "summary": "上传文件（multipart）" },
+        { "method": "GET", "path": "/system/files/info", "summary": "单个文件详情" }
+      ]
+    },
+    {
+      "name": "应用商店 AppStore",
+      "description": "Git 源应用 / 脚本安装、运行与日志",
+      "endpoints": [
+        { "method": "GET", "path": "/appstore/repos", "summary": "Git 仓库源列表" },
+        { "method": "POST", "path": "/appstore/repos/add", "summary": "新增仓库源" },
+        { "method": "POST", "path": "/appstore/repos/remove", "summary": "移除仓库源" },
+        { "method": "POST", "path": "/appstore/repos/update", "summary": "更新仓库源配置" },
+        { "method": "GET", "path": "/appstore/packages", "summary": "可安装应用 / 包列表" },
+        { "method": "POST", "path": "/appstore/install", "summary": "安装应用" },
+        { "method": "POST", "path": "/appstore/uninstall", "summary": "卸载应用" },
+        { "method": "POST", "path": "/appstore/upgrade", "summary": "升级应用" },
+        { "method": "GET", "path": "/appstore/scripts/tree", "summary": "脚本文件树" },
+        { "method": "GET", "path": "/appstore/script/read", "summary": "读取脚本内容" },
+        { "method": "POST", "path": "/appstore/script/write", "summary": "保存脚本" },
+        { "method": "POST", "path": "/appstore/script/run", "summary": "运行脚本 / 安装任务" },
+        { "method": "POST", "path": "/appstore/script/stop", "summary": "停止运行中的任务" },
+        { "method": "GET", "path": "/appstore/runs", "summary": "历史运行记录" },
+        { "method": "GET", "path": "/appstore/log/{run_id}", "summary": "运行日志" },
+        { "method": "WS", "path": "/appstore/ws/{run_id}", "summary": "WebSocket 实时日志流" }
+      ]
+    },
+    {
+      "name": "站点管理",
+      "description": "一个站点可绑定多个域名与多个 IP",
+      "endpoints": [
+        { "method": "GET", "path": "/site/list", "summary": "站点列表（可按关键词搜索域名 / IP）" },
+        { "method": "GET", "path": "/site/users", "summary": "可选归属用户列表（admin / reseller 用）" },
+        { "method": "POST", "path": "/site/add", "summary": "新增站点", "params": [
+          { "name": "user_id", "type": "int", "required": true, "desc": "归属用户 ID" },
+          { "name": "name", "type": "string", "required": false, "desc": "站点名称，留空默认取第一个域名" },
+          { "name": "domains", "type": "string[]", "required": true, "desc": "绑定的域名列表（可多个）" },
+          { "name": "ips", "type": "string[]", "required": false, "desc": "绑定的 IP 列表（可多个）" },
+          { "name": "remark", "type": "string", "required": false, "desc": "备注" }
+        ] },
+        { "method": "POST", "path": "/site/update", "summary": "修改站点（domains / ips 不传则保持原样，传入则整体覆盖）" },
+        { "method": "POST", "path": "/site/delete", "summary": "删除站点（级联清理域名 / IP 绑定）", "params": [
+          { "name": "ids", "type": "int[]", "required": true, "desc": "站点 ID 列表（支持批量）" }
+        ] }
+      ]
+    },
+    {
+      "name": "开发（API Token）",
+      "description": "本组接口即本页面数据来源",
+      "endpoints": [
+        { "method": "GET", "path": "/dev/api-token/list", "summary": "当前账号的 API Token 列表（只含前缀，不返回完整值）" },
+        { "method": "POST", "path": "/dev/api-token/create", "summary": "新建 API Token；完整值仅创建响应中返回一次", "params": [
+          { "name": "name", "type": "string", "required": false, "desc": "备注名称" },
+          { "name": "expire_days", "type": "int", "required": false, "desc": "有效期天数，缺省 / 0 表示永不过期" }
+        ] },
+        { "method": "POST", "path": "/dev/api-token/update", "summary": "修改备注或启停用", "params": [
+          { "name": "id", "type": "int", "required": true, "desc": "Token ID" },
+          { "name": "name", "type": "string", "required": false, "desc": "新备注" },
+          { "name": "status", "type": "int", "required": false, "desc": "1 启用 / 0 停用" }
+        ] },
+        { "method": "POST", "path": "/dev/api-token/delete", "summary": "吊销（删除）API Token", "params": [
+          { "name": "id", "type": "int", "required": true, "desc": "Token ID" }
+        ] },
+        { "method": "GET", "path": "/dev/api-docs", "summary": "API 文档数据（当前页面）" }
+      ]
+    }
+  ]
+}

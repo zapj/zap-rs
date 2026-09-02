@@ -2,7 +2,7 @@ use std::time::{self, UNIX_EPOCH};
 
 use axum::{
     Json, RequestPartsExt,
-    extract::{FromRequestParts, Request},
+    extract::FromRequestParts,
     http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
 };
@@ -17,7 +17,9 @@ use jsonwebtoken::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::config;
+use sha2::{Digest, Sha256};
+
+use crate::{config, db};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -101,17 +103,25 @@ pub fn is_demo(claims: &Claims) -> bool {
     claims.roles.split(',').any(|r| r.trim() == "demo")
 }
 
-/// 从 HTTP 请求的 Authorization 头解析 JWT claims（供只读守卫等中间件使用）
-pub fn claims_from_request(req: &Request) -> Option<Claims> {
-    let header = req
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?;
-    let token = header.strip_prefix("Bearer ")?;
+/// 静态 API Token 前缀（`zap_` 开头，用于区分 JWT）
+pub const API_TOKEN_PREFIX: &str = "zap_";
+
+/// SHA-256 十六进制摘要（API Token 在 DB 中仅存哈希，不落明文）
+pub fn sha256_hex(input: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// 解析 Bearer 凭据字符串为 claims（支持 JWT 与静态 API Token，供只读守卫等中间件使用）。
+/// 入参应为已剥离 `Bearer ` 前缀的 token，调用方需在 await 前持有 owned String，避免借用跨 await。
+pub async fn claims_from_token(raw_token: &str) -> Option<Claims> {
+    if raw_token.starts_with(API_TOKEN_PREFIX) {
+        return resolve_api_token(raw_token).await;
+    }
     let secure_key = &config::get_config().read().unwrap().jwt.jwt_secure;
     decode::<Claims>(
-        token,
+        raw_token,
         &DecodingKey::from_secret(secure_key.as_ref()),
         &Validation::default(),
     )
@@ -157,9 +167,19 @@ async fn extract_claims(parts: &mut Parts) -> Result<Claims, AuthError> {
         .await
         .map_err(|_| AuthError::MissingCredentials)?;
 
+    let raw = bearer.token();
+
+    // 静态 API Token（zap_ 前缀）→ 数据库校验
+    if raw.starts_with(API_TOKEN_PREFIX) {
+        return match resolve_api_token(raw).await {
+            Some(claims) => Ok(claims),
+            None => Err(AuthError::InvalidToken),
+        };
+    }
+
     let secure_key = &config::get_config().read().unwrap().jwt.jwt_secure;
     let token_data = decode::<Claims>(
-        bearer.token(),
+        raw,
         &DecodingKey::from_secret(secure_key.as_ref()),
         &Validation::default(),
     )
@@ -191,4 +211,64 @@ impl IntoResponse for AuthError {
         }));
         (status, body).into_response()
     }
+}
+
+// ── 静态 API Token 校验 ─────────────────────────────────────
+
+#[derive(sqlx::FromRow)]
+struct ApiTokenLookup {
+    user_id: i64,
+    username: String,
+    roles: String,
+    token_status: i64,
+    user_status: i64,
+    expires_at: i64,
+}
+
+/// 校验静态 API Token：按哈希查表，校验 Token/用户状态与有效期，返回等价 Claims。
+async fn resolve_api_token(raw: &str) -> Option<Claims> {
+    let pool = db::get_db_pool().await;
+    let row: Option<ApiTokenLookup> = sqlx::query_as(
+        "SELECT t.user_id, u.username, u.roles, t.status AS token_status,
+                u.status AS user_status, t.expires_at
+         FROM api_token t JOIN user u ON u.id = t.user_id
+         WHERE t.token_hash = ?",
+    )
+    .bind(sha256_hex(raw))
+    .fetch_optional(pool)
+    .await
+    .ok()?;
+    let r = row?;
+
+    let now = time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
+    if r.token_status != 1 || r.user_status != 1 || (r.expires_at > 0 && r.expires_at <= now) {
+        return None;
+    }
+
+    // 尽力更新最近使用时间（失败不阻断请求）
+    let pool = db::get_db_pool().await;
+    let _ = sqlx::query("UPDATE api_token SET last_used_at = ? WHERE token_hash = ?")
+        .bind(now)
+        .bind(sha256_hex(raw))
+        .execute(pool)
+        .await;
+
+    let exp = if r.expires_at > 0 {
+        r.expires_at as u64
+    } else {
+        // 永不过期的 Token：赋予足够远的 exp（10 年）
+        now as u64 + 10 * 365 * 86400
+    };
+    Some(Claims {
+        id: r.user_id as u64,
+        iat: now as u64,
+        sub: r.username,
+        iss: "Zap".to_string(),
+        exp,
+        roles: r.roles,
+        pwd_is_default: false,
+    })
 }
