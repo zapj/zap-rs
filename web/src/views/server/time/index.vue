@@ -3,7 +3,6 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
 
-// ── 时间 ───────────────────────────────────────────────────
 interface TimeInfo {
   datetime: string
   timestamp: number
@@ -16,6 +15,7 @@ const timezones = ref<string[]>([])
 const selectedTz = ref('')
 const tzFilter = ref('')
 const tzDialogVisible = ref(false)
+const syncing = ref(false)
 
 const filteredZones = computed(() => {
   if (!tzFilter.value) return timezones.value.slice(0, 200)
@@ -34,11 +34,14 @@ async function syncTime() {
   try {
     await ElMessageBox.confirm('确认同步服务器时间？', '提示', { type: 'info' })
   } catch { return }
+  syncing.value = true
   try {
     const res = await http.post<{ code: number; message: string }>('/system/config/time/sync')
     ElMessage.success(res.message ?? '同步成功')
     loadTime()
-  } catch { /* handled */ }
+  } catch { /* handled */ } finally {
+    syncing.value = false
+  }
 }
 
 async function loadTimezones() {
@@ -59,75 +62,28 @@ async function setTimezone() {
   } catch { /* handled */ }
 }
 
-// ── SSH ────────────────────────────────────────────────────
-interface SshInfo {
-  running: boolean
-  port: number
-  version: string
-}
-
-const sshInfo = ref<SshInfo | null>(null)
-
-async function loadSsh() {
-  try {
-    const res = await http.get<{ code: number; data: SshInfo }>('/system/config/ssh/status')
-    sshInfo.value = res.data
-  } catch { /* handled */ }
-}
-
-async function restartSsh() {
-  try {
-    await ElMessageBox.confirm('确认重启 SSH 服务？重启期间当前连接不受影响。', '警告', {
-      type: 'warning',
-      confirmButtonText: '确认重启',
-    })
-  } catch { return }
-  try {
-    const res = await http.post<{ code: number; message: string }>('/system/config/ssh/restart')
-    ElMessage.success(res.message ?? '重启成功')
-    loadSsh()
-  } catch { /* handled */ }
-}
-
-onMounted(() => {
-  loadTime()
-  loadSsh()
-})
+onMounted(loadTime)
 </script>
 
 <template>
-  <div class="config-container">
-    <!-- 服务器时间 -->
-    <el-card style="margin-bottom:20px">
-      <template #header><span>服务器时间</span></template>
+  <div class="time-container">
+    <el-card>
+      <template #header>
+        <div class="card-header">
+          <span>服务器时间</span>
+          <el-tag size="small" type="info">{{ timeInfo?.timezone ?? '--' }}</el-tag>
+        </div>
+      </template>
       <el-descriptions v-if="timeInfo" :column="2" border>
         <el-descriptions-item label="当前时间">{{ timeInfo.datetime }}</el-descriptions-item>
         <el-descriptions-item label="时区">{{ timeInfo.timezone }}</el-descriptions-item>
         <el-descriptions-item label="UTC 偏移">{{ timeInfo.timezone_offset }}</el-descriptions-item>
         <el-descriptions-item label="时间戳">{{ timeInfo.timestamp }}</el-descriptions-item>
       </el-descriptions>
+      <el-empty v-else description="暂无数据" :image-size="60" />
       <div style="margin-top:16px;display:flex;gap:12px">
-        <el-button type="primary" @click="syncTime">同步时间 (NTP)</el-button>
+        <el-button type="primary" :loading="syncing" @click="syncTime">同步时间 (NTP)</el-button>
         <el-button @click="loadTimezones">修改时区</el-button>
-      </div>
-    </el-card>
-
-    <!-- SSH 服务 -->
-    <el-card>
-      <template #header><span>SSH 服务</span></template>
-      <el-descriptions v-if="sshInfo" :column="2" border>
-        <el-descriptions-item label="运行状态">
-          <el-tag :type="sshInfo.running ? 'success' : 'danger'">
-            {{ sshInfo.running ? '运行中' : '已停止' }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="监听端口">{{ sshInfo.port }}</el-descriptions-item>
-        <el-descriptions-item label="版本" :span="2">{{ sshInfo.version }}</el-descriptions-item>
-      </el-descriptions>
-      <div style="margin-top:16px">
-        <el-button type="warning" @click="restartSsh" :disabled="!sshInfo?.running">
-          重启 SSH
-        </el-button>
       </div>
     </el-card>
 
@@ -155,5 +111,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.config-container { padding: 20px; }
+.time-container { padding: 20px; }
+.card-header { display: flex; align-items: center; justify-content: space-between; }
 </style>

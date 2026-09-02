@@ -25,6 +25,8 @@ enum ClientVerb {
     TimeSetTimezone { timezone: String },
     SshStatus,
     SshRestart,
+    ServiceList,
+    ServiceAction { name: String, action: String },
     SshKeyList,
     SshKeyGenerate { name: String },
     SshKeyAuthorizedList,
@@ -62,6 +64,8 @@ pub async fn run(args: ClientArgs) {
         ClientVerb::TimeSetTimezone { timezone } => Request::TimeSetTimezone { timezone },
         ClientVerb::SshStatus => Request::SshStatus,
         ClientVerb::SshRestart => Request::SshRestart,
+        ClientVerb::ServiceList => Request::ServiceList,
+        ClientVerb::ServiceAction { name, action } => Request::ServiceAction { name, action },
         ClientVerb::SshKeyList => Request::SshKeyList,
         ClientVerb::SshKeyGenerate { name } => Request::SshKeyGenerate {
             name,

@@ -78,3 +78,39 @@ pub async fn ssh_restart(_claims: ValidatedClaims) -> ZapJsonResult {
     }
     Ok(Json(json!({ "code": 0, "message": resp.message })))
 }
+
+// ── System Services ─────────────────────────────────────────
+
+/// Get list of system services (systemd)
+pub async fn list_services(_claims: ValidatedClaims) -> ZapJsonResult {
+    let resp = crate::zapexec::call(Request::ServiceList).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({ "code": 0, "data": resp.data })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ServiceActionPayload {
+    pub name: String,
+    pub action: String,
+}
+
+/// start / stop / restart / reload / enable / disable a service
+pub async fn service_action(
+    _claims: ValidatedClaims,
+    Json(payload): Json<ServiceActionPayload>,
+) -> ZapJsonResult {
+    if payload.name.is_empty() {
+        return Err(ZapError::New(-1, "服务名称不能为空".to_string()));
+    }
+    let resp = crate::zapexec::call(Request::ServiceAction {
+        name: payload.name,
+        action: payload.action,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({ "code": 0, "message": resp.message, "data": resp.data })))
+}

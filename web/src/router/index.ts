@@ -90,12 +90,6 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         meta: { title: '菜单管理', icon: 'Menu' , affix: true},
       },
       {
-        path: 'config',
-        name: 'Config',
-        component: () => import('@/views/system/config/index.vue'),
-        meta: { title: '服务配置', icon: 'Tools', affix: true },
-      },
-      {
         path: 'ssh-keys',
         name: 'SshKeys',
         component: () => import('@/views/system/config/ssh-keys.vue'),
@@ -114,6 +108,33 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         name: 'FileManager',
         component: () => import('@/views/files/index.vue'),
         meta: { title: '文件管理器', icon: 'FolderOpened', affix: true },
+      },
+    ],
+  },
+  // 服务器配置
+  {
+    path: '/server',
+    component: Layout,
+    redirect: '/server/time',
+    meta: { title: '服务器配置', icon: 'ep:set-up', roles: ['admin'] },
+    children: [
+      {
+        path: 'time',
+        name: 'ServerTime',
+        component: () => import('@/views/server/time/index.vue'),
+        meta: { title: '服务器时间', icon: 'ep:clock', affix: true },
+      },
+      {
+        path: 'services',
+        name: 'ServerServices',
+        component: () => import('@/views/server/services/index.vue'),
+        meta: { title: '服务', icon: 'ep:service', affix: true },
+      },
+      {
+        path: 'ssh',
+        name: 'ServerSsh',
+        component: () => import('@/views/server/ssh/index.vue'),
+        meta: { title: 'SSH 服务', icon: 'ep:connection', affix: true },
       },
     ],
   },

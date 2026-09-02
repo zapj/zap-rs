@@ -63,6 +63,7 @@ declare module 'vue' {
     IconEpFold: typeof import('~icons/ep/fold')['default']
     IconEpKey: typeof import('~icons/ep/key')['default']
     IconEpLock: typeof import('~icons/ep/lock')['default']
+    IconEpSearch: typeof import('~icons/ep/search')['default']
     IconEpSwitchButton: typeof import('~icons/ep/switch-button')['default']
     IconEpUser: typeof import('~icons/ep/user')['default']
     IconEpUserFilled: typeof import('~icons/ep/user-filled')['default']

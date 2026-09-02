@@ -22,6 +22,12 @@ pub enum Request {
     /// 重启 SSH 服务
     #[serde(rename = "ssh.restart")]
     SshRestart,
+    /// 列出系统服务（systemd）
+    #[serde(rename = "service.list")]
+    ServiceList,
+    /// 对系统服务执行操作（start/stop/restart/reload/enable/disable）
+    #[serde(rename = "service.action")]
+    ServiceAction { name: String, action: String },
     /// 列出 SSH 密钥
     #[serde(rename = "ssh_key.list")]
     SshKeyList,

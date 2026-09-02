@@ -197,9 +197,17 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (23, 2, 'menus', 'menus', 'system/menus/index', 'menu', '菜单管理', 'ep:menu', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (24, 2, 'config', 'config', 'system/config/index', 'menu', '服务配置', 'ep:tools', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- Server config dir
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (7, 0, 'server', '/server', 'Layout', '/server/time', 'dir', '服务器配置', 'ep:set-up', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (71, 7, 'server-time', 'time', 'server/time/index', 'menu', '服务器时间', 'ep:clock', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (72, 7, 'server-services', 'services', 'server/services/index', 'menu', '服务', 'ep:service', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (73, 7, 'server-ssh', 'ssh', 'server/ssh/index', 'menu', 'SSH 服务', 'ep:connection', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Terminal
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -249,7 +257,6 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 21);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 22);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 23);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 24);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 25);
     -- User gets dashboard only
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 1);
@@ -290,6 +297,11 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 6);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 61);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 62);
+    -- Server config: admin 专属
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 7);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 71);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 72);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 73);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
