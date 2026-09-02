@@ -359,16 +359,24 @@ pub async fn ws_terminal(
     };
 
     let secure_key = &config::get_config().read().unwrap().jwt.jwt_secure;
-    if decode::<Claims>(
+    let claims = match decode::<Claims>(
         &token,
         &DecodingKey::from_secret(secure_key.as_ref()),
         &Validation::default(),
-    )
-    .is_err()
-    {
+    ) {
+        Ok(d) => d.claims,
+        Err(_) => {
+            return axum::response::Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body(axum::body::Body::from("Invalid token"))
+                .unwrap();
+        }
+    };
+    // 演示账号仅支持浏览，禁止通过终端执行命令
+    if crate::zap::jwt::is_demo(&claims) {
         return axum::response::Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .body(axum::body::Body::from("Invalid token"))
+            .status(StatusCode::FORBIDDEN)
+            .body(axum::body::Body::from("演示账号仅支持浏览，不能使用终端"))
             .unwrap();
     }
 

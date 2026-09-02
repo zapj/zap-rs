@@ -4,7 +4,7 @@
     <div class="terminal-sidebar">
       <div class="sidebar-header">
         <span class="sidebar-title">连接管理</span>
-        <el-button type="primary" size="small" :icon="Plus" @click="showAddDialog = true">
+        <el-button type="primary" size="small" :icon="Plus" :disabled="isReadOnly" @click="showAddDialog = true">
           添加
         </el-button>
       </div>
@@ -34,6 +34,7 @@
               :icon="Edit"
               size="small"
               text
+              :disabled="isReadOnly"
               @click.stop="editConnection(conn)"
               title="编辑"
             />
@@ -42,7 +43,7 @@
               @confirm="handleDelete(conn.id)"
             >
               <template #reference>
-                <el-button :icon="Delete" size="small" text title="删除" />
+                <el-button :icon="Delete" size="small" text title="删除" :disabled="isReadOnly" />
               </template>
             </el-popconfirm>
           </div>
@@ -168,8 +169,12 @@ import {
   type SshConnection,
 } from '@/api/terminal'
 import { getToken } from '@/utils/auth'
+import { useUserStore } from '@/stores/user'
 
 // ── 状态 ───────────────────────────────────────────────────
+
+const userStore = useUserStore()
+const isReadOnly = computed(() => userStore.roles.includes('demo'))
 
 const connections = ref<SshConnection[]>([])
 const sshKeys = ref<{ name: string }[]>([])
@@ -350,6 +355,10 @@ function getWsUrl(connId: number): string {
 }
 
 async function openTerminal(conn: SshConnection) {
+  if (isReadOnly.value) {
+    ElMessage.warning('演示账号仅支持浏览，不能使用终端')
+    return
+  }
   // Check if already open
   const existing = tabs.value.find(t => t.connId === conn.id)
   if (existing) {

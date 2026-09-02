@@ -1,7 +1,7 @@
 use std::time::{self, UNIX_EPOCH};
 
 use axum::{
-    extract::FromRequestParts,
+    extract::{FromRequestParts, Request},
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
     Json, RequestPartsExt,
@@ -95,6 +95,29 @@ pub fn is_admin(claims: &Claims) -> bool {
 /// Check if the claims contain the reseller role
 pub fn is_reseller(claims: &Claims) -> bool {
     claims.roles.split(',').any(|r| r.trim() == "reseller")
+}
+
+/// Check if the claims contain the demo role（只读演示账号）
+pub fn is_demo(claims: &Claims) -> bool {
+    claims.roles.split(',').any(|r| r.trim() == "demo")
+}
+
+/// 从 HTTP 请求的 Authorization 头解析 JWT claims（供只读守卫等中间件使用）
+pub fn claims_from_request(req: &Request) -> Option<Claims> {
+    let header = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+    let token = header.strip_prefix("Bearer ")?;
+    let secure_key = &config::get_config().read().unwrap().jwt.jwt_secure;
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secure_key.as_ref()),
+        &Validation::default(),
+    )
+    .ok()
+    .map(|d| d.claims)
 }
 
 // ── Claims extractor (allows default-password users through) ────────────────

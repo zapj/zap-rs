@@ -105,12 +105,14 @@
               size="small"
               type="warning"
               plain
+              :disabled="!isAdmin"
               @click="handleUpgrade(pkg)"
             >升级</el-button>
             <el-button
               size="small"
               type="danger"
               plain
+              :disabled="!isAdmin"
               @click="handleUninstall(pkg)"
             >卸载</el-button>
           </template>
@@ -118,7 +120,7 @@
             v-else
             size="small"
             type="primary"
-            :disabled="pkg.source === 'custom' && !isAdmin"
+            :disabled="!isAdmin"
             @click="handleInstall(pkg)"
           >安装</el-button>
         </div>

@@ -8,6 +8,7 @@
 #   ./rundev.sh --skip-web      # 跳过前端构建
 #   ./rundev.sh --skip-build    # 跳过 cargo 构建
 #   ./rundev.sh --skip-install  # 缺 node_modules 时不自动 npm install
+#   ./rundev.sh --reset-db      # 删除 data/zap.db 重建全新数据库（admin 初始密码 A123456）
 #
 # 注意：zapexec 需要 root 权限，脚本通过 sudo 启动（首次可能提示输入密码）。
 set -euo pipefail
@@ -22,13 +23,14 @@ die()  { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 usage() { sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ── 参数解析 ────────────────────────────────────────────────
-RELEASE=false; SKIP_WEB=false; SKIP_BUILD=false; SKIP_INSTALL=false
+RELEASE=false; SKIP_WEB=false; SKIP_BUILD=false; SKIP_INSTALL=false; RESET_DB=false
 for arg in "$@"; do
   case "$arg" in
     --release)      RELEASE=true ;;
     --skip-web)     SKIP_WEB=true ;;
     --skip-build)   SKIP_BUILD=true ;;
     --skip-install) SKIP_INSTALL=true ;;
+    --reset-db|--fresh-db) RESET_DB=true ;;
     -h|--help)      usage; exit 0 ;;
     *)              die "未知参数: $arg（--help 查看用法）" ;;
   esac
@@ -115,6 +117,17 @@ EOF
   ok "开发配置已生成"
 fi
 
+# ── 3.5 删除数据库（--reset-db）──────────────────────────────
+if [ "$RESET_DB" = true ]; then
+  if [ -f "$ROOT_DIR/data/zap.db" ]; then
+    warn "删除数据库 $ROOT_DIR/data/zap.db ..."
+    rm -f "$ROOT_DIR/data/zap.db" "$ROOT_DIR/data/zap.db-wal" "$ROOT_DIR/data/zap.db-shm"
+    ok "数据库已删除，启动时将重建全新数据库"
+  else
+    info "数据库不存在，跳过删除"
+  fi
+fi
+
 # ── 清理与退出 ──────────────────────────────────────────────
 ZAPEXEC_PID=""
 ZAPD_PID=""
@@ -147,12 +160,21 @@ sleep 1
 
 # ── 5. 启动 zapd ────────────────────────────────────────────
 info "启动 zapd ..."
-ZAP_CONFIG="$DEV_CONF" "$BIN_DIR/zapd" &
+if [ "$RESET_DB" = true ]; then
+  info "注入 ZAP_ADMIN_PASSWORD=A123456（全新数据库 admin 初始密码）"
+  ZAP_ADMIN_PASSWORD="A123456" ZAP_CONFIG="$DEV_CONF" "$BIN_DIR/zapd" &
+else
+  ZAP_CONFIG="$DEV_CONF" "$BIN_DIR/zapd" &
+fi
 ZAPD_PID=$!
 
 echo ""
 ok "全部服务已启动"
-info "  zapd    : https://127.0.0.1:2600 （默认 admin / 123456）"
+if [ "$RESET_DB" = true ]; then
+  info "  zapd    : https://127.0.0.1:2600 （默认 admin / A123456，请登录后尽快修改）"
+else
+  info "  zapd    : https://127.0.0.1:2600 （默认 admin / 123456）"
+fi
 info "  zapexec : $EXEC_SOCKET （root 特权守护进程）"
 info "  按 Ctrl+C 停止全部服务"
 echo ""

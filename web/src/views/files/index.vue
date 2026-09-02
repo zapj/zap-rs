@@ -238,7 +238,7 @@
       />
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="doSaveEdit">保存</el-button>
+        <el-button v-if="isAdmin" type="primary" :loading="saving" @click="doSaveEdit">保存</el-button>
       </template>
     </el-dialog>
   </div>

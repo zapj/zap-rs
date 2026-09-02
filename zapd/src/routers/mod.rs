@@ -1,12 +1,34 @@
 use axum::{
     body::Body,
-    http::{header, StatusCode, Uri},
-    response::Response,
+    extract::Request,
+    http::{header, Method, StatusCode, Uri},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
 use rust_embed::RustEmbed;
 use serde_json::json;
+
+use crate::zap::jwt::{claims_from_request, is_demo};
+
+/// 演示账号只读守卫：demo 角色仅允许 GET 请求（浏览），其余写操作一律拒绝。
+/// /auth/* 为个人账户操作（登录/登出/改密/2FA），放行以免演示账号被锁死。
+async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Response> {
+    if req.method() == Method::GET || req.uri().path().starts_with("/auth/") {
+        return Ok(next.run(req).await);
+    }
+    if let Some(claims) = claims_from_request(&req) {
+        if is_demo(&claims) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(json!({ "code": -1, "message": "演示账号仅支持浏览，不能执行操作" })),
+            )
+                .into_response());
+        }
+    }
+    Ok(next.run(req).await)
+}
 
 pub mod appstore;
 pub mod auth;
@@ -188,4 +210,5 @@ fn api_routers() -> Router {
         .route("/appstore/runs", get(appstore::runs))
         .route("/appstore/log/{run_id}", get(appstore::log))
         .route("/appstore/ws/{run_id}", get(appstore::ws_log))
+        .layer(middleware::from_fn(demo_readonly_guard))
 }
