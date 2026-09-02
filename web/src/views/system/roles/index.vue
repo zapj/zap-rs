@@ -8,7 +8,14 @@
       <el-table :data="tableData" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="name" label="角色名称" width="140" />
-        <el-table-column prop="role_key" label="标识" width="120" />
+        <el-table-column label="标识" width="170">
+          <template #default="{ row }">
+            <span>{{ row.role_key }}</span>
+            <el-tag v-if="isBuiltinRole(row.role_key)" type="warning" size="small" style="margin-left:6px">
+              内置
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
@@ -25,7 +32,7 @@
             <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
             <el-button type="primary" link @click="handlePermission(row)">权限</el-button>
             <el-button
-              v-if="row.role_key !== 'admin' && row.role_key !== 'user'"
+              v-if="!isBuiltinRole(row.role_key)"
               type="danger"
               link
               @click="handleDelete(row)"
@@ -50,7 +57,7 @@
           <el-input v-model="form.description" type="textarea" />
         </el-form-item>
         <el-form-item label="状态">
-          <el-radio-group v-model="form.status">
+          <el-radio-group v-model="form.status" :disabled="dialogType==='edit' && isBuiltinRole(form.role_key)">
             <el-radio :value="1">启用</el-radio>
             <el-radio :value="0">禁用</el-radio>
           </el-radio-group>
@@ -96,6 +103,7 @@ import {
   type RoleItem,
 } from '@/api/role'
 import { getMenuList } from '@/api/menu'
+import { isBuiltinRole } from '@/utils/role'
 
 const loading = ref(false)
 const tableData = ref<RoleItem[]>([])

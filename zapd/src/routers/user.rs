@@ -315,10 +315,13 @@ pub async fn user_update(
     )
     .await;
 
-    Ok(Json(json!({
-        "code": 0,
-        "message": "用户更新成功"
-    })))
+    // First-time password change (was still using the default password):
+    // tell the frontend to log out and require re-login with the new password.
+    let mut resp = json!({ "code": 0, "message": "用户更新成功" });
+    if payload.password.is_some() && claims.pwd_is_default {
+        resp["must_relogin"] = json!(true);
+    }
+    Ok(Json(resp))
 }
 
 /// Delete a user — admin: any; reseller: own customers only

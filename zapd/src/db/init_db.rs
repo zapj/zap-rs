@@ -13,22 +13,8 @@ pub async fn init_schema() {
     init_login_attempts_table().await;
     init_hourly_stats_tables().await;
     crate::routers::ssh_terminal::init_table().await;
-
-    // Migration: fix empty path on existing child menus
-    fix_empty_menu_paths().await;
-    // Migration: ensure reseller role + base permissions exist on upgraded DBs
-    ensure_reseller_role().await;
-    // Migration: add owner_id column to user table (reseller customer ownership)
-    ensure_user_owner_id().await;
-    // Migration: rename 系统管理 -> 系统设置
-    fix_system_menu_title().await;
-    // Migration: add TOTP 2FA columns to user table
-    ensure_user_totp_columns().await;
-    // Migration: encrypt legacy plaintext SSH passwords
-    crate::zap::crypto::migrate_legacy_passwords().await;
     // AppStore: run records table + menu
     init_appstore_runs_table().await;
-    ensure_appstore_menu().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -52,15 +38,25 @@ async fn init_system_user_table_schema() {
         roles TEXT,
         permissions TEXT,
         owner_id INTEGER DEFAULT 0,
+        totp_secret TEXT NOT NULL DEFAULT '',
+        totp_enabled INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER,
         updated_at INTEGER
     )
     "#;
     get_db_pool().await.execute(create_sql).await.unwrap();
 
-    // Insert admin with runtime-generated bcrypt hash (avoids $2y$ prefix issues)
-    let default_password = "123456";
-    let hashed = bcrypt::hash(default_password, bcrypt::DEFAULT_COST)
+    // Insert admin with runtime-generated bcrypt hash (avoids $2y$ prefix issues).
+    // Password: use $ZAP_ADMIN_PASSWORD if set (fresh DBs only), otherwise default "123456".
+    let default_password = std::env::var("ZAP_ADMIN_PASSWORD")
+        .map(|p| p.trim().to_string())
+        .unwrap_or_default();
+    let default_password = if default_password.is_empty() {
+        "123456".to_string()
+    } else {
+        default_password
+    };
+    let hashed = bcrypt::hash(&default_password, bcrypt::DEFAULT_COST)
         .expect("failed to hash default password");
     let now = chrono::Utc::now().timestamp();
 
@@ -152,6 +148,8 @@ async fn init_roles_table() {
     VALUES ('普通用户', 'user', '普通用户角色', 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO roles (name, role_key, description, status, created_at, updated_at)
     VALUES ('经销商', 'reseller', '经销商角色', 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO roles (name, role_key, description, status, created_at, updated_at)
+    VALUES ('演示', 'demo', '演示角色', 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -220,6 +218,14 @@ async fn init_menus_table() {
     VALUES (5, 0, 'reseller-users', '/reseller/users', 'Layout', '/reseller/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 5, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', '', 1, 'reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- AppStore (Layout + children)
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (6, 0, 'appstore', '/appstore', 'Layout', '/appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 6, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (61, 6, 'appstore-index', 'index', 'appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (62, 6, 'appstore-scripts', 'scripts', 'appstore/scripts', 'menu', '脚本管理', 'ep:document', 1, 'admin,user', 2, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -265,108 +271,27 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 41);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 5);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 51);
+    -- AppStore: admin / user / reseller 均可访问
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 6);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 61);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 62);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 6);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 61);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 62);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 6);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 61);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 62);
+    -- Demo: dashboard, files, terminal, appstore（与普通用户一致）
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 1);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 3);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 31);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 4);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 41);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 6);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 61);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 62);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-}
-
-// ── migrations ─────────────────────────────────────────────
-
-/// Fix child menus that have empty path (causes frontend menuToRoute to crash)
-async fn fix_empty_menu_paths() {
-    let pool = get_db_pool().await;
-
-    let result = sqlx::query(
-        "UPDATE menus SET path = 'index' WHERE parent_id > 0 AND (path = '' OR path IS NULL)"
-    )
-    .execute(pool)
-    .await;
-
-    match result {
-        Ok(r) if r.rows_affected() > 0 => {
-            tracing::info!("Fixed {} menu(s) with empty path", r.rows_affected());
-        }
-        _ => {}
-    }
-}
-
-/// Ensure reseller role and its base menu permissions exist (idempotent).
-/// Needed for databases created before the reseller role was introduced.
-async fn ensure_reseller_role() {
-    let pool = get_db_pool().await;
-    let now = chrono::Local::now().timestamp();
-
-    // 0. Ensure the customer-management menu exists with Layout wrapper (upgraded DBs)
-    let _ = sqlx::query(
-        "INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-         VALUES (5, 0, 'reseller-users', '/reseller/users', 'Layout', '/reseller/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 5, 1, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-            parent_id = 0, name = 'reseller-users', path = '/reseller/users', component = 'Layout', redirect = '/reseller/users/index', type = 'menu', title = '客户管理', icon = 'ep:user-filled', affix = 1, roles = 'reseller', sort_order = 5, status = 1",
-    )
-    .bind(now)
-    .bind(now)
-    .execute(pool)
-    .await;
-
-    let _ = sqlx::query(
-        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-         VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', '', 1, 'reseller', 1, 1, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-            parent_id = 5, name = 'reseller-users-index', path = 'index', component = 'system/users/index', type = 'menu', title = '客户管理', icon = '', affix = 1, roles = 'reseller', sort_order = 1, status = 1",
-    )
-    .bind(now)
-    .bind(now)
-    .execute(pool)
-    .await;
-
-    // 1. Ensure the reseller role exists
-    let _ = sqlx::query(
-        "INSERT OR IGNORE INTO roles (name, role_key, description, status, created_at, updated_at)
-         VALUES ('经销商', 'reseller', '经销商角色', 1, ?, ?)",
-    )
-    .bind(now)
-    .bind(now)
-    .execute(pool)
-    .await;
-
-    // 2. Resolve the role id (roles uses AUTOINCREMENT)
-    let role_id: i64 = match sqlx::query_as("SELECT id FROM roles WHERE role_key = 'reseller'")
-        .fetch_optional(pool)
-        .await
-    {
-        Ok(Some((id,))) => id,
-        _ => return,
-    };
-
-    // 3. Ensure base menu permissions (same as user + customer management)
-    for menu_id in [1i64, 3, 31, 4, 41, 5, 51] {
-        let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (?, ?)")
-            .bind(role_id)
-            .bind(menu_id)
-            .execute(pool)
-            .await;
-    }
-}
-
-/// Add owner_id column to the user table for existing databases (idempotent).
-async fn ensure_user_owner_id() {
-    if column_exists("user", "owner_id").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let _ = sqlx::query("ALTER TABLE user ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0")
-        .execute(pool)
-        .await;
-    tracing::info!("Added user.owner_id column");
-}
-
-/// Rename the "系统管理" top menu to "系统设置" for existing databases.
-async fn fix_system_menu_title() {
-    let pool = get_db_pool().await;
-    let _ = sqlx::query(
-        "UPDATE menus SET title = '系统设置' WHERE name = 'system' AND title = '系统管理'",
-    )
-    .execute(pool)
-    .await;
 }
 
 // ── audit logs ─────────────────────────────────────────────
@@ -449,25 +374,6 @@ async fn init_hourly_stats_tables() {
     }
 }
 
-// ── migrations ─────────────────────────────────────────────
-
-/// Add TOTP 2FA columns to the user table (idempotent).
-async fn ensure_user_totp_columns() {
-    let pool = get_db_pool().await;
-    if !column_exists("user", "totp_secret").await {
-        let _ = sqlx::query("ALTER TABLE user ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''")
-            .execute(pool)
-            .await;
-        tracing::info!("Added user.totp_secret column");
-    }
-    if !column_exists("user", "totp_enabled").await {
-        let _ = sqlx::query("ALTER TABLE user ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0")
-            .execute(pool)
-            .await;
-        tracing::info!("Added user.totp_enabled column");
-    }
-}
-
 // ── appstore ────────────────────────────────────────────────
 
 async fn init_appstore_runs_table() {
@@ -492,56 +398,6 @@ async fn init_appstore_runs_table() {
     let _ = get_db_pool().await.execute(sql).await;
 }
 
-/// 确保 AppStore 菜单存在（幂等，兼容已存在的数据库）。
-async fn ensure_appstore_menu() {
-    let pool = get_db_pool().await;
-    let now = chrono::Local::now().timestamp();
-
-    let _ = sqlx::query(
-        "INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-         VALUES (6, 0, 'appstore', '/appstore', 'Layout', '/appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 6, 1, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-            parent_id = 0, name = 'appstore', path = '/appstore', component = 'Layout', redirect = '/appstore/index', type = 'menu', title = '应用商店', icon = 'ep:goods', affix = 1, roles = 'admin,user', sort_order = 6, status = 1",
-    )
-    .bind(now)
-    .bind(now)
-    .execute(pool)
-    .await;
-
-    let _ = sqlx::query(
-        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-         VALUES (61, 6, 'appstore-index', 'index', 'appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 1, 1, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-            parent_id = 6, name = 'appstore-index', path = 'index', component = 'appstore/index', type = 'menu', title = '应用商店', icon = 'ep:goods', affix = 1, roles = 'admin,user', sort_order = 1, status = 1",
-    )
-    .bind(now)
-    .bind(now)
-    .execute(pool)
-    .await;
-
-    let _ = sqlx::query(
-        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-         VALUES (62, 6, 'appstore-scripts', 'scripts', 'appstore/scripts', 'menu', '脚本管理', 'ep:document', 1, 'admin,user', 2, 1, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-            parent_id = 6, name = 'appstore-scripts', path = 'scripts', component = 'appstore/scripts', type = 'menu', title = '脚本管理', icon = 'ep:document', affix = 1, roles = 'admin,user', sort_order = 2, status = 1",
-    )
-    .bind(now)
-    .bind(now)
-    .execute(pool)
-    .await;
-
-    // admin / user / reseller 均可访问应用商店与脚本管理
-    for role_id in [1i64, 2, 3] {
-        for menu_id in [6i64, 61, 62] {
-            let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (?, ?)")
-                .bind(role_id)
-                .bind(menu_id)
-                .execute(pool)
-                .await;
-        }
-    }
-}
-
 // ── helper ─────────────────────────────────────────────────
 
 async fn table_exists(table_name: &str) -> bool {
@@ -552,15 +408,4 @@ async fn table_exists(table_name: &str) -> bool {
             .fetch_one(pool)
             .await;
     result.is_ok()
-}
-
-async fn column_exists(table_name: &str, column_name: &str) -> bool {
-    let pool = get_db_pool().await;
-    let sql = format!(
-        "SELECT name FROM pragma_table_info('{}') WHERE name = '{}'",
-        table_name, column_name
-    );
-    let result: Result<Option<String>, sqlx::Error> =
-        sqlx::query_scalar(&sql).fetch_optional(pool).await;
-    matches!(result, Ok(Some(_)))
 }

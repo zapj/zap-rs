@@ -66,6 +66,16 @@ fn role_to_value(r: &RoleRow) -> Value {
     })
 }
 
+// ── helpers ────────────────────────────────────────────────
+
+/// System built-in role keys. These roles cannot be deleted, disabled,
+/// or have their key changed.
+const BUILTIN_ROLE_KEYS: [&str; 4] = ["admin", "reseller", "user", "demo"];
+
+fn is_builtin_role(role_key: &str) -> bool {
+    BUILTIN_ROLE_KEYS.contains(&role_key)
+}
+
 // ── handlers ───────────────────────────────────────────────
 
 pub async fn role_list(_claims: ValidatedClaims) -> ZapJsonResult {
@@ -90,6 +100,10 @@ pub async fn role_add(
     let pool = db::get_db_pool().await;
     let now = chrono::Local::now().timestamp();
     let desc = payload.description.unwrap_or_default();
+
+    if is_builtin_role(&payload.role_key) {
+        return Err(ZapError::New(-1, "系统内置角色标识不可使用".to_string()));
+    }
 
     let result = sqlx::query(
         "INSERT INTO roles (name, role_key, description, status, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
@@ -129,6 +143,23 @@ pub async fn role_update(
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
     let now = chrono::Local::now().timestamp();
+
+    // Built-in roles: name/description may be edited, but key/status cannot.
+    let role: Option<RoleRow> = sqlx::query_as("SELECT * FROM roles WHERE id = ?")
+        .bind(payload.id)
+        .fetch_optional(pool)
+        .await?;
+    let Some(role) = role else {
+        return Err(ZapError::New(-1, "角色不存在".to_string()));
+    };
+    if is_builtin_role(&role.role_key) {
+        if payload.role_key.is_some() && payload.role_key.as_deref() != Some(role.role_key.as_str()) {
+            return Err(ZapError::New(-1, "系统内置角色的标识不可修改".to_string()));
+        }
+        if payload.status == Some(0) {
+            return Err(ZapError::New(-1, "系统内置角色不可禁用".to_string()));
+        }
+    }
 
     let mut qb: sqlx::QueryBuilder<'_, Sqlite> = sqlx::QueryBuilder::new("UPDATE roles SET ");
     let mut sep = qb.separated(", ");
@@ -176,7 +207,7 @@ pub async fn role_delete(
         .fetch_one(pool)
         .await?;
 
-    if role.role_key == "admin" || role.role_key == "reseller" || role.role_key == "user" {
+    if is_builtin_role(&role.role_key) {
         return Err(ZapError::New(-1, "系统内置角色不可删除".to_string()));
     }
 

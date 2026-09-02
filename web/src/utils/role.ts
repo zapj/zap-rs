@@ -5,6 +5,7 @@ export const ROLE_LABELS: Record<string, string> = {
   admin: '管理员',
   reseller: '经销商',
   user: '普通用户',
+  demo: '演示',
 }
 
 /** 根据角色标识返回中文名称，未知角色原样返回 */
@@ -17,4 +18,12 @@ export const ROLE_OPTIONS = [
   { label: '管理员', value: 'admin' },
   { label: '经销商', value: 'reseller' },
   { label: '普通用户', value: 'user' },
+  { label: '演示', value: 'demo' },
 ]
+
+/** 系统内置角色标识（不可删除、不可禁用、不可修改标识） */
+export const BUILTIN_ROLE_KEYS = ['admin', 'reseller', 'user', 'demo']
+
+export function isBuiltinRole(roleKey: string): boolean {
+  return BUILTIN_ROLE_KEYS.includes(roleKey)
+}

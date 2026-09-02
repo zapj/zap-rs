@@ -83,14 +83,20 @@ async fn main() {
     );
     info!("Zap server listening on https://{}.", bind);
 
-    // Security: warn if JWT secret is still default
-    // (config module already rotates it automatically)
-    warn!(
-        "Default admin password is '123456'. Please change it immediately after first login."
-    );
-
     // init db
     db::init_db::init_schema().await;
+
+    // Security: admin password hint (only relevant when a fresh DB was created)
+    match std::env::var("ZAP_ADMIN_PASSWORD").map(|p| p.trim().to_string()) {
+        Ok(p) if !p.is_empty() => {
+            info!("Admin password initialized from ZAP_ADMIN_PASSWORD on fresh DB.");
+        }
+        _ => {
+            warn!(
+                "Default admin password is '123456'. Please change it immediately after first login."
+            );
+        }
+    }
 
     // init job scheduler for system monitoring
     zap::job::init_system_jobs().await;
