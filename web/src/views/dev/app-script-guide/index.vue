@@ -93,7 +93,8 @@
               <tr><td><code>svc_name</code></td><td>string</td><td>守护型应用填 systemd unit 名（如 <code>mysql</code> / <code>nginx</code> / <code>php-fpm-85</code>），状态探测与面板启停走 systemctl</td></tr>
               <tr><td><code>instance</code></td><td>string</td><td>实例展示标识（如 <code>php85</code>、<code>openssl1011</code>）</td></tr>
               <tr><td><code>install_dir</code></td><td>string</td><td>软件本体实际安装目录（位于 <code>$APPS_DIR</code> 下），日志定位 / 「打开目录」用</td></tr>
-              <tr><td><code>config_file</code></td><td>string</td><td>主配置文件绝对路径</td></tr>
+              <tr><td><code>config_file</code></td><td>string</td><td>主配置文件绝对路径（单文件快捷编辑入口）</td></tr>
+              <tr><td><code>config_files</code></td><td>string[] / {path,label}[]</td><td>可编辑文件列表（可选）；「已安装」详情据此提供多个配置文件编辑入口，每项为纯路径或 <code>{path, label}</code>；未填时回退 <code>config_file</code></td></tr>
               <tr><td><code>pid_file</code></td><td>string</td><td>pid 文件路径；守护型填写，作无 systemd 环境下的兜底探活</td></tr>
               <tr><td><code>expose</code></td><td>string / string[]</td><td>暴露入口：<code>tcp:80</code>、<code>unix:/run/xxx.sock</code> 等，可多行数组；无则 <code>none</code></td></tr>
               <tr><td><code>tags</code></td><td>string[]</td><td>分类 / 特性标签（如 <code>webserver</code>、<code>library</code>）</td></tr>
@@ -273,6 +274,13 @@ svc_name: php-fpm-\${PHP_SHORT_VERSION}   # 守护型填 systemd unit 名；库�
 instance: php\${PHP_SHORT_VERSION}
 install_dir: \${PHP_INSTALL_PATH}          # 软件本体在 \$APPS_DIR 下的实际安装目录
 config_file: \${PHP_INSTALL_PATH}/etc/php.ini
+config_files:                 # 可选：可编辑文件列表；缺省时仅 config_file
+  - path: \${PHP_INSTALL_PATH}/etc/php.ini
+    label: php.ini（主配置）
+  - path: \${PHP_INSTALL_PATH}/etc/php-fpm.conf
+    label: php-fpm.conf
+  - path: \${PHP_INSTALL_PATH}/etc/php-fpm.d/www.conf
+    label: www.conf（FPM 池）
 pid_file: \${PHP_FPM_PID}                  # 无守护进程的库类删除此行
 expose: unix:\${PHP_FPM_SOCK}
 tags:

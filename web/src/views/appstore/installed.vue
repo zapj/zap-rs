@@ -164,22 +164,55 @@
           <el-descriptions-item label="最近任务">{{ current.run_id || '-' }}</el-descriptions-item>
         </el-descriptions>
 
-        <!-- 配置文件快捷编辑 -->
-        <div v-if="configPathOf(current)" class="cfg-block">
+        <!-- 配置文件快捷编辑（info.yaml: config_files 列表 / 兼容单值 config_file） -->
+        <div v-if="editableFilesOf(current).length" class="cfg-block">
           <div class="cfg-head">
             <span class="info-title">配置文件</span>
-            <el-tooltip v-if="!isAdmin" content="仅管理员可编辑实例配置文件" placement="top">
-              <el-button size="small" type="primary" plain disabled>编辑配置</el-button>
-            </el-tooltip>
-            <el-button
-              v-else
-              size="small"
-              type="primary"
-              plain
-              @click="openCfgEditor(configPathOf(current))"
-            >编辑配置</el-button>
+            <span v-if="!isAdmin" class="cfg-ro-tip">仅管理员可编辑</span>
           </div>
-          <div class="cfg-path mono">{{ configPathOf(current) }}</div>
+          <template v-if="editableFilesOf(current).length === 1">
+            <div class="cfg-single">
+              <div class="cfg-path mono">{{ editableFilesOf(current)[0].path }}</div>
+              <el-dropdown
+                v-if="isAdmin"
+                trigger="click"
+                @command="(c: string) => onEditCommand(editableFilesOf(current)[0], c)"
+              >
+                <el-button size="small" type="primary" plain>
+                  编辑配置<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="edit">直接编辑</el-dropdown-item>
+                    <el-dropdown-item command="backup">备份后编辑</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </template>
+          <template v-else>
+            <div v-for="f in editableFilesOf(current)" :key="f.path" class="cfg-item">
+              <div class="cfg-item-main">
+                <div class="cfg-item-label">{{ f.label }}</div>
+                <div class="cfg-path mono">{{ f.path }}</div>
+              </div>
+              <el-dropdown
+                v-if="isAdmin"
+                trigger="click"
+                @command="(c: string) => onEditCommand(f, c)"
+              >
+                <el-button size="small" type="primary" plain>
+                  编辑<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="edit">直接编辑</el-dropdown-item>
+                    <el-dropdown-item command="backup">备份后编辑</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </template>
         </div>
 
         <div class="info-title">运行 / 安装信息（info.yaml）</div>
@@ -189,10 +222,12 @@
           :image-size="50"
         />
         <div v-else class="info-grid">
-          <div v-for="(v, k) in current.info" :key="k" class="info-row">
-            <span class="info-key">{{ k }}</span>
-            <span class="info-val mono">{{ fmtVal(v) }}</span>
-          </div>
+          <template v-for="(v, k) in current.info" :key="k">
+            <div v-if="k !== 'config_files'" class="info-row">
+              <span class="info-key">{{ k }}</span>
+              <span class="info-val mono">{{ fmtVal(v) }}</span>
+            </div>
+          </template>
         </div>
 
         <div v-if="isAdmin && canControl(current)" class="detail-actions">
@@ -221,37 +256,79 @@
       </div>
     </el-drawer>
 
-    <!-- 配置文件编辑弹窗 -->
+    <!-- 配置文件编辑弹窗（支持 config_files 多文件 tab 切换） -->
     <el-dialog
       v-model="cfgVisible"
       :title="cfgTitle"
-      width="780px"
+      width="820px"
       top="6vh"
       append-to-body
       destroy-on-close
+      :before-close="requestClose"
     >
-      <div v-loading="cfgLoading" class="cfg-editor-wrap">
-        <div v-if="cfgError" class="cfg-error">
-          {{ cfgError }}
+      <div class="cfg-editor-wrap">
+        <el-tabs
+          v-if="cfgTabs.length > 1"
+          v-model="cfgActive"
+          type="card"
+          class="cfg-tabs"
+          @tab-change="onTabChange"
+        >
+          <el-tab-pane v-for="t in cfgTabs" :key="t.path" :name="t.path">
+            <template #label>
+              <span>{{ tabLabel(t) }}</span>
+            </template>
+            <div class="cfg-pane">
+              <div v-if="t.loading" v-loading="true" class="cfg-tab-loading" />
+              <div v-else-if="t.error" class="cfg-error">{{ t.error }}</div>
+              <template v-else-if="t.loaded">
+                <div class="cfg-path-tip mono">{{ t.path }}</div>
+                <el-input
+                  v-model="t.content"
+                  type="textarea"
+                  :rows="20"
+                  class="cfg-editor"
+                  spellcheck="false"
+                  :disabled="cfgSaving"
+                  @input="onCfgInput(t)"
+                />
+              </template>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+        <div v-else-if="activeCfg" class="cfg-pane">
+          <div v-if="activeCfg.loading" v-loading="true" class="cfg-tab-loading" />
+          <div v-else-if="activeCfg.error" class="cfg-error">{{ activeCfg.error }}</div>
+          <template v-else-if="activeCfg.loaded">
+            <div class="cfg-path-tip mono">{{ activeCfg.path }}</div>
+            <el-input
+              v-model="activeCfg.content"
+              type="textarea"
+              :rows="20"
+              class="cfg-editor"
+              spellcheck="false"
+              :disabled="cfgSaving"
+              @input="onCfgInput(activeCfg)"
+            />
+          </template>
         </div>
-        <template v-else>
-          <div class="cfg-path-tip mono">{{ cfgPath }}</div>
-          <el-input
-            v-model="cfgContent"
-            type="textarea"
-            :rows="22"
-            class="cfg-editor"
-            spellcheck="false"
-            :disabled="cfgSaving"
-          />
-          <div class="cfg-save-bar">
-            <span v-if="!cfgDirty" class="cfg-hint">未修改</span>
-            <el-button @click="cfgVisible = false">取消</el-button>
-            <el-button type="primary" :loading="cfgSaving" :disabled="!cfgDirty" @click="saveCfg">
-              保存
-            </el-button>
-          </div>
-        </template>
+        <div v-if="activeCfg" class="cfg-save-bar">
+          <span v-if="dirtyCount === 0" class="cfg-hint">未修改</span>
+          <span v-else class="cfg-hint">{{ dirtyCount }} 个文件有未保存修改</span>
+          <el-button @click="requestClose()">取消</el-button>
+          <el-button
+            v-if="cfgTabs.length > 1 && dirtyCount > 0"
+            type="primary"
+            :loading="cfgSaving"
+            @click="saveAllCfg"
+          >保存全部</el-button>
+          <el-button
+            type="primary"
+            :loading="cfgSaving"
+            :disabled="!activeCfg.dirty"
+            @click="saveCfg"
+          >保存</el-button>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -260,7 +337,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Box, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Box, Refresh, Search } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { getInstalledApps, instanceAction, type InstalledApp } from '@/api/appstore'
 import { readFile, writeFile } from '@/api/file'
@@ -411,64 +488,221 @@ function showDetail(app: InstalledApp) {
   drawerVisible.value = true
 }
 
-// ── 配置文件可视化编辑（info.yaml 的 config_file，仅 admin 可读写）──
-function configPathOf(app: InstalledApp | null): string {
-  const cf = app?.info?.config_file
-  if (!cf) return ''
-  if (Array.isArray(cf)) return String(cf[0] || '')
-  return String(cf)
+// ── 配置文件可视化编辑（info.yaml：config_files 列表 / 兼容 config_file，仅 admin 可读写）──
+interface EditableFile {
+  path: string
+  label: string
+}
+interface CfgTab extends EditableFile {
+  content: string
+  original: string
+  loaded: boolean
+  loading: boolean
+  dirty: boolean
+  error: string
+}
+
+function fileBaseName(path: string): string {
+  return path.split('/').filter(Boolean).pop() || path
+}
+
+/** 解析可编辑文件列表：优先 info.config_files（string | {path,label} 数组），回退 config_file（string | string[]） */
+function editableFilesOf(app: InstalledApp | null): EditableFile[] {
+  const raw = app?.info?.config_files ?? app?.info?.config_file
+  if (!raw) return []
+  const list = Array.isArray(raw) ? raw : [raw]
+  const out: EditableFile[] = []
+  for (const it of list) {
+    if (typeof it === 'string') {
+      if (it.trim()) out.push({ path: it, label: fileBaseName(it) })
+    } else if (it && typeof it === 'object') {
+      const p = (it as { path?: unknown }).path
+      const lb = (it as { label?: unknown }).label
+      if (typeof p === 'string' && p.trim()) {
+        out.push({
+          path: p,
+          label: typeof lb === 'string' && lb.trim() ? lb : fileBaseName(p),
+        })
+      }
+    }
+  }
+  return out
 }
 
 const cfgVisible = ref(false)
-const cfgPath = ref('')
-const cfgContent = ref('')
-const cfgOriginal = ref('')
-const cfgLoading = ref(false)
+const cfgActive = ref('')
+const cfgTabs = ref<CfgTab[]>([])
 const cfgSaving = ref(false)
-const cfgError = ref('')
 
-const cfgDirty = computed(() => cfgContent.value !== cfgOriginal.value)
+const activeCfg = computed(
+  () => cfgTabs.value.find((t) => t.path === cfgActive.value) || null,
+)
+const dirtyCount = computed(() => cfgTabs.value.filter((t) => t.dirty).length)
+const cfgTitle = computed(() => {
+  const name = cfgTabs.value.length > 1
+    ? `${cfgTabs.value.length} 个配置文件`
+    : activeCfg.value?.label || 'file'
+  return `编辑配置 · ${name}`
+})
 
-const cfgTitle = computed(() => `编辑配置 · ${cfgPath.value.split('/').pop() || 'file'}`)
+function tabLabel(t: CfgTab): string {
+  return t.dirty ? `${t.label} ●` : t.label
+}
 
-async function openCfgEditor(path: string) {
-  cfgPath.value = path
-  cfgContent.value = ''
-  cfgOriginal.value = ''
-  cfgError.value = ''
+function onTabChange(name: string | number) {
+  void loadTab(String(name))
+}
+
+function onCfgInput(t: CfgTab) {
+  t.dirty = t.content !== t.original
+}
+
+function openCfgEditor(files: EditableFile[], activePath?: string) {
+  cfgTabs.value = files.map((f) => ({
+    ...f,
+    content: '',
+    original: '',
+    loaded: false,
+    loading: false,
+    dirty: false,
+    error: '',
+  }))
+  cfgActive.value = activePath || files[0]?.path || ''
   cfgVisible.value = true
-  cfgLoading.value = true
+  if (cfgActive.value) void loadTab(cfgActive.value)
+}
+
+function tsStamp(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+/** 把服务器当前文件内容复制为 <path>.bak.<时间戳>，返回是否成功（false 表示用户放弃） */
+async function backupPath(path: string): Promise<boolean> {
+  let content = ''
+  try {
+    const resp = await readFile(path)
+    content = resp.data?.content ?? ''
+    if (content.includes('\u0000')) {
+      ElMessage.warning('原文件疑似二进制，跳过备份，直接编辑')
+      return true
+    }
+  } catch (e: any) {
+    try {
+      await ElMessageBox.confirm('原文件读取失败（可能不存在），无法备份。仍要继续编辑吗？', '提示', {
+        type: 'warning',
+        confirmButtonText: '继续编辑',
+        cancelButtonText: '取消',
+      })
+    } catch {
+      return false
+    }
+    return true
+  }
+  const bakPath = `${path}.bak.${tsStamp()}`
+  try {
+    await writeFile(bakPath, content)
+    ElMessage.success(`已备份原文件 → ${bakPath}`)
+    return true
+  } catch (e: any) {
+    ElMessage.error(`备份失败：${e?.message || ''}`)
+    return false
+  }
+}
+
+/** 编辑入口命令：edit=直接打开；backup=先备份当前文件再打开（多文件时激活该 tab） */
+async function onEditCommand(target: EditableFile, cmd: string) {
+  if (!current.value) return
+  if (cmd === 'backup' && !(await backupPath(target.path))) return
+  const files = editableFilesOf(current.value)
+  openCfgEditor(files, files.length > 1 ? target.path : undefined)
+}
+
+async function loadTab(path: string) {
+  const tab = cfgTabs.value.find((t) => t.path === path)
+  if (!tab || tab.loaded || tab.loading) return
+  tab.loading = true
+  tab.error = ''
   try {
     const resp = await readFile(path)
     const content = resp.data?.content ?? ''
     if (content.includes('\u0000')) {
-      cfgError.value = '该文件疑似二进制文件，无法在文本编辑器中修改'
+      tab.error = '该文件疑似二进制文件，无法在文本编辑器中修改'
       return
     }
-    cfgContent.value = content
-    cfgOriginal.value = content
+    tab.content = content
+    tab.original = content
+    tab.loaded = true
   } catch (e: any) {
-    cfgError.value = e.message || '读取配置文件失败'
+    tab.error = e.message || '读取配置文件失败'
   } finally {
-    cfgLoading.value = false
+    tab.loading = false
   }
 }
 
+async function saveTab(t: CfgTab) {
+  await writeFile(t.path, t.content)
+  t.original = t.content
+  t.dirty = false
+}
+
 async function saveCfg() {
+  const tab = activeCfg.value
+  if (!tab) return
   cfgSaving.value = true
   try {
-    await writeFile(cfgPath.value, cfgContent.value)
+    await saveTab(tab)
+    finishSave()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    cfgSaving.value = false
+  }
+}
+
+async function saveAllCfg() {
+  const dirtyTabs = cfgTabs.value.filter((t) => t.dirty)
+  cfgSaving.value = true
+  try {
+    for (const t of dirtyTabs) await saveTab(t)
+    finishSave()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    cfgSaving.value = false
+  }
+}
+
+function finishSave() {
+  const left = cfgTabs.value.filter((t) => t.dirty)
+  if (left.length === 0) {
     ElMessage.success('配置已保存')
     cfgVisible.value = false
     ElMessage.info({
       message: '如为服务型应用（php / nginx 等），请重启对应实例使配置生效',
       duration: 3500,
     })
-  } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
-  } finally {
-    cfgSaving.value = false
+  } else {
+    ElMessage.success(`已保存，仍有 ${left.length} 个文件未保存`)
   }
+}
+
+/** 关闭前如有未保存修改需确认（用于取消按钮与 dialog 关闭拦截） */
+async function requestClose(done?: () => void) {
+  if (dirtyCount.value > 0) {
+    try {
+      await ElMessageBox.confirm('存在未保存的修改，确定放弃并关闭？', '未保存', {
+        type: 'warning',
+        confirmButtonText: '放弃修改',
+        cancelButtonText: '继续编辑',
+      })
+    } catch {
+      return
+    }
+  }
+  if (done) done()
+  else cfgVisible.value = false
 }
 
 onMounted(() => {
@@ -670,5 +904,43 @@ onUnmounted(() => {
   margin-right: auto;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.cfg-ro-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.cfg-single {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.cfg-single .cfg-path {
+  flex: 1;
+  margin-top: 0;
+}
+.cfg-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  margin-top: 8px;
+}
+.cfg-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.cfg-item-label {
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  margin-bottom: 2px;
+}
+.cfg-tab-loading {
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>
