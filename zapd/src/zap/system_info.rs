@@ -112,7 +112,7 @@ pub async fn get_system_info() -> ZapJsonResult {
 
     let boot_time = format!("{} {}", boot_time.date(), boot_time.time());
 
-    return Ok(Json(json!({
+    Ok(Json(json!({
         "code":0,
         "message":"OK",
         "data": {
@@ -146,7 +146,7 @@ pub async fn get_system_info() -> ZapJsonResult {
 
             "disk_info": disk_info,
         }
-    })));
+    })))
 }
 
 pub async fn get_system_status() -> ZapJsonResult {
@@ -176,7 +176,7 @@ pub async fn get_system_status() -> ZapJsonResult {
     .fetch_all(pool)
     .await?;
     sys.refresh_cpu_usage();
-    return Ok(Json(json!({
+    Ok(Json(json!({
         "code":0,
         "message":"OK",
         "data": {
@@ -199,7 +199,7 @@ pub async fn get_system_status() -> ZapJsonResult {
             "system_stats" : system_stats,
             "network_stats" : network_stats,
         }
-    })));
+    })))
 }
 
 pub async fn get_os_info() -> SystemInfo {
@@ -298,12 +298,12 @@ pub struct PhysicalDisk {
 fn cpu_model_name() -> String {
     if let Ok(content) = std::fs::read_to_string("/proc/cpuinfo") {
         for line in content.lines() {
-            if let Some(rest) = line.strip_prefix("model name") {
-                if let Some(name) = rest.split(':').nth(1) {
-                    let name = name.trim();
-                    if !name.is_empty() {
-                        return name.to_string();
-                    }
+            if let Some(rest) = line.strip_prefix("model name")
+                && let Some(name) = rest.split(':').nth(1)
+            {
+                let name = name.trim();
+                if !name.is_empty() {
+                    return name.to_string();
                 }
             }
         }
@@ -315,14 +315,13 @@ fn cpu_model_name() -> String {
 fn cpu_frequency_mhz() -> u64 {
     if let Ok(content) = std::fs::read_to_string("/proc/cpuinfo") {
         for line in content.lines() {
-            if let Some(rest) = line.strip_prefix("cpu MHz") {
-                if let Some(mhz) = rest
+            if let Some(rest) = line.strip_prefix("cpu MHz")
+                && let Some(mhz) = rest
                     .split(':')
                     .nth(1)
                     .and_then(|s| s.trim().parse::<f64>().ok())
-                {
-                    return mhz.round() as u64;
-                }
+            {
+                return mhz.round() as u64;
             }
         }
     }
@@ -347,10 +346,10 @@ fn list_physical_disks() -> Vec<PhysicalDisk> {
             continue;
         }
         // 可移动设备（软驱/U 盘等）跳过
-        if let Ok(removable) = std::fs::read_to_string(format!("/sys/block/{name}/removable")) {
-            if removable.trim() == "1" {
-                continue;
-            }
+        if let Ok(removable) = std::fs::read_to_string(format!("/sys/block/{name}/removable"))
+            && removable.trim() == "1"
+        {
+            continue;
         }
         let model = std::fs::read_to_string(format!("/sys/block/{name}/device/model"))
             .ok()
@@ -400,20 +399,20 @@ fn parse_dmidecode_mem(text: &str) -> Vec<MemModule> {
             cur = Some(MemModule::default());
             continue;
         }
-        if let Some(m) = cur.as_mut() {
-            if let Some((key, value)) = line.split_once(':') {
-                let key = key.trim();
-                let value = value.trim();
-                match key {
-                    "Size" => m.size = value.to_string(),
-                    "Locator" => m.locator = value.to_string(),
-                    "Bank Locator" => m.bank_locator = value.to_string(),
-                    "Type" => m.memory_type = value.to_string(),
-                    "Speed" => m.speed = value.to_string(),
-                    "Manufacturer" => m.manufacturer = value.to_string(),
-                    "Part Number" => m.part_number = value.to_string(),
-                    _ => {}
-                }
+        if let Some(m) = cur.as_mut()
+            && let Some((key, value)) = line.split_once(':')
+        {
+            let key = key.trim();
+            let value = value.trim();
+            match key {
+                "Size" => m.size = value.to_string(),
+                "Locator" => m.locator = value.to_string(),
+                "Bank Locator" => m.bank_locator = value.to_string(),
+                "Type" => m.memory_type = value.to_string(),
+                "Speed" => m.speed = value.to_string(),
+                "Manufacturer" => m.manufacturer = value.to_string(),
+                "Part Number" => m.part_number = value.to_string(),
+                _ => {}
             }
         }
     }

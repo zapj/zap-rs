@@ -99,6 +99,7 @@ fn normalize_fpm_spec(raw: Option<String>) -> Result<Option<String>, ZapError> {
 /// - system：确保 user.linux_user 有值，创建 Linux 系统账号（useradd，nologin），
 ///   家目录按独立用户模式赋权（owner = linux_user）
 /// - www：仅按统一 www 模式补家目录骨架
+///
 /// 站点同步 / 用户同步 / 新增用户均调用；失败返回 Err 描述。
 pub async fn ensure_user_runtime(uid: i64) -> Result<(), String> {
     let pool = db::get_db_pool().await;
@@ -562,22 +563,20 @@ pub async fn user_delete(
     }
 
     // 删除用户后清理运行实体（system 模式：清 pool + userdel）
-    if was_system {
-        if let Some(lu) = linux_user {
-            match crate::zapexec::call(zap_proto::types::Request::UserSystemRemove {
-                linux_user: lu.clone(),
-            })
-            .await
-            {
-                Ok(resp) if resp.code != 0 => {
-                    warn!("清理 Linux 账号失败(id={}): {}", payload.id, resp.message);
-                }
-                Err(e) => {
-                    warn!("清理 Linux 账号失败(id={}): {}", payload.id, e);
-                }
-                _ => {
-                    info!("Linux 账号已清理: {} (user id={})", lu, payload.id);
-                }
+    if was_system && let Some(lu) = linux_user {
+        match crate::zapexec::call(zap_proto::types::Request::UserSystemRemove {
+            linux_user: lu.clone(),
+        })
+        .await
+        {
+            Ok(resp) if resp.code != 0 => {
+                warn!("清理 Linux 账号失败(id={}): {}", payload.id, resp.message);
+            }
+            Err(e) => {
+                warn!("清理 Linux 账号失败(id={}): {}", payload.id, e);
+            }
+            _ => {
+                info!("Linux 账号已清理: {} (user id={})", lu, payload.id);
             }
         }
     }

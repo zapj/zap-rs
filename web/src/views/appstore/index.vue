@@ -196,9 +196,19 @@
         <el-table-column label="开始时间" width="170">
           <template #default="{ row }">{{ fmtTime(row.started_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="110" fixed="right">
+        <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text type="primary" @click="viewRunLog(row)">查看日志</el-button>
+            <el-button
+              v-if="isAdmin && row.status === 'failed'"
+              size="small"
+              text
+              type="danger"
+              :loading="retryId === row.run_id"
+              @click="handleRetryRun(row)"
+            >
+              重跑
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -252,6 +262,8 @@ import {
   uninstallPackage,
   upgradePackage,
   getRuns,
+  retryRun,
+  getRunFiles,
   type AppPackage,
   type RepoSource,
   type RunItem,
@@ -483,6 +495,7 @@ const runs = ref<RunItem[]>([])
 const runsLoading = ref(false)
 const runPage = ref(1)
 const runTotal = ref(0)
+const retryId = ref('')
 
 async function loadRuns() {
   runsLoading.value = true
@@ -499,6 +512,37 @@ async function loadRuns() {
 
 function viewRunLog(row: RunItem) {
   logDrawerRef.value?.openDrawer(row.run_id, `${row.action} ${row.pkg}`)
+}
+
+/** 失败运行的快捷重跑：先探测快照是否存在，再复用其内容以新运行记录执行 */
+async function handleRetryRun(row: RunItem) {
+  if (retryId.value) return
+  try {
+    const files = await getRunFiles(row.run_id)
+    if (!(files.data?.files || []).length) {
+      ElMessage.warning('该运行没有可编辑的脚本快照，无法重跑（手动脚本运行或快照已清理）')
+      return
+    }
+    await ElMessageBox.confirm(
+      `将复用该次${row.action}运行的脚本快照重新执行，并生成新的运行记录。确定重跑？`,
+      '重跑确认',
+      { type: 'warning' },
+    )
+  } catch (e: any) {
+    if (e !== 'cancel' && e?.message) ElMessage.warning(e.message)
+    return
+  }
+  retryId.value = row.run_id
+  try {
+    const resp = await retryRun(row.run_id)
+    ElMessage.success('重跑已启动')
+    logDrawerRef.value?.openDrawer(resp.data.run_id, `${row.action} ${row.pkg}（重跑）`)
+    setTimeout(loadRuns, 1500)
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e.message || '重跑失败')
+  } finally {
+    retryId.value = ''
+  }
 }
 
 function statusType(s: string): 'info' | 'success' | 'danger' | 'warning' {

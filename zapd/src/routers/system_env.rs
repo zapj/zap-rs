@@ -135,20 +135,19 @@ pub async fn vhost_mode() -> String {
 /// 合并后的最终 pool 规格 JSON（全局默认 + 用户覆盖），供 PhpPoolSync 使用。
 pub async fn merged_fpm_spec(user_spec_json: Option<&str>) -> String {
     let mut base = default_fpm_spec();
-    if let Some(v) = conf_get("fpm_pool_defaults").await {
-        if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&v) {
-            for (k, val) in obj {
-                base.insert(k, val);
-            }
+    if let Some(v) = conf_get("fpm_pool_defaults").await
+        && let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&v)
+    {
+        for (k, val) in obj {
+            base.insert(k, val);
         }
     }
-    if let Some(us) = user_spec_json {
-        if !us.trim().is_empty() {
-            if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(us) {
-                for (k, val) in obj {
-                    base.insert(k, val);
-                }
-            }
+    if let Some(us) = user_spec_json
+        && !us.trim().is_empty()
+        && let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(us)
+    {
+        for (k, val) in obj {
+            base.insert(k, val);
         }
     }
     serde_json::Value::Object(base).to_string()
@@ -225,13 +224,14 @@ pub async fn env_refresh(
     let payload = probe_payload().await?;
     let t = save_snapshot(&payload).await;
 
-    let _ = audit::log(
+    audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
         "env_refresh",
         "system",
         "手动刷新服务器运行环境快照",
-    );
+    )
+    .await;
 
     Ok(Json(
         json!({ "code": 0, "message": "运行环境已刷新", "data": build_env_data(Some(payload), t, true, None).await }),
@@ -317,13 +317,14 @@ pub async fn env_defaults_save(
         .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join(" ");
-    let _ = audit::log(
+    audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
         "env_defaults_save",
         "system",
         &detail,
-    );
+    )
+    .await;
 
     Ok(Json(
         json!({ "code": 0, "message": "默认配置已保存", "data": conf_json(&conf) }),

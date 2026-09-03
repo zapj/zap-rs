@@ -180,6 +180,23 @@ pub enum Request {
     /// 写自定义脚本（仅限 appstore/custom/ 内）
     #[serde(rename = "appstore.script_write")]
     AppstoreScriptWrite { path: String, content: String },
+    /// 列出一次运行的可编辑脚本快照（runs/<run_id>/pkg/ 递归文件树）
+    #[serde(rename = "appstore.run_files")]
+    AppstoreRunFiles { run_id: String },
+    /// 读取运行快照内文件（仅限 runs/<run_id>/pkg/ 内）
+    #[serde(rename = "appstore.run_file_read")]
+    AppstoreRunFileRead { run_id: String, path: String },
+    /// 写运行快照内文件（仅限 runs/<run_id>/pkg/ 内，用于修改脚本后重跑）
+    #[serde(rename = "appstore.run_file_write")]
+    AppstoreRunFileWrite {
+        run_id: String,
+        path: String,
+        content: String,
+    },
+    /// 重跑某次失败的运行：复用其可编辑脚本快照（runs/<old_run_id>/pkg/），
+    /// 以 new_run_id 新建日志/pid 重新执行原安装/卸载/升级动作。
+    #[serde(rename = "appstore.run_retry")]
+    AppstoreRunRetry { run_id: String, new_run_id: String },
     /// 扫描已安装应用列表（data/apps/*/meta.yaml + info.yaml + 运行状态）
     #[serde(rename = "appstore.installed")]
     AppstoreInstalled,

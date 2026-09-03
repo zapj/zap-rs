@@ -17,7 +17,7 @@ pub async fn detect() -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> { Ok(detect_inner()) })
         .await
         .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-        .map_or_else(|e| Response::err(-1, e), |r| r)
+        .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 fn detect_inner() -> Response {
@@ -63,7 +63,7 @@ fn proc_running(name: &str) -> bool {
 }
 
 /// 在 marker 之后的第一个空白分隔 token，如失败返回 None。
-fn token_after<'a>(line: &'a str, marker: &str) -> Option<String> {
+fn token_after(line: &str, marker: &str) -> Option<String> {
     let rest = line.split_once(marker)?.1;
     let tok = rest
         .split_whitespace()
@@ -263,10 +263,10 @@ fn detect_php() -> Value {
 
     // 4) 默认 PHP（PATH 上的 php；无则取最高版本）
     let mut default_v2 = String::new();
-    if let Some(line) = probe_first_line("php", &["-v"]) {
-        if let Some(ver) = php_version(&line) {
-            default_v2 = short_version(&ver);
-        }
+    if let Some(line) = probe_first_line("php", &["-v"])
+        && let Some(ver) = php_version(&line)
+    {
+        default_v2 = short_version(&ver);
     }
     if default_v2.is_empty() {
         default_v2 = instances.keys().next_back().cloned().unwrap_or_default();

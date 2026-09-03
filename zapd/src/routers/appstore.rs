@@ -582,12 +582,11 @@ pub async fn script_stop(
     Json(payload): Json<ScriptStopPayload>,
 ) -> ZapJsonResult {
     // 非管理员只能停止自己发起的任务
-    if !jwt::is_admin(&claims) {
-        if let Ok(Some(run)) = ast::get_run(&payload.run_id).await {
-            if run.username != claims.sub {
-                return Err(ZapError::New(-1, "只能停止自己发起的任务".to_string()));
-            }
-        }
+    if !jwt::is_admin(&claims)
+        && let Ok(Some(run)) = ast::get_run(&payload.run_id).await
+        && run.username != claims.sub
+    {
+        return Err(ZapError::New(-1, "只能停止自己发起的任务".to_string()));
     }
     let resp = zapexec::call(Request::AppstoreScriptStop {
         run_id: payload.run_id.clone(),
@@ -597,6 +596,145 @@ pub async fn script_stop(
         return Err(ZapError::New(resp.code, resp.message));
     }
     Ok(Json(json!({ "code": 0, "message": "已发送停止信号" })))
+}
+
+// ── 运行快照（失败后查看/编辑脚本并重跑）─────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct RunFilesQuery {
+    pub run_id: String,
+}
+
+/// 列出一次运行的可编辑脚本快照文件树（runs/<run_id>/pkg/）。
+pub async fn run_files(_claims: ValidatedClaims, Query(q): Query<RunFilesQuery>) -> ZapJsonResult {
+    let resp = zapexec::call(Request::AppstoreRunFiles {
+        run_id: q.run_id.clone(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(
+        json!({ "code": 0, "message": "OK", "data": resp.data }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunFileReadQuery {
+    pub run_id: String,
+    pub path: String,
+}
+
+/// 读取运行快照内文件内容（编辑前查看）。
+pub async fn run_file_read(
+    _claims: ValidatedClaims,
+    Query(q): Query<RunFileReadQuery>,
+) -> ZapJsonResult {
+    let resp = zapexec::call(Request::AppstoreRunFileRead {
+        run_id: q.run_id.clone(),
+        path: q.path.clone(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(
+        json!({ "code": 0, "message": "OK", "data": resp.data }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunFileWritePayload {
+    pub run_id: String,
+    pub path: String,
+    pub content: String,
+}
+
+/// 写入运行快照内文件（修改脚本后保存；会改变待执行内容，仅管理员）。
+pub async fn run_file_write(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<RunFileWritePayload>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    let resp = zapexec::call(Request::AppstoreRunFileWrite {
+        run_id: payload.run_id.clone(),
+        path: payload.path.clone(),
+        content: payload.content.clone(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "appstore_run_file_write",
+        &format!("{}:{}", payload.run_id, payload.path),
+        "",
+    )
+    .await;
+    info!(
+        "AppStore run snapshot file written: {}:{}",
+        payload.run_id, payload.path
+    );
+    Ok(Json(
+        json!({ "code": 0, "message": "已保存", "data": resp.data }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunRetryPayload {
+    pub run_id: String,
+}
+
+/// 重跑某次失败的运行：复用其快照（含已编辑脚本），以新的 run_id 重新执行。
+/// 快照内脚本会以 root 执行，仅管理员可操作。
+pub async fn run_retry(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<RunRetryPayload>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    // 原运行记录必须存在，以便向 runs 表登记新的重跑记录
+    let run = ast::get_run(&payload.run_id)
+        .await?
+        .ok_or_else(|| ZapError::New(-1, "原任务不存在，无法重跑".to_string()))?;
+    let new_run_id = ast::generate_run_id();
+    let log_path = ast::log_path_for(&new_run_id);
+    ast::register_run(&new_run_id, &run.action, &run.pkg, &claims.sub, &log_path).await?;
+
+    let resp = zapexec::call(Request::AppstoreRunRetry {
+        run_id: payload.run_id.clone(),
+        new_run_id: new_run_id.clone(),
+    })
+    .await?;
+    if resp.code != 0 {
+        ast::finish_run(&new_run_id, "failed", resp.code as i64).await;
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    ast::watch_log(new_run_id.clone(), log_path.clone());
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "appstore_run_retry",
+        &payload.run_id,
+        &format!("new_run_id={new_run_id}"),
+    )
+    .await;
+    info!(
+        "AppStore run retry started: {} -> {}",
+        payload.run_id, new_run_id
+    );
+    Ok(Json(json!({
+        "code": 0,
+        "message": "重跑已启动",
+        "data": {
+            "run_id": new_run_id,
+            "log": log_path,
+            "original_run_id": payload.run_id
+        }
+    })))
 }
 
 // ── 运行记录 / 日志 ─────────────────────────────────────────
@@ -762,16 +900,15 @@ async fn handle_ws_log(mut socket: WebSocket, run_id: String) {
                     } else {
                         text.clone()
                     };
-                    if !clean.is_empty() {
-                        if socket
+                    if !clean.is_empty()
+                        && socket
                             .send(Message::Text(Utf8Bytes::from(
                                 json!({ "type": "log", "data": clean }).to_string(),
                             )))
                             .await
                             .is_err()
-                        {
-                            return;
-                        }
+                    {
+                        return;
                     }
                     offset += text.len() as u64;
                 }

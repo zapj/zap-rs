@@ -137,10 +137,10 @@ pub async fn list(gid: u32) -> Response {
         if let Ok(entries) = std::fs::read_dir(ssh_dir()) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map(|e| e == "pub").unwrap_or(false) {
-                    if let Some(info) = parse_pub_file(&path) {
-                        keys.push(info);
-                    }
+                if path.extension().map(|e| e == "pub").unwrap_or(false)
+                    && let Some(info) = parse_pub_file(&path)
+                {
+                    keys.push(info);
                 }
             }
         }
@@ -250,21 +250,19 @@ pub async fn import(
         if let Err(e) = std::fs::write(&key_path, private_key.trim()) {
             return Response::err(-1, format!("写入私钥失败: {e}"));
         }
-        if let Some(pk) = &public_key {
-            if !pk.trim().is_empty() {
-                let _ = std::fs::write(&pub_path, pk.trim());
-            }
+        if let Some(pk) = &public_key
+            && !pk.trim().is_empty()
+        {
+            let _ = std::fs::write(&pub_path, pk.trim());
         }
         // 未提供公钥则从私钥派生
-        if !pub_path.exists() {
-            if let Ok(o) = std::process::Command::new("ssh-keygen")
+        if !pub_path.exists()
+            && let Ok(o) = std::process::Command::new("ssh-keygen")
                 .args(["-y", "-f", &key_path.to_string_lossy()])
                 .output()
-            {
-                if o.status.success() {
-                    let _ = std::fs::write(&pub_path, String::from_utf8_lossy(&o.stdout).trim());
-                }
-            }
+            && o.status.success()
+        {
+            let _ = std::fs::write(&pub_path, String::from_utf8_lossy(&o.stdout).trim());
         }
         set_owned_mode(&key_path, gid, 0o640);
         set_owned_mode(&pub_path, gid, 0o640);
@@ -290,10 +288,10 @@ pub async fn delete(name: String) -> Response {
             .ok()
             .map(|s| s.trim().to_string());
 
-        if key_path.exists() {
-            if let Err(e) = std::fs::remove_file(&key_path) {
-                return Response::err(-1, format!("删除失败: {e}"));
-            }
+        if key_path.exists()
+            && let Err(e) = std::fs::remove_file(&key_path)
+        {
+            return Response::err(-1, format!("删除失败: {e}"));
         }
         if pub_path.exists() {
             let _ = std::fs::remove_file(&pub_path);

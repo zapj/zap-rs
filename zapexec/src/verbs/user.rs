@@ -64,7 +64,7 @@ pub async fn home_init(home_dir: &str, owner: Option<&str>) -> Response {
     tokio::task::spawn_blocking(move || home_init_inner(&home_dir, owner.as_deref()))
         .await
         .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-        .map_or_else(|e| Response::err(-1, e), |r| r)
+        .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 fn run_bash(script: &str) -> Result<(), String> {
@@ -89,10 +89,10 @@ fn home_init_inner(home_dir: &str, owner: Option<&str>) -> Result<Response, Stri
             "home_dir 非法（必须为 /home/ 下的绝对路径）: {home}"
         ));
     }
-    if let Some(u) = owner {
-        if !linux_user_ok(u) {
-            return Err(format!("非法的 Linux 账号名: {u}"));
-        }
+    if let Some(u) = owner
+        && !linux_user_ok(u)
+    {
+        return Err(format!("非法的 Linux 账号名: {u}"));
     }
     let run = owner.unwrap_or("www");
     // 进程主组：system 模式用账号独立组（不放进 www 组，避免跨用户读 php 源码）
@@ -149,7 +149,7 @@ pub async fn system_init(linux_user: &str, home_dir: &str) -> Response {
     tokio::task::spawn_blocking(move || system_init_inner(&linux_user, &home_dir))
         .await
         .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-        .map_or_else(|e| Response::err(-1, e), |r| r)
+        .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 fn system_init_inner(linux_user: &str, home_dir: &str) -> Result<Response, String> {
@@ -212,7 +212,7 @@ pub async fn system_remove(linux_user: &str) -> Response {
     tokio::task::spawn_blocking(move || system_remove_inner(&linux_user))
         .await
         .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-        .map_or_else(|e| Response::err(-1, e), |r| r)
+        .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 fn system_remove_inner(linux_user: &str) -> Result<Response, String> {

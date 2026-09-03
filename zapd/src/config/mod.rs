@@ -86,10 +86,10 @@ pub fn new() -> ZapConfig {
 /// 2. 生产默认 `/etc/zap/zap.yaml`（若存在）
 /// 3. 开发回退 `conf/zap.yaml`
 fn config_path() -> PathBuf {
-    if let Ok(p) = std::env::var("ZAP_CONFIG") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("ZAP_CONFIG")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     let prod = PathBuf::from("/etc/zap/zap.yaml");
     if prod.exists() {

@@ -142,10 +142,10 @@ pub async fn read(path: String) -> Response {
 pub async fn write(path: String, content: String) -> Response {
     tokio::task::spawn_blocking(move || {
         let resolved = resolve_path(&path);
-        if let Ok(md) = std::fs::metadata(&resolved) {
-            if md.is_dir() {
-                return Response::err(-1, "不能覆盖目录");
-            }
+        if let Ok(md) = std::fs::metadata(&resolved)
+            && md.is_dir()
+        {
+            return Response::err(-1, "不能覆盖目录");
         }
         if let Some(parent) = resolved.parent() {
             let _ = std::fs::create_dir_all(parent);

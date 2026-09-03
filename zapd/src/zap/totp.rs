@@ -20,7 +20,7 @@ const STEP: u64 = 30;
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 fn base32_encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity((data.len() * 8 + 4) / 5);
+    let mut out = String::with_capacity((data.len() * 8).div_ceil(5));
     let mut buffer: u32 = 0;
     let mut bits = 0;
     for &byte in data {
@@ -106,10 +106,10 @@ pub fn verify(secret: &str, code: &str) -> bool {
         } else {
             now.saturating_sub(offset * STEP)
         };
-        if let Ok(c) = totp_code(secret, ts) {
-            if c == code {
-                return true;
-            }
+        if let Ok(c) = totp_code(secret, ts)
+            && c == code
+        {
+            return true;
         }
     }
     false

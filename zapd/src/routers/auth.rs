@@ -160,51 +160,50 @@ pub async fn login(
     .fetch_one(pool)
     .await;
 
-    if let Ok(row) = record {
-        if let Ok(true) = bcrypt::verify(payload.password.to_string(), &row.password) {
-            // TOTP 两步验证（已启用时校验）
-            if row.totp_enabled == 1 {
-                let code = payload.totp_code.unwrap_or_default();
-                if code.is_empty() {
-                    // 密码正确但未提供验证码：通知前端进入第二步（展示验证码输入）
-                    return Err(ZapError::New(
-                        1002,
-                        "该账号已启用两步验证，请输入验证码".to_string(),
-                    ));
-                }
-                if !totp::verify(&row.totp_secret, &code) {
-                    audit::log(None, Some(&ip), "login_2fa_failed", &row.username, "").await;
-                    return Err(ZapError::New(-1, "两步验证码错误或已失效".to_string()));
-                }
+    if let Ok(row) = record
+        && let Ok(true) = bcrypt::verify(&payload.password, &row.password)
+    {
+        // TOTP 两步验证（已启用时校验）
+        if row.totp_enabled == 1 {
+            let code = payload.totp_code.unwrap_or_default();
+            if code.is_empty() {
+                // 密码正确但未提供验证码：通知前端进入第二步（展示验证码输入）
+                return Err(ZapError::New(
+                    1002,
+                    "该账号已启用两步验证，请输入验证码".to_string(),
+                ));
             }
-
-            // Check if using default password
-            let is_default = is_default_password(&row.password);
-
-            if let Ok(token) =
-                zap::jwt::generate_jwt_token(row.username.clone(), row.id, &row.roles, is_default)
-            {
-                clear_login_attempts(&ip, &username).await;
-                // 更新最后登录信息
-                let now = chrono::Local::now().timestamp();
-                let _ = sqlx::query(
-                    "UPDATE user SET last_login_time = ?, last_login_ip = ? WHERE id = ?",
-                )
-                .bind(now)
-                .bind(&ip)
-                .bind(row.id as i64)
-                .execute(pool)
-                .await;
-                audit::log(None, Some(&ip), "login_success", &row.username, "").await;
-                return Ok(Json(json!({
-                    "code": 0,
-                    "access_token": token,
-                    "token_type": "Bearer",
-                    "message": "登陆成功",
-                    "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire,
-                    "must_change_password": is_default,
-                })));
+            if !totp::verify(&row.totp_secret, &code) {
+                audit::log(None, Some(&ip), "login_2fa_failed", &row.username, "").await;
+                return Err(ZapError::New(-1, "两步验证码错误或已失效".to_string()));
             }
+        }
+
+        // Check if using default password
+        let is_default = is_default_password(&row.password);
+
+        if let Ok(token) =
+            zap::jwt::generate_jwt_token(row.username.clone(), row.id, &row.roles, is_default)
+        {
+            clear_login_attempts(&ip, &username).await;
+            // 更新最后登录信息
+            let now = chrono::Local::now().timestamp();
+            let _ =
+                sqlx::query("UPDATE user SET last_login_time = ?, last_login_ip = ? WHERE id = ?")
+                    .bind(now)
+                    .bind(&ip)
+                    .bind(row.id as i64)
+                    .execute(pool)
+                    .await;
+            audit::log(None, Some(&ip), "login_success", &row.username, "").await;
+            return Ok(Json(json!({
+                "code": 0,
+                "access_token": token,
+                "token_type": "Bearer",
+                "message": "登陆成功",
+                "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire,
+                "must_change_password": is_default,
+            })));
         }
     }
     record_failed_login(&ip, &username).await;

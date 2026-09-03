@@ -55,6 +55,77 @@ fn repos_yaml_path() -> PathBuf {
     appstore_dir().join("repos.yaml")
 }
 
+// ── 运行快照：可编辑脚本副本 ────────────────────────────────
+// 每次 install/upgrade/uninstall 启动前，把 pkg 目录整体复制到
+// runs/<run_id>/pkg/ 作为“本次运行使用的脚本”快照并执行该副本：
+// - 失败后保留快照，用户可在 web 端读取/编辑快照内的脚本，
+//   再以 appstore.run_retry 复用快照重新执行；
+// - 成功后自动清理快照，避免磁盘堆积。
+// run.json 记录本次运行的原始参数，供重跑还原环境。
+
+fn runs_dir() -> PathBuf {
+    appstore_dir().join("runs")
+}
+
+fn run_snapshot_dir(run_id: &str) -> PathBuf {
+    runs_dir().join(run_id).join("pkg")
+}
+
+fn run_meta_path(run_id: &str) -> PathBuf {
+    runs_dir().join(run_id).join("run.json")
+}
+
+/// 递归复制目录（跳过 .git），供快照使用。
+fn copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_tree(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to).map_err(|e| format!("复制 {} 失败: {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// 准备一次运行的可编辑脚本快照：复制 pkg 目录到 runs/<run_id>/pkg 并记录 run.json。
+fn prepare_snapshot(run_id: &str, pkg_dir: &Path, spec: &Value) -> Result<PathBuf, String> {
+    let dst = run_snapshot_dir(run_id);
+    if !dst.is_dir() {
+        copy_tree(pkg_dir, &dst)?;
+    }
+    let meta_dir = runs_dir().join(run_id);
+    std::fs::create_dir_all(&meta_dir).map_err(|e| e.to_string())?;
+    let _ = std::fs::write(
+        run_meta_path(run_id),
+        serde_json::to_string_pretty(spec).unwrap_or_default(),
+    );
+    Ok(dst)
+}
+
+/// 运行成功后清理快照；失败保留供编辑重跑。
+fn cleanup_snapshot(run_id: &str, code: i32) {
+    if code == 0 {
+        let _ = std::fs::remove_dir_all(runs_dir().join(run_id));
+    }
+}
+
+/// run_id 快照内相对路径安全解析（仅限 runs/<run_id>/pkg/ 内）。
+fn run_safe_path(run_id: &str, rel: &str) -> Result<PathBuf, String> {
+    let root = run_snapshot_dir(run_id);
+    let p = safe_join(&root, rel)?;
+    if !p.starts_with(&root) {
+        return Err("路径越界".into());
+    }
+    Ok(p)
+}
+
 // ── 路径安全 ───────────────────────────────────────────────
 
 fn safe_rel(requested: &str) -> Result<PathBuf, String> {
@@ -135,16 +206,14 @@ fn find_package(pkg_path: &str, source: &str, repo_id: Option<&str>) -> Result<P
 /// 包脚本文件名：app.yaml 的 `scripts.{install|uninstall|upgrade}` 可覆盖默认约定。
 fn script_file(pkg_dir: &Path, key: &str, default: &str) -> Result<PathBuf, String> {
     let mut file = default.to_string();
-    if let Ok(content) = std::fs::read_to_string(pkg_dir.join("app.yaml")) {
-        if let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-            if let Some(name) = v
-                .get("scripts")
-                .and_then(|s| s.get(key))
-                .and_then(|s| s.as_str())
-            {
-                file = name.to_string();
-            }
-        }
+    if let Ok(content) = std::fs::read_to_string(pkg_dir.join("app.yaml"))
+        && let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(&content)
+        && let Some(name) = v
+            .get("scripts")
+            .and_then(|s| s.get(key))
+            .and_then(|s| s.as_str())
+    {
+        file = name.to_string();
     }
     let p = safe_join(pkg_dir, &file)?;
     if !p.is_file() {
@@ -309,9 +378,64 @@ struct ScriptStep {
     env: Vec<(String, String)>,
 }
 
+// ── 任务执行队列：安装/卸载/升级等脚本任务一次只跑一个 ──────
+// appstore 脚本任务会改动系统级目录与软件，串行执行避免互相干扰。
+// 后来的任务在线程内先写日志提示排队，随后阻塞等待前序任务完成。
+
+struct QueueGate {
+    busy: bool,
+}
+
+static QUEUE_PAIR: std::sync::OnceLock<(std::sync::Mutex<QueueGate>, std::sync::Condvar)> =
+    std::sync::OnceLock::new();
+
+fn queue_pair() -> &'static (std::sync::Mutex<QueueGate>, std::sync::Condvar) {
+    QUEUE_PAIR.get_or_init(|| {
+        (
+            std::sync::Mutex::new(QueueGate { busy: false }),
+            std::sync::Condvar::new(),
+        )
+    })
+}
+
+fn queue_acquire() {
+    let (m, c) = queue_pair();
+    let mut g = m.lock().unwrap();
+    while g.busy {
+        g = c.wait(g).unwrap();
+    }
+    g.busy = true;
+}
+
+fn queue_release() {
+    let (m, c) = queue_pair();
+    {
+        let mut g = m.lock().unwrap();
+        g.busy = false;
+    }
+    c.notify_one();
+}
+
+/// 执行期间持有；drop 时（含 panic 路径）释放队列闸门。
+struct QueueToken;
+
+impl QueueToken {
+    fn new() -> Self {
+        queue_acquire();
+        QueueToken
+    }
+}
+
+impl Drop for QueueToken {
+    fn drop(&mut self) {
+        queue_release();
+    }
+}
+
 /// 后台运行一个或多个脚本（同一 run_id、同一日志追加写）。
 /// 每个脚本以 `setsid` 启动独立进程组，pid 写入 run-{id}.pid 供停止使用。
 /// 全部成功退出码为 0；任一脚本失败则中断后续步骤。结束后追加 `__ZAP_DONE__ <code>`。
+/// 任务受全局队列闸门约束：同一时间仅执行一个脚本任务，其余等待。
 fn spawn_background(
     run_id: &str,
     steps: Vec<ScriptStep>,
@@ -333,6 +457,10 @@ fn spawn_background(
     std::thread::spawn(move || {
         use std::io::Write;
         let mut log = log_file;
+        let _ = writeln!(log, "── 任务进入执行队列，等待前序任务完成后自动开始 ──");
+        // 全局串行闸门：install/uninstall/upgrade/script_run 一次只执行一个
+        let _queue_token = QueueToken::new();
+        let _ = writeln!(log, "── 开始执行（队列闸门已获得） ──");
         let mut final_code = 0;
         for step in steps {
             let mut cmd = root_cmd("/bin/bash");
@@ -591,7 +719,7 @@ pub async fn repo_remove(id: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 /// 更新单个 Git 源（后台执行）：fetch + reset，或首次 clone。
@@ -661,24 +789,39 @@ pub async fn install(
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
         let (cat, name) = validate_pkg_path(&pkg_path)?;
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
-        let script = script_file(&pkg_dir, "install", "bin.sh")?;
+        // 复制脚本副本到 runs/<run_id>/pkg 并从副本执行，失败后用户可编辑重跑
+        let spec = json!({
+            "kind": "install",
+            "pkg_path": pkg_path.clone(),
+            "source": source.clone(),
+            "repo_id": repo_id.clone(),
+            "version": version.clone(),
+            "action": action.clone(),
+        });
+        let snapshot = prepare_snapshot(&run_id, &pkg_dir, &spec)?;
+        let script = script_file(&snapshot, "install", "bin.sh")?;
         let app_path = apps_dir().join(&pkg_path);
-        let mut env = task_env(&pkg_dir, &app_path, &name, Some(&version), &run_id);
-        if let Some(a) = action.as_deref() {
-            if !a.is_empty() {
-                env.push(("ACTION".into(), a.to_string()));
-            }
+        let mut env = task_env(&snapshot, &app_path, &name, Some(&version), &run_id);
+        env.push((
+            "PKG_SRC_PATH".into(),
+            pkg_dir.to_string_lossy().into_owned(),
+        ));
+        if let Some(a) = action.as_deref()
+            && !a.is_empty()
+        {
+            env.push(("ACTION".into(), a.to_string()));
         }
         let done_run_id = run_id.clone();
         let done_pkg_path = pkg_path.clone();
         let done_source = source.clone();
         let done_repo_id = repo_id.clone();
+        let done_cat = cat.clone();
         let on_done = Box::new(move |code: i32| {
             if code == 0 {
                 let meta = MetaInfo {
                     name: name.clone(),
                     version: version.clone(),
-                    category: cat.clone(),
+                    category: done_cat.clone(),
                     source: done_source.clone(),
                     repo_id: done_repo_id.clone(),
                     installed_at: now_ts(),
@@ -689,6 +832,7 @@ pub async fn install(
                     tracing::error!("写入 {done_pkg_path} 安装元数据失败: {e}");
                 }
             }
+            cleanup_snapshot(&done_run_id, code);
         });
         let log = spawn_background(&run_id, vec![ScriptStep { script, env }], on_done)?;
         Ok(Response::ok(
@@ -698,7 +842,7 @@ pub async fn install(
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
@@ -712,14 +856,34 @@ pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
             .map(|m| (m.source, m.repo_id))
             .unwrap_or_else(|_| ("official".into(), None));
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
-        let script = script_file(&pkg_dir, "uninstall", "uninstall.sh")?;
+        // 与 install 一致：复制脚本副本到 runs/<run_id>/pkg 并从副本执行
+        let spec = json!({
+            "kind": "uninstall",
+            "pkg_path": pkg_path.clone(),
+            "source": source.clone(),
+            "repo_id": repo_id.clone(),
+        });
+        let snapshot = prepare_snapshot(&run_id, &pkg_dir, &spec)?;
+        let script = script_file(&snapshot, "uninstall", "uninstall.sh")?;
         // 卸载脚本可能需要版本信息（如按版本计算安装目录），注入 meta 中记录的版本
         let meta_version = read_meta(&app_path).ok().map(|m| m.version);
-        let env = task_env(&pkg_dir, &app_path, &name, meta_version.as_deref(), &run_id);
+        let mut env = task_env(
+            &snapshot,
+            &app_path,
+            &name,
+            meta_version.as_deref(),
+            &run_id,
+        );
+        env.push((
+            "PKG_SRC_PATH".into(),
+            pkg_dir.to_string_lossy().into_owned(),
+        ));
+        let done_run_id = run_id.clone();
         let on_done = Box::new(move |code: i32| {
             if code == 0 {
                 let _ = std::fs::remove_dir_all(&app_path);
             }
+            cleanup_snapshot(&done_run_id, code);
         });
         let log = spawn_background(&run_id, vec![ScriptStep { script, env }], on_done)?;
         Ok(Response::ok(
@@ -729,7 +893,7 @@ pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 pub async fn upgrade(
@@ -748,28 +912,43 @@ pub async fn upgrade(
             return Err("该包未安装，无法升级".into());
         }
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
-        let mut env = task_env(&pkg_dir, &app_path, &name, Some(&version), &run_id);
+        // 与 install 一致：复制脚本副本到 runs/<run_id>/pkg 并从副本执行
+        let spec = json!({
+            "kind": "upgrade",
+            "pkg_path": pkg_path.clone(),
+            "source": source.clone(),
+            "repo_id": repo_id.clone(),
+            "version": version.clone(),
+            "old_version": old_version.clone(),
+            "action": action.clone(),
+        });
+        let snapshot = prepare_snapshot(&run_id, &pkg_dir, &spec)?;
+        let mut env = task_env(&snapshot, &app_path, &name, Some(&version), &run_id);
+        env.push((
+            "PKG_SRC_PATH".into(),
+            pkg_dir.to_string_lossy().into_owned(),
+        ));
         env.push(("APP_OLD_VERSION".into(), old_version.clone()));
-        if let Some(a) = action.as_deref() {
-            if !a.is_empty() {
-                env.push(("ACTION".into(), a.to_string()));
-            }
+        if let Some(a) = action.as_deref()
+            && !a.is_empty()
+        {
+            env.push(("ACTION".into(), a.to_string()));
         }
 
         let mut steps = Vec::new();
-        if pkg_dir.join("upgrade.sh").is_file() {
+        if snapshot.join("upgrade.sh").is_file() {
             steps.push(ScriptStep {
-                script: script_file(&pkg_dir, "upgrade", "upgrade.sh")?,
+                script: script_file(&snapshot, "upgrade", "upgrade.sh")?,
                 env: env.clone(),
             });
         } else {
             // 缺省升级策略：先卸载（uninstall.sh 自带数据备份）再安装
             steps.push(ScriptStep {
-                script: script_file(&pkg_dir, "uninstall", "uninstall.sh")?,
+                script: script_file(&snapshot, "uninstall", "uninstall.sh")?,
                 env: env.clone(),
             });
             steps.push(ScriptStep {
-                script: script_file(&pkg_dir, "install", "bin.sh")?,
+                script: script_file(&snapshot, "install", "bin.sh")?,
                 env: env.clone(),
             });
         }
@@ -777,12 +956,13 @@ pub async fn upgrade(
         let done_pkg_path = pkg_path.clone();
         let done_source = source.clone();
         let done_repo_id = repo_id.clone();
+        let done_cat = cat.clone();
         let on_done = Box::new(move |code: i32| {
             if code == 0 {
                 let meta = MetaInfo {
                     name: name.clone(),
                     version: version.clone(),
-                    category: cat.clone(),
+                    category: done_cat.clone(),
                     source: done_source.clone(),
                     repo_id: done_repo_id.clone(),
                     installed_at: now_ts(),
@@ -793,6 +973,7 @@ pub async fn upgrade(
                     tracing::error!("写入 {done_pkg_path} 升级元数据失败: {e}");
                 }
             }
+            cleanup_snapshot(&done_run_id, code);
         });
         let log = spawn_background(&run_id, steps, on_done)?;
         Ok(Response::ok(
@@ -802,7 +983,208 @@ pub async fn upgrade(
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+/// 列出一次运行的可编辑脚本快照文件树（runs/<run_id>/pkg/ 递归）。
+pub async fn run_files(run_id: String) -> Response {
+    tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        let root = run_snapshot_dir(&run_id);
+        if !root.is_dir() {
+            return Err("该运行没有可编辑脚本快照（可能已成功结束并自动清理）".into());
+        }
+        fn walk(dir: &Path, base: &Path, out: &mut Vec<Value>) -> Result<(), String> {
+            for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let p = entry.path();
+                if p.is_dir() {
+                    walk(&p, base, out)?;
+                } else {
+                    let rel = p
+                        .strip_prefix(base)
+                        .map_err(|e| e.to_string())?
+                        .to_string_lossy()
+                        .to_string();
+                    let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                    out.push(json!({ "path": rel, "size": size }));
+                }
+            }
+            Ok(())
+        }
+        let mut files = Vec::new();
+        walk(&root, &root, &mut files)?;
+        files.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+        Ok(Response::ok(
+            "OK",
+            Some(json!({ "run_id": run_id, "files": files })),
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+/// 读取运行快照内文件内容（编辑前读取，仅限 runs/<run_id>/pkg/ 内）。
+pub async fn run_file_read(run_id: String, path: String) -> Response {
+    tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        let p = run_safe_path(&run_id, &path)?;
+        if !p.is_file() {
+            return Err("快照内文件不存在".into());
+        }
+        let content = std::fs::read_to_string(&p).map_err(|e| format!("读取失败: {e}"))?;
+        Ok(Response::ok(
+            "OK",
+            Some(json!({ "run_id": run_id, "path": path, "content": content })),
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+/// 写运行快照内文件（修改脚本后重跑前保存；仅限 runs/<run_id>/pkg/ 内）。
+pub async fn run_file_write(run_id: String, path: String, content: String) -> Response {
+    tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        use std::os::unix::fs::PermissionsExt;
+        let p = run_safe_path(&run_id, &path)?;
+        let dir = p.parent().map(|d| d.to_path_buf()).ok_or("非法路径")?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {e}"))?;
+        std::fs::write(&p, &content).map_err(|e| format!("写入失败: {e}"))?;
+        let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755));
+        Ok(Response::ok(
+            "已保存",
+            Some(json!({ "run_id": run_id, "path": path })),
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+/// 重跑某次失败的运行：复用 runs/<old_run_id>/pkg 快照（含用户编辑），
+/// 以 new_run_id 记录新日志/pid，按 run.json 记录的原始动作重新执行。
+pub async fn run_retry(run_id: String, new_run_id: String) -> Response {
+    tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        let meta_content = std::fs::read_to_string(run_meta_path(&run_id))
+            .map_err(|_| "该运行没有可重跑记录（run.json 缺失，可能已成功并清理）".to_string())?;
+        let spec: Value =
+            serde_json::from_str(&meta_content).map_err(|e| format!("run.json 解析失败: {e}"))?;
+        let kind = spec["kind"].as_str().unwrap_or("install");
+        let snapshot = run_snapshot_dir(&run_id);
+        if !snapshot.is_dir() {
+            return Err("运行快照缺失，无法重跑".into());
+        }
+        let pkg_path = spec["pkg_path"].as_str().unwrap_or("").to_string();
+        let app_path = apps_dir().join(&pkg_path);
+        let name = pkg_path.rsplit('/').next().unwrap_or("").to_string();
+        let version = spec["version"].as_str().unwrap_or("").to_string();
+        let action = spec["action"].as_str().unwrap_or("").to_string();
+        let old_version = spec["old_version"].as_str().unwrap_or("").to_string();
+
+        let mut env = task_env(&snapshot, &app_path, &name, Some(&version), &new_run_id);
+        env.push((
+            "PKG_SRC_PATH".into(),
+            snapshot.to_string_lossy().into_owned(),
+        ));
+        if !old_version.is_empty() {
+            env.push(("APP_OLD_VERSION".into(), old_version.clone()));
+        }
+        if !action.is_empty() {
+            env.push(("ACTION".into(), action.clone()));
+        }
+
+        let mut steps = Vec::new();
+
+        let done_run_id = new_run_id.clone();
+        // 重跑复用原 run 的快照：成功后清理原快照防堆积；失败保留供继续编辑重试
+        let done_old_run = run_id.clone();
+        let done_app = app_path.clone();
+        let on_done_extra: Option<Box<dyn FnOnce(i32) + Send>> = match kind {
+            "uninstall" => {
+                let script = script_file(&snapshot, "uninstall", "uninstall.sh")?;
+                steps.push(ScriptStep { script, env });
+                Some(Box::new(move |code: i32| {
+                    if code == 0 {
+                        let _ = std::fs::remove_dir_all(&done_app);
+                    }
+                    cleanup_snapshot(&done_old_run, code);
+                }))
+            }
+            "upgrade" => {
+                if snapshot.join("upgrade.sh").is_file() {
+                    steps.push(ScriptStep {
+                        script: script_file(&snapshot, "upgrade", "upgrade.sh")?,
+                        env: env.clone(),
+                    });
+                } else {
+                    steps.push(ScriptStep {
+                        script: script_file(&snapshot, "uninstall", "uninstall.sh")?,
+                        env: env.clone(),
+                    });
+                    steps.push(ScriptStep {
+                        script: script_file(&snapshot, "install", "bin.sh")?,
+                        env: env.clone(),
+                    });
+                }
+                let category = pkg_path.split('/').next().unwrap_or("").to_string();
+                let done_source = spec["source"].as_str().unwrap_or("").to_string();
+                let done_repo = spec["repo_id"].as_str().map(|s| s.to_string());
+                let done_old = old_version.clone();
+                let done_name = name.clone();
+                let done_ver = version.clone();
+                Some(Box::new(move |code: i32| {
+                    if code == 0 {
+                        let meta = MetaInfo {
+                            name: done_name.clone(),
+                            version: done_ver.clone(),
+                            category: category.clone(),
+                            source: done_source.clone(),
+                            repo_id: done_repo.clone(),
+                            installed_at: now_ts(),
+                            upgraded_from: Some(done_old.clone()),
+                            run_id: done_run_id.clone(),
+                        };
+                        let _ = write_meta(&done_app, &meta);
+                    }
+                    cleanup_snapshot(&done_old_run, code);
+                }))
+            }
+            _ => {
+                // install 默认
+                let script = script_file(&snapshot, "install", "bin.sh")?;
+                steps.push(ScriptStep { script, env });
+                let category = pkg_path.split('/').next().unwrap_or("").to_string();
+                let done_source = spec["source"].as_str().unwrap_or("").to_string();
+                let done_repo = spec["repo_id"].as_str().map(|s| s.to_string());
+                let done_name = name.clone();
+                let done_ver = version.clone();
+                Some(Box::new(move |code: i32| {
+                    if code == 0 {
+                        let meta = MetaInfo {
+                            name: done_name.clone(),
+                            version: done_ver.clone(),
+                            category: category.clone(),
+                            source: done_source.clone(),
+                            repo_id: done_repo.clone(),
+                            installed_at: now_ts(),
+                            upgraded_from: None,
+                            run_id: done_run_id.clone(),
+                        };
+                        let _ = write_meta(&done_app, &meta);
+                    }
+                    cleanup_snapshot(&done_old_run, code);
+                }))
+            }
+        };
+        let log = spawn_background(&new_run_id, steps, on_done_extra.unwrap())?;
+        Ok(Response::ok(
+            "重跑已启动",
+            Some(json!({ "run_id": new_run_id, "log": log })),
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 pub async fn script_run(path: String, run_id: String) -> Response {
@@ -827,7 +1209,7 @@ pub async fn script_run(path: String, run_id: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 pub async fn script_stop(run_id: String) -> Response {
@@ -855,7 +1237,7 @@ pub async fn script_stop(run_id: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 pub async fn script_read(path: String) -> Response {
@@ -874,7 +1256,7 @@ pub async fn script_read(path: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 pub async fn script_write(path: String, content: String) -> Response {
@@ -882,10 +1264,10 @@ pub async fn script_write(path: String, content: String) -> Response {
         use std::os::unix::fs::PermissionsExt;
         let custom = appstore_dir().join("custom");
         let resolved = safe_join(&custom, &path)?;
-        if let Ok(md) = std::fs::metadata(&resolved) {
-            if md.is_dir() {
-                return Err("不能覆盖目录".to_string());
-            }
+        if let Ok(md) = std::fs::metadata(&resolved)
+            && md.is_dir()
+        {
+            return Err("不能覆盖目录".to_string());
         }
         if let Some(parent) = resolved.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -900,7 +1282,7 @@ pub async fn script_write(path: String, content: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 pub async fn installed() -> Response {
@@ -1093,7 +1475,7 @@ pub async fn instance_action(pkg_path: String, action: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 #[cfg(test)]

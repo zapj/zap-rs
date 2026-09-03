@@ -14,6 +14,7 @@ use crate::zap::jwt::{claims_from_token, is_demo};
 
 /// 演示账号只读守卫：demo 角色仅允许 GET 请求（浏览），其余写操作一律拒绝。
 /// /auth/* 为个人账户操作（登录/登出/改密/2FA），放行以免演示账号被锁死。
+#[allow(clippy::result_large_err)] // axum 中间件约定 Result<Response, Response>
 async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Response> {
     if req.method() == Method::GET || req.uri().path().starts_with("/auth/") {
         return Ok(next.run(req).await);
@@ -25,16 +26,15 @@ async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Respo
         .and_then(|v| v.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .map(String::from);
-    if let Some(token) = bearer {
-        if let Some(claims) = claims_from_token(&token).await {
-            if is_demo(&claims) {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(json!({ "code": -1, "message": "演示账号仅支持浏览，不能执行操作" })),
-                )
-                    .into_response());
-            }
-        }
+    if let Some(token) = bearer
+        && let Some(claims) = claims_from_token(&token).await
+        && is_demo(&claims)
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "code": -1, "message": "演示账号仅支持浏览，不能执行操作" })),
+        )
+            .into_response());
     }
     Ok(next.run(req).await)
 }
@@ -311,6 +311,10 @@ fn api_routers() -> Router {
         .route("/appstore/script/write", post(appstore::script_write))
         .route("/appstore/script/run", post(appstore::script_run))
         .route("/appstore/script/stop", post(appstore::script_stop))
+        .route("/appstore/run/files", get(appstore::run_files))
+        .route("/appstore/run/file/read", get(appstore::run_file_read))
+        .route("/appstore/run/file/write", post(appstore::run_file_write))
+        .route("/appstore/run/retry", post(appstore::run_retry))
         .route("/appstore/runs", get(appstore::runs))
         .route("/appstore/log/{run_id}", get(appstore::log))
         .route("/appstore/ws/{run_id}", get(appstore::ws_log))

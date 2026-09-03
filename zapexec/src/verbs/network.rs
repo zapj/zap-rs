@@ -34,10 +34,10 @@ fn machine_info_value(key: &str) -> String {
     if let Ok(content) = std::fs::read_to_string("/etc/machine-info") {
         for line in content.lines() {
             let line = line.trim();
-            if let Some(rest) = line.strip_prefix(key) {
-                if let Some(value) = rest.strip_prefix('=') {
-                    return value.trim().trim_matches('"').trim().to_string();
-                }
+            if let Some(rest) = line.strip_prefix(key)
+                && let Some(value) = rest.strip_prefix('=')
+            {
+                return value.trim().trim_matches('"').trim().to_string();
             }
         }
     }

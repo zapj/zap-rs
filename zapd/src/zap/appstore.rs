@@ -413,10 +413,10 @@ pub async fn installed_version_of(pkg_path: &str) -> Option<String> {
 pub async fn read_repos_value() -> Option<Value> {
     let path = appstore_dir().join("repos.yaml");
     tokio::task::spawn_blocking(move || {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(v) = serde_yaml::from_str::<Value>(&content) {
-                return Some(v);
-            }
+        if let Ok(content) = std::fs::read_to_string(&path)
+            && let Ok(v) = serde_yaml::from_str::<Value>(&content)
+        {
+            return Some(v);
         }
         Some(json!({
             "repos": [{
@@ -441,22 +441,22 @@ pub async fn list_repos() -> Vec<Value> {
     let value = read_repos_value().await;
     tokio::task::spawn_blocking(move || {
         let mut items = Vec::new();
-        if let Some(v) = value {
-            if let Some(repos) = v.get("repos").and_then(|r| r.as_array()) {
-                for repo in repos {
-                    let id = repo.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                    items.push(json!({
-                        "id": id,
-                        "name": repo.get("name").and_then(|v| v.as_str()).unwrap_or_default(),
-                        "url": repo.get("url").and_then(|v| v.as_str()).unwrap_or_default(),
-                        "builtin": repo.get("builtin").and_then(|v| v.as_bool()).unwrap_or(false),
-                        "enabled": repo.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
-                        "version": repo.get("version").and_then(|v| v.as_str()).unwrap_or_default(),
-                        "commit": repo.get("commit").and_then(|v| v.as_str()).unwrap_or_default(),
-                        "updated_at": repo.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(0),
-                        "exists": repos_root.join(id).is_dir(),
-                    }));
-                }
+        if let Some(v) = value
+            && let Some(repos) = v.get("repos").and_then(|r| r.as_array())
+        {
+            for repo in repos {
+                let id = repo.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                items.push(json!({
+                    "id": id,
+                    "name": repo.get("name").and_then(|v| v.as_str()).unwrap_or_default(),
+                    "url": repo.get("url").and_then(|v| v.as_str()).unwrap_or_default(),
+                    "builtin": repo.get("builtin").and_then(|v| v.as_bool()).unwrap_or(false),
+                    "enabled": repo.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+                    "version": repo.get("version").and_then(|v| v.as_str()).unwrap_or_default(),
+                    "commit": repo.get("commit").and_then(|v| v.as_str()).unwrap_or_default(),
+                    "updated_at": repo.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(0),
+                    "exists": repos_root.join(id).is_dir(),
+                }));
             }
         }
         items

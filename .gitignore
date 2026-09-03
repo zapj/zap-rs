@@ -13,3 +13,6 @@ web/a.html
 #data/appstore/repos/
 data/appstore/logs/*.log
 data/appstore/tmp/*
+data/appstore/runs/*
+data/appstore/cache/*
+data/appstore/custom/*

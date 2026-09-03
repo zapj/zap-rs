@@ -20,6 +20,43 @@ use zap_proto::Request;
 
 // ── SQL 行结构 ──────────────────────────────────────────────
 
+// sqlx 行映射元组别名（避免 clippy::type_complexity）
+type SiteRow = (
+    i64,
+    i64,
+    String,
+    i32,
+    String,
+    i64,
+    i64,
+    Option<String>,
+    String,
+);
+type SiteRowExt = (
+    i64,
+    i64,
+    String,
+    i32,
+    String,
+    i64,
+    i64,
+    Option<String>,
+    String,
+    Vec<String>,
+    Vec<String>,
+);
+type SyncOneRow = (
+    String,
+    i32,
+    String,
+    String,
+    String,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 #[derive(sqlx::FromRow, Debug)]
 struct OwnerCandidate {
     id: i64,
@@ -273,6 +310,7 @@ fn validate_site_fields(
 /// 计算站点的文档根与日志目录：统一规划在归属用户家目录下
 /// - web_root = {home}/www/{sanitize(name)}-{site_id}
 /// - log_root = {home}/logs/{sanitize(name)}-{site_id}
+///
 /// 归属用户无 home_dir 时返回空串（执行端回退 {ZAP_PATH}/data/www/...，兼容老站点）
 async fn site_dirs_for(
     user_id: i64,
@@ -330,17 +368,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     let base_sql = "SELECT s.id, s.user_id, s.name, s.status, s.remark, s.created_at, s.updated_at, \
                     u.username AS owner_username, s.php_instance \
                     FROM site s LEFT JOIN user u ON u.id = s.user_id";
-    let rows: Vec<(
-        i64,
-        i64,
-        String,
-        i32,
-        String,
-        i64,
-        i64,
-        Option<String>,
-        String,
-    )> = if jwt::is_admin(&claims) {
+    let rows: Vec<SiteRow> = if jwt::is_admin(&claims) {
         sqlx::query_as(&format!("{} ORDER BY s.id DESC", base_sql))
             .fetch_all(pool)
             .await?
@@ -438,19 +466,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         }
     }
 
-    let mut recs: Vec<(
-        i64,
-        i64,
-        String,
-        i32,
-        String,
-        i64,
-        i64,
-        Option<String>,
-        String,
-        Vec<String>,
-        Vec<String>,
-    )> = rows
+    let mut recs: Vec<SiteRowExt> = rows
         .into_iter()
         .map(|r| {
             let domains = domain_map.remove(&r.0).unwrap_or_default();
@@ -463,10 +479,10 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     if let Some(uid) = q.user_id {
         recs.retain(|r| r.1 == uid);
     }
-    if let Some(status) = q.status {
-        if status == 0 || status == 1 {
-            recs.retain(|r| r.3 == status);
-        }
+    if let Some(status) = q.status
+        && (status == 0 || status == 1)
+    {
+        recs.retain(|r| r.3 == status);
     }
     if let Some(search) = q.search {
         let s = search.trim().to_lowercase();
@@ -878,10 +894,9 @@ pub async fn site_delete(
             name: String::new(),
         })
         .await
+            && resp.code != 0
         {
-            if resp.code != 0 {
-                tracing::warn!("remove vhost for site {} failed: {}", id, resp.message);
-            }
+            tracing::warn!("remove vhost for site {} failed: {}", id, resp.message);
         }
     }
 
@@ -973,17 +988,7 @@ async fn sync_one_site(
     let pool = db::get_db_pool().await;
 
     // 站点 + 归属用户（LEFT JOIN：站点可能无主 / 用户已删）
-    let row: Option<(
-        String,
-        i32,
-        String,
-        String,
-        String,
-        Option<i64>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(
+    let row: Option<SyncOneRow> = sqlx::query_as(
         "SELECT s.name, s.status, s.php_instance, s.web_root, s.log_root,
                 u.id, u.home_dir, u.linux_user, u.fpm_pool
          FROM site s LEFT JOIN user u ON u.id = s.user_id
@@ -1025,10 +1030,10 @@ async fn sync_one_site(
                 owner_user = Some(lu);
             }
         }
-    } else if let Some(uid) = uid {
-        if let Err(e) = crate::routers::user::ensure_user_runtime(uid).await {
-            warn!("初始化用户运行实体失败(id={}): {}", uid, e);
-        }
+    } else if let Some(uid) = uid
+        && let Err(e) = crate::routers::user::ensure_user_runtime(uid).await
+    {
+        warn!("初始化用户运行实体失败(id={}): {}", uid, e);
     }
 
     // PHP 通道：
@@ -1149,37 +1154,36 @@ fn php_version_suffix(php_instance: &str) -> String {
 /// 2) 否则按官方包命名约定推导（php8.3 → /var/run/php-fpm-8.3.sock，php74 → /var/run/php-fpm-74.sock）
 async fn resolve_php_socket(php_instance: &str) -> Result<String, ZapError> {
     let resp = crate::zapexec::call(Request::AppstoreInstalled).await?;
-    if resp.code == 0 {
-        if let Some(data) = &resp.data {
-            if let Some(items) = data.get("items").and_then(|v| v.as_array()) {
-                for it in items {
-                    if it.get("instance").and_then(|v| v.as_str()) != Some(php_instance) {
-                        continue;
+    if resp.code == 0
+        && let Some(data) = &resp.data
+        && let Some(items) = data.get("items").and_then(|v| v.as_array())
+    {
+        for it in items {
+            if it.get("instance").and_then(|v| v.as_str()) != Some(php_instance) {
+                continue;
+            }
+            let info = it.get("info").unwrap_or(&serde_json::Value::Null);
+            for key in ["php_socket", "fpm_socket"] {
+                if let Some(v) = info.get(key).and_then(|v| v.as_str()) {
+                    let v = v.trim();
+                    if !v.is_empty() {
+                        return Ok(v.to_string());
                     }
-                    let info = it.get("info").unwrap_or(&serde_json::Value::Null);
-                    for key in ["php_socket", "fpm_socket"] {
-                        if let Some(v) = info.get(key).and_then(|v| v.as_str()) {
-                            let v = v.trim();
-                            if !v.is_empty() {
-                                return Ok(v.to_string());
-                            }
+                }
+            }
+            if let Some(v) = info.get("expose").and_then(|v| v.as_str()) {
+                for seg in v.split(['\n', ',']) {
+                    let seg = seg.trim();
+                    if let Some(rest) = seg.strip_prefix("unix:") {
+                        let rest = rest.trim();
+                        if !rest.is_empty() {
+                            return Ok(format!("unix:{rest}"));
                         }
                     }
-                    if let Some(v) = info.get("expose").and_then(|v| v.as_str()) {
-                        for seg in v.split(['\n', ',']) {
-                            let seg = seg.trim();
-                            if let Some(rest) = seg.strip_prefix("unix:") {
-                                let rest = rest.trim();
-                                if !rest.is_empty() {
-                                    return Ok(format!("unix:{rest}"));
-                                }
-                            }
-                            if let Some(rest) = seg.strip_prefix("tcp:") {
-                                let rest = rest.trim();
-                                if !rest.is_empty() {
-                                    return Ok(rest.to_string());
-                                }
-                            }
+                    if let Some(rest) = seg.strip_prefix("tcp:") {
+                        let rest = rest.trim();
+                        if !rest.is_empty() {
+                            return Ok(rest.to_string());
                         }
                     }
                 }

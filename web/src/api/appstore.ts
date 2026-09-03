@@ -112,6 +112,29 @@ export const getRuns = (params: { page?: number; page_size?: number }) =>
 export const getRunLog = (runId: string, offset = 0) =>
   http.get<any>(`/appstore/log/${runId}`, { params: { offset } })
 
+// ── 运行快照（失败后查看/编辑脚本并重跑）──────────────────────
+
+export interface RunFileItem {
+  path: string
+  size: number
+}
+
+/** 列出一次运行的可编辑脚本快照文件树 */
+export const getRunFiles = (runId: string) =>
+  http.get<any>('/appstore/run/files', { params: { run_id: runId } })
+
+/** 读取运行快照内文件内容 */
+export const readRunFile = (runId: string, path: string) =>
+  http.get<any>('/appstore/run/file/read', { params: { run_id: runId, path } })
+
+/** 写运行快照内文件（修改脚本，仅管理员） */
+export const writeRunFile = (data: { run_id: string; path: string; content: string }) =>
+  http.post<any>('/appstore/run/file/write', data)
+
+/** 重跑一次失败的运行（复用其快照，仅管理员） */
+export const retryRun = (runId: string) =>
+  http.post<any>('/appstore/run/retry', { run_id: runId })
+
 export function wsLogUrl(runId: string): string {
   const apiBase = import.meta.env.VITE_API_URL || window.location.origin
   const wsBase = apiBase.replace(/^http/, 'ws')

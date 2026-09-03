@@ -274,7 +274,7 @@ fn default_sign_days() -> i64 {
 
 /// 拆分逗号 / 空格 / 换行分隔的域名列表。
 fn split_domains(raw: &str) -> Vec<String> {
-    raw.split(|c: char| matches!(c, ',' | ' ' | '\t' | '\n' | '\r' | ';'))
+    raw.split([',', ' ', '\t', '\n', '\r', ';'])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
@@ -513,12 +513,12 @@ pub async fn cert_letsencrypt(
                     let map_req = map_conn.clone();
                     async move {
                         let path = req.uri().path().to_string();
-                        if let Some(token) = path.strip_prefix("/.well-known/acme-challenge/") {
-                            if let Some(proof) = map_req.lock().unwrap().get(token).cloned() {
-                                return Ok::<_, std::convert::Infallible>(Response::new(
-                                    AxBody::from(proof),
-                                ));
-                            }
+                        if let Some(token) = path.strip_prefix("/.well-known/acme-challenge/")
+                            && let Some(proof) = map_req.lock().unwrap().get(token).cloned()
+                        {
+                            return Ok::<_, std::convert::Infallible>(Response::new(AxBody::from(
+                                proof,
+                            )));
                         }
                         Ok(Response::builder()
                             .status(StatusCode::NOT_FOUND)

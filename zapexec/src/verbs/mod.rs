@@ -108,6 +108,18 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::AppstoreScriptWrite { path, content } => {
             appstore::script_write(path, content).await
         }
+        Request::AppstoreRunFiles { run_id } => appstore::run_files(run_id).await,
+        Request::AppstoreRunFileRead { run_id, path } => {
+            appstore::run_file_read(run_id, path).await
+        }
+        Request::AppstoreRunFileWrite {
+            run_id,
+            path,
+            content,
+        } => appstore::run_file_write(run_id, path, content).await,
+        Request::AppstoreRunRetry { run_id, new_run_id } => {
+            appstore::run_retry(run_id, new_run_id).await
+        }
         Request::AppstoreInstalled => appstore::installed().await,
         Request::AppstoreInstanceAction { pkg_path, action } => {
             appstore::instance_action(pkg_path, action).await

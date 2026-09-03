@@ -137,18 +137,16 @@ pub(super) fn nginx_bin(nginx_conf: &Path) -> PathBuf {
 
 pub(super) fn nginx_running() -> bool {
     for pid_file in [PathBuf::from("/var/run/nginx.pid")] {
-        if let Ok(content) = std::fs::read_to_string(&pid_file) {
-            if let Ok(pid) = content.trim().parse::<i32>() {
-                if pid > 0
-                    && root_cmd("kill")
-                        .args(["-0", &pid.to_string()])
-                        .output()
-                        .map(|o| o.status.success())
-                        .unwrap_or(false)
-                {
-                    return true;
-                }
-            }
+        if let Ok(content) = std::fs::read_to_string(&pid_file)
+            && let Ok(pid) = content.trim().parse::<i32>()
+            && pid > 0
+            && root_cmd("kill")
+                .args(["-0", &pid.to_string()])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        {
+            return true;
         }
     }
     root_cmd("pgrep")
@@ -319,6 +317,7 @@ fn fix_tree_owner(root: &Path, owner: &str, is_log: bool) -> Result<(), String> 
     }
 }
 
+#[allow(clippy::too_many_arguments)] // 同步站点完整 vhost 配置所需，参数固定且各司其职
 pub async fn vhost_sync(
     site_id: i64,
     name: String,
@@ -336,9 +335,10 @@ pub async fn vhost_sync(
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
+#[allow(clippy::too_many_arguments)] // 同 vhost_sync，同步所需配置字段固定
 fn vhost_sync_inner(
     site_id: i64,
     name: &str,
@@ -472,7 +472,7 @@ pub async fn vhost_remove(site_id: i64, name: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 fn nginx_test(bin: &Path) -> Result<(), String> {

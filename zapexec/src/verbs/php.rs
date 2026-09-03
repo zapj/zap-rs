@@ -242,15 +242,15 @@ fn parse_spec(spec_json: &str) -> BTreeMap<String, String> {
     if spec_json.trim().is_empty() {
         return m;
     }
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(spec_json) {
-        if let Some(obj) = v.as_object() {
-            for (k, val) in obj {
-                let s = match val {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                m.insert(k.clone(), s);
-            }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(spec_json)
+        && let Some(obj) = v.as_object()
+    {
+        for (k, val) in obj {
+            let s = match val {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            m.insert(k.clone(), s);
         }
     }
     m
@@ -358,7 +358,7 @@ pub async fn pool_sync(
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 /// 移除某用户在所有已安装 PHP 实例中的 pool 配置并 reload（幂等）。
@@ -407,7 +407,7 @@ pub async fn pool_clean(linux_user: String) -> Response {
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .map_or_else(|e| Response::err(-1, e), |r| r)
+    .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 #[cfg(test)]

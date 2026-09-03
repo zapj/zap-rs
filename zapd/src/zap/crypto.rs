@@ -55,7 +55,7 @@ fn load_or_create_key() -> Result<[u8; KEY_LEN], String> {
         .find(|p| {
             let parent = p.parent().unwrap_or(Path::new("."));
             let ok = fs::create_dir_all(parent).is_ok()
-                && fs::write(p, &key).is_ok()
+                && fs::write(p, key).is_ok()
                 && set_key_permissions(p);
             if ok {
                 info!("已生成新的加密密钥: {}", p.display());

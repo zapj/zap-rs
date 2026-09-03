@@ -157,7 +157,7 @@ pub async fn list_connections(_claims: ValidatedClaims) -> ZapJsonResult {
     .fetch_all(pool)
     .await?;
 
-    let mut connections: Vec<SshConnection> = rows.iter().map(|r| row_to_conn(r)).collect();
+    let mut connections: Vec<SshConnection> = rows.iter().map(row_to_conn).collect();
     // 敏感信息脱敏：不回传已加密的密码字段
     for c in connections.iter_mut() {
         c.password = String::new();
@@ -618,7 +618,7 @@ fn authenticate(session: &mut Session, info: &ConnectionInfo) -> Result<(), Stri
             if key_path.is_none() {
                 return Err(format!("SSH 密钥 '{}' 不存在", info.ssh_key_name));
             }
-            let key_content = std::fs::read_to_string(&key_path.unwrap())
+            let key_content = std::fs::read_to_string(key_path.unwrap())
                 .map_err(|e| format!("读取密钥文件失败: {}", e))?;
             // 显式传入公钥，避免 libssh2 从 OpenSSH 私钥格式推导公钥的兼容性问题
             let pub_content = get_pub_key_content(&info.ssh_key_name)
@@ -686,29 +686,27 @@ fn get_key_path(key_name: &str) -> Option<std::path::PathBuf> {
 fn get_pub_key_content(key_name: &str) -> Option<String> {
     let ssh_dir = std::path::PathBuf::from(zap_proto::SSH_KEY_DIR);
     let pub_path = ssh_dir.join(format!("{key_name}.pub"));
-    if pub_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&pub_path) {
-            let trimmed = content.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
+    if pub_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&pub_path)
+    {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
         }
     }
     // 兜底：从私钥推导公钥
     let key_path = ssh_dir.join(key_name);
-    if key_path.exists() {
-        if let Ok(out) = std::process::Command::new("ssh-keygen")
+    if key_path.exists()
+        && let Ok(out) = std::process::Command::new("ssh-keygen")
             .args(["-y", "-f"])
             .arg(&key_path)
             .output()
-        {
-            if out.status.success() {
-                let trimmed = String::from_utf8_lossy(&out.stdout);
-                let trimmed = trimmed.trim();
-                if !trimmed.is_empty() {
-                    return Some(trimmed.to_string());
-                }
-            }
+        && out.status.success()
+    {
+        let trimmed = String::from_utf8_lossy(&out.stdout);
+        let trimmed = trimmed.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
         }
     }
     None
@@ -852,16 +850,16 @@ pub async fn push_key_to_host(
     let auth_path = ssh_dir.join("authorized_keys");
 
     // 已存在且包含该公钥则跳过
-    if sftp.stat(&auth_path).is_ok() {
-        if let Ok(mut f) = sftp.open(&auth_path) {
-            let mut content = String::new();
-            if f.read_to_string(&mut content).is_ok()
-                && content.lines().any(|l| l.trim() == pub_content)
-            {
-                return Ok(Json(
-                    json!({ "code": 0, "message": "公钥已存在于远程主机，无需重复推送" }),
-                ));
-            }
+    if sftp.stat(&auth_path).is_ok()
+        && let Ok(mut f) = sftp.open(&auth_path)
+    {
+        let mut content = String::new();
+        if f.read_to_string(&mut content).is_ok()
+            && content.lines().any(|l| l.trim() == pub_content)
+        {
+            return Ok(Json(
+                json!({ "code": 0, "message": "公钥已存在于远程主机，无需重复推送" }),
+            ));
         }
     }
 

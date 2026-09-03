@@ -55,27 +55,30 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let zap_config = config::get_config().read().unwrap();
-    let cert_file = &zap_config.server.cert_file;
-    let key_file = &zap_config.server.key_file;
+    // 一次性读取配置并转为 owned 值：配置读写锁不跨 await 持有
+    let (cert_file, key_file, bind, web_port) = {
+        let cfg = config::get_config().read().unwrap();
+        (
+            cfg.server.cert_file.clone(),
+            cfg.server.key_file.clone(),
+            format!("{}:{}", cfg.server.address, cfg.server.port),
+            cfg.server.port,
+        )
+    };
 
     // Ensure TLS certificates exist (generate self-signed if missing)
-    if !zap::certmgr::ensure_certs(cert_file, key_file) {
+    if !zap::certmgr::ensure_certs(&cert_file, &key_file) {
         warn!(
             "TLS certificates not available at {} / {}. HTTPS will not work.",
             cert_file, key_file
         );
     }
 
-    let tls_acceptor = create_tls_acceptor(cert_file, key_file);
-    let bind = format!("{}:{}", zap_config.server.address, zap_config.server.port);
+    let tls_acceptor = create_tls_acceptor(&cert_file, &key_file);
     let tcp_listener = TcpListener::bind(&bind).await.unwrap();
     let primary_ip = local_ip_address::local_ip()
         .unwrap_or_else(|_| std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
-    info!(
-        "listening on https://{}:{}",
-        primary_ip, zap_config.server.port
-    );
+    info!("listening on https://{}:{}", primary_ip, web_port);
     info!("Zap server listening on https://{}.", bind);
 
     // init db
