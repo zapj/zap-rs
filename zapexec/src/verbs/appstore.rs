@@ -1383,8 +1383,9 @@ pub async fn script_stop(run_id: String) -> Response {
 
 pub async fn script_read(path: String) -> Response {
     tokio::task::spawn_blocking(move || {
-        let base = appstore_dir();
-        let resolved = safe_join(&base, &path)?;
+        // 与 script_write / script_run 一致：path 相对 custom/（树节点亦以此生成）
+        let custom = appstore_dir().join("custom");
+        let resolved = safe_join(&custom, &path)?;
         let md = std::fs::metadata(&resolved).map_err(|e| format!("路径不存在: {e}"))?;
         if !md.is_file() {
             return Err("不是文件".to_string());
