@@ -23,6 +23,12 @@ pub async fn init_schema() {
     init_api_token_table().await;
     // 「开发」菜单（API Tokens / API 文档，幂等补插）
     ensure_dev_menus().await;
+    // SSL/TLS 证书管理表
+    init_ssl_cert_table().await;
+    // 「SSL/TLS」菜单（位于应用商店上方，幂等补插）
+    ensure_ssl_menus().await;
+    // 「审计日志」子菜单（系统设置目录下，仅 admin，幂等补插）
+    ensure_audit_menu().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -602,6 +608,138 @@ async fn ensure_dev_menus() {
           ON m.name IN ('dev', 'api-tokens', 'api-docs')
          AND (m.parent_id = 0 OR m.parent_id IN (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev'))
         WHERE r.role_key IN ('admin', 'user', 'reseller')
+          AND NOT EXISTS (
+              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
+          )
+        "#,
+        )
+        .await;
+}
+
+// ── ssl_cert（SSL/TLS 证书管理）────────────────────────────
+
+async fn init_ssl_cert_table() {
+    let sql = r#"
+    CREATE TABLE IF NOT EXISTS ssl_cert (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL DEFAULT '',
+        domains TEXT NOT NULL DEFAULT '',
+        cert_type TEXT NOT NULL DEFAULT 'upload',
+        cert_content TEXT NOT NULL DEFAULT '',
+        key_content TEXT NOT NULL DEFAULT '',
+        ca_bundle TEXT NOT NULL DEFAULT '',
+        csr TEXT NOT NULL DEFAULT '',
+        not_before INTEGER NOT NULL DEFAULT 0,
+        not_after INTEGER NOT NULL DEFAULT 0,
+        status INTEGER NOT NULL DEFAULT 1,
+        remark TEXT NOT NULL DEFAULT '',
+        created_at INTEGER,
+        updated_at INTEGER
+    );
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+/// 幂等补插「SSL/TLS」顶级菜单（位于应用商店上方）及「SSL 证书管理」子菜单，
+/// 并授权 admin / user。可安全重复执行：仅当菜单不存在时先把应用商店及其后的
+/// 顶级菜单排序后移，再插入 SSL/TLS（sort_order=6，位于应用商店之前）。
+async fn ensure_ssl_menus() {
+    let pool = get_db_pool().await;
+    // 首次插入时，将应用商店及其后顶级菜单（sort_order >= 6）整体后移
+    let _ = pool
+        .execute(
+            r#"
+        UPDATE menus SET sort_order = sort_order + 1
+        WHERE parent_id = 0 AND sort_order >= 6
+          AND NOT EXISTS (SELECT 1 FROM menus WHERE parent_id = 0 AND name = 'ssl-tls')
+        "#,
+        )
+        .await;
+    // 顶级目录：SSL/TLS
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT 0, 'ssl-tls', '/ssl-tls', 'Layout', '/ssl-tls/certs', 'dir', 'SSL/TLS', 'ep:lock', 1, 'admin,user', 6, 1, strftime('%s','now'), strftime('%s','now')
+        WHERE NOT EXISTS (SELECT 1 FROM menus WHERE parent_id = 0 AND name = 'ssl-tls')
+        "#,
+        )
+        .await;
+    // 子菜单：SSL证书管理
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT id, 'ssl-certs', 'certs', 'ssl-tls/certs/index', 'menu', 'SSL证书', 'ep:lock', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now')
+        FROM menus
+        WHERE parent_id = 0 AND name = 'ssl-tls'
+          AND NOT EXISTS (
+              SELECT 1 FROM menus m2
+              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'ssl-tls')
+                AND m2.name = 'ssl-certs'
+          )
+        "#,
+        )
+        .await;
+    // 兼容旧库：把已存在的「SSL 证书管理」标题统一改为「SSL证书」（幂等）
+    let _ = pool
+        .execute(
+            r#"
+        UPDATE menus SET title = 'SSL证书', updated_at = strftime('%s','now')
+        WHERE name = 'ssl-certs' AND title = 'SSL 证书管理'
+        "#,
+        )
+        .await;
+    // role_menus 授权：admin / user ×（ssl-tls、ssl-certs）
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO role_menus (role_id, menu_id)
+        SELECT r.id, m.id
+        FROM roles r
+        JOIN menus m
+          ON m.name IN ('ssl-tls', 'ssl-certs')
+         AND (m.parent_id = 0 OR m.parent_id IN (SELECT id FROM menus WHERE parent_id = 0 AND name = 'ssl-tls'))
+        WHERE r.role_key IN ('admin', 'user')
+          AND NOT EXISTS (
+              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
+          )
+        "#,
+        )
+        .await;
+}
+
+/// 幂等补插「审计日志」子菜单（位于「系统设置」目录下，仅 admin）。
+/// 可安全重复执行：已存在则跳过（新库/旧库均适用，无需重置数据库）。
+async fn ensure_audit_menu() {
+    let pool = get_db_pool().await;
+    // 子菜单：审计日志（紧跟 SSH 密钥之后，sort_order=5）
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT id, 'audit', 'audit', 'system/audit/index', 'menu', '审计日志', 'ep:tickets', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now')
+        FROM menus
+        WHERE parent_id = 0 AND name = 'system'
+          AND NOT EXISTS (
+              SELECT 1 FROM menus m2
+              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'system')
+                AND m2.name = 'audit'
+          )
+        "#,
+        )
+        .await;
+    // role_menus 授权：仅 admin × audit
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO role_menus (role_id, menu_id)
+        SELECT r.id, m.id
+        FROM roles r
+        JOIN menus m
+          ON m.name = 'audit'
+         AND m.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'system')
+        WHERE r.role_key = 'admin'
           AND NOT EXISTS (
               SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
           )

@@ -45,6 +45,7 @@ pub mod dev;
 pub mod site;
 pub mod ssh_keys;
 pub mod ssh_terminal;
+pub mod ssl;
 pub mod system_audit;
 pub mod system_config;
 pub mod system_file;
@@ -311,6 +312,14 @@ fn api_routers() -> Router {
         .route("/site/add", post(site::site_add))
         .route("/site/update", post(site::site_update))
         .route("/site/delete", post(site::site_delete))
+        // SSL/TLS：证书管理（手动导入 / 自签名 / Let's Encrypt）
+        .route("/ssl/cert/list", get(ssl::cert_list))
+        .route("/ssl/cert/detail", get(ssl::cert_detail))
+        .route("/ssl/cert/add", post(ssl::cert_add))
+        .route("/ssl/cert/update", post(ssl::cert_update))
+        .route("/ssl/cert/delete", post(ssl::cert_delete))
+        .route("/ssl/cert/self-sign", post(ssl::cert_self_sign))
+        .route("/ssl/cert/letsencrypt", post(ssl::cert_letsencrypt))
         // 开发：API Token 管理 + API 文档
         .route("/dev/api-token/list", get(dev::api_token_list))
         .route("/dev/api-token/create", post(dev::api_token_create))

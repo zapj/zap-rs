@@ -244,6 +244,46 @@
         ] },
         { "method": "GET", "path": "/dev/api-docs", "summary": "API 文档数据（当前页面）" }
       ]
+    },
+    {
+      "name": "SSL/TLS（证书管理）",
+      "description": "SSL 证书（crt / key / ca-bundle / csr）的导入、自签名生成与 Let's Encrypt 自动申请",
+      "endpoints": [
+        { "method": "GET", "path": "/ssl/cert/list", "summary": "证书列表（不含私钥等内容，只含元信息）" },
+        { "method": "GET", "path": "/ssl/cert/detail", "summary": "证书详情（含 crt / key / ca-bundle / csr 明文）", "params": [
+          { "name": "id", "type": "int", "required": true, "desc": "证书 ID" }
+        ] },
+        { "method": "POST", "path": "/ssl/cert/add", "summary": "手动添加证书（至少提供 cert / key / csr 之一）", "params": [
+          { "name": "name", "type": "string", "required": true, "desc": "证书名称" },
+          { "name": "domains", "type": "string", "required": false, "desc": "覆盖域名，逗号分隔" },
+          { "name": "cert_content", "type": "string", "required": false, "desc": "证书 PEM（crt）" },
+          { "name": "key_content", "type": "string", "required": false, "desc": "私钥 PEM（key）" },
+          { "name": "ca_bundle", "type": "string", "required": false, "desc": "CA 中间链 PEM" },
+          { "name": "csr", "type": "string", "required": false, "desc": "CSR PEM" },
+          { "name": "remark", "type": "string", "required": false, "desc": "备注" }
+        ] },
+        { "method": "POST", "path": "/ssl/cert/update", "summary": "修改证书（名称 / 内容 / 备注 / 状态）", "params": [
+          { "name": "id", "type": "int", "required": true, "desc": "证书 ID" },
+          { "name": "name", "type": "string", "required": true, "desc": "证书名称" },
+          { "name": "status", "type": "int", "required": false, "desc": "1 启用 / 0 停用" }
+        ] },
+        { "method": "POST", "path": "/ssl/cert/delete", "summary": "删除证书", "params": [
+          { "name": "id", "type": "int", "required": true, "desc": "证书 ID" }
+        ] },
+        { "method": "POST", "path": "/ssl/cert/self-sign", "summary": "生成自签名证书（rcgen，支持域名与 IP，保存 crt/key/csr）", "params": [
+          { "name": "name", "type": "string", "required": true, "desc": "证书名称" },
+          { "name": "domains", "type": "string", "required": true, "desc": "域名 / IP，逗号分隔" },
+          { "name": "days", "type": "int", "required": false, "desc": "有效天数，默认 365" },
+          { "name": "remark", "type": "string", "required": false, "desc": "备注" }
+        ] },
+        { "method": "POST", "path": "/ssl/cert/letsencrypt", "summary": "向 Let's Encrypt 申请证书（ACME HTTP-01，需 80 端口可达）", "params": [
+          { "name": "domains", "type": "string", "required": true, "desc": "域名（不可为 IP），逗号分隔，首个为主域名" },
+          { "name": "email", "type": "string", "required": true, "desc": "ACME 账户邮箱" },
+          { "name": "name", "type": "string", "required": false, "desc": "证书名称，缺省用主域名" },
+          { "name": "staging", "type": "bool", "required": false, "desc": "true 使用 Let's Encrypt 测试环境" },
+          { "name": "remark", "type": "string", "required": false, "desc": "备注" }
+        ] }
+      ]
     }
   ]
 }
