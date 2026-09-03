@@ -614,7 +614,7 @@ async fn init_api_token_table() {
     let _ = get_db_pool().await.execute(sql).await;
 }
 
-/// 幂等补插「开发」顶级菜单及子菜单（API Tokens / API 文档），并授权 admin/user/reseller。
+/// 幂等补插「开发」顶级菜单及子菜单（API Tokens / API 文档 / 应用脚本编写），并授权 admin/user/reseller。
 /// 可安全重复执行：已存在则跳过（新库/旧库均适用，无需重置数据库）。
 async fn ensure_dev_menus() {
     let pool = get_db_pool().await;
@@ -660,7 +660,23 @@ async fn ensure_dev_menus() {
         "#,
         )
         .await;
-    // role_menus 授权：admin / user / reseller ×（dev、api-tokens、api-docs）
+    // 子菜单：应用脚本编写
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT id, 'app-script-guide', 'app-script-guide', 'dev/app-script-guide/index', 'menu', '应用脚本编写', 'ep:notebook', 1, 'admin,user,reseller', 3, 1, strftime('%s','now'), strftime('%s','now')
+        FROM menus
+        WHERE parent_id = 0 AND name = 'dev'
+          AND NOT EXISTS (
+              SELECT 1 FROM menus m4
+              WHERE m4.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev')
+                AND m4.name = 'app-script-guide'
+          )
+        "#,
+        )
+        .await;
+    // role_menus 授权：admin / user / reseller ×（dev、api-tokens、api-docs、app-script-guide）
     let _ = pool
         .execute(
             r#"
@@ -668,7 +684,7 @@ async fn ensure_dev_menus() {
         SELECT r.id, m.id
         FROM roles r
         JOIN menus m
-          ON m.name IN ('dev', 'api-tokens', 'api-docs')
+          ON m.name IN ('dev', 'api-tokens', 'api-docs', 'app-script-guide')
          AND (m.parent_id = 0 OR m.parent_id IN (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev'))
         WHERE r.role_key IN ('admin', 'user', 'reseller')
           AND NOT EXISTS (

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// `zapd` -> `zapexec` 的请求。只有白名单动词，刻意不提供任意 shell 执行。
 #[derive(Debug, Serialize, Deserialize)]
@@ -148,6 +149,9 @@ pub enum Request {
         /// 用户点击的操作（app.yaml actions 键，如 bin/build），透传给安装脚本的 ACTION 环境变量
         #[serde(skip_serializing_if = "Option::is_none")]
         action: Option<String>,
+        /// 用户在安装表单中填写的选项（app.yaml options，键=选项名，值=字符串化表单值）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        options: Option<BTreeMap<String, String>>,
         run_id: String,
     },
     /// 卸载包：执行 uninstall.sh 并删除已安装目录
@@ -166,6 +170,9 @@ pub enum Request {
         /// 用户点击的操作（app.yaml actions 键），透传给升级脚本的 ACTION 环境变量
         #[serde(skip_serializing_if = "Option::is_none")]
         action: Option<String>,
+        /// 升级表单选项（键=选项名，值=字符串化表单值）；缺省复用安装选项定义
+        #[serde(skip_serializing_if = "Option::is_none")]
+        options: Option<BTreeMap<String, String>>,
         run_id: String,
     },
     /// 运行自定义脚本（仅限 appstore/custom/ 内）
@@ -436,6 +443,7 @@ mod tests {
                 repo_id: Some("zap-appstore".into()),
                 version: "11.4.4".into(),
                 action: None,
+                options: None,
                 run_id: "r1".into(),
             })
             .unwrap(),
@@ -448,6 +456,7 @@ mod tests {
                 repo_id: Some("zap-appstore".into()),
                 version: "8.3.3".into(),
                 action: Some("build".into()),
+                options: None,
                 run_id: "r2".into(),
             })
             .unwrap(),

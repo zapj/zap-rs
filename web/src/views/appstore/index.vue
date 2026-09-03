@@ -242,6 +242,79 @@
       </template>
     </el-dialog>
 
+    <!-- 安装/升级选项对话框 -->
+    <el-dialog
+      v-model="optDialogVisible"
+      :title="optDialogTitle"
+      width="620px"
+      :close-on-click-modal="false"
+    >
+      <el-form v-if="optList.length" label-width="140px" label-position="left" @submit.prevent>
+        <el-form-item
+          v-for="o in optList"
+          :key="o.name"
+          :label="optLabel(o)"
+          :required="!!o.required"
+          :error="optFieldError[o.name]"
+        >
+          <template v-if="optType(o) === 'string'">
+            <el-input
+              v-model="optValues[o.name]"
+              :placeholder="o.placeholder || ''"
+              clearable
+              maxlength="4096"
+            />
+          </template>
+          <template v-else-if="optType(o) === 'number'">
+            <el-input-number
+              v-model="optValues[o.name]"
+              :placeholder="o.placeholder || '请输入数值'"
+              controls-position="right"
+              style="width: 100%"
+            />
+          </template>
+          <template v-else-if="optType(o) === 'bool'">
+            <el-switch v-model="optValues[o.name]" />
+          </template>
+          <template v-else-if="optType(o) === 'select'">
+            <el-select
+              v-model="optValues[o.name]"
+              style="width: 100%"
+              clearable
+              :placeholder="o.placeholder || '请选择'"
+            >
+              <el-option v-for="c in choicesOf(o)" :key="c.value" :label="c.label" :value="c.value" />
+            </el-select>
+          </template>
+          <template v-else>
+            <el-select
+              v-model="optValues[o.name]"
+              multiple
+              collapse-tags
+              style="width: 100%"
+              :placeholder="o.placeholder || '可多选'"
+            >
+              <el-option v-for="c in choicesOf(o)" :key="c.value" :label="c.label" :value="c.value" />
+            </el-select>
+          </template>
+          <div v-if="o.desc" class="opt-tip">{{ o.desc }}</div>
+        </el-form-item>
+      </el-form>
+      <div class="opt-hint">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          选项会写入运行快照的 options.env / options.json（与脚本同目录），并注入同名环境变量；
+          脚本内可直接以 $选项名 使用，也可 source $PKG_PATH/options.env
+        </span>
+      </div>
+      <template #footer>
+        <el-button @click="optDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="optSubmitting" @click="submitOptions">
+          {{ optMode === 'install' ? '确认安装' : '确认升级' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 日志抽屉 -->
     <AppStoreLogDrawer ref="logDrawerRef" />
   </div>
@@ -250,7 +323,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Goods, Search } from '@element-plus/icons-vue'
+import { Goods, Search, InfoFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import {
   getRepos,
@@ -265,6 +338,9 @@ import {
   retryRun,
   getRunFiles,
   type AppPackage,
+  type AppOption,
+  type AppChoice,
+  type FormOptions,
   type RepoSource,
   type RunItem,
 } from '@/api/appstore'
@@ -422,9 +498,146 @@ function depList(pkg: AppPackage): string[] {
   return Object.entries(d as Record<string, string>).map(([n, v]) => (v ? `${n} ${v}` : n))
 }
 
+// ── 安装/升级选项（app.yaml options 动态表单）───────────────
+
+type OptMode = 'install' | 'upgrade'
+
+const optDialogVisible = ref(false)
+const optMode = ref<OptMode>('install')
+const optPkg = ref<AppPackage | null>(null)
+const optActionKey = ref('')
+const optList = ref<AppOption[]>([])
+/** 表单值:type=string/select 存 string;number 存 number;bool 存 boolean;multiselect 存 string[] */
+const optValues = ref<Record<string, any>>({})
+const optFieldError = ref<Record<string, string>>({})
+const optSubmitting = ref(false)
+
+const optDialogTitle = computed(() => {
+  const pkg = optPkg.value
+  if (!pkg) return ''
+  const modeName = optMode.value === 'install' ? (pkg.installed ? '再次安装' : '安装') : '升级'
+  const act = optMode.value === 'install' && optActionKey.value
+    ? ` · ${actionLabel(pkg, optActionKey.value)}`
+    : ''
+  return `${modeName} ${pkg.title || pkg.name}${act} — 选项`
+})
+
+/** 包在该动作下需要填写的选项（缺省回退到 install 键;顶层数组作用于所有动作） */
+function optionsFor(pkg: AppPackage, actionKey?: string): AppOption[] {
+  const o = pkg.options as unknown
+  if (!o) return []
+  if (Array.isArray(o)) return o as AppOption[]
+  const m = o as Record<string, AppOption[]>
+  if (actionKey && m[actionKey]) return m[actionKey]
+  if (m.install) return m.install
+  const first = Object.keys(m)[0]
+  return first ? m[first] || [] : []
+}
+
+function optType(o: AppOption): AppOption['type'] {
+  return o.type || 'string'
+}
+
+function optLabel(o: AppOption): string {
+  return o.label || o.name
+}
+
+function choicesOf(o: AppOption): AppChoice[] {
+  return (o.choices || []).map((c) =>
+    typeof c === 'string' ? { label: c, value: c } : { label: c.label || c.value, value: c.value },
+  )
+}
+
+function optDefault(o: AppOption): any {
+  const d = o.default
+  if (optType(o) === 'multiselect') {
+    if (Array.isArray(d)) return d.map(String)
+    if (typeof d === 'string' && d) return d.split(o.separator || ' ').map((s) => s.trim()).filter(Boolean)
+    return []
+  }
+  if (optType(o) === 'bool') return !!d
+  if (optType(o) === 'number') return typeof d === 'number' ? d : undefined
+  return typeof d === 'string' ? d : typeof d === 'number' ? String(d) : ''
+}
+
+function openOptionsDialog(pkg: AppPackage, actionKey: string | undefined, mode: OptMode) {
+  const defs = optionsFor(pkg, actionKey)
+  if (!defs.length) return
+  optMode.value = mode
+  optPkg.value = pkg
+  optActionKey.value = actionKey || ''
+  optList.value = defs
+  const vals: Record<string, any> = {}
+  for (const o of defs) vals[o.name] = optDefault(o)
+  optValues.value = vals
+  optFieldError.value = {}
+  const ver = curVersion(pkg)
+  const modeName = mode === 'install' ? (pkg.installed ? '再次安装' : '安装') : '升级'
+  const actionLabel_ = mode === 'install' ? actionLabel(pkg, actionKey) : ''
+  optSubmitting.value = false
+  optDialogVisible.value = true
+}
+
+/** 校验并归一化为提交载荷（字符串化）;失败返回 null 并标出错误字段 */
+function collectOptions(): FormOptions | null {
+  const out: FormOptions = {}
+  const errors: Record<string, string> = {}
+  for (const o of optList.value) {
+    const t = optType(o)
+    const name = o.name
+    const v = optValues.value[name]
+    if (t === 'multiselect') {
+      const arr = (Array.isArray(v) ? v : []) as string[]
+      if (o.required && !arr.length) errors[name] = '至少选择一项'
+      else out[name] = arr.join(o.separator || ' ')
+    } else if (t === 'bool') {
+      out[name] = v ? 'true' : 'false'
+    } else if (t === 'number') {
+      if (o.required && (v === undefined || v === null || v === '')) errors[name] = '请填写数值'
+      else out[name] = v === undefined || v === null ? '' : String(v)
+    } else if (t === 'select') {
+      if (o.required && (v === undefined || v === null || v === '')) errors[name] = '请选择一项'
+      else out[name] = v === undefined || v === null ? '' : String(v)
+    } else {
+      const s = typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v)
+      if (o.required && !s.trim()) errors[name] = '请填写'
+      else out[name] = s
+    }
+  }
+  optFieldError.value = errors
+  return Object.keys(errors).length ? null : out
+}
+
+async function submitOptions() {
+  const opts = collectOptions()
+  if (!opts) return
+  optSubmitting.value = true
+  try {
+    const pkg = optPkg.value
+    if (!pkg) return
+    const ok =
+      optMode.value === 'install'
+        ? await doInstall(pkg, optActionKey.value || undefined, opts)
+        : await doUpgrade(pkg, opts)
+    if (ok) optDialogVisible.value = false
+  } finally {
+    optSubmitting.value = false
+  }
+}
+
 // ── 安装 / 卸载 / 升级 ─────────────────────────────────────
 
 async function handleInstall(pkg: AppPackage, actionKey?: string) {
+  // 该动作定义了选项表单 → 先收集选项再安装
+  if (optionsFor(pkg, actionKey).length) {
+    openOptionsDialog(pkg, actionKey, 'install')
+    return
+  }
+  await doInstall(pkg, actionKey)
+}
+
+/** 真正发起安装;成功返回 true（关闭选项对话框） */
+async function doInstall(pkg: AppPackage, actionKey?: string, options?: FormOptions): Promise<boolean> {
   const ver = curVersion(pkg)
   const label = actionLabel(pkg, actionKey)
   const actName = pkg.installed ? '重新安装' : '安装'
@@ -444,12 +657,15 @@ async function handleInstall(pkg: AppPackage, actionKey?: string) {
       repo_id: pkg.source === 'official' ? pkg.repo_id : undefined,
       version: ver,
       action: actionKey || undefined,
+      options,
     })
     ElMessage.success(`${actName}已启动`)
     logDrawerRef.value?.openDrawer(resp.data.run_id, `${actName} ${pkg.name}`)
     setTimeout(loadPackages, 2000)
+    return true
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message || `${actName}失败`)
+    return false
   }
 }
 
@@ -468,6 +684,16 @@ async function handleUninstall(pkg: AppPackage) {
 }
 
 async function handleUpgrade(pkg: AppPackage) {
+  // 该包定义了升级选项（或缺省复用安装选项）→ 先收集选项再升级
+  if (optionsFor(pkg, 'upgrade').length) {
+    openOptionsDialog(pkg, undefined, 'upgrade')
+    return
+  }
+  await doUpgrade(pkg)
+}
+
+/** 真正发起升级;成功返回 true */
+async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolean> {
   const ver = curVersion(pkg)
   try {
     await ElMessageBox.confirm(
@@ -480,12 +706,15 @@ async function handleUpgrade(pkg: AppPackage) {
       source: pkg.source,
       repo_id: pkg.source === 'official' ? pkg.repo_id : undefined,
       version: ver || pkg.version,
+      options,
     })
     ElMessage.success('升级已启动')
     logDrawerRef.value?.openDrawer(resp.data.run_id, `升级 ${pkg.name}`)
     setTimeout(loadPackages, 2000)
+    return true
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message || '升级失败')
+    return false
   }
 }
 
@@ -584,6 +813,31 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.opt-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  margin-top: 2px;
+  white-space: pre-line;
+}
+
+.opt-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: #909399;
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 8px 10px;
+  line-height: 1.6;
+  margin-top: 4px;
+}
+
+.opt-hint .el-icon {
+  margin-top: 2px;
 }
 
 .repo-card {

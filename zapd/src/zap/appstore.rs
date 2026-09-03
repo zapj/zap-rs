@@ -207,6 +207,10 @@ struct AppYaml {
     /// 自定义操作按钮：动作键 -> 按钮文案（如 build: 编译安装 / bin: 安装）
     #[serde(default)]
     actions: Option<Value>,
+    /// 安装/升级可选项：动作键 -> 选项定义列表（形如 {prefix: {...}}）。
+    /// 顶层直接为列表时视为作用于 install 动作。
+    #[serde(default)]
+    options: Option<Value>,
     /// 是否允许多实例安装（为 yes 时即使已安装也可再次安装其他版本）
     #[serde(default, deserialize_with = "de_boolish")]
     allow_multiple_instances: bool,
@@ -354,6 +358,7 @@ fn scan_source_dir(
                     "deps": app_yaml.deps.clone().unwrap_or_default(),
                     "dependencies": dependencies,
                     "actions": actions,
+                    "options": app_yaml.options.clone().unwrap_or(Value::Null),
                     "allow_multiple_instances": app_yaml.allow_multiple_instances,
                     "default_port": app_yaml.default_port,
                     "scripts": app_yaml.scripts.clone().unwrap_or(Value::Null),

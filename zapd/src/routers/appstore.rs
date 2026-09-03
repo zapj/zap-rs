@@ -1,6 +1,6 @@
 //! AppStore 路由：仓库管理 / 包安装卸载升级 / 脚本管理 / 运行记录与实时日志。
 
-use std::net::SocketAddr;
+use std::{collections::BTreeMap, net::SocketAddr};
 
 use axum::{
     Json,
@@ -246,6 +246,46 @@ pub struct InstallPayload {
     pub version: String,
     /// 用户点击的操作（app.yaml actions 键，如 bin/build）
     pub action: Option<String>,
+    /// 安装表单选项：选项名 -> 字符串化值
+    pub options: Option<BTreeMap<String, String>>,
+}
+
+/// 校验并规整 options：仅接受合法 shell 变量名，拒绝系统保留前缀；
+/// 值统一截断超长输入防滥用。
+fn sanitize_options(
+    options: Option<BTreeMap<String, String>>,
+) -> Result<Option<BTreeMap<String, String>>, String> {
+    let Some(mut opts) = options else {
+        return Ok(None);
+    };
+    if opts.len() > 64 {
+        return Err("安装选项数量过多".into());
+    }
+    for (k, v) in opts.iter_mut() {
+        let valid = !k.is_empty()
+            && k.len() <= 64
+            && k.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !k.starts_with("ZAP_")
+            && !k.starts_with("PKG_")
+            && !k.starts_with("APP_")
+            && !k.starts_with("ACTION")
+            && !k.starts_with("SCRIPT_")
+            && !k.starts_with("RUN_")
+            && k != "PATH"
+            && k != "HOME";
+        if !valid {
+            return Err(format!(
+                "非法选项名: {k}（须为字母/下划线开头且不含保留前缀）"
+            ));
+        }
+        if v.chars().count() > 4096 {
+            return Err(format!("选项 {k} 的值过长"));
+        }
+    }
+    Ok(Some(opts))
 }
 
 pub async fn install(
@@ -257,6 +297,10 @@ pub async fn install(
     if payload.source == "custom" {
         require_admin(&claims)?;
     }
+    let options = match sanitize_options(payload.options.clone()) {
+        Ok(o) => o,
+        Err(e) => return Err(ZapError::New(-1, e)),
+    };
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
     ast::register_run(
@@ -274,6 +318,7 @@ pub async fn install(
         repo_id: payload.repo_id.clone(),
         version: payload.version.clone(),
         action: payload.action.clone(),
+        options,
         run_id: run_id.clone(),
     })
     .await?;
@@ -287,7 +332,16 @@ pub async fn install(
         Some(client_addr.ip().to_string().as_str()),
         "appstore_install",
         &payload.pkg_path,
-        &format!("source={} version={}", payload.source, payload.version),
+        &format!(
+            "source={} version={} options=[{}]",
+            payload.source,
+            payload.version,
+            payload
+                .options
+                .as_ref()
+                .map(|o| o.keys().cloned().collect::<Vec<_>>().join(","))
+                .unwrap_or_default()
+        ),
     )
     .await;
     info!(
@@ -356,6 +410,8 @@ pub struct UpgradePayload {
     pub version: String,
     /// 用户点击的操作（app.yaml actions 键）
     pub action: Option<String>,
+    /// 升级表单选项：选项名 -> 字符串化值
+    pub options: Option<BTreeMap<String, String>>,
 }
 
 pub async fn upgrade(
@@ -366,6 +422,10 @@ pub async fn upgrade(
     let old_version = ast::installed_version_of(&payload.pkg_path)
         .await
         .unwrap_or_default();
+    let options = match sanitize_options(payload.options.clone()) {
+        Ok(o) => o,
+        Err(e) => return Err(ZapError::New(-1, e)),
+    };
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
     ast::register_run(
@@ -384,6 +444,7 @@ pub async fn upgrade(
         version: payload.version.clone(),
         old_version,
         action: payload.action.clone(),
+        options,
         run_id: run_id.clone(),
     })
     .await?;
@@ -397,7 +458,16 @@ pub async fn upgrade(
         Some(client_addr.ip().to_string().as_str()),
         "appstore_upgrade",
         &payload.pkg_path,
-        &format!("source={} version={}", payload.source, payload.version),
+        &format!(
+            "source={} version={} options=[{}]",
+            payload.source,
+            payload.version,
+            payload
+                .options
+                .as_ref()
+                .map(|o| o.keys().cloned().collect::<Vec<_>>().join(","))
+                .unwrap_or_default()
+        ),
     )
     .await;
     info!("AppStore upgrade started: {}", payload.pkg_path);

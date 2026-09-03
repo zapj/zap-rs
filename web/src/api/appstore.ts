@@ -13,6 +13,31 @@ export interface RepoSource {
   exists: boolean
 }
 
+/** 单个安装/升级选项（app.yaml options） */
+export interface AppOption {
+  /** 选项名；同时作为脚本环境变量名（建议全大写，如 MODULES） */
+  name: string
+  /** 展示标题，缺省用 name */
+  label?: string
+  /** string | number | bool | select | multiselect，缺省 string */
+  type?: 'string' | 'number' | 'bool' | 'select' | 'multiselect'
+  /** 默认值：标量或字符串（多选可传数组） */
+  default?: unknown
+  /** 必填（多选=至少选一个） */
+  required?: boolean
+  placeholder?: string
+  desc?: string
+  /** select/multiselect 候选；项可为字符串或 {label,value} */
+  choices?: Array<string | { label: string; value: string }>
+  /** 多选值拼接字符，缺省空格（脚本用 $NAME 展开时勿含空格于值中） */
+  separator?: string
+}
+
+export interface AppChoice {
+  label: string
+  value: string
+}
+
 export interface AppPackage {
   pkg_path: string
   category: string
@@ -27,6 +52,8 @@ export interface AppPackage {
   dependencies: Record<string, string> | string[]
   /** 自定义操作按钮：动作键 -> 按钮文案（如 build: 编译安装） */
   actions: Record<string, string>
+  /** 安装/升级可选项：动作键 -> 选项列表（缺省动作键时使用 install 键） */
+  options?: Record<string, AppOption[]>
   /** 是否允许多实例安装（已安装仍可安装其他版本） */
   allow_multiple_instances: boolean
   default_port: number | null
@@ -69,6 +96,9 @@ export const updateRepo = (data: { id: string }) =>
 
 export const getPackages = () => http.get<any>('/appstore/packages')
 
+/** 表单归一后的选项：选项名 -> 字符串值（多选以 separator 拼接） */
+export type FormOptions = Record<string, string>
+
 export const installPackage = (data: {
   pkg_path: string
   source: string
@@ -76,6 +106,8 @@ export const installPackage = (data: {
   version: string
   /** 用户点击的动作键（app.yaml actions），随请求透传到 shell 环境变量 ACTION */
   action?: string
+  /** 安装表单选项 */
+  options?: FormOptions
 }) => http.post<any>('/appstore/install', data)
 
 export const uninstallPackage = (data: { pkg_path: string }) =>
@@ -88,6 +120,8 @@ export const upgradePackage = (data: {
   version: string
   /** 用户点击的动作键（app.yaml actions），随请求透传到 shell 环境变量 ACTION */
   action?: string
+  /** 升级表单选项 */
+  options?: FormOptions
 }) => http.post<any>('/appstore/upgrade', data)
 
 // ── 脚本 ────────────────────────────────────────────────────
