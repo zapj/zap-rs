@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
 };
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     db,
@@ -330,31 +330,40 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     let base_sql = "SELECT s.id, s.user_id, s.name, s.status, s.remark, s.created_at, s.updated_at, \
                     u.username AS owner_username, s.php_instance \
                     FROM site s LEFT JOIN user u ON u.id = s.user_id";
-    let rows: Vec<(i64, i64, String, i32, String, i64, i64, Option<String>, String)> =
-        if jwt::is_admin(&claims) {
-            sqlx::query_as(&format!("{} ORDER BY s.id DESC", base_sql))
-                .fetch_all(pool)
-                .await?
-        } else if jwt::is_reseller(&claims) {
-            // reseller：自己的站点 + 名下客户的站点
-            sqlx::query_as(&format!(
-                "{} WHERE s.user_id = ? OR s.user_id IN (SELECT id FROM user WHERE owner_id = ?) \
+    let rows: Vec<(
+        i64,
+        i64,
+        String,
+        i32,
+        String,
+        i64,
+        i64,
+        Option<String>,
+        String,
+    )> = if jwt::is_admin(&claims) {
+        sqlx::query_as(&format!("{} ORDER BY s.id DESC", base_sql))
+            .fetch_all(pool)
+            .await?
+    } else if jwt::is_reseller(&claims) {
+        // reseller：自己的站点 + 名下客户的站点
+        sqlx::query_as(&format!(
+            "{} WHERE s.user_id = ? OR s.user_id IN (SELECT id FROM user WHERE owner_id = ?) \
                  ORDER BY s.id DESC",
-                base_sql
-            ))
-            .bind(claims.id as i64)
-            .bind(claims.id as i64)
-            .fetch_all(pool)
-            .await?
-        } else {
-            sqlx::query_as(&format!(
-                "{} WHERE s.user_id = ? ORDER BY s.id DESC",
-                base_sql
-            ))
-            .bind(claims.id as i64)
-            .fetch_all(pool)
-            .await?
-        };
+            base_sql
+        ))
+        .bind(claims.id as i64)
+        .bind(claims.id as i64)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as(&format!(
+            "{} WHERE s.user_id = ? ORDER BY s.id DESC",
+            base_sql
+        ))
+        .bind(claims.id as i64)
+        .fetch_all(pool)
+        .await?
+    };
 
     // 批量加载子表域名 / IP
     let ids: Vec<i64> = rows.iter().map(|r| r.0).collect();
@@ -362,6 +371,8 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     let mut ip_map: HashMap<i64, Vec<String>> = HashMap::new();
     let mut vh_map: HashMap<i64, String> = HashMap::new();
     let mut dir_map: HashMap<i64, (String, String)> = HashMap::new();
+    // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
+    let mut lu_map: HashMap<i64, String> = HashMap::new();
     if !ids.is_empty() {
         let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let dsql = format!(
@@ -409,6 +420,21 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         }
         for (sid, w, l) in dirq.fetch_all(pool).await? {
             dir_map.insert(sid, (w, l));
+        }
+        // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
+        let mut owner_ids: Vec<i64> = rows.iter().map(|r| r.1).collect();
+        owner_ids.sort_unstable();
+        owner_ids.dedup();
+        if !owner_ids.is_empty() {
+            let ph2 = owner_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let lusql = format!("SELECT id, linux_user FROM user WHERE id IN ({})", ph2);
+            let mut lq = sqlx::query_as::<_, (i64, String)>(&lusql);
+            for id in &owner_ids {
+                lq = lq.bind(id);
+            }
+            for (uid, lu) in lq.fetch_all(pool).await? {
+                lu_map.insert(uid, lu);
+            }
         }
     }
 
@@ -461,6 +487,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
             stopped += 1;
         }
     }
+    let vmode = crate::routers::system_env::vhost_mode().await;
     let list: Vec<Value> = recs
         .iter()
         .map(|r| {
@@ -468,6 +495,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
                 "id": r.0,
                 "user_id": r.1,
                 "owner_username": r.7.as_deref().unwrap_or(""),
+                "linux_user": lu_map.get(&r.1).cloned().unwrap_or_default(),
                 "name": r.2,
                 "php_instance": r.8,
                 "domains": r.9,
@@ -490,6 +518,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
             "total": recs.len(),
             "running": running,
             "stopped": stopped,
+            "vhost_mode": vmode,
             "rows": list,
         }
     })))
@@ -921,32 +950,116 @@ pub async fn site_sync(
 ) -> ZapJsonResult {
     require_manageable(&claims)?;
     site_in_scope(&claims, payload.id).await?;
+    let (msg, data, name, status) = match sync_one_site(payload.id).await {
+        Ok(v) => v,
+        Err(e) => return Err(e),
+    };
+    let _ = audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "site_sync",
+        &format!("id={}", payload.id),
+        &format!("name={} status={} {}", name, status, msg),
+    )
+    .await;
+    info!("site sync: id={} status={}", payload.id, status);
+    Ok(Json(json!({ "code": 0, "message": msg, "data": data })))
+}
+
+/// 单个站点全量同步核心（幂等，被 /site/sync 与 /site/sync_all 复用）
+async fn sync_one_site(
+    id: i64,
+) -> Result<(String, Option<serde_json::Value>, String, i32), ZapError> {
     let pool = db::get_db_pool().await;
 
-    let row: Option<(String, i32, String, String, String)> = sqlx::query_as(
-        "SELECT name, status, php_instance, web_root, log_root FROM site WHERE id = ?",
+    // 站点 + 归属用户（LEFT JOIN：站点可能无主 / 用户已删）
+    let row: Option<(
+        String,
+        i32,
+        String,
+        String,
+        String,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT s.name, s.status, s.php_instance, s.web_root, s.log_root,
+                u.id, u.home_dir, u.linux_user, u.fpm_pool
+         FROM site s LEFT JOIN user u ON u.id = s.user_id
+         WHERE s.id = ?",
     )
-    .bind(payload.id)
+    .bind(id)
     .fetch_optional(pool)
     .await?;
-    let Some((name, status, php_instance, web_root, log_root)) = row else {
+    let Some((name, status, php_instance, web_root, log_root, uid, uhome, _ulu, ufpm)) = row else {
         return Err(ZapError::New(-1, "站点不存在".to_string()));
     };
+    let mode = crate::routers::system_env::vhost_mode().await;
 
     // 域名 → server_name
     let mut domains = Vec::new();
     let dsql = "SELECT domain FROM site_domain WHERE site_id = ? ORDER BY id";
     let dq = sqlx::query_as::<_, (String,)>(dsql);
-    for (d,) in dq.bind(payload.id).fetch_all(pool).await? {
+    for (d,) in dq.bind(id).fetch_all(pool).await? {
         let d = d.trim().to_string();
         if !d.is_empty() {
             domains.push(d);
         }
     }
 
-    // PHP socket：优先从已安装实例的 info.yaml 解析，否则按官方包命名推导
+    // 运行实体准备（幂等）：
+    // - system 模式：确保归属用户有 Linux 账号 + 独立用户家目录，文件属主 = linux_user
+    // - www 模式：确保归属用户家目录骨架（www:www），文件属主 = www
+    let mut owner_user: Option<String> = None;
+    if mode == "system" {
+        if let Some(uid) = uid {
+            crate::routers::user::ensure_user_runtime(uid)
+                .await
+                .map_err(|e| ZapError::New(-1, e))?;
+            let lu: Option<String> = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
+                .bind(uid)
+                .fetch_one(pool)
+                .await?;
+            if let Some(lu) = lu.filter(|s| !s.is_empty()) {
+                owner_user = Some(lu);
+            }
+        }
+    } else if let Some(uid) = uid {
+        if let Err(e) = crate::routers::user::ensure_user_runtime(uid).await {
+            warn!("初始化用户运行实体失败(id={}): {}", uid, e);
+        }
+    }
+
+    // PHP 通道：
+    // - system 模式：先为归属用户同步专属 pool，通道 = /var/run/php-fpm-{linux_user}-{ver}.sock
+    // - www 模式：全局实例 socket（info.yaml 解析 / 命名推导）
     let php_socket = if php_instance.is_empty() {
         None
+    } else if mode == "system" {
+        match &owner_user {
+            Some(lu) => {
+                let spec = crate::routers::system_env::merged_fpm_spec(ufpm.as_deref()).await;
+                let resp = crate::zapexec::call(Request::PhpPoolSync {
+                    php_instance: php_instance.clone(),
+                    linux_user: lu.clone(),
+                    home_dir: uhome.unwrap_or_default(),
+                    spec,
+                })
+                .await?;
+                if resp.code != 0 {
+                    return Err(ZapError::New(
+                        resp.code,
+                        format!("PHP-FPM pool 同步失败：{}", resp.message),
+                    ));
+                }
+                Some(format!(
+                    "/var/run/php-fpm-{lu}-{}.sock",
+                    php_version_suffix(&php_instance)
+                ))
+            }
+            None => Some(resolve_php_socket(&php_instance).await?),
+        }
     } else {
         Some(resolve_php_socket(&php_instance).await?)
     };
@@ -954,20 +1067,21 @@ pub async fn site_sync(
     let web_root_opt = (!web_root.trim().is_empty()).then_some(web_root);
     let log_root_opt = (!log_root.trim().is_empty()).then_some(log_root);
     let resp = crate::zapexec::call(Request::SiteVhostSync {
-        site_id: payload.id,
+        site_id: id,
         name: name.clone(),
         domains,
         enabled: status == 1,
         php_socket,
         web_root: web_root_opt,
         log_root: log_root_opt,
+        owner_user,
     })
     .await?;
 
     let state = if resp.code == 0 { "synced" } else { "error" };
     let _ = sqlx::query("UPDATE site SET vhost_state = ? WHERE id = ?")
         .bind(state)
-        .bind(payload.id)
+        .bind(id)
         .execute(pool)
         .await;
 
@@ -978,24 +1092,56 @@ pub async fn site_sync(
         ));
     }
 
+    info!("site sync core: id={} status={}", id, status);
+    Ok((resp.message, resp.data, name, status))
+}
+
+/// 全部站点按当前模式重同步：vhost 模式开关切换后的「再同步」入口
+pub async fn site_sync_all(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    let pool = db::get_db_pool().await;
+    let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM site ORDER BY id")
+        .fetch_all(pool)
+        .await?;
+    if ids.is_empty() {
+        return Ok(Json(json!({ "code": 0, "message": "没有需要同步的站点" })));
+    }
+    let mut ok = 0usize;
+    let mut fails: Vec<String> = Vec::new();
+    for sid in ids {
+        match sync_one_site(sid).await {
+            Ok(_) => ok += 1,
+            Err(e) => fails.push(format!("站点 #{}：{}", sid, e)),
+        }
+    }
+    let fail = fails.len();
+    let summary = if fail == 0 {
+        format!("已按当前模式重同步 {} 个站点", ok)
+    } else {
+        let detail = fails.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+        format!("成功 {} 个，失败 {} 个（{}…）", ok, fail, detail)
+    };
     let _ = audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
-        "site_sync",
-        &format!("id={}", payload.id),
-        &format!(
-            "name={} php_instance={} status={} {}",
-            name, php_instance, status, resp.message
-        ),
+        "site_sync_all",
+        "all",
+        &summary,
     )
     .await;
-    info!("site sync: id={} status={}", payload.id, status);
+    info!("site sync all: {}", summary);
+    if fail > 0 {
+        return Err(ZapError::New(-1, format!("部分站点同步失败：{}", summary)));
+    }
+    Ok(Json(json!({ "code": 0, "message": summary })))
+}
 
-    Ok(Json(json!({
-        "code": 0,
-        "message": resp.message,
-        "data": resp.data,
-    })))
+/// PHP 实例 → 版本后缀：php8.3 → 8.3，php74 → 74
+fn php_version_suffix(php_instance: &str) -> String {
+    php_instance.trim_start_matches("php").to_string()
 }
 
 /// 解析 PHP 实例的 FPM 通道：

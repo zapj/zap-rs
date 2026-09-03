@@ -2,6 +2,7 @@ mod appstore;
 mod env;
 mod file;
 mod network;
+mod php;
 mod process;
 mod service;
 mod site;
@@ -89,7 +90,18 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             old_version,
             action,
             run_id,
-        } => appstore::upgrade(pkg_path, source, repo_id, version, old_version, action, run_id).await,
+        } => {
+            appstore::upgrade(
+                pkg_path,
+                source,
+                repo_id,
+                version,
+                old_version,
+                action,
+                run_id,
+            )
+            .await
+        }
         Request::AppstoreScriptRun { path, run_id } => appstore::script_run(path, run_id).await,
         Request::AppstoreScriptStop { run_id } => appstore::script_stop(run_id).await,
         Request::AppstoreScriptRead { path } => appstore::script_read(path).await,
@@ -108,10 +120,29 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             php_socket,
             web_root,
             log_root,
-        } => site::vhost_sync(site_id, name, domains, enabled, php_socket, web_root, log_root).await,
+            owner_user,
+        } => {
+            site::vhost_sync(
+                site_id, name, domains, enabled, php_socket, web_root, log_root, owner_user,
+            )
+            .await
+        }
         Request::SiteVhostRemove { site_id, name } => site::vhost_remove(site_id, name).await,
         Request::EnvDetect => env::detect().await,
-        Request::UserHomeInit { home_dir } => user::home_init(&home_dir).await,
+        Request::UserHomeInit { home_dir, owner } => {
+            user::home_init(&home_dir, owner.as_deref()).await
+        }
+        Request::UserSystemInit {
+            linux_user,
+            home_dir,
+        } => user::system_init(&linux_user, &home_dir).await,
+        Request::UserSystemRemove { linux_user } => user::system_remove(&linux_user).await,
+        Request::PhpPoolSync {
+            php_instance,
+            linux_user,
+            home_dir,
+            spec,
+        } => php::pool_sync(php_instance, linux_user, home_dir, spec).await,
     }
 }
 

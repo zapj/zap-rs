@@ -22,11 +22,11 @@
         </el-button>
         <el-tooltip
           v-if="isAdmin"
-          content="为所有已记录 home_dir 的用户补齐家目录骨架（www / logs）"
+          content="按当前虚拟主机运行模式补齐所有用户运行实体：www 模式补家目录骨架；system 模式创建 Linux 账号并赋权家目录"
           placement="top"
         >
           <el-button :loading="syncingHome" @click="handleHomeSync">
-            <el-icon><FolderOpened /></el-icon>同步家目录
+            <el-icon><FolderOpened /></el-icon>同步运行实体
           </el-button>
         </el-tooltip>
       </div>
@@ -46,6 +46,18 @@
               <code class="home-dir">{{ row.home_dir }}</code>
             </el-tooltip>
             <el-tag v-else size="small" type="warning">未设置</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="系统账号" width="150">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.linux_user"
+              :content="`独立系统用户模式：站点文件 owner=${row.linux_user}，PHP-FPM pool 以该账号运行（${row.home_dir || '/home'}）`"
+              placement="top"
+            >
+              <code class="linux-user">{{ row.linux_user }}</code>
+            </el-tooltip>
+            <span v-else class="muted">—</span>
           </template>
         </el-table-column>
         <el-table-column label="角色" width="120">
@@ -129,6 +141,15 @@
               :value="r.id"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="isAdmin" label="FPM 规格">
+          <el-input
+            v-model="form.fpm_pool"
+            type="textarea"
+            :rows="4"
+            placeholder='选填 JSON，覆盖面板默认，如 {"max_children": 16, "memory_limit": "512M"}；留空 = 使用面板默认'
+          />
+          <div class="form-tip">独立系统用户模式下，每用户每 PHP 版本生成独立 pool，规格按此（面板默认 + 此处覆盖）</div>
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="form.status">
@@ -229,6 +250,8 @@ interface FormData {
   roles: string
   owner_id: number
   status: number
+  /** 用户 PHP-FPM pool 规格（JSON 字符串，空 = 面板默认） */
+  fpm_pool: string
 }
 
 const defaultForm = (): FormData => ({
@@ -239,6 +262,7 @@ const defaultForm = (): FormData => ({
   roles: 'user',
   owner_id: 0,
   status: 1,
+  fpm_pool: '',
 })
 
 const form = reactive<FormData>(defaultForm())
@@ -277,8 +301,21 @@ function handleEdit(row: UserListItem) {
     roles: row.roles?.[0] ?? 'user',
     owner_id: row.owner_id ?? 0,
     status: row.status,
+    fpm_pool: row.fpm_pool ?? '',
   })
   dialogVisible.value = true
+}
+
+/** 校验用户 FPM 规格 JSON（空 = 允许） */
+function fpmSpecValid(raw: string): boolean {
+  const v = raw.trim()
+  if (!v) return true
+  try {
+    const obj = JSON.parse(v)
+    return typeof obj === 'object' && obj !== null && !Array.isArray(obj)
+  } catch {
+    return false
+  }
 }
 
 function resetForm() {
@@ -298,9 +335,14 @@ async function submitForm() {
         email: form.email,
         nickname: form.nickname,
       }
+      if (!fpmSpecValid(form.fpm_pool)) {
+        ElMessage.warning('FPM 规格必须是 JSON 对象（留空 = 面板默认）')
+        return
+      }
       if (isAdmin.value) {
         payload.roles = form.roles
         payload.owner_id = form.owner_id || 0
+        if (form.fpm_pool.trim()) payload.fpm_pool = form.fpm_pool.trim()
       }
       const res = await createUser(payload)
       ElMessage.success(
@@ -315,6 +357,13 @@ async function submitForm() {
       }
       if (isAdmin.value) {
         payload.roles = form.roles
+        if (form.fpm_pool.trim()) {
+          if (!fpmSpecValid(form.fpm_pool)) {
+            ElMessage.warning('FPM 规格必须是 JSON 对象（留空 = 面板默认）')
+            return
+          }
+          payload.fpm_pool = form.fpm_pool.trim()
+        }
       }
       await updateUser(payload)
       ElMessage.success('更新成功')
@@ -373,8 +422,8 @@ const syncingHome = ref(false)
 async function handleHomeSync() {
   try {
     await ElMessageBox.confirm(
-      '将为所有已记录 home_dir 的用户补齐家目录骨架（www / logs）。\n此操作仅补建目录，不影响已有站点。',
-      '同步家目录',
+      '将按当前虚拟主机运行模式补齐所有用户的运行实体：\n• www 模式：家目录骨架（www / logs / tmp）\n• system 模式：创建 Linux 账号（nologin）+ 独立用户家目录赋权\n此操作幂等，不影响已有站点。',
+      '同步运行实体',
       {
         type: 'info',
         confirmButtonText: '开始同步',
@@ -393,7 +442,7 @@ async function handleHomeSync() {
         .join('\n')
       await ElMessageBox.alert(
         `成功 ${ok.length} 个，失败 ${fail.length} 个：\n${detail}`,
-        '家目录同步完成（部分失败）',
+        '运行实体同步完成（部分失败）',
         {
           type: 'warning',
           confirmButtonText: '知道了',
@@ -401,7 +450,7 @@ async function handleHomeSync() {
         },
       )
     } else {
-      ElMessage.success(`家目录同步完成：成功 ${ok.length} 个`)
+      ElMessage.success(`运行实体同步完成：成功 ${ok.length} 个`)
     }
     loadList()
   } catch {
@@ -437,5 +486,25 @@ onMounted(() => {
   padding: 1px 6px;
   cursor: default;
   word-break: break-all;
+}
+
+.linux-user {
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+  font-size: 12px;
+  color: var(--el-color-warning);
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: default;
+}
+
+.form-tip {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.muted {
+  color: #c0c4cc;
 }
 </style>

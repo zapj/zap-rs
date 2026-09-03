@@ -214,6 +214,11 @@ pub enum Request {
         /// None 时 vhost 不生成日志指令（沿用 nginx 全局日志）
         #[serde(default, skip_serializing_if = "Option::is_none")]
         log_root: Option<String>,
+        /// 站点文件属主（Linux 账号名）；Some 时 web_root/log_root 整树
+        /// chown {owner}:www 并收紧权限（目录 750 / 文件 640），
+        /// None（默认 www 运行模式）则归 www:www
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner_user: Option<String>,
     },
     /// 移除站点 Nginx vhost（站点删除时清理，幂等）
     #[serde(rename = "site.vhost_remove")]
@@ -221,9 +226,47 @@ pub enum Request {
     /// 探测服务器运行环境快照（OS / Web 服务器 / PHP / 数据库 / 工具链）
     #[serde(rename = "env.detect")]
     EnvDetect,
-    /// 初始化面板用户家目录骨架：mkdir -p {home_dir}/www {home_dir}/logs（root 特权）
+    /// 初始化面板用户家目录骨架：mkdir -p {home_dir}/www {home_dir}/logs（root 特权）。
+    /// owner 为 Some(linux 账号) 时按「独立系统用户」模式设置属主与权限：
+    /// home 711 owner {u}:{u}，www / logs 750 owner {u}:www；
+    /// owner None（默认 www 模式）时 www / logs 归 www:www。
     #[serde(rename = "user.home_init")]
-    UserHomeInit { home_dir: String },
+    UserHomeInit {
+        home_dir: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
+    },
+    /// 为面板用户创建 Linux 系统账号（useradd，nologin，home 指向 home_dir），幂等。
+    /// 虚拟主机运行模式为「独立系统用户」时，面板用户在 user.add / 站点同步前调用。
+    #[serde(rename = "user.system_init")]
+    UserSystemInit {
+        /// Linux 账号名（须通过 zap_proto::linux_username 派生，调用方已校验）
+        linux_user: String,
+        /// 账号 home 目录（面板记录的 home_dir）
+        home_dir: String,
+    },
+    /// 移除 Linux 系统账号（删除面板用户 / 切换回 www 模式时调用）。
+    /// 会先清掉该用户的 PHP-FPM pool 配置文件并 reload，再 userdel。
+    #[serde(rename = "user.system_remove")]
+    UserSystemRemove {
+        /// Linux 账号名
+        linux_user: String,
+    },
+    /// 按用户生成 PHP-FPM pool 配置并 reload（幂等）：
+    /// 写入 {php 安装}/etc/php-fpm.d/{linux_user}.conf，
+    /// listen unix:/var/run/php-fpm-{linux_user}-{php版本}.sock，worker 以 {linux_user} 运行，
+    /// 规格来自 spec（JSON 字符串，缺省用面板默认值）。
+    #[serde(rename = "php.pool_sync")]
+    PhpPoolSync {
+        /// PHP 实例标识（如 php8.3）
+        php_instance: String,
+        /// Linux 账号名（worker 运行身份 / pool 名 / socket 名）
+        linux_user: String,
+        /// 用户家目录（open_basedir / session / upload 隔离根）
+        home_dir: String,
+        /// fpm pool 规格 JSON 字符串；空 = 使用默认规格
+        spec: String,
+    },
 }
 
 /// `zapexec` -> `zapd` 的响应。
@@ -294,6 +337,36 @@ pub fn sanitize_site_name(name: &str) -> String {
         out = out.chars().take(48).collect();
     }
     out
+}
+
+/// 面板用户名 → Linux 系统账号名派生（与家目录末段一致，home_dir 统一
+/// `/home/{linux_username}`）：
+/// 1. 经 `sanitize_site_name` 清洗；2. 转小写；
+/// 3. 首位必须是 ascii 字母或 `_`（数字/`-` 开头补 `z` 前缀，保证 useradd 合法）；
+/// 4. 最长 24 字符（Linux 用户名上限 32，留裕量给面板其它后缀）。
+pub fn linux_username(username: &str) -> String {
+    let clean = sanitize_site_name(username);
+    let mut base: String = clean
+        .chars()
+        .take(23)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    let first_ok = base
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    if !first_ok {
+        // base 以数字或 `-` 开头（sanitize 已去首尾 `-`，这里多为数字开头/空）
+        if base.is_empty() {
+            base = "zapuser".to_string();
+        } else {
+            base.insert(0, 'z');
+        }
+    }
+    if base.len() > 24 {
+        base.truncate(24);
+    }
+    base
 }
 
 #[cfg(test)]
@@ -408,6 +481,7 @@ mod tests {
                 php_socket: Some("unix:/var/run/php-fpm-8.3.sock".into()),
                 web_root: None,
                 log_root: None,
+                owner_user: None,
             })
             .unwrap(),
             r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com","b.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock"}"#
@@ -443,11 +517,12 @@ mod tests {
             php_socket: None,
             web_root: Some("/home/zap/www/blog-1".into()),
             log_root: Some("/home/zap/logs/blog-1".into()),
+            owner_user: Some("zap".into()),
         };
         let json = serde_json::to_string(&req).unwrap();
         assert_eq!(
             json,
-            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/blog-1"}"#
+            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/blog-1","owner_user":"zap"}"#
         );
         // 老版本 JSON（无 web_root/log_root）也能反序列化成功 → None
         let old: Request =
@@ -469,13 +544,16 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Request::UserHomeInit {
                 home_dir: "/home/zap".into(),
+                owner: None,
             })
             .unwrap(),
             r#"{"verb":"user.home_init","home_dir":"/home/zap"}"#
         );
         let back: Request =
             serde_json::from_str(r#"{"verb":"user.home_init","home_dir":"/home/zap"}"#).unwrap();
-        assert!(matches!(back, Request::UserHomeInit { home_dir } if home_dir == "/home/zap"));
+        assert!(
+            matches!(back, Request::UserHomeInit { home_dir, owner: None } if home_dir == "/home/zap")
+        );
     }
 
     #[test]
@@ -487,6 +565,33 @@ mod tests {
         // 最长 48
         let long = "a".repeat(60);
         assert_eq!(sanitize_site_name(&long).chars().count(), 48);
+    }
+
+    #[test]
+    fn linux_username_helper() {
+        assert_eq!(linux_username("zap"), "zap");
+        assert_eq!(linux_username("Zap_Admin"), "zap_admin");
+        // 全非法 → sanitize 回退 site → 小写 site
+        assert_eq!(linux_username("我的 博客"), "site");
+        assert_eq!(linux_username("123abc"), "z123abc");
+        // 前导 - 被 sanitize 修剪
+        assert_eq!(linux_username("-x"), "x");
+        let long = "A".repeat(40);
+        let got = linux_username(&long);
+        assert!(got.len() <= 24);
+        assert!(got.chars().next().unwrap().is_ascii_alphabetic());
+    }
+
+    #[test]
+    fn php_pool_sync_tagging() {
+        let req = Request::PhpPoolSync {
+            php_instance: "php8.3".into(),
+            linux_user: "zap".into(),
+            home_dir: "/home/zap".into(),
+            spec: "{\"pm\":\"dynamic\",\"max_children\":8}".into(),
+        };
+        let back: Request = serde_json::from_str(&serde_json::to_string(&req).unwrap()).unwrap();
+        assert_eq!(format!("{req:?}"), format!("{back:?}"));
     }
 
     #[test]

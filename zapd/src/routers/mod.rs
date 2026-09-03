@@ -48,8 +48,8 @@ pub mod ssh_terminal;
 pub mod ssl;
 pub mod system_audit;
 pub mod system_config;
-pub mod system_file;
 pub mod system_env;
+pub mod system_file;
 pub mod system_info;
 pub mod system_ip;
 pub mod system_job;
@@ -321,6 +321,7 @@ fn api_routers() -> Router {
         .route("/site/update", post(site::site_update))
         .route("/site/delete", post(site::site_delete))
         .route("/site/sync", post(site::site_sync))
+        .route("/site/sync_all", post(site::site_sync_all))
         // SSL/TLS：证书管理（手动导入 / 自签名 / Let's Encrypt）
         .route("/ssl/cert/list", get(ssl::cert_list))
         .route("/ssl/cert/detail", get(ssl::cert_detail))

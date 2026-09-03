@@ -55,6 +55,8 @@ async fn init_system_user_table_schema() {
         phone VARCHAR(32) UNIQUE,
         nickname TEXT,
         home_dir TEXT NOT NULL DEFAULT '',
+        linux_user TEXT NOT NULL DEFAULT '',
+        fpm_pool TEXT NOT NULL DEFAULT '',
         last_login_time INTEGER,
         last_login_ip TEXT,
         status INTEGER DEFAULT 1,
@@ -84,11 +86,12 @@ async fn init_system_user_table_schema() {
     let now = chrono::Utc::now().timestamp();
 
     sqlx::query(
-        "INSERT INTO user (username, home_dir, password, email, nickname, phone, last_login_time, last_login_ip, status, roles, permissions, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'admin', '', ?, ?)",
+        "INSERT INTO user (username, home_dir, linux_user, password, email, nickname, phone, last_login_time, last_login_ip, status, roles, permissions, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'admin', '', ?, ?)",
     )
     .bind("admin")
     .bind("/home/admin")
+    .bind("admin")
     .bind(&hashed)
     .bind("admin@demo.zap.cn")
     .bind("admin")

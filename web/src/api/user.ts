@@ -26,6 +26,10 @@ export interface UserListItem {
   nickname: string
   /** 用户家目录，如 /home/foo；老库回填前可能为空串 */
   home_dir: string
+  /** Linux 系统账号名（独立系统用户模式）；空 = 未创建/未派生 */
+  linux_user: string
+  /** 该用户 PHP-FPM pool 规格 JSON；空 = 使用面板默认规格 */
+  fpm_pool: string
   last_login_ip: string
   last_login_time: number
   status: number
@@ -67,11 +71,16 @@ export interface CreateUserPayload {
   nickname?: string
   roles?: string
   owner_id?: number
+  /** 该用户 PHP-FPM pool 规格 JSON；缺省用面板默认（admin） */
+  fpm_pool?: string
 }
 
-/** 新增用户（返回 id 与家目录路径） */
+/** 新增用户（返回 id / 家目录 / Linux 账号） */
 export function createUser(data: CreateUserPayload) {
-  return http.post<ApiResponse<{ id: number; home_dir: string }>>('/system/user/add', data)
+  return http.post<ApiResponse<{ id: number; home_dir: string; linux_user: string }>>(
+    '/system/user/add',
+    data,
+  )
 }
 
 export interface UpdateUserPayload {
@@ -82,6 +91,8 @@ export interface UpdateUserPayload {
   roles?: string
   status?: number
   password?: string
+  /** 该用户 PHP-FPM pool 规格 JSON；空 = 恢复面板默认（admin） */
+  fpm_pool?: string
 }
 
 /** 更新用户结果（首次改密成功后返回 must_relogin） */
@@ -105,12 +116,14 @@ export function changeMyPassword(newPassword: string) {
   return http.post<ApiResponse>('/system/user/update', { password: newPassword })
 }
 
-// ── 家目录 ─────────────────────────────────────────────────
+// ── 家目录 / 运行实体同步 ──────────────────────────────────
 
 export interface HomeSyncOkItem {
   id: number
   username: string
   home_dir: string
+  linux_user: string
+  mode: string
 }
 
 export interface HomeSyncFailItem extends HomeSyncOkItem {
@@ -120,9 +133,10 @@ export interface HomeSyncFailItem extends HomeSyncOkItem {
 export interface HomeSyncResult {
   ok: HomeSyncOkItem[]
   fail: HomeSyncFailItem[]
+  mode: string
 }
 
-/** 批量补齐所有已记录 home_dir 用户的家目录骨架（www / logs，admin only） */
+/** 按全局运行模式批量补齐用户运行实体（www=家目录骨架 / system=Linux 账号+家目录，admin only） */
 export function userHomeSync() {
   return http.post<ApiResponse<HomeSyncResult>>('/system/user/home_sync', undefined, {
     timeout: 60000,

@@ -100,7 +100,11 @@ pub(super) fn vhosts_dir(nginx_conf: &Path) -> Result<PathBuf, String> {
     let chosen = targets
         .iter()
         .find(|t| t.contains("sites-enabled"))
-        .or_else(|| targets.iter().find(|t| t.contains("conf.d") || t.contains("vhost")))
+        .or_else(|| {
+            targets
+                .iter()
+                .find(|t| t.contains("conf.d") || t.contains("vhost"))
+        })
         .or_else(|| targets.first());
     match chosen {
         Some(raw) => {
@@ -230,10 +234,7 @@ fn render_vhost(
     access_log: Option<&str>,
     error_log: Option<&str>,
 ) -> String {
-    let comment = name
-        .chars()
-        .filter(|c| !c.is_control())
-        .collect::<String>();
+    let comment = name.chars().filter(|c| !c.is_control()).collect::<String>();
     let server_name = {
         let parts: Vec<&str> = domains
             .iter()
@@ -287,6 +288,37 @@ fn dir_arg_ok(p: &str) -> bool {
     p.starts_with('/') && !p.split('/').any(|s| s == "..")
 }
 
+/// 递归收敛站点树属主与权限（幂等）：
+/// - web tree：chown -R {owner}:www；目录 750 / 文件 640（nginx 以组 www 读取）
+/// - log tree（is_log=true）：chown -R www:www；目录 770 / 文件 660（nginx 写入日志）
+fn fix_tree_owner(root: &Path, owner: &str, is_log: bool) -> Result<(), String> {
+    let q = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+    let dir_mode = if is_log { "770" } else { "750" };
+    let file_mode = if is_log { "660" } else { "640" };
+    let root_s = root.to_string_lossy();
+    let script = format!(
+        "chown -R {}:www {} && find {} -type d -exec chmod {} \\; && find {} -type f -exec chmod {} \\;",
+        q(owner),
+        q(&root_s),
+        q(&root_s),
+        dir_mode,
+        q(&root_s),
+        file_mode
+    );
+    let o = root_cmd("bash")
+        .args(["-c", &script])
+        .output()
+        .map_err(|e| format!("收敛站点树属主/权限失败: {e}"))?;
+    if o.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "chown/chmod 站点树失败：{}",
+            output_err(&o, "未知错误")
+        ))
+    }
+}
+
 pub async fn vhost_sync(
     site_id: i64,
     name: String,
@@ -295,9 +327,12 @@ pub async fn vhost_sync(
     php_socket: Option<String>,
     web_root: Option<String>,
     log_root: Option<String>,
+    owner_user: Option<String>,
 ) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
-        vhost_sync_inner(site_id, &name, &domains, enabled, php_socket, web_root, log_root)
+        vhost_sync_inner(
+            site_id, &name, &domains, enabled, php_socket, web_root, log_root, owner_user,
+        )
     })
     .await
     .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
@@ -312,6 +347,7 @@ fn vhost_sync_inner(
     php_socket: Option<String>,
     web_root: Option<String>,
     log_root: Option<String>,
+    owner_user: Option<String>,
 ) -> Result<Response, String> {
     let conf_file = match find_nginx_conf_file() {
         Some(c) => c,
@@ -353,6 +389,15 @@ fn vhost_sync_inner(
     };
     // create_dir_all 会递归创建归属用户家目录骨架（/home/{u}/www/...）
     ensure_web_root(&root)?;
+    // 站点树属主/权限收敛：
+    // - web tree：owner_user（独立系统用户模式）或 www；组恒为 www，目录 750 / 文件 640
+    //   （nginx worker 以组 www 读静态文件，php-fpm 以 owner 身份读写）
+    // - log tree：恒归 www:www，目录 770 / 文件 660（nginx 写 access/error.log）
+    let web_owner = owner_user
+        .as_deref()
+        .filter(|u| !u.is_empty())
+        .unwrap_or("www");
+    fix_tree_owner(&root, web_owner, false)?;
 
     // 日志：面板规划了 log_root（{home}/logs/{site}）时生成独立 access/error 日志
     let (mut access_log, mut error_log) = (None, None);
@@ -364,6 +409,7 @@ fn vhost_sync_inner(
             }
             let ldir = PathBuf::from(lr);
             std::fs::create_dir_all(&ldir).map_err(|e| format!("创建站点日志目录失败: {e}"))?;
+            fix_tree_owner(&ldir, "www", true)?;
             access_log = Some(ldir.join("access.log").to_string_lossy().to_string());
             error_log = Some(ldir.join("error.log").to_string_lossy().to_string());
         }
@@ -457,7 +503,10 @@ fn reload_nginx(bin: &Path) -> Result<(), String> {
     if o.status.success() {
         Ok(())
     } else {
-        Err(format!("nginx -s reload 失败：{}", output_err(&o, "未知错误")))
+        Err(format!(
+            "nginx -s reload 失败：{}",
+            output_err(&o, "未知错误")
+        ))
     }
 }
 
@@ -469,7 +518,15 @@ mod tests {
 
     #[test]
     fn render_static_vhost() {
-        let s = render_vhost(1, "blog", &["a.com".into(), "b.com".into()], "/zap/www/blog-1", None, None, None);
+        let s = render_vhost(
+            1,
+            "blog",
+            &["a.com".into(), "b.com".into()],
+            "/zap/www/blog-1",
+            None,
+            None,
+            None,
+        );
         assert!(s.contains("server_name a.com b.com;"));
         assert!(s.contains("root /zap/www/blog-1;"));
         assert!(s.contains("index index.html;"));
@@ -496,7 +553,15 @@ mod tests {
 
     #[test]
     fn render_php_tcp() {
-        let s = render_vhost(3, "x", &[], "/zap/www/x-3", Some("127.0.0.1:9000"), None, None);
+        let s = render_vhost(
+            3,
+            "x",
+            &[],
+            "/zap/www/x-3",
+            Some("127.0.0.1:9000"),
+            None,
+            None,
+        );
         assert!(s.contains("server_name _;"));
         assert!(s.contains("fastcgi_pass 127.0.0.1:9000;"));
     }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Delete, Edit, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus, Refresh, RefreshRight, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/user'
@@ -11,6 +11,7 @@ interface SiteItem {
   id: number
   user_id: number
   owner_username: string
+  linux_user: string
   name: string
   domains: string[]
   ips: string[]
@@ -22,6 +23,13 @@ interface SiteItem {
   log_root: string
   created_at: number
   updated_at: number
+}
+
+// PHP 运行通道（按全局 vhost 模式 + 站点归属用户派生，仅用于展示）
+interface ChannelInfo {
+  kind: 'system' | 'www' | 'pending'
+  text: string
+  tip: string
 }
 
 interface OwnerOption {
@@ -42,6 +50,9 @@ const currentUserName = computed(
 
 const list = ref<SiteItem[]>([])
 const stats = reactive({ total: 0, running: 0, stopped: 0 })
+// 虚拟主机运行模式：'www' 统一 www 用户 / 'system' 每面板用户独立 Linux 账号（取自 site/list 返回）
+const vhostMode = ref<'www' | 'system'>('www')
+const systemMode = computed(() => vhostMode.value === 'system')
 const loading = ref(false)
 const selection = ref<SiteItem[]>([])
 
@@ -142,12 +153,19 @@ async function load() {
   try {
     const res = await http.get<{
       code: number
-      data: { total: number; running: number; stopped: number; rows: SiteItem[] }
+      data: {
+        total: number
+        running: number
+        stopped: number
+        vhost_mode?: 'www' | 'system'
+        rows: SiteItem[]
+      }
     }>('/site/list')
     list.value = res.data?.rows || []
     stats.total = res.data?.total || 0
     stats.running = res.data?.running || 0
     stats.stopped = res.data?.stopped || 0
+    if (res.data?.vhost_mode) vhostMode.value = res.data.vhost_mode
   } catch {
     /* handled */
   } finally {
@@ -156,6 +174,40 @@ async function load() {
 }
 
 const fmtTime = (ts: number) => (ts ? new Date(ts * 1000).toLocaleString() : '-')
+
+// PHP 通道展示：system → 用户专属 pool（socket = /var/run/php-fpm-{账号}-{版本}.sock）；www → 统一实例
+const phpSuffix = (instance: string) => instance.replace(/^php/i, '')
+function phpChannel(row: SiteItem): ChannelInfo | null {
+  const ins = row.php_instance || ''
+  if (!ins) return null
+  if (systemMode.value) {
+    const lu = row.linux_user || ''
+    if (!lu) {
+      return {
+        kind: 'pending',
+        text: '待同步',
+        tip: 'system 模式需先对该站点执行“同步”，生成归属用户的 Linux 账号与专属 PHP-FPM pool',
+      }
+    }
+    const suffix = phpSuffix(ins) || ins
+    return {
+      kind: 'system',
+      text: `${lu} 专属 pool`,
+      tip: `PHP-FPM 独立 pool：/var/run/php-fpm-${lu}-${suffix}.sock\npool worker 与站点文件属主均为 ${lu}（nologin 系统账号）`,
+    }
+  }
+  return {
+    kind: 'www',
+    text: 'www 统一实例',
+    tip: '站点与 PHP 统一以 www 用户运行，PHP 走该实例全局 socket（由实例安装配置决定）',
+  }
+}
+const channelMap = computed<Record<number, ChannelInfo | null>>(() => {
+  const m: Record<number, ChannelInfo | null> = {}
+  for (const it of list.value) m[it.id] = phpChannel(it)
+  return m
+})
+const channelOf = (row: SiteItem): ChannelInfo | null => channelMap.value[row.id] ?? null
 
 // ── 新增 ───────────────────────────────────────────────────
 const addVisible = ref(false)
@@ -293,6 +345,35 @@ async function submitEdit() {
 
 // ── vhost 同步：按站点档案（域名/状态/PHP 实例）渲染 Nginx 配置并 reload ──
 const syncingId = ref(0)
+const syncingAll = ref(false)
+
+// 全部站点按当前 vhost 模式再同步（切换「www / system」模式后的批量入口）
+async function syncAllSites() {
+  const modeTip =
+    vhostMode.value === 'system'
+      ? '当前为「系统用户隔离」模式：将按「归属用户 × PHP 版本」重建独立 pool 与 socket，并把 web 目录属主切为该用户的 Linux 账号。'
+      : '当前为「统一 www」模式：将把所有站点切回 www 用户运行并复用实例全局 socket。'
+  try {
+    await ElMessageBox.confirm(
+      `${modeTip}\n\n该操作会对所有站点执行 nginx 配置渲染 + reload，是否继续？`,
+      '全部再同步',
+      { type: 'warning', confirmButtonText: '开始同步' }
+    )
+  } catch {
+    return
+  }
+  syncingAll.value = true
+  try {
+    const res = await http.post<{ code: number; message: string }>('/site/sync_all')
+    ElMessage.success(res.message || '全部站点已按当前模式同步')
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '部分站点同步失败，请查看面板运行日志')
+    load()
+  } finally {
+    syncingAll.value = false
+  }
+}
 async function syncSite(id: number): Promise<boolean> {
   if (syncingId.value) return false
   syncingId.value = id
@@ -378,6 +459,21 @@ onMounted(() => {
       </el-col>
     </el-row>
 
+    <!-- 运行模式说明 -->
+    <el-alert
+      v-if="systemMode"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="mode-alert"
+      title="当前为「系统用户隔离」模式：每个面板用户对应一个 Linux 系统账号（nologin），站点文件属主为该账号，PHP-FPM 按「用户 × PHP 版本」生成独立 pool"
+    >
+      <template #default>
+        运行通道形如
+        <code>/var/run/php-fpm-{账号}-{版本}.sock</code>，在「运行环境 → 默认配置」中可切换回「统一 www 用户」模式
+      </template>
+    </el-alert>
+
     <el-card shadow="never" class="table-card">
       <!-- 工具栏 -->
       <div class="toolbar">
@@ -412,6 +508,11 @@ onMounted(() => {
           <el-button :icon="Refresh" circle @click="load" />
         </div>
         <div class="toolbar-right">
+          <el-button
+            :icon="RefreshRight"
+            :loading="syncingAll"
+            @click="syncAllSites"
+          >全部再同步</el-button>
           <el-button type="danger" plain :icon="Delete" :disabled="!selection.length" @click="removeRows(selection)">
             删除选中
           </el-button>
@@ -463,6 +564,22 @@ onMounted(() => {
                 <el-tag size="small" type="danger" effect="plain">
                   {{ row.php_instance }}（已停用）
                 </el-tag>
+              </el-tooltip>
+            </template>
+            <span v-else class="dim">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="PHP 运行通道" min-width="170">
+          <template #default="{ row }">
+            <template v-if="channelOf(row)">
+              <el-tooltip :content="channelOf(row)!.tip" placement="top">
+                <el-tag v-if="channelOf(row)!.kind === 'system'" size="small" type="warning" effect="plain">
+                  {{ channelOf(row)!.text }}
+                </el-tag>
+                <el-tag v-else-if="channelOf(row)!.kind === 'www'" size="small" type="success" effect="plain">
+                  {{ channelOf(row)!.text }}
+                </el-tag>
+                <el-tag v-else size="small" type="info" effect="plain">{{ channelOf(row)!.text }}</el-tag>
               </el-tooltip>
             </template>
             <span v-else class="dim">-</span>
@@ -751,6 +868,16 @@ onMounted(() => {
   color: #909399;
 }
 
+.mode-alert {
+  margin-top: 16px;
+}
+.mode-alert code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--el-fill-color-light);
+  color: var(--el-color-primary);
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
 .table-card {
   margin-top: 16px;
 }

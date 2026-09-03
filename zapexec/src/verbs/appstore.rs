@@ -14,7 +14,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::root_cmd;
 use std::os::unix::process::CommandExt;

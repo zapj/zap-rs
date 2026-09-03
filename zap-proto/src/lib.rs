@@ -10,7 +10,7 @@ pub mod auth;
 pub mod frame;
 pub mod types;
 
-pub use types::{sanitize_site_name, Message, Request, Response};
+pub use types::{Message, Request, Response, linux_username, sanitize_site_name};
 
 /// `zapexec` 管理的 SSH 密钥目录（root 写入、`zapadm` 读取）。
 /// 从 `/root/.ssh` 迁出，避免 `zapd` 依赖 root 的 home 目录。

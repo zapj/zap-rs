@@ -730,7 +730,10 @@ pub async fn instance_action(
         &payload.action,
     )
     .await;
-    info!("AppStore instance action {}: {}", payload.action, payload.pkg_path);
+    info!(
+        "AppStore instance action {}: {}",
+        payload.action, payload.pkg_path
+    );
     Ok(Json(
         json!({ "code": 0, "message": "OK", "data": resp.data }),
     ))

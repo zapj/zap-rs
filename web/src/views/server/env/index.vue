@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { EnvConf, EnvData } from '@/api/serverEnv'
 import { getServerEnv, refreshServerEnv, saveServerEnvDefaults } from '@/api/serverEnv'
 
@@ -10,7 +10,33 @@ const refreshing = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
 
-const form = reactive<EnvConf>({ webserver: '', php_default: '', database: '' })
+const form = reactive<EnvConf>({
+  webserver: '',
+  php_default: '',
+  database: '',
+  vhost_mode: 'www',
+  fpm_pool_defaults: '',
+})
+
+/** fpm pool 默认规格 —— 数值字段 */
+const fpmNum = reactive({
+  max_children: 10,
+  start_servers: 3,
+  min_spare_servers: 2,
+  max_spare_servers: 5,
+  max_requests: 1000,
+  request_terminate_timeout: 300,
+  max_execution_time: 300,
+})
+/** fpm pool 默认规格 —— 字符串字段 */
+const fpmStr = reactive({
+  pm: 'dynamic',
+  memory_limit: '256M',
+  post_max_size: '128M',
+  upload_max_filesize: '128M',
+})
+const FPM_NUM_DEFAULTS: Record<string, number> = { ...fpmNum }
+const FPM_STR_DEFAULTS: Record<string, string> = { ...fpmStr }
 
 function fmtTime(ts?: number): string {
   if (!ts) return '--'
@@ -68,16 +94,68 @@ function openDefaultsDialog() {
   form.webserver = c?.webserver ?? ''
   form.php_default = c?.php_default ?? ''
   form.database = c?.database ?? ''
+  form.vhost_mode = c?.vhost_mode === 'system' ? 'system' : 'www'
+  // 回填 fpm 默认规格（先重置再覆盖）
+  resetFpmForm()
+  const raw = c?.fpm_pool_defaults
+  if (raw) {
+    try {
+      const obj = JSON.parse(raw) as Record<string, unknown>
+      Object.keys(fpmNum).forEach(k => {
+        const v = obj[k]
+        const n = Number(v)
+        if (v !== undefined && v !== null && Number.isFinite(n)) fpmNum[k as keyof typeof fpmNum] = n
+      })
+      Object.keys(fpmStr).forEach(k => {
+        const v = obj[k]
+        if (v !== undefined && v !== null) fpmStr[k as keyof typeof fpmStr] = String(v)
+      })
+    } catch {
+      /* 非法 JSON 忽略，使用默认 */
+    }
+  }
   dialogVisible.value = true
 }
 
+function resetFpmForm() {
+  Object.keys(fpmNum).forEach(k => {
+    fpmNum[k as keyof typeof fpmNum] = FPM_NUM_DEFAULTS[k]
+  })
+  Object.keys(fpmStr).forEach(k => {
+    fpmStr[k as keyof typeof fpmStr] = FPM_STR_DEFAULTS[k]
+  })
+}
+
+function fpmSpecJson(): string {
+  return JSON.stringify({ ...fpmStr, ...fpmNum })
+}
+
 async function saveDefaults() {
+  const prevMode = conf.value?.vhost_mode ?? 'www'
+  const nextMode = form.vhost_mode
+  if (prevMode !== nextMode) {
+    const tip =
+      nextMode === 'system'
+        ? '切换到「独立系统用户」后：\n· 新用户创建/同步时会自动 useradd（nologin）并把 web 目录归该账号；\n· 存量站点请到「虚拟主机 → 全部再同步」按新模式重建（自动生成每用户 PHP-FPM pool）。'
+        : '切换到「统一 www 用户」后：\n· 站点同步时 web 目录属主与 PHP pool 会回到 www / 全局实例；\n· 此前已创建的 Linux 系统账号与专属 pool 不会被自动删除（保留为孤儿账号），如不再使用请手动清理。'
+    try {
+      await ElMessageBox.confirm(
+        `${tip}\n\n是否继续保存？`,
+        '切换虚拟主机运行模式',
+        { type: 'warning', confirmButtonText: '保存并切换' }
+      )
+    } catch {
+      return
+    }
+  }
   saving.value = true
   try {
     const res = await saveServerEnvDefaults({
       webserver: form.webserver,
       php_default: form.php_default,
       database: form.database,
+      vhost_mode: form.vhost_mode,
+      fpm_pool_defaults: fpmSpecJson(),
     })
     ElMessage.success(res.message || '默认配置已保存')
     dialogVisible.value = false
@@ -227,7 +305,7 @@ onMounted(loadEnv)
     </el-card>
 
     <!-- 全局默认配置 -->
-    <el-dialog v-model="dialogVisible" title="全局默认配置" width="480px">
+    <el-dialog v-model="dialogVisible" title="全局默认配置" width="640px">
       <el-form label-width="130px">
         <el-form-item label="默认 Web 服务器">
           <el-select v-model="form.webserver" clearable placeholder="跟随自动探测" style="width: 100%">
@@ -262,6 +340,79 @@ onMounted(loadEnv)
           >
             <el-option v-for="d in dbOptions" :key="d" :label="d" :value="d" />
           </el-select>
+        </el-form-item>
+
+        <el-divider content-position="left">虚拟主机运行模式</el-divider>
+        <el-form-item label="运行模式">
+          <el-radio-group v-model="form.vhost_mode">
+            <el-radio value="www">
+              统一 www 用户
+              <span class="mode-sub">所有站点文件与 PHP 均以 www 运行，简单易维护</span>
+            </el-radio>
+            <el-radio value="system">
+              独立系统用户
+              <span class="mode-sub">每个面板用户对应一个 Linux 账号，PHP-FPM 以该账号运行</span>
+            </el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label=" ">
+          <el-alert
+            :title="form.vhost_mode === 'system'
+              ? '切换后：新用户创建时将自动 useradd（nologin）并 chown 家目录；存量用户请到「用户管理 → 同步家目录/运行实体」补齐，站点同步时自动生成独立 PHP-FPM pool（每用户每 PHP 版本一个）。'
+              : '统一 www 模式：站点文件与 PHP-FPM 均归 www 用户，站点使用全局 PHP socket。'"
+            type="info"
+            :closable="false"
+            show-icon
+          />
+        </el-form-item>
+
+        <el-divider content-position="left">PHP-FPM 默认 pool 规格</el-divider>
+        <el-form-item label="进程管理模式">
+          <el-radio-group v-model="fpmStr.pm">
+            <el-radio value="dynamic">dynamic（动态）</el-radio>
+            <el-radio value="static">static（固定）</el-radio>
+            <el-radio value="ondemand">ondemand（按需）</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="fpmStr.pm !== 'ondemand'" label="最大子进程数">
+          <el-input-number v-model="fpmNum.max_children" :min="1" :max="512" controls-position="right" />
+          <div class="form-tip">pm.max_children：常驻 worker 上限（建议 = 可用内存 MB ÷ 单进程约 50-100MB）</div>
+        </el-form-item>
+        <el-form-item v-if="fpmStr.pm === 'dynamic'" label="启动子进程数">
+          <el-input-number v-model="fpmNum.start_servers" :min="1" :max="128" controls-position="right" />
+        </el-form-item>
+        <el-form-item v-if="fpmStr.pm === 'dynamic'" label="空闲下限 / 上限">
+          <el-input-number v-model="fpmNum.min_spare_servers" :min="1" :max="128" controls-position="right" />
+          <span style="margin: 0 8px; color: #909399">~</span>
+          <el-input-number v-model="fpmNum.max_spare_servers" :min="1" :max="256" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="单进程最大请求数">
+          <el-input-number v-model="fpmNum.max_requests" :min="0" :max="100000" controls-position="right" />
+          <div class="form-tip">pm.max_requests：达到后自动回收（0 = 不回收），防内存泄漏</div>
+        </el-form-item>
+        <el-form-item label="请求超时(秒)">
+          <el-input-number v-model="fpmNum.request_terminate_timeout" :min="1" :max="86400" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="内存限制">
+          <el-select v-model="fpmStr.memory_limit" filterable allow-create default-first-option style="width: 180px">
+            <el-option v-for="m in ['128M', '256M', '512M', '1G', '2G']" :key="m" :label="m" :value="m" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="上传大小上限">
+          <el-select v-model="fpmStr.upload_max_filesize" filterable allow-create default-first-option style="width: 180px">
+            <el-option v-for="m in ['64M', '128M', '256M', '512M', '1G']" :key="m" :label="m" :value="m" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="POST 大小上限">
+          <el-select v-model="fpmStr.post_max_size" filterable allow-create default-first-option style="width: 180px">
+            <el-option v-for="m in ['64M', '128M', '256M', '512M', '1G']" :key="m" :label="m" :value="m" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="最大执行时间(秒)">
+          <el-input-number v-model="fpmNum.max_execution_time" :min="1" :max="86400" controls-position="right" />
+        </el-form-item>
+        <el-form-item label=" ">
+          <el-button size="small" @click="resetFpmForm">恢复默认规格</el-button>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -303,5 +454,11 @@ onMounted(loadEnv)
   color: #909399;
   font-size: 12px;
   line-height: 1.6;
+}
+.mode-sub {
+  display: block;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
 }
 </style>

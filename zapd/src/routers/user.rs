@@ -21,6 +21,8 @@ struct UserInfo {
     phone: Option<String>,
     nickname: String,
     home_dir: String,
+    linux_user: String,
+    fpm_pool: String,
     last_login_ip: String,
     last_login_time: i64,
     status: i32,
@@ -40,6 +42,8 @@ pub struct CreateUserPayload {
     pub nickname: Option<String>,
     pub roles: Option<String>,
     pub owner_id: Option<i64>,
+    /// 该用户 PHP-FPM pool 规格（JSON 字符串；空 = 使用面板默认规格）
+    pub fpm_pool: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +55,8 @@ pub struct UpdateUserPayload {
     pub roles: Option<String>,
     pub status: Option<i32>,
     pub password: Option<String>,
+    /// 该用户 PHP-FPM pool 规格（JSON 字符串；空 = 恢复面板默认）
+    pub fpm_pool: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +71,85 @@ fn require_admin(claims: &jwt::Claims) -> Result<(), ZapError> {
     } else {
         Err(ZapError::New(-1, "权限不足，需要管理员权限".to_string()))
     }
+}
+
+/// 归一化用户 fpm pool 规格：
+/// - None / 空 → Some("")（不指定，使用面板默认）
+/// - 其它 → 必须是 JSON 对象字符串
+fn normalize_fpm_spec(raw: Option<String>) -> Result<Option<String>, ZapError> {
+    match raw {
+        None => Ok(None),
+        Some(v) => {
+            let v = v.trim().to_string();
+            if v.is_empty() {
+                return Ok(Some(String::new()));
+            }
+            match serde_json::from_str::<Value>(&v) {
+                Ok(Value::Object(_)) => Ok(Some(v)),
+                _ => Err(ZapError::New(
+                    -1,
+                    "fpm_pool 必须是 JSON 对象（如 {\"max_children\": 12}）".to_string(),
+                )),
+            }
+        }
+    }
+}
+
+/// 按全局虚拟主机运行模式补齐「面板用户 → 运行实体」（幂等）：
+/// - system：确保 user.linux_user 有值，创建 Linux 系统账号（useradd，nologin），
+///   家目录按独立用户模式赋权（owner = linux_user）
+/// - www：仅按统一 www 模式补家目录骨架
+/// 站点同步 / 用户同步 / 新增用户均调用；失败返回 Err 描述。
+pub async fn ensure_user_runtime(uid: i64) -> Result<(), String> {
+    let pool = db::get_db_pool().await;
+    let row: Option<(String, String, String)> =
+        sqlx::query_as("SELECT username, home_dir, linux_user FROM user WHERE id = ?")
+            .bind(uid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let Some((username, home_dir, mut linux_user)) = row else {
+        return Err(format!("用户 {uid} 不存在"));
+    };
+    if home_dir.is_empty() {
+        return Err(format!("用户 {username} 未配置家目录（home_dir 为空）"));
+    }
+    if linux_user.is_empty() {
+        linux_user = zap_proto::linux_username(&username);
+        sqlx::query("UPDATE user SET linux_user = ? WHERE id = ?")
+            .bind(&linux_user)
+            .bind(uid)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    let mode = crate::routers::system_env::vhost_mode().await;
+    if mode == "system" {
+        let resp = crate::zapexec::call(zap_proto::types::Request::UserSystemInit {
+            linux_user: linux_user.clone(),
+            home_dir: home_dir.clone(),
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        if resp.code != 0 {
+            return Err(format!("创建 Linux 账号失败: {}", resp.message));
+        }
+    }
+    let owner = if mode == "system" {
+        Some(linux_user)
+    } else {
+        None
+    };
+    let resp = crate::zapexec::call(zap_proto::types::Request::UserHomeInit {
+        home_dir: home_dir.clone(),
+        owner,
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if resp.code != 0 {
+        return Err(format!("初始化家目录失败: {}", resp.message));
+    }
+    Ok(())
 }
 
 /// Fetch the owner_id of a user. Returns -1 when the user does not exist.
@@ -95,6 +180,8 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
                 "phone": user.phone.clone().unwrap_or_default(),
                 "nickname": user.nickname,
                 "home_dir": user.home_dir,
+                "linux_user": user.linux_user,
+                "fpm_pool": user.fpm_pool,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
                 "roles": user.roles.split(',').collect::<Vec<&str>>(),
@@ -119,7 +206,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
 
     let mut querybuilder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
-        "SELECT id,username,email,phone,nickname,home_dir,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
+        "SELECT id,username,email,phone,nickname,home_dir,linux_user,fpm_pool,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
     );
     if is_reseller && !is_admin {
         querybuilder
@@ -140,6 +227,8 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
                 "phone": user.phone.clone().unwrap_or_default(),
                 "nickname": user.nickname,
                 "home_dir": user.home_dir,
+                "linux_user": user.linux_user,
+                "fpm_pool": user.fpm_pool,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
                 "status": user.status,
@@ -188,18 +277,38 @@ pub async fn user_add(
         .phone
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
-    // 家目录：/home/{sanitize(username)}，站点文档根与站点日志均规划于其下
-    let home_dir = format!(
-        "/home/{}",
-        zap_proto::sanitize_site_name(&payload.username)
-    );
+    // fpm pool 规格（空 = 面板默认）
+    let fpm_pool = normalize_fpm_spec(payload.fpm_pool)?;
+    let fpm_pool = fpm_pool.unwrap_or_default();
 
+    // 家目录 / Linux 账号：/home/{linux_username(username)} 派生，
+    // 站点文档根与站点日志均规划于其下；派生名与已有账号冲突时追加 -n 后缀
+    let lu_base = zap_proto::linux_username(&payload.username);
     let pool = db::get_db_pool().await;
+    let mut lu = lu_base.clone();
+    let mut n: i64 = 2;
+    loop {
+        let cnt: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM user WHERE linux_user = ? AND linux_user != ''")
+                .bind(&lu)
+                .fetch_one(pool)
+                .await
+                .unwrap_or((0,));
+        if cnt.0 == 0 {
+            break;
+        }
+        lu = format!("{lu_base}-{n}");
+        n += 1;
+    }
+    let home_dir = format!("/home/{lu}");
+
     let result = sqlx::query(
-        "INSERT INTO user (username, home_dir, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        "INSERT INTO user (username, home_dir, linux_user, fpm_pool, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
     )
     .bind(&payload.username)
     .bind(&home_dir)
+    .bind(&lu)
+    .bind(&fpm_pool)
     .bind(&hashed)
     .bind(&payload.email)
     .bind(phone)
@@ -227,25 +336,16 @@ pub async fn user_add(
                 payload.username,
                 r.last_insert_rowid()
             );
-            // 尽力创建家目录骨架（zapexec 以 root 执行）；失败仅告警，
-            // 后续站点同步创建 web_root 时仍会递归补齐
-            match crate::zapexec::call(zap_proto::types::Request::UserHomeInit {
-                home_dir: home_dir.clone(),
-            })
-            .await
-            {
-                Ok(resp) if resp.code != 0 => {
-                    warn!("创建用户家目录失败(id={}): {}", r.last_insert_rowid(), resp.message);
-                }
-                Err(e) => {
-                    warn!("创建用户家目录失败(id={}): {}", r.last_insert_rowid(), e);
-                }
-                _ => {}
+            // 按全局运行模式补齐运行实体（system=Linux 账号 / www=家目录骨架）。
+            // 尽力而为：失败仅告警，站点同步时仍会递归补齐
+            let new_id = r.last_insert_rowid();
+            if let Err(e) = ensure_user_runtime(new_id).await {
+                warn!("初始化用户运行实体失败(id={}): {}", new_id, e);
             }
             Ok(Json(json!({
                 "code": 0,
                 "message": "用户创建成功",
-                "data": { "id": r.last_insert_rowid(), "home_dir": home_dir }
+                "data": { "id": new_id, "home_dir": home_dir, "linux_user": lu }
             })))
         }
         Err(e) => {
@@ -290,6 +390,7 @@ pub async fn user_update(
             || payload.nickname.is_some()
             || payload.roles.is_some()
             || payload.status.is_some()
+            || payload.fpm_pool.is_some()
         {
             return Err(ZapError::New(
                 -1,
@@ -301,6 +402,13 @@ pub async fn user_update(
     // 非管理员不能修改角色（防止提权，admin 除外）
     if !jwt::is_admin(&claims) && payload.roles.is_some() {
         return Err(ZapError::New(-1, "权限不足，不能修改角色".to_string()));
+    }
+    // PHP-FPM pool 规格（资源配额类）仅管理员可配置
+    if !jwt::is_admin(&claims) && payload.fpm_pool.is_some() {
+        return Err(ZapError::New(
+            -1,
+            "权限不足，不能修改 PHP-FPM 规格".to_string(),
+        ));
     }
 
     // 更新他人时的归属/权限校验
@@ -329,7 +437,8 @@ pub async fn user_update(
         || payload.nickname.is_some()
         || payload.roles.is_some()
         || payload.status.is_some()
-        || payload.password.is_some();
+        || payload.password.is_some()
+        || payload.fpm_pool.is_some();
 
     if !has_any_field {
         return Err(ZapError::New(-1, "没有需要更新的字段".to_string()));
@@ -367,6 +476,10 @@ pub async fn user_update(
         let hashed = bcrypt::hash(password, bcrypt::DEFAULT_COST)
             .map_err(|e| ZapError::Error(format!("密码加密失败: {}", e)))?;
         separated.push("password = ").push_bind_unseparated(hashed);
+    }
+    if let Some(ref fpm) = payload.fpm_pool {
+        let norm = normalize_fpm_spec(Some(fpm.clone()))?.unwrap_or_default();
+        separated.push("fpm_pool = ").push_bind_unseparated(norm);
     }
     separated.push("updated_at = ").push_bind_unseparated(now);
 
@@ -431,6 +544,14 @@ pub async fn user_delete(
     }
 
     let pool = db::get_db_pool().await;
+    // 独立系统用户模式下，先记录待清理的 Linux 账号
+    let linux_user: Option<String> = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
+        .bind(payload.id)
+        .fetch_optional(pool)
+        .await?
+        .filter(|s: &String| !s.is_empty());
+    let was_system = crate::routers::system_env::vhost_mode().await == "system";
+
     let result = sqlx::query("DELETE FROM user WHERE id = ?")
         .bind(payload.id)
         .execute(pool)
@@ -438,6 +559,27 @@ pub async fn user_delete(
 
     if result.rows_affected() == 0 {
         return Err(ZapError::New(-1, "用户不存在".to_string()));
+    }
+
+    // 删除用户后清理运行实体（system 模式：清 pool + userdel）
+    if was_system {
+        if let Some(lu) = linux_user {
+            match crate::zapexec::call(zap_proto::types::Request::UserSystemRemove {
+                linux_user: lu.clone(),
+            })
+            .await
+            {
+                Ok(resp) if resp.code != 0 => {
+                    warn!("清理 Linux 账号失败(id={}): {}", payload.id, resp.message);
+                }
+                Err(e) => {
+                    warn!("清理 Linux 账号失败(id={}): {}", payload.id, e);
+                }
+                _ => {
+                    info!("Linux 账号已清理: {} (user id={})", lu, payload.id);
+                }
+            }
+        }
     }
 
     audit::log(
@@ -476,39 +618,34 @@ pub async fn reseller_list(claims: ValidatedClaims) -> ZapJsonResult {
     })))
 }
 
-/// 批量补齐所有已记录 home_dir 的用户家目录骨架（admin only）。
-/// 用途：DB 升级/老库回填后一次性把 /home/{username}/www、/home/{username}/logs
-/// 补建出来；个别失败不影响整体（结果里给出失败清单）。
+/// 批量补齐所有用户运行实体（admin only）：按全局虚拟主机运行模式
+/// 为每个用户补家目录骨架（www 模式）或 Linux 账号 + 独立用户家目录（system 模式）。
+/// 个别失败不影响整体（结果里给出失败清单）。
 pub async fn user_home_sync(
     claims: ValidatedClaims,
     Extension(client_addr): Extension<SocketAddr>,
 ) -> ZapJsonResult {
     require_admin(&claims)?;
 
+    let mode = crate::routers::system_env::vhost_mode().await;
     let pool = db::get_db_pool().await;
-    let rows: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT id, username, home_dir FROM user WHERE home_dir != '' ORDER BY id",
+    let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT id, username, home_dir, linux_user FROM user WHERE home_dir != '' ORDER BY id",
     )
     .fetch_all(pool)
     .await?;
 
     let mut ok_items: Vec<Value> = Vec::new();
     let mut fail_items: Vec<Value> = Vec::new();
-    for (id, username, home_dir) in rows {
-        match crate::zapexec::call(zap_proto::types::Request::UserHomeInit {
-            home_dir: home_dir.clone(),
-        })
-        .await
-        {
-            Ok(resp) if resp.code == 0 => {
-                ok_items.push(json!({ "id": id, "username": username, "home_dir": home_dir }));
-            }
-            Ok(resp) => {
-                fail_items.push(json!({
+    for (id, username, home_dir, linux_user) in rows {
+        match ensure_user_runtime(id).await {
+            Ok(()) => {
+                ok_items.push(json!({
                     "id": id,
                     "username": username,
                     "home_dir": home_dir,
-                    "error": resp.message,
+                    "linux_user": linux_user,
+                    "mode": mode,
                 }));
             }
             Err(e) => {
@@ -516,7 +653,9 @@ pub async fn user_home_sync(
                     "id": id,
                     "username": username,
                     "home_dir": home_dir,
-                    "error": e.to_string(),
+                    "linux_user": linux_user,
+                    "mode": mode,
+                    "error": e,
                 }));
             }
         }
@@ -527,13 +666,18 @@ pub async fn user_home_sync(
         Some(client_addr.ip().to_string().as_str()),
         "user_home_sync",
         &format!("ok={} fail={}", ok_items.len(), fail_items.len()),
-        "",
+        &format!("mode={mode}"),
     )
     .await;
 
+    let action = if mode == "system" {
+        "运行实体"
+    } else {
+        "家目录"
+    };
     Ok(Json(json!({
         "code": 0,
-        "message": format!("家目录同步完成：成功 {}，失败 {}", ok_items.len(), fail_items.len()),
-        "data": { "ok": ok_items, "fail": fail_items }
+        "message": format!("{action}同步完成：成功 {}，失败 {}", ok_items.len(), fail_items.len()),
+        "data": { "ok": ok_items, "fail": fail_items, "mode": mode }
     })))
 }

@@ -7,11 +7,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zap_proto::Response;
 
-use super::site;
 use super::root_cmd;
+use super::site;
 
 pub async fn detect() -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> { Ok(detect_inner()) })
@@ -65,8 +65,15 @@ fn proc_running(name: &str) -> bool {
 /// 在 marker 之后的第一个空白分隔 token，如失败返回 None。
 fn token_after<'a>(line: &'a str, marker: &str) -> Option<String> {
     let rest = line.split_once(marker)?.1;
-    let tok = rest.split_whitespace().next()?.trim_matches(['(', ')', ';', ',']);
-    if tok.is_empty() { None } else { Some(tok.to_string()) }
+    let tok = rest
+        .split_whitespace()
+        .next()?
+        .trim_matches(['(', ')', ';', ',']);
+    if tok.is_empty() {
+        None
+    } else {
+        Some(tok.to_string())
+    }
 }
 
 // ── OS / 主机 ────────────────────────────────────────────────
@@ -77,7 +84,9 @@ fn os_release() -> (String, String, String) {
     let mut ver = String::new();
     if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
         for line in text.lines() {
-            let Some((k, v)) = line.split_once('=') else { continue };
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
             let v = v.trim().trim_matches('"').to_string();
             match k {
                 "ID" => id = v,
@@ -117,7 +126,10 @@ fn detect_webserver() -> Value {
         let bin = site::nginx_bin(&conf);
         let bin_s = bin.to_string_lossy().into_owned();
         let raw = probe_first_line(&bin_s, &["-v"]).unwrap_or_default();
-        let flavor = if raw.contains("openresty") || conf_s.contains("openresty") || bin_s.contains("openresty") {
+        let flavor = if raw.contains("openresty")
+            || conf_s.contains("openresty")
+            || bin_s.contains("openresty")
+        {
             "openresty"
         } else {
             "nginx"
@@ -224,7 +236,9 @@ fn detect_php() -> Value {
     // 3) FPM socket：为实例补 socket / running；未匹配 socket 生成独立条目
     for sock in fpm_sockets() {
         let running = sock.exists();
-        let Some(raw_tok) = socket_version_token(&sock) else { continue };
+        let Some(raw_tok) = socket_version_token(&sock) else {
+            continue;
+        };
         let v2 = normalize_version_token(&raw_tok);
         if v2.is_empty() {
             continue;
@@ -238,9 +252,9 @@ fn detect_php() -> Value {
             }
             continue;
         }
-        let entry = instances
-            .entry(v2.clone())
-            .or_insert_with(|| json!({ "version": v2.clone(), "binary": "", "socket": "", "running": false }));
+        let entry = instances.entry(v2.clone()).or_insert_with(
+            || json!({ "version": v2.clone(), "binary": "", "socket": "", "running": false }),
+        );
         if running {
             entry["socket"] = json!(sock.to_string_lossy());
             entry["running"] = json!(true);
@@ -269,8 +283,12 @@ fn detect_php() -> Value {
 
 fn push_php_bin(map: &mut BTreeMap<String, Value>, bin: &Path) {
     let bstr = bin.to_string_lossy().into_owned();
-    let Some(line) = probe_first_line(&bstr, &["-v"]) else { return };
-    let Some(ver) = php_version(&line) else { return };
+    let Some(line) = probe_first_line(&bstr, &["-v"]) else {
+        return;
+    };
+    let Some(ver) = php_version(&line) else {
+        return;
+    };
     let v2 = short_version(&ver);
     if map.contains_key(&v2) {
         return;
@@ -304,11 +322,19 @@ fn short_version(ver: &str) -> String {
 /// 常见 FPM unix socket 位置扫描（系统 pool 与单实例均可）。
 fn fpm_sockets() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for dir in [PathBuf::from("/var/run"), PathBuf::from("/run"), PathBuf::from("/var/run/php-fpm")] {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+    for dir in [
+        PathBuf::from("/var/run"),
+        PathBuf::from("/run"),
+        PathBuf::from("/var/run/php-fpm"),
+    ] {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for e in rd.flatten() {
             let p = e.path();
-            let Some(name) = p.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+            let Some(name) = p.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+                continue;
+            };
             if name.starts_with("php-fpm") && name.ends_with(".sock") {
                 out.push(p);
             }
@@ -324,7 +350,11 @@ fn socket_version_token(sock: &Path) -> Option<String> {
     let name = sock.file_name()?.to_string_lossy();
     let name = name.strip_suffix(".sock")?;
     let tok = name.strip_prefix("php-fpm")?.trim_start_matches(['-', '_']);
-    if tok.is_empty() { None } else { Some(tok.to_string()) }
+    if tok.is_empty() {
+        None
+    } else {
+        Some(tok.to_string())
+    }
 }
 
 /// 版本 token 规范化：`83` → `8.3`；含点的原样保留。
@@ -376,7 +406,11 @@ fn db_version(name: &str, line: &str) -> String {
     // 去掉发行版/插件后缀：8.0.39-0ubuntu... → 8.0.39；11.4.4-MariaDB → 11.4.4
     let head = raw.split('-').next().unwrap_or(&raw).to_string();
     let head = head.trim_end_matches(['(', ')', ';', ',']).to_string();
-    if head.is_empty() { line.chars().take(80).collect() } else { head }
+    if head.is_empty() {
+        line.chars().take(80).collect()
+    } else {
+        head
+    }
 }
 
 // ── 常用工具链 ───────────────────────────────────────────────
@@ -406,13 +440,19 @@ mod tests {
     #[test]
     fn parse_nginx_version_lines() {
         assert_eq!(nginx_version("nginx version: nginx/1.24.0"), "1.24.0");
-        assert_eq!(nginx_version("nginx version: openresty/1.25.3.2"), "1.25.3.2");
+        assert_eq!(
+            nginx_version("nginx version: openresty/1.25.3.2"),
+            "1.25.3.2"
+        );
         assert_eq!(nginx_version("nginx: [emerg] unknown directive"), "");
     }
 
     #[test]
     fn parse_php_version_lines() {
-        assert_eq!(php_version("PHP 8.3.7 (cli) (built: Jun 27 2024)").unwrap(), "8.3.7");
+        assert_eq!(
+            php_version("PHP 8.3.7 (cli) (built: Jun 27 2024)").unwrap(),
+            "8.3.7"
+        );
         assert_eq!(php_version("PHP 7.4.33").unwrap(), "7.4.33");
         assert!(php_version("Usage: php [options]").is_none());
         assert_eq!(short_version("8.3.7"), "8.3");
@@ -426,11 +466,15 @@ mod tests {
             "8.3"
         );
         assert_eq!(
-            normalize_version_token(&socket_version_token(Path::new("/var/run/php-fpm-8.3.sock")).unwrap()),
+            normalize_version_token(
+                &socket_version_token(Path::new("/var/run/php-fpm-8.3.sock")).unwrap()
+            ),
             "8.3"
         );
         assert_eq!(
-            normalize_version_token(&socket_version_token(Path::new("/var/run/php-fpm83.sock")).unwrap()),
+            normalize_version_token(
+                &socket_version_token(Path::new("/var/run/php-fpm83.sock")).unwrap()
+            ),
             "8.3"
         );
         // 无版本 token 的 socket 文件名返回 None → 归一化空串（调用方跳过）

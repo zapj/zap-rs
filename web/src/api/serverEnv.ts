@@ -37,6 +37,10 @@ export interface EnvConf {
   webserver: string
   php_default: string
   database: string
+  /** 虚拟主机运行模式：www=统一 www 用户 / system=每用户独立 Linux 账号 */
+  vhost_mode: 'www' | 'system'
+  /** PHP-FPM 默认 pool 规格（JSON 字符串；用户未自定义时的兜底） */
+  fpm_pool_defaults: string
 }
 
 export interface EnvData {
@@ -54,6 +58,8 @@ export interface EnvDefaultsPayload {
   webserver?: string
   php_default?: string
   database?: string
+  vhost_mode?: 'www' | 'system'
+  fpm_pool_defaults?: string
 }
 
 export const getServerEnv = () =>
