@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::{QueryBuilder, Sqlite};
 use std::net::SocketAddr;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     db,
@@ -20,6 +20,7 @@ struct UserInfo {
     email: String,
     phone: Option<String>,
     nickname: String,
+    home_dir: String,
     last_login_ip: String,
     last_login_time: i64,
     status: i32,
@@ -93,6 +94,7 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
                 "email": user.email,
                 "phone": user.phone.clone().unwrap_or_default(),
                 "nickname": user.nickname,
+                "home_dir": user.home_dir,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
                 "roles": user.roles.split(',').collect::<Vec<&str>>(),
@@ -117,7 +119,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
 
     let mut querybuilder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
-        "SELECT id,username,email,phone,nickname,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
+        "SELECT id,username,email,phone,nickname,home_dir,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
     );
     if is_reseller && !is_admin {
         querybuilder
@@ -137,6 +139,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
                 "email": user.email,
                 "phone": user.phone.clone().unwrap_or_default(),
                 "nickname": user.nickname,
+                "home_dir": user.home_dir,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
                 "status": user.status,
@@ -185,12 +188,18 @@ pub async fn user_add(
         .phone
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
+    // 家目录：/home/{sanitize(username)}，站点文档根与站点日志均规划于其下
+    let home_dir = format!(
+        "/home/{}",
+        zap_proto::sanitize_site_name(&payload.username)
+    );
 
     let pool = db::get_db_pool().await;
     let result = sqlx::query(
-        "INSERT INTO user (username, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        "INSERT INTO user (username, home_dir, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
     )
     .bind(&payload.username)
+    .bind(&home_dir)
     .bind(&hashed)
     .bind(&payload.email)
     .bind(phone)
@@ -218,10 +227,25 @@ pub async fn user_add(
                 payload.username,
                 r.last_insert_rowid()
             );
+            // 尽力创建家目录骨架（zapexec 以 root 执行）；失败仅告警，
+            // 后续站点同步创建 web_root 时仍会递归补齐
+            match crate::zapexec::call(zap_proto::types::Request::UserHomeInit {
+                home_dir: home_dir.clone(),
+            })
+            .await
+            {
+                Ok(resp) if resp.code != 0 => {
+                    warn!("创建用户家目录失败(id={}): {}", r.last_insert_rowid(), resp.message);
+                }
+                Err(e) => {
+                    warn!("创建用户家目录失败(id={}): {}", r.last_insert_rowid(), e);
+                }
+                _ => {}
+            }
             Ok(Json(json!({
                 "code": 0,
                 "message": "用户创建成功",
-                "data": { "id": r.last_insert_rowid() }
+                "data": { "id": r.last_insert_rowid(), "home_dir": home_dir }
             })))
         }
         Err(e) => {
@@ -449,5 +473,67 @@ pub async fn reseller_list(claims: ValidatedClaims) -> ZapJsonResult {
         "data": rows.iter().map(|(id, username, nickname)| {
             json!({ "id": id, "username": username, "nickname": nickname })
         }).collect::<Vec<Value>>(),
+    })))
+}
+
+/// 批量补齐所有已记录 home_dir 的用户家目录骨架（admin only）。
+/// 用途：DB 升级/老库回填后一次性把 /home/{username}/www、/home/{username}/logs
+/// 补建出来；个别失败不影响整体（结果里给出失败清单）。
+pub async fn user_home_sync(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+
+    let pool = db::get_db_pool().await;
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT id, username, home_dir FROM user WHERE home_dir != '' ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut ok_items: Vec<Value> = Vec::new();
+    let mut fail_items: Vec<Value> = Vec::new();
+    for (id, username, home_dir) in rows {
+        match crate::zapexec::call(zap_proto::types::Request::UserHomeInit {
+            home_dir: home_dir.clone(),
+        })
+        .await
+        {
+            Ok(resp) if resp.code == 0 => {
+                ok_items.push(json!({ "id": id, "username": username, "home_dir": home_dir }));
+            }
+            Ok(resp) => {
+                fail_items.push(json!({
+                    "id": id,
+                    "username": username,
+                    "home_dir": home_dir,
+                    "error": resp.message,
+                }));
+            }
+            Err(e) => {
+                fail_items.push(json!({
+                    "id": id,
+                    "username": username,
+                    "home_dir": home_dir,
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "user_home_sync",
+        &format!("ok={} fail={}", ok_items.len(), fail_items.len()),
+        "",
+    )
+    .await;
+
+    Ok(Json(json!({
+        "code": 0,
+        "message": format!("家目录同步完成：成功 {}，失败 {}", ok_items.len(), fail_items.len()),
+        "data": { "ok": ok_items, "fail": fail_items }
     })))
 }

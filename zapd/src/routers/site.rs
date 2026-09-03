@@ -16,6 +16,7 @@ use crate::{
         jwt::{self, ValidatedClaims},
     },
 };
+use zap_proto::Request;
 
 // ── SQL 行结构 ──────────────────────────────────────────────
 
@@ -50,6 +51,9 @@ pub struct SiteAddPayload {
     pub status: Option<i32>,
     #[serde(default)]
     pub remark: Option<String>,
+    /// PHP 实例标识（appstore 已安装 PHP 应用的 instance，如 php74）；空表示未绑定
+    #[serde(default)]
+    pub php_instance: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +72,9 @@ pub struct SiteUpdatePayload {
     pub status: Option<i32>,
     #[serde(default)]
     pub remark: Option<String>,
+    /// None 表示 PHP 实例保持不变；Some(空串) 表示清除 PHP 实例
+    #[serde(default)]
+    pub php_instance: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,6 +217,13 @@ fn fallback_name(name: &str, domains: &[String]) -> String {
     }
 }
 
+/// PHP 实例标识校验：允许字母/数字/./_/-/@，最长 120；空串表示未绑定
+fn valid_php_instance(s: &str) -> bool {
+    s.chars().count() <= 120
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'@' | b'/'))
+}
+
 fn validate_site_fields(
     name: &str,
     domains: &[String],
@@ -256,6 +270,34 @@ fn validate_site_fields(
     Ok(())
 }
 
+/// 计算站点的文档根与日志目录：统一规划在归属用户家目录下
+/// - web_root = {home}/www/{sanitize(name)}-{site_id}
+/// - log_root = {home}/logs/{sanitize(name)}-{site_id}
+/// 归属用户无 home_dir 时返回空串（执行端回退 {ZAP_PATH}/data/www/...，兼容老站点）
+async fn site_dirs_for(
+    user_id: i64,
+    name: &str,
+    site_id: i64,
+) -> Result<(String, String), ZapError> {
+    let pool = db::get_db_pool().await;
+    let row: Option<(String,)> = sqlx::query_as("SELECT home_dir FROM user WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some((home,)) = row else {
+        return Ok((String::new(), String::new()));
+    };
+    let home = home.trim();
+    if home.is_empty() {
+        return Ok((String::new(), String::new()));
+    }
+    let seg = zap_proto::sanitize_site_name(name);
+    Ok((
+        format!("{home}/www/{seg}-{site_id}"),
+        format!("{home}/logs/{seg}-{site_id}"),
+    ))
+}
+
 /// 检查域名是否与其它站点重复（exclude_site 用于更新时排除自身）
 async fn ensure_domains_unique(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -286,9 +328,9 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     require_manageable(&claims)?;
     let pool = db::get_db_pool().await;
     let base_sql = "SELECT s.id, s.user_id, s.name, s.status, s.remark, s.created_at, s.updated_at, \
-                    u.username AS owner_username \
+                    u.username AS owner_username, s.php_instance \
                     FROM site s LEFT JOIN user u ON u.id = s.user_id";
-    let rows: Vec<(i64, i64, String, i32, String, i64, i64, Option<String>)> =
+    let rows: Vec<(i64, i64, String, i32, String, i64, i64, Option<String>, String)> =
         if jwt::is_admin(&claims) {
             sqlx::query_as(&format!("{} ORDER BY s.id DESC", base_sql))
                 .fetch_all(pool)
@@ -318,6 +360,8 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     let ids: Vec<i64> = rows.iter().map(|r| r.0).collect();
     let mut domain_map: HashMap<i64, Vec<String>> = HashMap::new();
     let mut ip_map: HashMap<i64, Vec<String>> = HashMap::new();
+    let mut vh_map: HashMap<i64, String> = HashMap::new();
+    let mut dir_map: HashMap<i64, (String, String)> = HashMap::new();
     if !ids.is_empty() {
         let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let dsql = format!(
@@ -342,6 +386,30 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         for (sid, ip) in iq.fetch_all(pool).await? {
             ip_map.entry(sid).or_default().push(ip);
         }
+        // vhost 同步状态（独立 map，不进入主行 tuple）
+        let vsql = format!(
+            "SELECT id, vhost_state FROM site WHERE id IN ({}) ORDER BY id",
+            ph
+        );
+        let mut vq = sqlx::query_as::<_, (i64, String)>(&vsql);
+        for id in &ids {
+            vq = vq.bind(id);
+        }
+        for (sid, state) in vq.fetch_all(pool).await? {
+            vh_map.insert(sid, state);
+        }
+        // 站点文档根 / 日志目录（独立 map，不进入主行 tuple）
+        let dirsql = format!(
+            "SELECT id, web_root, log_root FROM site WHERE id IN ({}) ORDER BY id",
+            ph
+        );
+        let mut dirq = sqlx::query_as::<_, (i64, String, String)>(&dirsql);
+        for id in &ids {
+            dirq = dirq.bind(id);
+        }
+        for (sid, w, l) in dirq.fetch_all(pool).await? {
+            dir_map.insert(sid, (w, l));
+        }
     }
 
     let mut recs: Vec<(
@@ -353,6 +421,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         i64,
         i64,
         Option<String>,
+        String,
         Vec<String>,
         Vec<String>,
     )> = rows
@@ -360,7 +429,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         .map(|r| {
             let domains = domain_map.remove(&r.0).unwrap_or_default();
             let ips = ip_map.remove(&r.0).unwrap_or_default();
-            (r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, domains, ips)
+            (r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, domains, ips)
         })
         .collect();
 
@@ -378,8 +447,8 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         if !s.is_empty() {
             recs.retain(|r| {
                 r.2.to_lowercase().contains(&s)
-                    || r.8.iter().any(|d| d.contains(&s))
-                    || r.9.iter().any(|ip| ip.to_lowercase().contains(&s))
+                    || r.9.iter().any(|d| d.contains(&s))
+                    || r.10.iter().any(|ip| ip.to_lowercase().contains(&s))
             });
         }
     }
@@ -400,9 +469,13 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
                 "user_id": r.1,
                 "owner_username": r.7.as_deref().unwrap_or(""),
                 "name": r.2,
-                "domains": r.8,
-                "ips": r.9,
+                "php_instance": r.8,
+                "domains": r.9,
+                "ips": r.10,
                 "status": r.3,
+                "vhost_state": vh_map.get(&r.0).cloned().unwrap_or_else(|| "pending".into()),
+                "web_root": dir_map.get(&r.0).map(|d| d.0.clone()).unwrap_or_default(),
+                "log_root": dir_map.get(&r.0).map(|d| d.1.clone()).unwrap_or_default(),
                 "remark": r.4,
                 "created_at": r.5,
                 "updated_at": r.6,
@@ -508,6 +581,13 @@ pub async fn site_add(
     let name = fallback_name(payload.name.as_deref().unwrap_or(""), &domains);
     let status = payload.status.unwrap_or(1).clamp(0, 1);
     let remark = payload.remark.unwrap_or_default().trim().to_string();
+    let php_instance = payload.php_instance.unwrap_or_default().trim().to_string();
+    if !valid_php_instance(&php_instance) {
+        return Err(ZapError::New(
+            -1,
+            "PHP 实例标识不合法（最长 120 字符，仅允许字母/数字/./_/-/@）".to_string(),
+        ));
+    }
     validate_site_fields(&name, &domains, &ips, &remark)?;
 
     let pool = db::get_db_pool().await;
@@ -516,11 +596,12 @@ pub async fn site_add(
     let mut tx = pool.begin().await?;
     ensure_domains_unique(&mut tx, &domains, 0).await?;
     let r = sqlx::query(
-        "INSERT INTO site (user_id, name, status, remark, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO site (user_id, name, php_instance, status, remark, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(owner)
     .bind(&name)
+    .bind(&php_instance)
     .bind(status)
     .bind(&remark)
     .bind(now)
@@ -542,6 +623,16 @@ pub async fn site_add(
             .execute(&mut *tx)
             .await?;
     }
+    // 站点文档根 / 日志目录：规划到归属用户家目录下（vhost 同步时由 zapexec 递归创建）
+    let (web_root, log_root) = site_dirs_for(owner, &name, id).await?;
+    if !web_root.is_empty() {
+        sqlx::query("UPDATE site SET web_root = ?, log_root = ? WHERE id = ?")
+            .bind(&web_root)
+            .bind(&log_root)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
 
     audit::log(
@@ -550,11 +641,12 @@ pub async fn site_add(
         "site_create",
         &format!("id={}", id),
         &format!(
-            "user_id={} name={} domains={} ips={}",
+            "user_id={} name={} domains={} ips={} php_instance={}",
             owner,
             name,
             domains.join(","),
-            ips.join(",")
+            ips.join(","),
+            php_instance
         ),
     )
     .await;
@@ -580,12 +672,13 @@ pub async fn site_update(
     site_in_scope(&claims, payload.id).await?;
 
     let pool = db::get_db_pool().await;
-    let row: Option<(i64, String, i32, String)> =
-        sqlx::query_as("SELECT user_id, name, status, remark FROM site WHERE id = ?")
-            .bind(payload.id)
-            .fetch_optional(pool)
-            .await?;
-    let Some((uid, old_name, mut status, mut remark)) = row else {
+    let row: Option<(i64, String, i32, String, String, String)> = sqlx::query_as(
+        "SELECT user_id, name, status, remark, php_instance, web_root FROM site WHERE id = ?",
+    )
+    .bind(payload.id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((uid, old_name, mut status, mut remark, mut php_instance, old_web_root)) = row else {
         return Err(ZapError::New(-1, "站点不存在".to_string()));
     };
 
@@ -641,16 +734,27 @@ pub async fn site_update(
     if let Some(rk) = &payload.remark {
         remark = rk.trim().to_string();
     }
+    if let Some(p) = &payload.php_instance {
+        let p = p.trim().to_string();
+        if !valid_php_instance(&p) {
+            return Err(ZapError::New(
+                -1,
+                "PHP 实例标识不合法（最长 120 字符，仅允许字母/数字/./_/-/@）".to_string(),
+            ));
+        }
+        php_instance = p;
+    }
     validate_site_fields(&name, &domains, &ips, &remark)?;
 
     let now = chrono::Local::now().timestamp();
     let mut tx = pool.begin().await?;
     let r = sqlx::query(
-        "UPDATE site SET user_id = ?, name = ?, status = ?, remark = ?, updated_at = ? \
+        "UPDATE site SET user_id = ?, name = ?, php_instance = ?, status = ?, remark = ?, updated_at = ? \
          WHERE id = ?",
     )
     .bind(new_owner)
     .bind(&name)
+    .bind(&php_instance)
     .bind(status)
     .bind(&remark)
     .bind(now)
@@ -689,6 +793,17 @@ pub async fn site_update(
                 .await?;
         }
     }
+    // 新式站点（DB 已记录 web_root）跟随归属转移 / 改名刷新目录规划；
+    // 老站点（web_root 为空）保持默认 data/www 不迁移
+    if !old_web_root.is_empty() && (new_owner != uid || name != old_name) {
+        let (web_root, log_root) = site_dirs_for(new_owner, &name, payload.id).await?;
+        sqlx::query("UPDATE site SET web_root = ?, log_root = ? WHERE id = ?")
+            .bind(&web_root)
+            .bind(&log_root)
+            .bind(payload.id)
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
 
     audit::log(
@@ -725,6 +840,20 @@ pub async fn site_delete(
     }
     for id in &payload.ids {
         site_in_scope(&claims, *id).await?;
+    }
+
+    // 先清理 Nginx vhost（尽力而为，失败不阻塞删除）
+    for id in &payload.ids {
+        if let Ok(resp) = crate::zapexec::call(Request::SiteVhostRemove {
+            site_id: *id,
+            name: String::new(),
+        })
+        .await
+        {
+            if resp.code != 0 {
+                tracing::warn!("remove vhost for site {} failed: {}", id, resp.message);
+            }
+        }
     }
 
     let placeholders = payload
@@ -777,4 +906,153 @@ pub async fn site_delete(
         "code": 0,
         "message": format!("已删除 {} 个站点", deleted)
     })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SiteSyncPayload {
+    pub id: i64,
+}
+
+/// 将站点档案同步为 Nginx vhost：按域名/状态/PHP 实例渲染 conf → nginx -t → reload
+pub async fn site_sync(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<SiteSyncPayload>,
+) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    site_in_scope(&claims, payload.id).await?;
+    let pool = db::get_db_pool().await;
+
+    let row: Option<(String, i32, String, String, String)> = sqlx::query_as(
+        "SELECT name, status, php_instance, web_root, log_root FROM site WHERE id = ?",
+    )
+    .bind(payload.id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((name, status, php_instance, web_root, log_root)) = row else {
+        return Err(ZapError::New(-1, "站点不存在".to_string()));
+    };
+
+    // 域名 → server_name
+    let mut domains = Vec::new();
+    let dsql = "SELECT domain FROM site_domain WHERE site_id = ? ORDER BY id";
+    let dq = sqlx::query_as::<_, (String,)>(dsql);
+    for (d,) in dq.bind(payload.id).fetch_all(pool).await? {
+        let d = d.trim().to_string();
+        if !d.is_empty() {
+            domains.push(d);
+        }
+    }
+
+    // PHP socket：优先从已安装实例的 info.yaml 解析，否则按官方包命名推导
+    let php_socket = if php_instance.is_empty() {
+        None
+    } else {
+        Some(resolve_php_socket(&php_instance).await?)
+    };
+
+    let web_root_opt = (!web_root.trim().is_empty()).then_some(web_root);
+    let log_root_opt = (!log_root.trim().is_empty()).then_some(log_root);
+    let resp = crate::zapexec::call(Request::SiteVhostSync {
+        site_id: payload.id,
+        name: name.clone(),
+        domains,
+        enabled: status == 1,
+        php_socket,
+        web_root: web_root_opt,
+        log_root: log_root_opt,
+    })
+    .await?;
+
+    let state = if resp.code == 0 { "synced" } else { "error" };
+    let _ = sqlx::query("UPDATE site SET vhost_state = ? WHERE id = ?")
+        .bind(state)
+        .bind(payload.id)
+        .execute(pool)
+        .await;
+
+    if resp.code != 0 {
+        return Err(ZapError::New(
+            resp.code,
+            format!("vhost 同步失败：{}", resp.message),
+        ));
+    }
+
+    let _ = audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "site_sync",
+        &format!("id={}", payload.id),
+        &format!(
+            "name={} php_instance={} status={} {}",
+            name, php_instance, status, resp.message
+        ),
+    )
+    .await;
+    info!("site sync: id={} status={}", payload.id, status);
+
+    Ok(Json(json!({
+        "code": 0,
+        "message": resp.message,
+        "data": resp.data,
+    })))
+}
+
+/// 解析 PHP 实例的 FPM 通道：
+/// 1) info.yaml 登记的 php_socket / fpm_socket / expose(unix:/tcp:)；
+/// 2) 否则按官方包命名约定推导（php8.3 → /var/run/php-fpm-8.3.sock，php74 → /var/run/php-fpm-74.sock）
+async fn resolve_php_socket(php_instance: &str) -> Result<String, ZapError> {
+    let resp = crate::zapexec::call(Request::AppstoreInstalled).await?;
+    if resp.code == 0 {
+        if let Some(data) = &resp.data {
+            if let Some(items) = data.get("items").and_then(|v| v.as_array()) {
+                for it in items {
+                    if it.get("instance").and_then(|v| v.as_str()) != Some(php_instance) {
+                        continue;
+                    }
+                    let info = it.get("info").unwrap_or(&serde_json::Value::Null);
+                    for key in ["php_socket", "fpm_socket"] {
+                        if let Some(v) = info.get(key).and_then(|v| v.as_str()) {
+                            let v = v.trim();
+                            if !v.is_empty() {
+                                return Ok(v.to_string());
+                            }
+                        }
+                    }
+                    if let Some(v) = info.get("expose").and_then(|v| v.as_str()) {
+                        for seg in v.split(['\n', ',']) {
+                            let seg = seg.trim();
+                            if let Some(rest) = seg.strip_prefix("unix:") {
+                                let rest = rest.trim();
+                                if !rest.is_empty() {
+                                    return Ok(format!("unix:{rest}"));
+                                }
+                            }
+                            if let Some(rest) = seg.strip_prefix("tcp:") {
+                                let rest = rest.trim();
+                                if !rest.is_empty() {
+                                    return Ok(rest.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 官方包命名推导
+    let ver = php_instance
+        .strip_prefix("php")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| {
+            ZapError::New(
+                -1,
+                format!(
+                    "无法确定 PHP 实例 {php_instance} 的 FPM socket：\
+                     实例未登记 php_socket 且命名不是 php<版本> 形式"
+                ),
+            )
+        })?;
+    Ok(format!("/var/run/php-fpm-{ver}.sock"))
 }

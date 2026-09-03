@@ -14,7 +14,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::root_cmd;
 use std::os::unix::process::CommandExt;
@@ -906,24 +906,47 @@ pub async fn script_write(path: String, content: String) -> Response {
 pub async fn installed() -> Response {
     tokio::task::spawn_blocking(move || {
         let mut items = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(apps_dir()) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                if !path.is_dir() {
+        let root = apps_dir();
+        if let Ok(cats) = std::fs::read_dir(&root) {
+            for cat in cats.flatten() {
+                let cat_path = cat.path();
+                if !cat_path.is_dir() {
                     continue;
                 }
-                if let Ok(meta) = read_meta(&path) {
-                    items.push(json!({
-                        "pkg_path": path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
-                        "name": meta.name,
-                        "version": meta.version,
-                        "category": meta.category,
-                        "source": meta.source,
-                        "repo_id": meta.repo_id,
-                        "installed_at": meta.installed_at,
-                        "upgraded_from": meta.upgraded_from,
-                        "run_id": meta.run_id,
-                    }));
+                let category = cat.file_name().to_string_lossy().to_string();
+                if let Ok(pkgs) = std::fs::read_dir(&cat_path) {
+                    for pkg in pkgs.flatten() {
+                        let app_path = pkg.path();
+                        if !app_path.is_dir() {
+                            continue;
+                        }
+                        let Ok(meta) = read_meta(&app_path) else {
+                            continue;
+                        };
+                        let name = pkg.file_name().to_string_lossy().to_string();
+                        let pkg_path = format!("{category}/{name}");
+                        let info = read_info_yaml(&app_path);
+                        let state = probe_instance_state(&app_path, info.as_ref());
+                        let instance = info
+                            .as_ref()
+                            .and_then(|i| i.get("instance").and_then(|v| v.as_str()))
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| name.clone());
+                        items.push(json!({
+                            "pkg_path": pkg_path,
+                            "name": meta.name,
+                            "version": meta.version,
+                            "category": meta.category,
+                            "source": meta.source,
+                            "repo_id": meta.repo_id,
+                            "installed_at": meta.installed_at,
+                            "upgraded_from": meta.upgraded_from,
+                            "run_id": meta.run_id,
+                            "instance": instance,
+                            "state": state,
+                            "info": info.as_ref().map(yaml_to_json).unwrap_or_else(|| json!({})),
+                        }));
+                    }
                 }
             }
         }
@@ -941,6 +964,136 @@ pub async fn installed() -> Response {
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+/// 读取安装脚本登记的实例信息 apps/<category>/<name>/info.yaml（可选文件）。
+fn read_info_yaml(app_path: &Path) -> Option<serde_yaml::Value> {
+    let content = std::fs::read_to_string(app_path.join("info.yaml")).ok()?;
+    serde_yaml::from_str(&content).ok()
+}
+
+/// 探测实例运行状态：登记了 svc_name（systemd）走 systemctl；否则读 pid_file 探活。
+fn probe_instance_state(_app_path: &Path, info: Option<&serde_yaml::Value>) -> String {
+    let info = match info {
+        Some(i) => i,
+        None => return "unknown".into(),
+    };
+    if let Some(svc) = info.get("svc_name").and_then(|v| v.as_str()) {
+        return match root_cmd("systemctl").args(["is-active", svc]).output() {
+            Ok(o) => normalize_state(String::from_utf8_lossy(&o.stdout).trim()),
+            Err(_) => "unknown".into(),
+        };
+    }
+    if let Some(pf) = info.get("pid_file").and_then(|v| v.as_str()) {
+        let pid: i32 = match std::fs::read_to_string(pf)
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+        {
+            Some(p) => p,
+            None => return "unknown".into(),
+        };
+        return match root_cmd("kill").args(["-0", &pid.to_string()]).status() {
+            Ok(s) if s.success() => "running".into(),
+            _ => "stopped".into(),
+        };
+    }
+    "unknown".into()
+}
+
+/// 归一化 systemctl 状态输出：running/stopped/failed/starting/stopping/unknown。
+fn normalize_state(raw: &str) -> String {
+    match raw {
+        "active" | "running" => "running",
+        "inactive" | "dead" | "stopped" | "exited" => "stopped",
+        "failed" => "failed",
+        "activating" | "reloading" => "starting",
+        "deactivating" => "stopping",
+        _ => "unknown",
+    }
+    .into()
+}
+
+fn serde_yaml_num_str(n: &serde_yaml::Number) -> String {
+    if let Some(i) = n.as_i64() {
+        return i.to_string();
+    }
+    if let Some(u) = n.as_u64() {
+        return u.to_string();
+    }
+    n.as_f64().map(|f| f.to_string()).unwrap_or_default()
+}
+
+/// serde_yaml 值 → serde_json 值（数字转字符串、布尔保留，便于展示与比对）。
+fn yaml_to_json(v: &serde_yaml::Value) -> Value {
+    match v {
+        serde_yaml::Value::String(s) => Value::String(s.clone()),
+        serde_yaml::Value::Bool(b) => Value::Bool(*b),
+        serde_yaml::Value::Number(n) => Value::String(serde_yaml_num_str(n)),
+        serde_yaml::Value::Mapping(m) => {
+            let mut obj = serde_json::Map::new();
+            for (k, val) in m {
+                let key = match k {
+                    serde_yaml::Value::String(s) => s.clone(),
+                    serde_yaml::Value::Number(n) => serde_yaml_num_str(n),
+                    serde_yaml::Value::Bool(b) => b.to_string(),
+                    other => format!("{other:?}"),
+                };
+                obj.insert(key, yaml_to_json(val));
+            }
+            Value::Object(obj)
+        }
+        serde_yaml::Value::Sequence(seq) => Value::Array(seq.iter().map(yaml_to_json).collect()),
+        serde_yaml::Value::Tagged(t) => yaml_to_json(&t.value),
+        serde_yaml::Value::Null => Value::Null,
+    }
+}
+
+/// 对已安装应用的实例执行 start/stop/restart。
+/// 要求脚本在 info.yaml 中登记 svc_name（systemd unit），由 root 执行 systemctl。
+pub async fn instance_action(pkg_path: String, action: String) -> Response {
+    let allowed = ["start", "stop", "restart"];
+    if !allowed.contains(&action.as_str()) {
+        return Response::err(-1, format!("不支持的实例操作: {action}"));
+    }
+    tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        let (cat, name) = validate_pkg_path(&pkg_path)?;
+        let app_path = apps_dir().join(&cat).join(&name);
+        if !app_path.is_dir() {
+            return Err("该应用未安装".into());
+        }
+        let info = read_info_yaml(&app_path).ok_or("缺少实例信息 info.yaml（由安装脚本登记）")?;
+        let svc = info
+            .get("svc_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or("未登记 systemd 服务（info.yaml 缺 svc_name），无法通过面板启停")?;
+        let out = root_cmd("systemctl")
+            .args([action.as_str(), svc.as_str()])
+            .output()
+            .map_err(|e| format!("执行 systemctl {action} {svc} 失败: {e}"))?;
+        if !out.status.success() {
+            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return Err(format!("systemctl {action} {svc} 失败: {msg}"));
+        }
+        // 操作后回读状态（restart 稍等稳定）
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let state = match root_cmd("systemctl").args(["is-active", &svc]).output() {
+            Ok(o) => normalize_state(String::from_utf8_lossy(&o.stdout).trim()),
+            Err(_) => "unknown".into(),
+        };
+        Ok(Response::ok(
+            "ok",
+            Some(json!({
+                "pkg_path": pkg_path,
+                "svc_name": svc,
+                "action": action,
+                "state": state,
+            })),
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .map_or_else(|e| Response::err(-1, e), |r| r)
 }
 
 #[cfg(test)]

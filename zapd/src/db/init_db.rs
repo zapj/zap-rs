@@ -1,4 +1,4 @@
-use sqlx::Executor;
+use sqlx::{Executor, Row};
 
 use super::get_db_pool;
 
@@ -17,8 +17,12 @@ pub async fn init_schema() {
     init_appstore_runs_table().await;
     // IP 池管理表
     init_ip_pool_table().await;
-    // 用户站点管理表
+    // 用户站点管理表（php_instance / vhost_state 老库幂等补列）
     init_site_table().await;
+    ensure_site_php_column().await;
+    ensure_site_vhost_column().await;
+    // 全局运行环境状态表（scope=auto 自动探测快照 / scope=conf 面板默认配置）
+    init_server_env_table().await;
     // API Token 管理表（幂等建表，新旧库均生效）
     init_api_token_table().await;
     // 「开发」菜单（API Tokens / API 文档，幂等补插）
@@ -29,6 +33,10 @@ pub async fn init_schema() {
     ensure_ssl_menus().await;
     // 「审计日志」子菜单（系统设置目录下，仅 admin，幂等补插）
     ensure_audit_menu().await;
+    // 「已安装应用」子菜单（应用商店下，幂等补插）
+    ensure_installed_menu().await;
+    // 「运行环境」子菜单（服务器配置目录下，仅 admin，幂等补插）
+    ensure_server_env_menu().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -46,6 +54,7 @@ async fn init_system_user_table_schema() {
         email VARCHAR(256) UNIQUE NOT NULL,
         phone VARCHAR(32) UNIQUE,
         nickname TEXT,
+        home_dir TEXT NOT NULL DEFAULT '',
         last_login_time INTEGER,
         last_login_ip TEXT,
         status INTEGER DEFAULT 1,
@@ -75,10 +84,11 @@ async fn init_system_user_table_schema() {
     let now = chrono::Utc::now().timestamp();
 
     sqlx::query(
-        "INSERT INTO user (username, password, email, nickname, phone, last_login_time, last_login_ip, status, roles, permissions, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'admin', '', ?, ?)",
+        "INSERT INTO user (username, home_dir, password, email, nickname, phone, last_login_time, last_login_ip, status, roles, permissions, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'admin', '', ?, ?)",
     )
     .bind("admin")
+    .bind("/home/admin")
     .bind(&hashed)
     .bind("admin@demo.zap.cn")
     .bind("admin")
@@ -504,6 +514,10 @@ async fn init_site_table() {
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL DEFAULT 0,
         name TEXT NOT NULL DEFAULT '',
+        php_instance TEXT NOT NULL DEFAULT '',
+        vhost_state TEXT NOT NULL DEFAULT 'pending',
+        web_root TEXT NOT NULL DEFAULT '',
+        log_root TEXT NOT NULL DEFAULT '',
         status INTEGER NOT NULL DEFAULT 1,
         remark TEXT NOT NULL DEFAULT '',
         created_at INTEGER,
@@ -527,6 +541,52 @@ async fn init_site_table() {
     CREATE INDEX idx_site_ip_site_id ON site_ip(site_id);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
+}
+
+/// 老库兼容：site 表缺少 php_instance 列时幂等补列（已有列则跳过）
+async fn ensure_site_php_column() {
+    if !table_exists("site").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let rows = sqlx::query("PRAGMA table_info(site)")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let has = rows.iter().any(|r| {
+        r.try_get::<String, _>("name")
+            .map(|n| n == "php_instance")
+            .unwrap_or(false)
+    });
+    if has {
+        return;
+    }
+    let _ = sqlx::query("ALTER TABLE site ADD COLUMN php_instance TEXT NOT NULL DEFAULT ''")
+        .execute(pool)
+        .await;
+}
+
+/// 老库兼容：site 表缺少 vhost_state 列时幂等补列（已有列则跳过）
+async fn ensure_site_vhost_column() {
+    if !table_exists("site").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let rows = sqlx::query("PRAGMA table_info(site)")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let has = rows.iter().any(|r| {
+        r.try_get::<String, _>("name")
+            .map(|n| n == "vhost_state")
+            .unwrap_or(false)
+    });
+    if has {
+        return;
+    }
+    let _ = sqlx::query("ALTER TABLE site ADD COLUMN vhost_state TEXT NOT NULL DEFAULT 'pending'")
+        .execute(pool)
+        .await;
 }
 
 // ── api_token（API Token 管理）──────────────────────────────
@@ -739,6 +799,113 @@ async fn ensure_audit_menu() {
         JOIN menus m
           ON m.name = 'audit'
          AND m.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'system')
+        WHERE r.role_key = 'admin'
+          AND NOT EXISTS (
+              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
+          )
+        "#,
+        )
+        .await;
+}
+
+async fn ensure_installed_menu() {
+    let pool = get_db_pool().await;
+    // 将「脚本管理」后移（2 -> 3），给「已安装应用」腾出 sort_order=2
+    let _ = pool
+        .execute(
+            r#"
+        UPDATE menus SET sort_order = 3, updated_at = strftime('%s','now')
+        WHERE parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'appstore')
+          AND name = 'scripts' AND sort_order = 2
+          AND NOT EXISTS (
+              SELECT 1 FROM menus
+              WHERE parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'appstore')
+                AND name = 'installed'
+          )
+        "#,
+        )
+        .await;
+    // 子菜单：已安装应用
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT id, 'installed', 'installed', 'appstore/installed', 'menu', '已安装应用', 'ep:box', 1, 'admin,user,reseller', 2, 1, strftime('%s','now'), strftime('%s','now')
+        FROM menus
+        WHERE parent_id = 0 AND name = 'appstore'
+          AND NOT EXISTS (
+              SELECT 1 FROM menus m2
+              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'appstore')
+                AND m2.name = 'installed'
+          )
+        "#,
+        )
+        .await;
+    // role_menus 授权：admin / user / reseller × installed
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO role_menus (role_id, menu_id)
+        SELECT r.id, m.id
+        FROM roles r
+        JOIN menus m
+          ON m.name = 'installed'
+         AND m.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'appstore')
+        WHERE r.role_key IN ('admin', 'user', 'reseller')
+          AND NOT EXISTS (
+              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
+          )
+        "#,
+        )
+        .await;
+}
+
+// ── server_env（全局运行环境状态表）───────────────────────────
+
+async fn init_server_env_table() {
+    let sql = r#"
+    CREATE TABLE IF NOT EXISTS server_env (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        scope TEXT NOT NULL DEFAULT 'auto',
+        k TEXT NOT NULL DEFAULT '',
+        v TEXT NOT NULL DEFAULT '',
+        remark TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(scope, k)
+    );
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+/// 幂等补插「运行环境」子菜单（位于「服务器配置」目录下 sort_order=7，仅 admin）。
+/// 可安全重复执行：仅当菜单不存在时插入（新库/旧库均适用）。
+async fn ensure_server_env_menu() {
+    let pool = get_db_pool().await;
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+        SELECT id, 'server-env', 'env', 'server/env/index', 'menu', '运行环境', 'ep:magic-stick', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now')
+        FROM menus
+        WHERE parent_id = 0 AND name = 'server'
+          AND NOT EXISTS (
+              SELECT 1 FROM menus m2
+              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'server')
+                AND m2.name = 'server-env'
+          )
+        "#,
+        )
+        .await;
+    // role_menus 授权：仅 admin × server-env
+    let _ = pool
+        .execute(
+            r#"
+        INSERT INTO role_menus (role_id, menu_id)
+        SELECT r.id, m.id
+        FROM roles r
+        JOIN menus m
+          ON m.name = 'server-env'
+         AND m.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'server')
         WHERE r.role_key = 'admin'
           AND NOT EXISTS (
               SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id

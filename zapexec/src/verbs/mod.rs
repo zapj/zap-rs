@@ -1,11 +1,14 @@
 mod appstore;
+mod env;
 mod file;
 mod network;
 mod process;
 mod service;
+mod site;
 mod ssh;
 mod ssh_key;
 mod time;
+mod user;
 
 use zap_proto::{Request, Response};
 
@@ -94,6 +97,21 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             appstore::script_write(path, content).await
         }
         Request::AppstoreInstalled => appstore::installed().await,
+        Request::AppstoreInstanceAction { pkg_path, action } => {
+            appstore::instance_action(pkg_path, action).await
+        }
+        Request::SiteVhostSync {
+            site_id,
+            name,
+            domains,
+            enabled,
+            php_socket,
+            web_root,
+            log_root,
+        } => site::vhost_sync(site_id, name, domains, enabled, php_socket, web_root, log_root).await,
+        Request::SiteVhostRemove { site_id, name } => site::vhost_remove(site_id, name).await,
+        Request::EnvDetect => env::detect().await,
+        Request::UserHomeInit { home_dir } => user::home_init(&home_dir).await,
     }
 }
 

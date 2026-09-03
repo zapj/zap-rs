@@ -24,6 +24,8 @@ export interface UserListItem {
   email: string
   phone: string
   nickname: string
+  /** 用户家目录，如 /home/foo；老库回填前可能为空串 */
+  home_dir: string
   last_login_ip: string
   last_login_time: number
   status: number
@@ -67,9 +69,9 @@ export interface CreateUserPayload {
   owner_id?: number
 }
 
-/** 新增用户 */
+/** 新增用户（返回 id 与家目录路径） */
 export function createUser(data: CreateUserPayload) {
-  return http.post<ApiResponse<{ id: number }>>('/system/user/add', data)
+  return http.post<ApiResponse<{ id: number; home_dir: string }>>('/system/user/add', data)
 }
 
 export interface UpdateUserPayload {
@@ -101,6 +103,30 @@ export function deleteUser(id: number) {
 /** 修改当前用户密码 */
 export function changeMyPassword(newPassword: string) {
   return http.post<ApiResponse>('/system/user/update', { password: newPassword })
+}
+
+// ── 家目录 ─────────────────────────────────────────────────
+
+export interface HomeSyncOkItem {
+  id: number
+  username: string
+  home_dir: string
+}
+
+export interface HomeSyncFailItem extends HomeSyncOkItem {
+  error: string
+}
+
+export interface HomeSyncResult {
+  ok: HomeSyncOkItem[]
+  fail: HomeSyncFailItem[]
+}
+
+/** 批量补齐所有已记录 home_dir 用户的家目录骨架（www / logs，admin only） */
+export function userHomeSync() {
+  return http.post<ApiResponse<HomeSyncResult>>('/system/user/home_sync', undefined, {
+    timeout: 60000,
+  })
 }
 
 // ── TOTP 两步验证 ───────────────────────────────────────────

@@ -16,15 +16,38 @@
         </el-form-item>
       </el-form>
 
-      <el-button type="primary" @click="handleAdd" style="margin-bottom: 16px">
-        <el-icon><Plus /></el-icon>{{ isAdmin ? '新增用户' : '新增客户' }}
-      </el-button>
+      <div style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center">
+        <el-button type="primary" @click="handleAdd">
+          <el-icon><Plus /></el-icon>{{ isAdmin ? '新增用户' : '新增客户' }}
+        </el-button>
+        <el-tooltip
+          v-if="isAdmin"
+          content="为所有已记录 home_dir 的用户补齐家目录骨架（www / logs）"
+          placement="top"
+        >
+          <el-button :loading="syncingHome" @click="handleHomeSync">
+            <el-icon><FolderOpened /></el-icon>同步家目录
+          </el-button>
+        </el-tooltip>
+      </div>
 
       <el-table :data="tableData" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="username" label="用户名" width="120" />
         <el-table-column prop="nickname" label="昵称" width="120" />
         <el-table-column prop="email" label="邮箱" min-width="180" />
+        <el-table-column label="家目录" min-width="200">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.home_dir"
+              :content="`站点文档根：${row.home_dir}/www/站点名-ID；站点日志：${row.home_dir}/logs/站点名-ID（access.log / error.log）`"
+              placement="top"
+            >
+              <code class="home-dir">{{ row.home_dir }}</code>
+            </el-tooltip>
+            <el-tag v-else size="small" type="warning">未设置</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="角色" width="120">
           <template #default="{ row }">
             <el-tag v-for="r in row.roles" :key="r" size="small" style="margin-right: 4px">
@@ -124,7 +147,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, FolderOpened } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
@@ -133,6 +156,7 @@ import {
   updateUser,
   deleteUser,
   getResellerList,
+  userHomeSync,
   type UserListItem,
   type ResellerItem,
   type CreateUserPayload,
@@ -278,8 +302,10 @@ async function submitForm() {
         payload.roles = form.roles
         payload.owner_id = form.owner_id || 0
       }
-      await createUser(payload)
-      ElMessage.success('新增成功')
+      const res = await createUser(payload)
+      ElMessage.success(
+        res.data?.home_dir ? `新增成功，家目录：${res.data.home_dir}` : '新增成功',
+      )
     } else {
       const payload: UpdateUserPayload = {
         id: editingId.value!,
@@ -341,6 +367,50 @@ async function handleDelete(row: UserListItem) {
   }
 }
 
+// ── 家目录同步 ─────────────────────────────────────────────
+const syncingHome = ref(false)
+
+async function handleHomeSync() {
+  try {
+    await ElMessageBox.confirm(
+      '将为所有已记录 home_dir 的用户补齐家目录骨架（www / logs）。\n此操作仅补建目录，不影响已有站点。',
+      '同步家目录',
+      {
+        type: 'info',
+        confirmButtonText: '开始同步',
+      },
+    )
+  } catch {
+    return
+  }
+  syncingHome.value = true
+  try {
+    const res = await userHomeSync()
+    const { ok, fail } = res.data ?? { ok: [], fail: [] }
+    if (fail.length > 0) {
+      const detail = fail
+        .map((f) => `${f.username}（${f.home_dir}）: ${f.error}`)
+        .join('\n')
+      await ElMessageBox.alert(
+        `成功 ${ok.length} 个，失败 ${fail.length} 个：\n${detail}`,
+        '家目录同步完成（部分失败）',
+        {
+          type: 'warning',
+          confirmButtonText: '知道了',
+          customStyle: { whiteSpace: 'pre-line' },
+        },
+      )
+    } else {
+      ElMessage.success(`家目录同步完成：成功 ${ok.length} 个`)
+    }
+    loadList()
+  } catch {
+    // 拦截器已弹窗
+  } finally {
+    syncingHome.value = false
+  }
+}
+
 // ── 工具 ───────────────────────────────────────────────────
 function fmtTime(ts: number) {
   if (!ts) return '-'
@@ -356,5 +426,16 @@ onMounted(() => {
 <style scoped>
 .users-container {
   padding: 20px;
+}
+
+.home-dir {
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: default;
+  word-break: break-all;
 }
 </style>

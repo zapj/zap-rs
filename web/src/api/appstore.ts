@@ -117,3 +117,28 @@ export function wsLogUrl(runId: string): string {
   const wsBase = apiBase.replace(/^http/, 'ws')
   return `${wsBase}/appstore/ws/${runId}?token=${getToken()}`
 }
+
+// ── 已安装应用（实例管理）───────────────────────────────────
+
+export interface InstalledApp {
+  pkg_path: string
+  name: string
+  version: string
+  category: string
+  source: 'official' | 'custom'
+  repo_id?: string
+  installed_at?: number
+  upgraded_from?: string | null
+  run_id?: string
+  /** 实例标识（默认同包名，php74/php85 之类由脚本在 info.yaml 登记） */
+  instance: string
+  /** 动态状态：running / stopped / failed / starting / stopping / unknown */
+  state: string
+  /** 脚本登记的实例信息：install_dir / expose / port / pid_file / config_file / svc_name 等 */
+  info: Record<string, any>
+}
+
+export const getInstalledApps = () => http.get<any>('/appstore/installed')
+
+export const instanceAction = (data: { pkg_path: string; action: string }) =>
+  http.post<any>('/appstore/instance/action', data)

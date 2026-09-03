@@ -4,6 +4,8 @@ import { Delete, Edit, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/user'
+import type { InstalledApp } from '@/api/appstore'
+import { getInstalledApps } from '@/api/appstore'
 
 interface SiteItem {
   id: number
@@ -14,6 +16,10 @@ interface SiteItem {
   ips: string[]
   status: number
   remark: string
+  php_instance: string
+  vhost_state: string
+  web_root: string
+  log_root: string
   created_at: number
   updated_at: number
 }
@@ -42,6 +48,53 @@ const selection = ref<SiteItem[]>([])
 // 归属用户下拉数据（admin / reseller）
 const ownerOptions = ref<OwnerOption[]>([])
 const ownersLoading = ref(false)
+
+// PHP 运行时选项：数据源 = 应用商店「已安装应用」中状态为 running 的 PHP 实例
+// （管理员在已安装列表停掉某版本实例后，自动从下拉中消失 → 用户不可再选择）
+interface PhpOption {
+  instance: string
+  name: string
+  version: string
+  label: string
+}
+const phpOptions = ref<PhpOption[]>([])
+const phpLoading = ref(false)
+
+function isPhpRuntime(p: InstalledApp): boolean {
+  const n = (p.name || '').toLowerCase()
+  const ins = (p.instance || '').toLowerCase()
+  return n === 'php' || ins === 'php' || /^php\d/i.test(n) || /^php\d/i.test(ins)
+}
+
+const phpRunningSet = computed(() => new Set(phpOptions.value.map((o) => o.instance)))
+
+async function loadPhpOptions() {
+  phpLoading.value = true
+  try {
+    const res = (await getInstalledApps()) as any
+    const body = res?.data || []
+    const apps: InstalledApp[] = Array.isArray(body)
+      ? body
+      : body?.items || body?.rows || []
+    const opts: PhpOption[] = []
+    for (const p of apps) {
+      if (!isPhpRuntime(p) || p.state !== 'running') continue
+      const instance = p.instance || p.name
+      if (!instance || opts.some((o) => o.instance === instance)) continue
+      opts.push({
+        instance,
+        name: p.name,
+        version: p.version,
+        label: `${instance}${p.version ? ` · v${p.version}` : ''}`,
+      })
+    }
+    phpOptions.value = opts
+  } catch {
+    phpOptions.value = []
+  } finally {
+    phpLoading.value = false
+  }
+}
 
 async function loadOwners() {
   if (!canManageAll.value) return
@@ -114,6 +167,7 @@ const addForm = reactive({
   ips: [] as string[],
   status: 1,
   remark: '',
+  php_instance: '',
 })
 
 function resetAddForm() {
@@ -129,10 +183,12 @@ function resetAddForm() {
   addForm.ips = []
   addForm.status = 1
   addForm.remark = ''
+  addForm.php_instance = ''
 }
 
 function openAdd() {
   resetAddForm()
+  loadPhpOptions()
   addVisible.value = true
 }
 
@@ -154,6 +210,7 @@ async function submitAdd() {
       ips: addForm.ips.map((s) => s.trim()).filter((s) => s),
       status: addForm.status,
       remark: addForm.remark.trim(),
+      php_instance: addForm.php_instance,
     }
     if (canManageAll.value) payload.user_id = addForm.user_id
     const res = await http.post<{ code: number; message: string }>('/site/add', payload)
@@ -178,6 +235,13 @@ const editForm = reactive({
   ips: [] as string[],
   status: 1,
   remark: '',
+  php_instance: '',
+})
+
+// 编辑时：若站点当前 PHP 实例已不在运行列表（管理员已停用），追加禁用选项以便展示并可改选
+const stalePhpInstance = computed(() => {
+  const v = editForm.php_instance
+  return v && !phpRunningSet.value.has(v) ? v : ''
 })
 
 function openEdit(row: SiteItem) {
@@ -188,6 +252,8 @@ function openEdit(row: SiteItem) {
   editForm.ips = [...(row.ips || [])]
   editForm.status = row.status
   editForm.remark = row.remark
+  editForm.php_instance = row.php_instance || ''
+  loadPhpOptions()
   editVisible.value = true
 }
 
@@ -210,12 +276,14 @@ async function submitEdit() {
       ips: editForm.ips.map((s) => s.trim()).filter((s) => s),
       status: editForm.status,
       remark: editForm.remark.trim(),
+      php_instance: editForm.php_instance,
     }
     if (canManageAll.value) payload.user_id = editForm.user_id
     const res = await http.post<{ code: number; message: string }>('/site/update', payload)
     ElMessage.success(res.message)
     editVisible.value = false
     load()
+    syncSite(editForm.id) // 域名 / PHP 版本变更后自动同步 vhost
   } catch {
     /* handled */
   } finally {
@@ -223,7 +291,25 @@ async function submitEdit() {
   }
 }
 
-// ── 行内快捷：状态开关（只更新状态，域名/IP 保持不变）─────
+// ── vhost 同步：按站点档案（域名/状态/PHP 实例）渲染 Nginx 配置并 reload ──
+const syncingId = ref(0)
+async function syncSite(id: number): Promise<boolean> {
+  if (syncingId.value) return false
+  syncingId.value = id
+  try {
+    const res = await http.post<{ code: number; message: string }>('/site/sync', { id })
+    ElMessage.success(res.message || '站点配置已同步')
+    load()
+    return true
+  } catch (e: any) {
+    ElMessage.error(e.message || 'vhost 同步失败，请确认已安装并启动 Nginx')
+    return false
+  } finally {
+    syncingId.value = 0
+  }
+}
+
+// ── 行内快捷：状态开关（只更新状态，域名/IP 保持不变，并同步 vhost）─────
 async function toggleStatus(row: SiteItem) {
   try {
     const res = await http.post<{ code: number; message: string }>('/site/update', {
@@ -231,9 +317,9 @@ async function toggleStatus(row: SiteItem) {
       status: row.status ? 1 : 0,
     })
     ElMessage.success(res.message)
-    load()
+    await syncSite(row.id) // 运行/停止 → 生成/移除 vhost
   } catch {
-    /* handled */
+    load() // 回滚行内开关展示
   }
 }
 
@@ -263,6 +349,7 @@ function handleSelectionChange(rows: SiteItem[]) {
 
 onMounted(() => {
   loadOwners()
+  loadPhpOptions()
   load()
 })
 </script>
@@ -366,9 +453,47 @@ onMounted(() => {
             <span v-else class="dim">-</span>
           </template>
         </el-table-column>
+        <el-table-column label="PHP 版本" min-width="170">
+          <template #default="{ row }">
+            <template v-if="row.php_instance">
+              <el-tag v-if="phpRunningSet.has(row.php_instance)" size="small" type="success">
+                {{ row.php_instance }}
+              </el-tag>
+              <el-tooltip v-else content="该 PHP 实例已停止/不可用，可编辑站点改选其他版本" placement="top">
+                <el-tag size="small" type="danger" effect="plain">
+                  {{ row.php_instance }}（已停用）
+                </el-tag>
+              </el-tooltip>
+            </template>
+            <span v-else class="dim">-</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="canManageAll" label="归属用户" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.owner_username || ownerLabel(row.user_id) || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="站点目录" min-width="250" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.web_root"
+              :content="`文档根；日志：${row.log_root || '-'}/access.log`"
+              placement="top"
+            >
+              <span class="dim">{{ row.web_root }}</span>
+            </el-tooltip>
+            <span v-else class="dim">默认 data/www（历史站点）</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="部署" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.vhost_state === 'synced'" size="small" type="success" effect="plain">
+              已同步
+            </el-tag>
+            <el-tag v-else-if="row.vhost_state === 'error'" size="small" type="danger" effect="plain">
+              同步失败
+            </el-tag>
+            <el-tag v-else size="small" type="info" effect="plain">未同步</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="110">
@@ -388,8 +513,15 @@ onMounted(() => {
         <el-table-column label="创建时间" min-width="150">
           <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="130" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              :loading="syncingId === row.id"
+              :disabled="syncingId !== 0 && syncingId !== row.id"
+              @click="syncSite(row.id)"
+            >同步</el-button>
             <el-button link type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" :icon="Delete" @click="removeRows([row])">删除</el-button>
           </template>
@@ -458,6 +590,21 @@ onMounted(() => {
           >
             <el-option v-for="ip in addForm.ips" :key="ip" :value="ip" :label="ip" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="PHP 版本">
+          <el-select
+            v-model="addForm.php_instance"
+            clearable
+            filterable
+            placeholder="选择运行中的 PHP 实例（不选则不绑定 PHP）"
+            style="width: 100%"
+            :loading="phpLoading"
+          >
+            <el-option v-for="o in phpOptions" :key="o.instance" :value="o.instance" :label="o.label" />
+          </el-select>
+          <div v-if="!phpOptions.length" class="form-tip">
+            没有运行中的 PHP 实例：请先在「应用商店 → 已安装应用」中安装并启动 PHP 版本
+          </div>
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="addForm.status">
@@ -539,6 +686,27 @@ onMounted(() => {
           >
             <el-option v-for="ip in editForm.ips" :key="ip" :value="ip" :label="ip" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="PHP 版本">
+          <el-select
+            v-model="editForm.php_instance"
+            clearable
+            filterable
+            placeholder="选择运行中的 PHP 实例（不选则不绑定 PHP）"
+            style="width: 100%"
+            :loading="phpLoading"
+          >
+            <el-option v-for="o in phpOptions" :key="o.instance" :value="o.instance" :label="o.label" />
+            <el-option
+              v-if="stalePhpInstance"
+              :value="stalePhpInstance"
+              :label="`${stalePhpInstance}（已停止，请改选其他运行中的版本）`"
+              disabled
+            />
+          </el-select>
+          <div v-if="!phpOptions.length && !stalePhpInstance" class="form-tip">
+            没有运行中的 PHP 实例：请先在「应用商店 → 已安装应用」中安装并启动 PHP 版本
+          </div>
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="editForm.status">

@@ -683,6 +683,59 @@ pub async fn ws_log(
     ws.on_upgrade(move |socket| handle_ws_log(socket, run_id))
 }
 
+// ── 已安装应用（实例管理）───────────────────────────────────
+
+/// 已安装应用列表：root 侧扫描 apps/*/meta.yaml + info.yaml 并探测运行状态。
+pub async fn installed_apps(_claims: ValidatedClaims) -> ZapJsonResult {
+    let resp = zapexec::call(Request::AppstoreInstalled).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(
+        json!({ "code": 0, "message": "OK", "data": resp.data }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InstanceActionPayload {
+    /// 形如 application/php 的包路径
+    pub pkg_path: String,
+    /// start | stop | restart
+    pub action: String,
+}
+
+/// 对已安装应用的实例执行启停（仅管理员；要求脚本登记 svc_name）。
+pub async fn instance_action(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<InstanceActionPayload>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    if !["start", "stop", "restart"].contains(&payload.action.as_str()) {
+        return Err(ZapError::New(-1, "不支持的实例操作".to_string()));
+    }
+    let resp = zapexec::call(Request::AppstoreInstanceAction {
+        pkg_path: payload.pkg_path.clone(),
+        action: payload.action.clone(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "appstore_instance_action",
+        &payload.pkg_path,
+        &payload.action,
+    )
+    .await;
+    info!("AppStore instance action {}: {}", payload.action, payload.pkg_path);
+    Ok(Json(
+        json!({ "code": 0, "message": "OK", "data": resp.data }),
+    ))
+}
+
 async fn handle_ws_log(mut socket: WebSocket, run_id: String) {
     info!("AppStore log WebSocket connected: {run_id}");
     let Some(run) = ast::get_run(&run_id).await.unwrap_or(None) else {

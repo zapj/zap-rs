@@ -49,6 +49,7 @@ pub mod ssl;
 pub mod system_audit;
 pub mod system_config;
 pub mod system_file;
+pub mod system_env;
 pub mod system_info;
 pub mod system_ip;
 pub mod system_job;
@@ -145,6 +146,7 @@ fn api_routers() -> Router {
         .route("/system/user/update", post(user::user_update))
         .route("/system/user/delete", post(user::user_delete))
         .route("/system/user/resellers", get(user::reseller_list))
+        .route("/system/user/home_sync", post(user::user_home_sync))
         // Role management (admin only)
         .route("/system/role/list", get(system_role::role_list))
         .route("/system/role/add", post(system_role::role_add))
@@ -220,6 +222,10 @@ fn api_routers() -> Router {
             "/system/config/processes/kill",
             post(system_config::process_kill),
         )
+        // Server runtime env (运行环境状态表，admin only)
+        .route("/system/env", get(system_env::env_get))
+        .route("/system/env/refresh", post(system_env::env_refresh))
+        .route("/system/env/defaults", post(system_env::env_defaults_save))
         // SSH key management (admin only)
         .route("/system/config/ssh/keys", get(ssh_keys::list_keys))
         .route(
@@ -298,6 +304,8 @@ fn api_routers() -> Router {
         .route("/appstore/install", post(appstore::install))
         .route("/appstore/uninstall", post(appstore::uninstall))
         .route("/appstore/upgrade", post(appstore::upgrade))
+        .route("/appstore/installed", get(appstore::installed_apps))
+        .route("/appstore/instance/action", post(appstore::instance_action))
         .route("/appstore/scripts/tree", get(appstore::scripts_tree))
         .route("/appstore/script/read", get(appstore::script_read))
         .route("/appstore/script/write", post(appstore::script_write))
@@ -312,6 +320,7 @@ fn api_routers() -> Router {
         .route("/site/add", post(site::site_add))
         .route("/site/update", post(site::site_update))
         .route("/site/delete", post(site::site_delete))
+        .route("/site/sync", post(site::site_sync))
         // SSL/TLS：证书管理（手动导入 / 自签名 / Let's Encrypt）
         .route("/ssl/cert/list", get(ssl::cert_list))
         .route("/ssl/cert/detail", get(ssl::cert_detail))

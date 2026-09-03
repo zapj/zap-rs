@@ -180,9 +180,50 @@ pub enum Request {
     /// 写自定义脚本（仅限 appstore/custom/ 内）
     #[serde(rename = "appstore.script_write")]
     AppstoreScriptWrite { path: String, content: String },
-    /// 扫描已安装包列表（data/apps/*/meta.yaml）
+    /// 扫描已安装应用列表（data/apps/*/meta.yaml + info.yaml + 运行状态）
     #[serde(rename = "appstore.installed")]
     AppstoreInstalled,
+    /// 对已安装应用的实例执行启停（start/stop/restart，走其登记的 systemd 服务）
+    #[serde(rename = "appstore.instance_action")]
+    AppstoreInstanceAction {
+        /// 形如 application/php 的包路径
+        pkg_path: String,
+        /// start | stop | restart
+        action: String,
+    },
+    /// 同步站点 Nginx vhost：按站点渲染 conf 文件并 reload（幂等）
+    #[serde(rename = "site.vhost_sync")]
+    SiteVhostSync {
+        /// site 表主键（vhost 文件名 zap-site-{id}.conf）
+        site_id: i64,
+        /// 站点名称（sanitize 后用于文档根目录名）
+        name: String,
+        /// 站点域名列表（server_name，多个以空格分隔）
+        domains: Vec<String>,
+        /// true 生成 vhost；false 移除 vhost（站点停用）
+        enabled: bool,
+        /// PHP-FPM 通道（如 unix:/var/run/php-fpm-8.3.sock 或 127.0.0.1:9000）；
+        /// None 表示纯静态站点，不生成 PHP location
+        #[serde(skip_serializing_if = "Option::is_none")]
+        php_socket: Option<String>,
+        /// 站点文档根目录（面板按归属用户家目录规划并入库，如 /home/u/www/blog-1）；
+        /// None 时回退 {ZAP_PATH}/data/www/{sanitize(name)}-{site_id}
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        web_root: Option<String>,
+        /// 站点日志目录（access.log / error.log 所在）；
+        /// None 时 vhost 不生成日志指令（沿用 nginx 全局日志）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        log_root: Option<String>,
+    },
+    /// 移除站点 Nginx vhost（站点删除时清理，幂等）
+    #[serde(rename = "site.vhost_remove")]
+    SiteVhostRemove { site_id: i64, name: String },
+    /// 探测服务器运行环境快照（OS / Web 服务器 / PHP / 数据库 / 工具链）
+    #[serde(rename = "env.detect")]
+    EnvDetect,
+    /// 初始化面板用户家目录骨架：mkdir -p {home_dir}/www {home_dir}/logs（root 特权）
+    #[serde(rename = "user.home_init")]
+    UserHomeInit { home_dir: String },
 }
 
 /// `zapexec` -> `zapd` 的响应。
@@ -227,6 +268,32 @@ pub enum Message {
     Request(Request),
     /// server -> client：响应
     Response(Response),
+}
+
+/// 站点/目录名安全规范化（zapd 与 zapexec 共用）：
+/// 仅保留 ASCII 字母数字与 `_`/`-`，其余（含 `.`、空格、路径分隔符等）替换为 `-`，
+/// 再去除首尾 `-`；空结果回退 `site`，最长 48 字符。
+/// 与 zapexec `verbs/site.rs` 的历史实现保持一致，避免「面板侧记录的目录名」与
+/// 「执行端实际创建的目录名」分叉。
+pub fn sanitize_site_name(name: &str) -> String {
+    let mut out: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    out = out.trim_matches('-').to_string();
+    if out.is_empty() {
+        out = "site".to_string();
+    }
+    if out.chars().count() > 48 {
+        out = out.chars().take(48).collect();
+    }
+    out
 }
 
 #[cfg(test)]
@@ -320,6 +387,106 @@ mod tests {
             .unwrap(),
             r#"{"verb":"appstore.repo_update","id":"zap-appstore","run_id":"r9"}"#
         );
+    }
+
+    #[test]
+    fn appstore_instance_action_tagging() {
+        assert_eq!(
+            serde_json::to_string(&Request::AppstoreInstanceAction {
+                pkg_path: "application/php".into(),
+                action: "stop".into(),
+            })
+            .unwrap(),
+            r#"{"verb":"appstore.instance_action","pkg_path":"application/php","action":"stop"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::SiteVhostSync {
+                site_id: 1,
+                name: "blog".into(),
+                domains: vec!["a.com".into(), "b.com".into()],
+                enabled: true,
+                php_socket: Some("unix:/var/run/php-fpm-8.3.sock".into()),
+                web_root: None,
+                log_root: None,
+            })
+            .unwrap(),
+            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com","b.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::SiteVhostRemove {
+                site_id: 2,
+                name: "x".into(),
+            })
+            .unwrap(),
+            r#"{"verb":"site.vhost_remove","site_id":2,"name":"x"}"#
+        );
+    }
+
+    #[test]
+    fn env_verb_tagging() {
+        assert_eq!(
+            serde_json::to_string(&Request::EnvDetect).unwrap(),
+            r#"{"verb":"env.detect"}"#
+        );
+        // env.detect 需能经 serde 反序列化回来（白名单内部路由用）
+        let back: Request = serde_json::from_str(r#"{"verb":"env.detect"}"#).unwrap();
+        assert!(matches!(back, Request::EnvDetect));
+    }
+
+    #[test]
+    fn site_vhost_sync_with_dirs() {
+        let req = Request::SiteVhostSync {
+            site_id: 1,
+            name: "blog".into(),
+            domains: vec!["a.com".into()],
+            enabled: true,
+            php_socket: None,
+            web_root: Some("/home/zap/www/blog-1".into()),
+            log_root: Some("/home/zap/logs/blog-1".into()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert_eq!(
+            json,
+            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/blog-1"}"#
+        );
+        // 老版本 JSON（无 web_root/log_root）也能反序列化成功 → None
+        let old: Request =
+            serde_json::from_str(r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock"}"#)
+                .unwrap();
+        match old {
+            Request::SiteVhostSync {
+                web_root, log_root, ..
+            } => {
+                assert!(web_root.is_none());
+                assert!(log_root.is_none());
+            }
+            _ => panic!("应解析为 SiteVhostSync"),
+        }
+    }
+
+    #[test]
+    fn user_home_init_tagging() {
+        assert_eq!(
+            serde_json::to_string(&Request::UserHomeInit {
+                home_dir: "/home/zap".into(),
+            })
+            .unwrap(),
+            r#"{"verb":"user.home_init","home_dir":"/home/zap"}"#
+        );
+        let back: Request =
+            serde_json::from_str(r#"{"verb":"user.home_init","home_dir":"/home/zap"}"#).unwrap();
+        assert!(matches!(back, Request::UserHomeInit { home_dir } if home_dir == "/home/zap"));
+    }
+
+    #[test]
+    fn sanitize_site_name_helper() {
+        assert_eq!(sanitize_site_name("我的 博客"), "site");
+        assert_eq!(sanitize_site_name("my blog/x"), "my-blog-x");
+        assert_eq!(sanitize_site_name(".."), "site");
+        assert_eq!(sanitize_site_name("ABC_123"), "ABC_123");
+        // 最长 48
+        let long = "a".repeat(60);
+        assert_eq!(sanitize_site_name(&long).chars().count(), 48);
     }
 
     #[test]
