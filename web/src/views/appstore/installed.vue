@@ -271,7 +271,7 @@ const isAdmin = computed(() => userStore.roles.includes('admin'))
 const CATEGORY_LABELS: Record<string, string> = {
   database: '数据库',
   application: '应用',
-  webserver: '网站服务',
+  webserver: 'Web 服务器',
   library: '基础库',
 }
 

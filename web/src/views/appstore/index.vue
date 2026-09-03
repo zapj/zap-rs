@@ -59,7 +59,7 @@
         <el-radio-button value="all">全部</el-radio-button>
         <el-radio-button value="database">数据库</el-radio-button>
         <el-radio-button value="application">应用</el-radio-button>
-        <el-radio-button value="webserver">网站服务</el-radio-button>
+        <el-radio-button value="webserver">Web 服务器</el-radio-button>
         <el-radio-button value="library">基础库</el-radio-button>
       </el-radio-group>
       <el-input
