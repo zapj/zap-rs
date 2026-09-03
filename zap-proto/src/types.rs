@@ -145,6 +145,9 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         repo_id: Option<String>,
         version: String,
+        /// 用户点击的操作（app.yaml actions 键，如 bin/build），透传给安装脚本的 ACTION 环境变量
+        #[serde(skip_serializing_if = "Option::is_none")]
+        action: Option<String>,
         run_id: String,
     },
     /// 卸载包：执行 uninstall.sh 并删除已安装目录
@@ -160,6 +163,9 @@ pub enum Request {
         repo_id: Option<String>,
         version: String,
         old_version: String,
+        /// 用户点击的操作（app.yaml actions 键），透传给升级脚本的 ACTION 环境变量
+        #[serde(skip_serializing_if = "Option::is_none")]
+        action: Option<String>,
         run_id: String,
     },
     /// 运行自定义脚本（仅限 appstore/custom/ 内）
@@ -272,10 +278,23 @@ mod tests {
                 source: "official".into(),
                 repo_id: Some("zap-appstore".into()),
                 version: "11.4.4".into(),
+                action: None,
                 run_id: "r1".into(),
             })
             .unwrap(),
             r#"{"verb":"appstore.install","pkg_path":"database/mariadb","source":"official","repo_id":"zap-appstore","version":"11.4.4","run_id":"r1"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::AppstoreInstall {
+                pkg_path: "application/php".into(),
+                source: "official".into(),
+                repo_id: Some("zap-appstore".into()),
+                version: "8.3.3".into(),
+                action: Some("build".into()),
+                run_id: "r2".into(),
+            })
+            .unwrap(),
+            r#"{"verb":"appstore.install","pkg_path":"application/php","source":"official","repo_id":"zap-appstore","version":"8.3.3","action":"build","run_id":"r2"}"#
         );
         assert_eq!(
             serde_json::to_string(&Request::AppstoreRepoAdd {

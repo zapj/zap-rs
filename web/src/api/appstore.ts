@@ -20,7 +20,15 @@ export interface AppPackage {
   title: string
   description: string
   version: string
+  /** 全部可安装版本（来自 app.yaml version 数组），默认取首个 */
+  versions: string[]
   deps: string[]
+  /** 依赖：映射（name: 版本/要求）或旧式数组 */
+  dependencies: Record<string, string> | string[]
+  /** 自定义操作按钮：动作键 -> 按钮文案（如 build: 编译安装） */
+  actions: Record<string, string>
+  /** 是否允许多实例安装（已安装仍可安装其他版本） */
+  allow_multiple_instances: boolean
   default_port: number | null
   scripts: any
   source: 'official' | 'custom'
@@ -66,6 +74,8 @@ export const installPackage = (data: {
   source: string
   repo_id?: string
   version: string
+  /** 用户点击的动作键（app.yaml actions），随请求透传到 shell 环境变量 ACTION */
+  action?: string
 }) => http.post<any>('/appstore/install', data)
 
 export const uninstallPackage = (data: { pkg_path: string }) =>
@@ -76,6 +86,8 @@ export const upgradePackage = (data: {
   source: string
   repo_id?: string
   version: string
+  /** 用户点击的动作键（app.yaml actions），随请求透传到 shell 环境变量 ACTION */
+  action?: string
 }) => http.post<any>('/appstore/upgrade', data)
 
 // ── 脚本 ────────────────────────────────────────────────────

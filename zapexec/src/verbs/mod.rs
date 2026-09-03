@@ -72,8 +72,9 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             source,
             repo_id,
             version,
+            action,
             run_id,
-        } => appstore::install(pkg_path, source, repo_id, version, run_id).await,
+        } => appstore::install(pkg_path, source, repo_id, version, action, run_id).await,
         Request::AppstoreUninstall { pkg_path, run_id } => {
             appstore::uninstall(pkg_path, run_id).await
         }
@@ -83,8 +84,9 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             repo_id,
             version,
             old_version,
+            action,
             run_id,
-        } => appstore::upgrade(pkg_path, source, repo_id, version, old_version, run_id).await,
+        } => appstore::upgrade(pkg_path, source, repo_id, version, old_version, action, run_id).await,
         Request::AppstoreScriptRun { path, run_id } => appstore::script_run(path, run_id).await,
         Request::AppstoreScriptStop { run_id } => appstore::script_stop(run_id).await,
         Request::AppstoreScriptRead { path } => appstore::script_read(path).await,

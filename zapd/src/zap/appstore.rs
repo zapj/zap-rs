@@ -1,6 +1,6 @@
 //! AppStore 运行任务管理：DB 记录 + 日志监控 + 本地目录扫描。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -192,14 +192,94 @@ pub fn strip_done_marker(content: &str) -> String {
 #[derive(Debug, Default, serde::Deserialize)]
 struct AppYaml {
     name: Option<String>,
-    version: Option<String>,
+    /// app.yaml 的 version 可能是单个字符串或数组（如 `[8.3.3,7.4.33]`），
+    /// 数组表示该包支持安装的多个版本，首个为默认版本。
+    #[serde(default)]
+    version: Versions,
     category: Option<String>,
     title: Option<String>,
     description: Option<String>,
+    /// 兼容旧写法：deps 为依赖名列表
     deps: Option<Vec<String>>,
+    /// dependencies 映射：依赖库名 -> 版本/要求（如 openssl: 1.1.1w）
+    #[serde(default)]
+    dependencies: Option<Value>,
+    /// 自定义操作按钮：动作键 -> 按钮文案（如 build: 编译安装 / bin: 安装）
+    #[serde(default)]
+    actions: Option<Value>,
+    /// 是否允许多实例安装（为 yes 时即使已安装也可再次安装其他版本）
+    #[serde(default, deserialize_with = "de_boolish")]
+    allow_multiple_instances: bool,
     default_port: Option<u16>,
     #[serde(default)]
     scripts: Option<Value>,
+}
+
+/// version 字段解析结果：默认版本 + 全部可安装版本。
+#[derive(Debug, Default, Clone)]
+struct Versions {
+    /// 默认版本（数组首个或单值本身）
+    default: String,
+    /// 支持安装的全部版本（单值写法时仅一个元素）
+    all: Vec<String>,
+}
+
+impl<'de> serde::Deserialize<'de> for Versions {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let v = serde_yaml::Value::deserialize(d)?;
+        Ok(versions_from_yaml(&v))
+    }
+}
+
+/// YAML 标量统一转字符串（版本号、yes/no 等）。
+fn yaml_scalar_to_string(v: &serde_yaml::Value) -> Option<String> {
+    match v {
+        serde_yaml::Value::String(s) => Some(s.trim().to_string()),
+        serde_yaml::Value::Number(n) => Some(n.to_string()),
+        serde_yaml::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+fn versions_from_yaml(v: &serde_yaml::Value) -> Versions {
+    match v {
+        serde_yaml::Value::Sequence(seq) => {
+            let all: Vec<String> = seq.iter().filter_map(yaml_scalar_to_string).collect();
+            Versions {
+                default: all.first().cloned().unwrap_or_default(),
+                all,
+            }
+        }
+        other => {
+            let default = yaml_scalar_to_string(other).unwrap_or_default();
+            let all = if default.is_empty() {
+                Vec::new()
+            } else {
+                vec![default.clone()]
+            };
+            Versions { default, all }
+        }
+    }
+}
+
+/// 兼容 yes/no/true/false/1/0 的布尔写法（app.yaml 中常写作 'yes'/'no'）。
+fn de_boolish<'de, D>(d: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_yaml::Value::deserialize(d)?;
+    Ok(match &v {
+        serde_yaml::Value::Bool(b) => *b,
+        serde_yaml::Value::String(s) => matches!(
+            s.trim().to_ascii_lowercase().as_str(),
+            "yes" | "true" | "1" | "on" | "y"
+        ),
+        serde_yaml::Value::Number(n) => n.as_i64().map(|i| i != 0).unwrap_or(false),
+        _ => false,
+    })
 }
 
 /// 扫描全部 Git 源 + 自定义包。同名覆盖顺序（优先级从低到高）：
@@ -252,6 +332,15 @@ fn scan_source_dir(
                 None => continue,
             };
             let pkg_path = format!("{category}/{name}");
+            // dependencies：优先解析映射（name: version），兼容旧 deps 数组写法
+            let dependencies = match app_yaml.dependencies.clone() {
+                Some(d) if !d.is_null() => d,
+                _ => match app_yaml.deps.clone() {
+                    Some(list) => Value::Array(list.into_iter().map(Value::String).collect()),
+                    None => json!({}),
+                },
+            };
+            let actions = app_yaml.actions.clone().unwrap_or_else(|| json!({}));
             by_path.insert(
                 pkg_path.clone(),
                 json!({
@@ -260,8 +349,12 @@ fn scan_source_dir(
                     "name": app_yaml.name.clone().unwrap_or(name),
                     "title": app_yaml.title.clone().unwrap_or_default(),
                     "description": app_yaml.description.clone().unwrap_or_default(),
-                    "version": app_yaml.version.clone().unwrap_or_default(),
+                    "version": app_yaml.version.default.clone(),
+                    "versions": app_yaml.version.all.clone(),
                     "deps": app_yaml.deps.clone().unwrap_or_default(),
+                    "dependencies": dependencies,
+                    "actions": actions,
+                    "allow_multiple_instances": app_yaml.allow_multiple_instances,
                     "default_port": app_yaml.default_port,
                     "scripts": app_yaml.scripts.clone().unwrap_or(Value::Null),
                     "source": source,

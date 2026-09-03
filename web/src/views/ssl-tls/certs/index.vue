@@ -237,7 +237,7 @@ async function loadList() {
   finally { loading.value = false }
 }
 
-const TYPE_META: Record<string, { label: string; tag: 'info' | 'success' | 'warning' | 'primary' }> = {
+const TYPE_META: Record<string, { label: string; tag: 'info' | 'success' | 'warning' | 'primary' | 'danger' }> = {
   upload: { label: '手动导入', tag: 'info' },
   'self-signed': { label: '自签名', tag: 'warning' },
   letsencrypt: { label: "Let's Encrypt", tag: 'success' },
@@ -282,13 +282,12 @@ const pemGroups: PemField[] = [
 ]
 
 type EditForm = Pick<SslCertDetail, 'cert_content' | 'key_content' | 'ca_bundle' | 'csr'> &
-  Record<string, string | number>
+  Record<string, string | number | undefined>
 
 // ── 添加 / 编辑 ─────────────────────────────────────────────
 const editVisible = ref(false)
 const saving = ref(false)
 const editForm = reactive<EditForm & { id?: number }>({
-  id: undefined,
   name: '',
   domains: '',
   cert_content: '',

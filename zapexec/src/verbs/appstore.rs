@@ -655,6 +655,7 @@ pub async fn install(
     source: String,
     repo_id: Option<String>,
     version: String,
+    action: Option<String>,
     run_id: String,
 ) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
@@ -662,7 +663,12 @@ pub async fn install(
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
         let script = script_file(&pkg_dir, "install", "bin.sh")?;
         let app_path = apps_dir().join(&pkg_path);
-        let env = task_env(&pkg_dir, &app_path, &name, Some(&version), &run_id);
+        let mut env = task_env(&pkg_dir, &app_path, &name, Some(&version), &run_id);
+        if let Some(a) = action.as_deref() {
+            if !a.is_empty() {
+                env.push(("ACTION".into(), a.to_string()));
+            }
+        }
         let done_run_id = run_id.clone();
         let done_pkg_path = pkg_path.clone();
         let done_source = source.clone();
@@ -732,6 +738,7 @@ pub async fn upgrade(
     repo_id: Option<String>,
     version: String,
     old_version: String,
+    action: Option<String>,
     run_id: String,
 ) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
@@ -743,6 +750,11 @@ pub async fn upgrade(
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
         let mut env = task_env(&pkg_dir, &app_path, &name, Some(&version), &run_id);
         env.push(("APP_OLD_VERSION".into(), old_version.clone()));
+        if let Some(a) = action.as_deref() {
+            if !a.is_empty() {
+                env.push(("ACTION".into(), a.to_string()));
+            }
+        }
 
         let mut steps = Vec::new();
         if pkg_dir.join("upgrade.sh").is_file() {

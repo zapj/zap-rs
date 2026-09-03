@@ -244,6 +244,8 @@ pub struct InstallPayload {
     pub source: String,
     pub repo_id: Option<String>,
     pub version: String,
+    /// 用户点击的操作（app.yaml actions 键，如 bin/build）
+    pub action: Option<String>,
 }
 
 pub async fn install(
@@ -271,6 +273,7 @@ pub async fn install(
         source: payload.source.clone(),
         repo_id: payload.repo_id.clone(),
         version: payload.version.clone(),
+        action: payload.action.clone(),
         run_id: run_id.clone(),
     })
     .await?;
@@ -351,6 +354,8 @@ pub struct UpgradePayload {
     pub source: String,
     pub repo_id: Option<String>,
     pub version: String,
+    /// 用户点击的操作（app.yaml actions 键）
+    pub action: Option<String>,
 }
 
 pub async fn upgrade(
@@ -378,6 +383,7 @@ pub async fn upgrade(
         repo_id: payload.repo_id.clone(),
         version: payload.version.clone(),
         old_version,
+        action: payload.action.clone(),
         run_id: run_id.clone(),
     })
     .await?;

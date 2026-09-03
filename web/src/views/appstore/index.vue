@@ -81,6 +81,12 @@
             {{ pkg.name }}
             <el-tag v-if="pkg.installed" size="small" type="success" effect="light">已安装</el-tag>
             <el-tag v-else size="small" type="info" effect="plain">未安装</el-tag>
+            <el-tag
+              v-if="pkg.allow_multiple_instances"
+              size="small"
+              type="primary"
+              effect="plain"
+            >多版本</el-tag>
           </div>
           <div class="pkg-tags">
             <el-tag v-if="pkg.source === 'custom'" size="small" type="warning" effect="light">自定义</el-tag>
@@ -90,8 +96,19 @@
         <div class="pkg-title">{{ pkg.title || pkg.name }}</div>
         <div class="pkg-desc">{{ pkg.description || '暂无描述' }}</div>
         <div class="pkg-meta">
-          <span>版本: <b>{{ pkg.version || '-' }}</b></span>
-          <span v-if="pkg.deps?.length" class="pkg-deps">依赖: {{ pkg.deps.join(', ') }}</span>
+          <span v-if="pkg.versions && pkg.versions.length > 1" class="pkg-ver-sel">
+            版本:
+            <el-select
+              size="small"
+              style="width: 130px"
+              :model-value="selVersion[pkg.pkg_path] || pkg.version"
+              @change="onSelVersion(pkg, $event)"
+            >
+              <el-option v-for="ver in pkg.versions" :key="ver" :label="ver" :value="ver" />
+            </el-select>
+          </span>
+          <span v-else>版本: <b>{{ pkg.version || '-' }}</b></span>
+          <span v-if="depList(pkg).length" class="pkg-deps">依赖: {{ depList(pkg).join('、') }}</span>
           <span v-if="pkg.default_port" class="pkg-port">端口: {{ pkg.default_port }}</span>
         </div>
         <div v-if="pkg.installed" class="pkg-installed-meta">
@@ -100,8 +117,45 @@
           <span v-if="pkg.upgraded_from">（升级自 {{ pkg.upgraded_from }}）</span>
         </div>
         <div class="pkg-actions">
-          <template v-if="pkg.installed">
+          <template v-if="!pkg.installed">
+            <template v-if="actionEntries(pkg).length">
+              <el-button
+                v-for="[key, label] in actionEntries(pkg)"
+                :key="key"
+                size="small"
+                type="primary"
+                :disabled="!isAdmin"
+                @click="handleInstall(pkg, key)"
+              >{{ label }}</el-button>
+            </template>
             <el-button
+              v-else
+              size="small"
+              type="primary"
+              :disabled="!isAdmin"
+              @click="handleInstall(pkg)"
+            >安装</el-button>
+          </template>
+          <template v-else>
+            <el-button
+              v-if="pkg.allow_multiple_instances && !actionEntries(pkg).length"
+              size="small"
+              type="primary"
+              plain
+              :disabled="!isAdmin"
+              @click="handleInstall(pkg)"
+            >再次安装</el-button>
+            <el-button
+              v-for="[key, label] in actionEntries(pkg)"
+              :key="key"
+              size="small"
+              type="success"
+              plain
+              :disabled="!isAdmin"
+              @click="handleInstall(pkg, key)"
+            >{{ label }}</el-button>
+            <el-button
+              v-if="!pkg.allow_multiple_instances"
               size="small"
               type="warning"
               plain
@@ -116,13 +170,6 @@
               @click="handleUninstall(pkg)"
             >卸载</el-button>
           </template>
-          <el-button
-            v-else
-            size="small"
-            type="primary"
-            :disabled="!isAdmin"
-            @click="handleInstall(pkg)"
-          >安装</el-button>
         </div>
       </el-card>
     </div>
@@ -329,26 +376,68 @@ async function loadPackages() {
   }
 }
 
+// ── 版本 / 动作 / 依赖辅助 ─────────────────────────────────
+
+/** 每张卡片当前选择的安装/升级目标版本（app.yaml version 数组中的一项） */
+const selVersion = ref<Record<string, string>>({})
+
+function onSelVersion(pkg: AppPackage, v: string) {
+  selVersion.value[pkg.pkg_path] = v
+}
+
+/** 卡片当前生效的版本：优先用户下拉选择，其次包默认版本 */
+function curVersion(pkg: AppPackage): string {
+  return selVersion.value[pkg.pkg_path] || pkg.version || ''
+}
+
+/** app.yaml actions 的动作键 -> 按钮文案（键值与文案均去空格兜底） */
+function actionEntries(pkg: AppPackage): Array<[string, string]> {
+  const a = pkg.actions
+  if (!a) return []
+  return Object.entries(a).map(([k, label]) => [k, (label || '').trim() || k])
+}
+
+function actionLabel(pkg: AppPackage, key?: string): string {
+  if (!key) return ''
+  return actionEntries(pkg).find(([k]) => k === key)?.[1] || key
+}
+
+/** 依赖展示：映射（openssl 1.1.1w）或旧式数组 */
+function depList(pkg: AppPackage): string[] {
+  const d = pkg.dependencies as unknown
+  if (!d) return pkg.deps || []
+  if (Array.isArray(d)) return d as string[]
+  return Object.entries(d as Record<string, string>).map(([n, v]) => (v ? `${n} ${v}` : n))
+}
+
 // ── 安装 / 卸载 / 升级 ─────────────────────────────────────
 
-async function handleInstall(pkg: AppPackage) {
+async function handleInstall(pkg: AppPackage, actionKey?: string) {
+  const ver = curVersion(pkg)
+  const label = actionLabel(pkg, actionKey)
+  const actName = pkg.installed ? '重新安装' : '安装'
   try {
+    const hint =
+      pkg.installed && pkg.allow_multiple_instances && pkg.versions && pkg.versions.length > 1
+        ? '（允许多版本共存，如需安装其他版本请先在卡片上选择）'
+        : ''
     await ElMessageBox.confirm(
-      `确定安装 ${pkg.title || pkg.name} ${pkg.version ? `(v${pkg.version})` : ''}？`,
-      '安装确认',
+      `确定${actName} ${pkg.title || pkg.name} ${ver ? `(v${ver})` : ''}${actionKey ? `，操作: ${label}` : ''}？${hint}`,
+      `${actName}确认`,
       { type: 'info' },
     )
     const resp = await installPackage({
       pkg_path: pkg.pkg_path,
       source: pkg.source,
       repo_id: pkg.source === 'official' ? pkg.repo_id : undefined,
-      version: pkg.version,
+      version: ver,
+      action: actionKey || undefined,
     })
-    ElMessage.success('安装已启动')
-    logDrawerRef.value?.openDrawer(resp.data.run_id, `安装 ${pkg.name}`)
+    ElMessage.success(`${actName}已启动`)
+    logDrawerRef.value?.openDrawer(resp.data.run_id, `${actName} ${pkg.name}`)
     setTimeout(loadPackages, 2000)
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '安装失败')
+    if (e !== 'cancel') ElMessage.error(e.message || `${actName}失败`)
   }
 }
 
@@ -367,9 +456,10 @@ async function handleUninstall(pkg: AppPackage) {
 }
 
 async function handleUpgrade(pkg: AppPackage) {
+  const ver = curVersion(pkg)
   try {
     await ElMessageBox.confirm(
-      `确定升级 ${pkg.title || pkg.name} 到 v${pkg.version}？当前已安装 v${pkg.installed_version}`,
+      `确定升级 ${pkg.title || pkg.name} 到 v${ver || pkg.version}？当前已安装 v${pkg.installed_version}`,
       '升级确认',
       { type: 'warning' },
     )
@@ -377,7 +467,7 @@ async function handleUpgrade(pkg: AppPackage) {
       pkg_path: pkg.pkg_path,
       source: pkg.source,
       repo_id: pkg.source === 'official' ? pkg.repo_id : undefined,
-      version: pkg.version,
+      version: ver || pkg.version,
     })
     ElMessage.success('升级已启动')
     logDrawerRef.value?.openDrawer(resp.data.run_id, `升级 ${pkg.name}`)
