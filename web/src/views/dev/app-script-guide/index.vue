@@ -29,7 +29,7 @@
           <pre class="code">{{ codes.tree }}</pre>
           <ul>
             <li><code>app.yaml</code>：应用描述，见第二节；</li>
-            <li><code>bin.sh</code> / <code>uninstall.sh</code> / <code>upgrade.sh</code>：默认生命周期脚本文件名，可用 <code>scripts</code> 字段覆盖（见第三节）；</li>
+            <li><code>install.sh</code> / <code>uninstall.sh</code> / <code>upgrade.sh</code>：默认生命周期脚本文件名，可用 <code>scripts</code> 字段覆盖（见第三节）；</li>
             <li>其余文件（源码、配置模板、编译资源等）随包下发，运行时位于快照目录内，由脚本自行引用。</li>
           </ul>
           <el-alert type="warning" :closable="false" class="doc-tip">
@@ -67,7 +67,7 @@
             <tbody>
               <tr>
                 <td>安装</td>
-                <td><code>scripts.install</code>，缺省 <code>bin.sh</code></td>
+                <td><code>scripts.install</code>，缺省 <code>install.sh</code></td>
                 <td>包未安装时执行；成功后系统在 <code>APP_PATH</code> 写入运行元数据 <code>meta.yaml</code>（版本 / 来源 / 安装时间 / run_id），脚本须自行登记实例信息 <code>info.yaml</code>（见下「实例登记」）</td>
               </tr>
               <tr>
@@ -77,7 +77,7 @@
               </tr>
               <tr>
                 <td>升级</td>
-                <td>存在 <code>upgrade.sh</code> 则执行；否则自动回退为「先 <code>uninstall.sh</code>、后 <code>bin.sh</code>」两段</td>
+                <td>存在 <code>upgrade.sh</code> 则执行；否则自动回退为「先 <code>uninstall.sh</code>、后 <code>install.sh</code>」两段</td>
                 <td>旧版本目录清理由脚本自理（<code>APP_OLD_VERSION</code> 携带旧版本号）；两段式策略中卸载阶段请勿删除还需复用的数据。成功后系统刷新 <code>meta.yaml</code>；若安装目录 / 服务名有变，脚本应同步更新 <code>info.yaml</code></td>
               </tr>
             </tbody>
@@ -247,7 +247,7 @@ const codes = {
 └── <category>/
     └── <name>/
         ├── app.yaml          # 应用描述（含 scripts / options / actions）
-        ├── bin.sh            # 安装脚本（缺省文件名）
+        ├── install.sh        # 安装脚本（缺省文件名）
         ├── uninstall.sh      # 卸载脚本（缺省文件名）
         ├── upgrade.sh        # 升级脚本（可选）
         └── ...               # 其余资源，随快照下发
@@ -258,7 +258,7 @@ const codes = {
 │   ├── runs/<run_id>/                    # 一次运行完整现场：成功后整体清理，失败保留
 │   │   ├── pkg/                          # 脚本快照：app.yaml + 脚本 + options.env/json（可编辑重跑）
 │   │   │   ├── app.yaml
-│   │   │   ├── bin.sh
+│   │   │   ├── install.sh
 │   │   │   ├── options.env               # 安装/升级选项（可 source、可编辑）
 │   │   │   └── options.json
 │   │   ├── build/                        # 编译目录（BUILD_PATH，随 run 一并清理）

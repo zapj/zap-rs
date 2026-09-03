@@ -922,7 +922,7 @@ pub async fn install(
             "options": options.clone(),
         });
         let snapshot = prepare_snapshot(&run_id, &pkg_dir, &spec)?;
-        let script = script_file(&snapshot, "install", "bin.sh")?;
+        let script = script_file(&snapshot, "install", "install.sh")?;
         let app_path = apps_dir().join(&pkg_path);
         let mut env = task_env(&snapshot, &app_path, &name, Some(&version), &run_id);
         // 选项落盘 options.env / options.json 并注入 env
@@ -1087,7 +1087,7 @@ pub async fn upgrade(
                 env: env.clone(),
             });
             steps.push(ScriptStep {
-                script: script_file(&snapshot, "install", "bin.sh")?,
+                script: script_file(&snapshot, "install", "install.sh")?,
                 env: env.clone(),
             });
         }
@@ -1263,7 +1263,7 @@ pub async fn run_retry(run_id: String, new_run_id: String) -> Response {
                         env: env.clone(),
                     });
                     steps.push(ScriptStep {
-                        script: script_file(&snapshot, "install", "bin.sh")?,
+                        script: script_file(&snapshot, "install", "install.sh")?,
                         env: env.clone(),
                     });
                 }
@@ -1292,7 +1292,7 @@ pub async fn run_retry(run_id: String, new_run_id: String) -> Response {
             }
             _ => {
                 // install 默认
-                let script = script_file(&snapshot, "install", "bin.sh")?;
+                let script = script_file(&snapshot, "install", "install.sh")?;
                 steps.push(ScriptStep { script, env });
                 let category = pkg_path.split('/').next().unwrap_or("").to_string();
                 let done_source = spec["source"].as_str().unwrap_or("").to_string();
@@ -1683,13 +1683,13 @@ mod tests {
         std::fs::write(pkg.join("remove.sh"), "#!/bin/bash\n").unwrap();
         std::fs::write(pkg.join("upgrade.sh"), "#!/bin/bash\n").unwrap();
 
-        let install = script_file(&pkg, "install", "bin.sh").unwrap();
+        let install = script_file(&pkg, "install", "install.sh").unwrap();
         assert_eq!(install.file_name().unwrap(), "setup.sh");
         // 未在 yaml 中定义的 key 回退到默认
         let upgrade = script_file(&pkg, "upgrade", "upgrade.sh").unwrap();
         assert_eq!(upgrade.file_name().unwrap(), "upgrade.sh");
         // 覆盖指向不存在的文件 → 报错
-        let missing = script_file(&pkg, "install", "bin.sh");
+        let missing = script_file(&pkg, "install", "install.sh");
         assert!(missing.is_ok());
     }
 

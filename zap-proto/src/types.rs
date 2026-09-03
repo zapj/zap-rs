@@ -135,7 +135,7 @@ pub enum Request {
     /// 更新单个 AppStore Git 源（clone/fetch + reset）
     #[serde(rename = "appstore.repo_update")]
     AppstoreRepoUpdate { id: String, run_id: String },
-    /// 安装包：执行包的 bin.sh（或 app.yaml 指定脚本）
+    /// 安装包：执行包的 install.sh（或 app.yaml 指定脚本）
     #[serde(rename = "appstore.install")]
     AppstoreInstall {
         /// 形如 database/mariadb 的包相对路径
@@ -157,7 +157,7 @@ pub enum Request {
     /// 卸载包：执行 uninstall.sh 并删除已安装目录
     #[serde(rename = "appstore.uninstall")]
     AppstoreUninstall { pkg_path: String, run_id: String },
-    /// 升级包：执行 upgrade.sh（缺省时先 uninstall.sh 再 bin.sh）
+    /// 升级包：执行 upgrade.sh（缺省时先 uninstall.sh 再 install.sh）
     #[serde(rename = "appstore.upgrade")]
     AppstoreUpgrade {
         pkg_path: String,

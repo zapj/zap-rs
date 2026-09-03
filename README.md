@@ -92,12 +92,12 @@ description: ...
 deps: []                  # 依赖包
 default_port: 3306
 scripts:                  # 可选，缺省走约定文件名
-  install: bin.sh
+  install: install.sh
   uninstall: uninstall.sh
   upgrade: upgrade.sh
 ```
 
-脚本由 `zapexec` 以 root 运行，注入环境变量：`ZAP_PATH` / `ZAPCTL` / `APPS_DIR` / `PKG_PATH` / `APP_ID` / `APP_VERSION`（升级另有 `APP_OLD_VERSION`）。无 `upgrade.sh` 时升级缺省 = 先 `uninstall.sh` 再 `bin.sh`。
+脚本由 `zapexec` 以 root 运行，注入环境变量：`ZAP_PATH` / `ZAPCTL` / `APPS_DIR` / `PKG_PATH` / `APP_ID` / `APP_VERSION`（升级另有 `APP_OLD_VERSION`）。无 `upgrade.sh` 时升级缺省 = 先 `uninstall.sh` 再 `install.sh`。
 
 ### Git 源管理（多源）
 
