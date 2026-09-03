@@ -695,6 +695,11 @@ async function handleUpgrade(pkg: AppPackage) {
 /** 真正发起升级;成功返回 true */
 async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolean> {
   const ver = curVersion(pkg)
+  // 升级目标与当前已装版本一致时直接拦截(后端亦拒绝),避免无意义的重复执行
+  if (pkg.installed && ver && ver === pkg.installed_version) {
+    ElMessage.warning(`已安装 v${ver}，无需重复升级（如需重装请使用「再次安装」）`)
+    return false
+  }
   try {
     await ElMessageBox.confirm(
       `确定升级 ${pkg.title || pkg.name} 到 v${ver || pkg.version}？当前已安装 v${pkg.installed_version}`,

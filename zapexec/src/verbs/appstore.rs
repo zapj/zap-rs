@@ -1038,6 +1038,15 @@ pub async fn upgrade(
         if !app_path.is_dir() {
             return Err("该包未安装，无法升级".into());
         }
+        // 目标版本与当前已装版本相同 → 拒绝重复升级(读不到 meta 时放行,避免误拦旧数据)
+        if let Ok(cur) = read_meta(&app_path)
+            && cur.version == version
+        {
+            return Ok(Response::err(
+                -1,
+                format!("已安装 v{version}，无需重复升级（如需重装请使用「再次安装」）"),
+            ));
+        }
         let pkg_dir = find_package(&pkg_path, &source, repo_id.as_deref())?;
         // 与 install 一致：复制脚本副本到 runs/<run_id>/pkg 并从副本执行
         let spec = json!({
