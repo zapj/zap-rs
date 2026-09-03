@@ -321,7 +321,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Goods, Search, InfoFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
@@ -661,7 +661,7 @@ async function doInstall(pkg: AppPackage, actionKey?: string, options?: FormOpti
     })
     ElMessage.success(`${actName}已启动`)
     logDrawerRef.value?.openDrawer(resp.data.run_id, `${actName} ${pkg.name}`)
-    setTimeout(loadPackages, 2000)
+    trackRun(resp.data.run_id, `${pkg.title || pkg.name} ${actName}`)
     return true
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message || `${actName}失败`)
@@ -677,7 +677,7 @@ async function handleUninstall(pkg: AppPackage) {
     const resp = await uninstallPackage({ pkg_path: pkg.pkg_path })
     ElMessage.success('卸载已启动')
     logDrawerRef.value?.openDrawer(resp.data.run_id, `卸载 ${pkg.name}`)
-    setTimeout(loadPackages, 2000)
+    trackRun(resp.data.run_id, `${pkg.title || pkg.name} 卸载`)
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message || '卸载失败')
   }
@@ -715,13 +715,45 @@ async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolea
     })
     ElMessage.success('升级已启动')
     logDrawerRef.value?.openDrawer(resp.data.run_id, `升级 ${pkg.name}`)
-    setTimeout(loadPackages, 2000)
+    trackRun(resp.data.run_id, `${pkg.title || pkg.name} 升级`)
     return true
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message || '升级失败')
     return false
   }
 }
+
+// ── 后台任务完成跟踪:终态提示 + 自动刷新列表 ───────────────
+const runPolls = new Map<string, number>()
+
+/** 轮询 run 直到终态:成功/失败给出提示,并刷新应用商店包列表(安装状态等) */
+function trackRun(runId: string, label: string) {
+  if (runPolls.has(runId)) return
+  const timer = window.setInterval(async () => {
+    try {
+      const resp = await getRuns({ page: 1, page_size: 50 })
+      const item = (resp.data?.items || []).find((r: RunItem) => r.run_id === runId)
+      if (!item || item.status === 'running') return // 排队中或仍在执行
+      window.clearInterval(timer)
+      runPolls.delete(runId)
+      if (item.status === 'success') {
+        ElMessage.success(`${label}成功`)
+      } else {
+        const code = item.exit_code !== -1 ? `，退出码 ${item.exit_code}` : ''
+        ElMessage.error(`${label}未成功（状态: ${statusText(item.status)}${code}），详见运行日志`)
+      }
+      loadPackages()
+    } catch {
+      // 瞬时网络 / 后端抖动,下一轮重试
+    }
+  }, 1500)
+  runPolls.set(runId, timer)
+}
+
+onBeforeUnmount(() => {
+  for (const t of runPolls.values()) window.clearInterval(t)
+  runPolls.clear()
+})
 
 // ── 运行记录 ────────────────────────────────────────────────
 
