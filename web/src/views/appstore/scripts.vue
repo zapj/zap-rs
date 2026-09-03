@@ -197,7 +197,8 @@ onMounted(() => {
 <style scoped>
 .scripts-page {
   display: flex;
-  height: calc(100vh - 84px - 20px);
+  /* 视口高 - 顶部导航 50 - 标签栏 34 - 底部 Footer 50 - app-main 上下 padding 20 */
+  height: calc(100vh - 154px);
   background: #fff;
   border-radius: 4px;
   overflow: hidden;
@@ -291,15 +292,24 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+.editor-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .editor-area :deep(.el-textarea__inner) {
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 13px;
   line-height: 1.6;
   height: 100%;
+  flex: 1;
   border: none;
   border-radius: 0;
   padding: 14px 16px;
   resize: none;
+  overflow-y: auto;
   background: #fafafa;
   color: #303133;
   box-shadow: none;

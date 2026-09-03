@@ -14,8 +14,12 @@ const APP_VERSION = import.meta.env.VITE_APP_VERSION
 
 <style scoped>
 .footer {
-  padding: 15px 0;
-  text-align: center;
+  height: 50px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   color: #666;
   font-size: 14px;
 }
