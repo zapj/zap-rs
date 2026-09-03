@@ -16,3 +16,4 @@ data/appstore/tmp/*
 data/appstore/runs/*
 data/appstore/cache/*
 data/appstore/custom/*
+data/apps/*/
