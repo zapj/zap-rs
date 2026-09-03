@@ -68,20 +68,41 @@
               <tr>
                 <td>安装</td>
                 <td><code>scripts.install</code>，缺省 <code>bin.sh</code></td>
-                <td>包未安装时执行；成功（退出码 0）后在 <code>APP_PATH</code> 写入 <code>meta.yaml</code>（版本 / 来源 / run_id 等元数据）</td>
+                <td>包未安装时执行；成功后系统在 <code>APP_PATH</code> 写入运行元数据 <code>meta.yaml</code>（版本 / 来源 / 安装时间 / run_id），脚本须自行登记实例信息 <code>info.yaml</code>（见下「实例登记」）</td>
               </tr>
               <tr>
                 <td>卸载</td>
                 <td><code>scripts.uninstall</code>，缺省 <code>uninstall.sh</code></td>
-                <td>仅已安装时可执行；成功后系统自动删除 <code>APP_PATH</code>，因此需要保留的备份请在脚本内自行处理</td>
+                <td>仅已安装时可执行；成功后系统自动删除 <code>APP_PATH</code>（含 <code>meta.yaml</code> / <code>info.yaml</code>），需要保留的备份请在脚本内自行处理</td>
               </tr>
               <tr>
                 <td>升级</td>
                 <td>存在 <code>upgrade.sh</code> 则执行；否则自动回退为「先 <code>uninstall.sh</code>、后 <code>bin.sh</code>」两段</td>
-                <td>旧版本目录清理由脚本自理（<code>APP_OLD_VERSION</code> 携带旧版本号）；两段式策略中卸载阶段请勿删除还需复用的数据</td>
+                <td>旧版本目录清理由脚本自理（<code>APP_OLD_VERSION</code> 携带旧版本号）；两段式策略中卸载阶段请勿删除还需复用的数据。成功后系统刷新 <code>meta.yaml</code>；若安装目录 / 服务名有变，脚本应同步更新 <code>info.yaml</code></td>
               </tr>
             </tbody>
           </table>
+
+          <p class="sec-sub"><strong>实例登记（info.yaml）</strong>：<code>APP_PATH</code>（<code>$ZAP_PATH/data/apps/&lt;category&gt;/&lt;name&gt;/</code>）下两类记录分工——<code>meta.yaml</code> 由系统在成功时写入（版本 / 来源 / 安装时间 / run_id 等运行元数据，脚本不要写）；<code>info.yaml</code> 由安装 / 升级脚本在结束前自行登记，Web 端「已安装」据此展示实例、探测状态并支持启停：</p>
+          <pre class="code">{{ codes.infoYaml }}</pre>
+          <table class="doc-table">
+            <thead>
+              <tr><th style="width: 140px">字段</th><th style="width: 110px">类型</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>svc_name</code></td><td>string</td><td>守护型应用填 systemd unit 名（如 <code>mysql</code> / <code>nginx</code> / <code>php-fpm-85</code>），状态探测与面板启停走 systemctl</td></tr>
+              <tr><td><code>instance</code></td><td>string</td><td>实例展示标识（如 <code>php85</code>、<code>openssl1011</code>）</td></tr>
+              <tr><td><code>install_dir</code></td><td>string</td><td>软件本体实际安装目录（位于 <code>$APPS_DIR</code> 下），日志定位 / 「打开目录」用</td></tr>
+              <tr><td><code>config_file</code></td><td>string</td><td>主配置文件绝对路径</td></tr>
+              <tr><td><code>pid_file</code></td><td>string</td><td>pid 文件路径；守护型填写，作无 systemd 环境下的兜底探活</td></tr>
+              <tr><td><code>expose</code></td><td>string / string[]</td><td>暴露入口：<code>tcp:80</code>、<code>unix:/run/xxx.sock</code> 等，可多行数组；无则 <code>none</code></td></tr>
+              <tr><td><code>tags</code></td><td>string[]</td><td>分类 / 特性标签（如 <code>webserver</code>、<code>library</code>）</td></tr>
+            </tbody>
+          </table>
+          <el-alert type="info" :closable="false" class="doc-tip">
+            无守护进程的库类（如 openssl / libpng / libpcre2）不写 <code>svc_name</code> / <code>pid_file</code>，状态由系统返回 unknown；需面板支持「启动 / 停止 / 状态」的守护型应用务必登记 <code>svc_name</code>。
+          </el-alert>
+
           <ul>
             <li><strong>退出码约定</strong>：任一步骤退出码非 0 即视为失败并中断后续步骤，任务最终以最后一次非 0 退出码结束；</li>
             <li><strong>输出</strong>：脚本 <code>stdout / stderr</code> 实时追加进 <code>run-&lt;run_id&gt;.log</code>，Web 端可跟踪，失败排查请把原因打印到输出；</li>
@@ -95,8 +116,8 @@
           <ul>
             <li><code>PKG_PATH</code> 指向的是这个快照目录（含 <code>app.yaml</code>、脚本、<code>options.env</code> 等），不是仓库源目录；运行中修改仓库不会影响已在队列/运行中的任务；</li>
             <li><code>run.json</code> 记录本次运行的原始参数（动作 / 版本 / 选项），供重跑还原环境；</li>
-            <li>全部步骤退出码为 0（成功）后，系统自动清理 <code>runs/&lt;run_id&gt;</code>，避免磁盘堆积；</li>
-            <li>失败（任一退出码非 0）则保留快照：管理员可在「应用商店 → 运行记录」中读取/编辑快照内脚本与 <code>options.env</code>，再「编辑脚本 / 重跑」复用同一快照重试；</li>
+            <li>全部步骤退出码为 0（成功）后，系统自动清理 <code>runs/&lt;run_id&gt;</code>（脚本快照与 <code>build/</code> 编译目录一并清理），避免磁盘堆积；</li>
+            <li>失败（任一退出码非 0）则保留整个运行现场：<code>pkg/</code> 内脚本与 <code>options.env</code> 可在「应用商店 → 运行记录」中读取/编辑，<code>build/</code> 编译残留一并保留便于排查，之后「编辑脚本 / 重跑」复用同一快照重试；</li>
             <li>全局串行队列：同一时间仅执行一个脚本任务，后续任务先排队，日志中会提示「任务进入执行队列，等待前序任务完成后自动开始」；</li>
             <li>日志结束时追加一行 <code>__ZAP_DONE__ &lt;退出码&gt;</code> 作为完成标记。</li>
           </ul>
@@ -112,15 +133,15 @@
               <tr><td><code>PATH</code></td><td>安全白名单：/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin（不可覆盖）</td></tr>
               <tr><td><code>ZAP_PATH</code></td><td>面板安装根目录，缺省 /usr/local/zap</td></tr>
               <tr><td><code>ZAPCTL</code></td><td>zapctl 可执行文件路径（<code>$ZAP_PATH/zapctl</code>）</td></tr>
-              <tr><td><code>APPS_DIR</code></td><td>已安装应用根目录（<code>$ZAP_PATH/data/apps</code>）</td></tr>
+              <tr><td><code>APPS_DIR</code></td><td>软件本体安装根目录（默认 <code>/usr/local/apps</code>；zapd / zapexec 启动时可经 <code>ZAP_APPS_DIR</code> 覆盖）。<code>configure --prefix</code> 等最终安装目标以此作基准拼接（如 <code>$APPS_DIR/nginx-1.24.0</code>），不要硬编码系统目录</td></tr>
               <tr><td><code>LOG_FILE</code></td><td>本次运行日志绝对路径（<code>data/appstore/logs/run-&lt;run_id&gt;.log</code>）</td></tr>
               <tr><td><code>CPU_NUM</code></td><td>可用 CPU 核数（编译可参考，如 make -j）</td></tr>
               <tr><td><code>PKG_PATH</code></td><td>本次运行脚本快照目录（含 app.yaml / 脚本 / options.env / options.json）</td></tr>
               <tr><td><code>PKG_SRC_PATH</code></td><td>仓库内源码目录（<code>repos/&lt;repo&gt;/&lt;category&gt;/&lt;name&gt;</code>），需要读源码附件时用</td></tr>
               <tr><td><code>APP_ID</code></td><td>本次运行 run_id</td></tr>
               <tr><td><code>APP_NAME</code></td><td>包名</td></tr>
-              <tr><td><code>APP_PATH</code></td><td>安装目录（<code>$APPS_DIR/category/name</code>），安装产物应落于此</td></tr>
-              <tr><td><code>BUILD_PATH</code></td><td>编译用临时目录（<code>$APPS_DIR/.build/name</code>），编译中间产物放这里</td></tr>
+              <tr><td><code>APP_PATH</code></td><td>本应用元数据登记目录（<code>$ZAP_PATH/data/apps/&lt;category&gt;/&lt;name&gt;</code>）：系统写 <code>meta.yaml</code>、脚本登记 <code>info.yaml</code>，勿放安装产物（登记字段见第三节「实例登记」）</td></tr>
+              <tr><td><code>BUILD_PATH</code></td><td>本次运行专属编译目录（<code>$ZAP_PATH/data/appstore/runs/&lt;run_id&gt;/build</code>），编译中间产物放这里；脚本开头可放心 <code>rm -rf</code>——路径按 run 隔离，成功后随运行现场一并清理、失败保留供排查</td></tr>
               <tr><td><code>ZAP_DATA_PATH</code></td><td>面板数据目录（<code>$ZAP_PATH/data</code>）</td></tr>
               <tr><td><code>APP_VERSION</code></td><td>本次安装/升级的目标版本</td></tr>
               <tr><td><code>MAJOR_VERSION</code></td><td>目标版本主版本号（如 1.24.0 → 1）</td></tr>
@@ -210,7 +231,7 @@
           <h2 id="sec-trouble">十、失败排查与重跑工作流</h2>
           <ol>
             <li>「应用商店 → 运行记录」查看失败运行的日志（末尾 <code>__ZAP_DONE__ &lt;code&gt;</code> 即退出码）；</li>
-            <li>失败快照默认保留在 <code>data/appstore/runs/&lt;run_id&gt;/pkg/</code>，管理员可查看/编辑其中的脚本与 <code>options.env</code>，然后「编辑脚本 / 重跑」——重跑以快照内文件为准，编辑过的选项同样生效；</li>
+            <li>失败现场默认保留在 <code>data/appstore/runs/&lt;run_id&gt;/</code>：<code>pkg/</code> 内脚本与 <code>options.env</code> 可查看/编辑，<code>build/</code> 编译残留一并保留供排查；然后「编辑脚本 / 重跑」——重跑以快照内文件为准，编辑过的选项同样生效；</li>
             <li>重跑成功后系统按新 run_id 重新跟踪日志；新运行成功会清理其快照，原失败快照由「重跑」发起时一并清理。</li>
           </ol>
           <p class="footnote">本文档与 <code>app.yaml</code> 解析、<code>zapexec/src/verbs/appstore.rs</code> 执行实现保持同步；如有出入以代码为准。</p>
@@ -231,16 +252,32 @@ const codes = {
         ├── upgrade.sh        # 升级脚本（可选）
         └── ...               # 其余资源，随快照下发
 `,
-  model: `data/appstore/
-├── repos/<repo>/<category>/<name>/   # 仓库源（只读参考）
-├── runs/<run_id>/
-│   ├── pkg/                         # 本次运行快照：app.yaml + 脚本 + options.env/json
-│   │   ├── app.yaml
-│   │   ├── bin.sh
-│   │   ├── options.env              # 安装/升级选项（可 source、可编辑）
-│   │   └── options.json
-│   └── run.json                     # 运行参数记录
-└── logs/run-<run_id>.log            # 实时日志（结束含 __ZAP_DONE__ <code>）
+  model: `\$ZAP_PATH/
+├── data/appstore/
+│   ├── repos/<repo>/<category>/<name>/   # 仓库源（只读参考）
+│   ├── runs/<run_id>/                    # 一次运行完整现场：成功后整体清理，失败保留
+│   │   ├── pkg/                          # 脚本快照：app.yaml + 脚本 + options.env/json（可编辑重跑）
+│   │   │   ├── app.yaml
+│   │   │   ├── bin.sh
+│   │   │   ├── options.env               # 安装/升级选项（可 source、可编辑）
+│   │   │   └── options.json
+│   │   ├── build/                        # 编译目录（BUILD_PATH，随 run 一并清理）
+│   │   └── run.json                      # 运行参数记录
+│   └── logs/run-<run_id>.log             # 实时日志（结束含 __ZAP_DONE__ <code>）
+├── data/apps/<category>/<name>/          # 安装元数据：meta.yaml（系统写）+ info.yaml（脚本写）
+└── \$APPS_DIR/<name>-<ver>/              # 软件本体：默认 /usr/local/apps（ZAP_APPS_DIR 可覆盖）
+`,
+  infoYaml: `# 安装脚本末尾：登记实例信息（值用脚本内变量展开，勿字面写死）
+cat > "\${APP_PATH}/info.yaml" <<EOF
+svc_name: php-fpm-\${PHP_SHORT_VERSION}   # 守护型填 systemd unit 名；库类删除此行
+instance: php\${PHP_SHORT_VERSION}
+install_dir: \${PHP_INSTALL_PATH}          # 软件本体在 \$APPS_DIR 下的实际安装目录
+config_file: \${PHP_INSTALL_PATH}/etc/php.ini
+pid_file: \${PHP_FPM_PID}                  # 无守护进程的库类删除此行
+expose: unix:\${PHP_FPM_SOCK}
+tags:
+  - language
+EOF
 `,
   optionsYaml: `options:
   build:                # 动作键；顶层直接写列表 = install
@@ -260,7 +297,8 @@ const codes = {
 `,
   readOpts: `# 方式一：直接用注入的环境变量（env 已注入，最常用）
 echo "已选模块: $MODULES"
-./configure --prefix="$APP_PATH" $EXTRA_CONFIG $MODULES || exit 1
+# 安装目标通常落在 $APPS_DIR 下（各包可自行定义 INSTALL_PATH 等变量拼版本目录）
+./configure --prefix="$APPS_DIR/nginx-$APP_VERSION" $EXTRA_CONFIG $MODULES || exit 1
 
 # 方式二：source options.env（与脚本同目录）
 source "$PKG_PATH/options.env"
@@ -299,8 +337,9 @@ options:
 `,
   nginxUse: `# build_linux_amd64.sh（节选）
 # $MODULES / $EXTRA_CONFIG 已由系统注入 env（来自 options）
+# prefix 落在 $APPS_DIR 下：仓库样例 INSTALL_PATH="$APPS_DIR/nginx-$APP_VERSION"
 ./configure \\
---prefix="$APP_PATH" \\
+--prefix="$INSTALL_PATH" \\
 --with-http_ssl_module \\
 --with-http_gzip_static_module \\
 \${EXTRA_CONFIG:-} \${MODULES:-} \\
@@ -415,6 +454,11 @@ pre.code {
   overflow-x: auto;
   color: var(--el-text-color-primary);
   white-space: pre;
+}
+.sec-sub {
+  margin: 16px 0 10px;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
 }
 .doc-tip {
   margin: 12px 0;
