@@ -11,6 +11,9 @@
 #   ./rundev.sh --reset-db      # 删除 data/zap.db 重建全新数据库（admin 初始密码 A123456）
 #
 # 注意：zapexec 需要 root 权限，脚本通过 sudo 启动（首次可能提示输入密码）。
+#
+# 软件安装根目录默认 /usr/local/apps（第三方软件安装位置，与面板数据解耦）；
+# 需要自定义时，先 export ZAP_APPS_DIR=/你的/安装/目录 再运行本脚本即可。
 set -euo pipefail
 
 # ── 终端颜色 ────────────────────────────────────────────────
@@ -151,7 +154,12 @@ trap cleanup EXIT INT TERM
 info "启动 zapexec (root)：socket=$EXEC_SOCKET client-user=$DEV_USER"
 # 注入 ZAP_PATH 使 zapexec 数据目录（$ZAP_PATH/data）与 zapd 配置 db.path 的父目录保持一致，
 # 否则 zapexec 默认 /usr/local/zap 会导致日志/源/安装目录错位。
-"${SUDO_CMD[@]}" env ZAP_PATH="$ROOT_DIR" "$BIN_DIR/zapexec" \
+# 软件安装根：默认 /usr/local/apps；若用户在 shell export 了 ZAP_APPS_DIR 则透传。
+ZAPEXEC_ENVS=(env ZAP_PATH="$ROOT_DIR")
+if [ -n "${ZAP_APPS_DIR:-}" ]; then
+  ZAPEXEC_ENVS+=(ZAP_APPS_DIR="$ZAP_APPS_DIR")
+fi
+"${SUDO_CMD[@]}" "${ZAPEXEC_ENVS[@]}" "$BIN_DIR/zapexec" \
   --socket "$EXEC_SOCKET" \
   --secret "$EXEC_SECRET" \
   --client-user "$DEV_USER" &

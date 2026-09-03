@@ -27,7 +27,8 @@ fn zap_path() -> PathBuf {
 
 /// 查找已部署 Nginx 的主配置 conf/nginx.conf：
 /// 1) 环境变量 `ZAP_NGINX_PREFIX/conf/nginx.conf`（若手工部署可指定）
-/// 2) `{ZAP_PATH}/data/apps` 下递归寻找含 `include`（sites-enabled/conf.d）的运行时配置
+/// 2) 软件安装根（默认 /usr/local/apps，`ZAP_APPS_DIR` 可覆盖）下递归寻找
+///    含 `include`（sites-enabled/conf.d）的运行时配置
 pub(super) fn find_nginx_conf_file() -> Option<PathBuf> {
     if let Ok(prefix) = std::env::var("ZAP_NGINX_PREFIX") {
         let p = PathBuf::from(prefix).join("conf/nginx.conf");
@@ -36,7 +37,7 @@ pub(super) fn find_nginx_conf_file() -> Option<PathBuf> {
         }
     }
     let mut cands = Vec::new();
-    collect_nginx_confs(&zap_path().join("data/apps"), 0, &mut cands);
+    collect_nginx_confs(&super::install_root(), 0, &mut cands);
     // 优先选择带 sites-enabled include 的运行时配置
     cands.sort_by_key(|p| !runtime_nginx_hint(p));
     cands.into_iter().find(|p| runtime_nginx_hint(p))
@@ -353,7 +354,7 @@ fn vhost_sync_inner(
         Some(c) => c,
         None => {
             return if enabled {
-                Err("未找到 Nginx 安装（data/apps 下无 conf/nginx.conf）。\
+                Err("未找到 Nginx 安装（安装根 /usr/local/apps 下无 conf/nginx.conf）。\
                      请先在「应用商店 → Web服务器 → Nginx」安装并部署 Nginx"
                     .to_string())
             } else {

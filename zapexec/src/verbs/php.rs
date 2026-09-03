@@ -17,16 +17,6 @@ use zap_proto::Response;
 
 use super::root_cmd;
 
-fn zap_path() -> PathBuf {
-    std::env::var("ZAP_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/usr/local/zap"))
-}
-
-fn apps_dir() -> PathBuf {
-    zap_path().join("data/apps")
-}
-
 fn linux_user_ok(u: &str) -> bool {
     if u.is_empty() || u.len() > 32 {
         return false;
@@ -61,12 +51,12 @@ fn cmd_err(o: &std::process::Output, fallback: &str) -> String {
     }
 }
 
-/// 从 data/apps 下定位 PHP 实例目录（含 etc/php-fpm.conf）。
-/// 兼容两种布局：`apps/php-8.3` 顶层目录 或 `apps/<分类>/php-8.3`。
+/// 从安装根（默认 /usr/local/apps）下定位 PHP 实例目录（含 etc/php-fpm.conf）。
+/// 兼容两种布局：`<root>/php-85` 顶层目录 或 `<root>/<分类>/php-85`。
 fn find_php_root(instance: &str) -> Option<PathBuf> {
     let ver = php_version(instance);
     let names = [instance.to_string(), format!("php-{ver}")];
-    let base = apps_dir();
+    let base = super::install_root();
     let mut hits = Vec::new();
     if let Ok(top) = std::fs::read_dir(&base) {
         for e in top.flatten() {
@@ -307,7 +297,7 @@ pub async fn pool_sync(
             return Err("home_dir 必须是合法绝对路径".into());
         }
         let root = find_php_root(php_instance).ok_or_else(|| {
-            format!("未找到 PHP 实例 {php_instance} 的安装（data/apps 下无 etc/php-fpm.conf）")
+            format!("未找到 PHP 实例 {php_instance} 的安装（安装根 /usr/local/apps 下无 etc/php-fpm.conf）")
         })?;
         let fpm_bin = find_fpm_bin(&root).ok_or("未找到 php-fpm 可执行文件")?;
         let conf = root.join("etc/php-fpm.conf");
@@ -371,7 +361,7 @@ pub async fn pool_clean(linux_user: String) -> Response {
         let mut removed = 0;
         let mut reloaded: Vec<String> = Vec::new();
         // 扫描所有已安装 PHP：目录名 php-{ver}（含分类二级目录）
-        let base = apps_dir();
+        let base = super::install_root();
         if let Ok(top) = std::fs::read_dir(&base) {
             for e in top.flatten() {
                 let p = e.path();

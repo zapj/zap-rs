@@ -370,22 +370,33 @@ fn scan_source_dir(
     }
 }
 
-/// 扫描已安装包（apps/ 下 meta.yaml）。
+/// 扫描已安装包（apps/<category>/<name>/meta.yaml）。
+/// 目录结构与 zapexec 保持一致：apps_dir 的直接子目录为 category，
+/// category 的子目录为具体包名。
 pub async fn scan_installed() -> Vec<Value> {
     tokio::task::spawn_blocking(|| {
         let mut items = Vec::new();
-        let Ok(entries) = std::fs::read_dir(apps_dir()) else {
+        let Ok(cats) = std::fs::read_dir(apps_dir()) else {
             return items;
         };
-        for entry in entries.flatten() {
-            let app_path = entry.path();
-            if !app_path.is_dir() {
+        for cat in cats.flatten() {
+            let cat_path = cat.path();
+            if !cat_path.is_dir() {
                 continue;
             }
-            let Some(meta) = parse_meta_yaml(&app_path.join("meta.yaml")) else {
+            let Ok(pkgs) = std::fs::read_dir(&cat_path) else {
                 continue;
             };
-            items.push(meta);
+            for pkg in pkgs.flatten() {
+                let app_path = pkg.path();
+                if !app_path.is_dir() {
+                    continue;
+                }
+                let Some(meta) = parse_meta_yaml(&app_path.join("meta.yaml")) else {
+                    continue;
+                };
+                items.push(meta);
+            }
         }
         items.sort_by(|a, b| {
             a.get("pkg_path")

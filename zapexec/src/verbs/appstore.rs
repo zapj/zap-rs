@@ -6,7 +6,7 @@
 //! - `install` / `uninstall` / `upgrade`：运行包脚本，日志写入 logs/run-{id}.log
 //! - `script_run` / `script_stop`：运行/停止自定义脚本（进程组管理）
 //! - `script_read` / `script_write`：读写 appstore 内脚本（写仅限 custom/）
-//! - `installed`：扫描 $APPS_DIR/*/meta.yaml
+//! - `installed`：扫描元数据目录 apps/<cat>/<name>/meta.yaml
 //!
 //! 安全边界：所有相对路径先做 sanitize（拒绝绝对路径 / `..` / 越界），
 //! 包名只允许 `[A-Za-z0-9_-]`。脚本永远通过白名单动词进入，不提供任意命令执行。
@@ -41,6 +41,9 @@ fn appstore_dir() -> PathBuf {
     zap_path().join("data/appstore")
 }
 
+/// 安装元数据目录（apps/<category>/<name>/meta.yaml + info.yaml）。
+/// 只存记录；第三方软件本体安装在 `super::install_root()`
+/// （默认 /usr/local/apps，环境变量 ZAP_APPS_DIR 可覆盖）。
 fn apps_dir() -> PathBuf {
     zap_path().join("data/apps")
 }
@@ -579,7 +582,7 @@ fn spawn_background(
             cmd.arg(&step.script)
                 .env("ZAP_PATH", zap_path())
                 .env("ZAPCTL", zap_path().join("zapctl"))
-                .env("APPS_DIR", apps_dir())
+                .env("APPS_DIR", super::install_root())
                 .env("LOG_FILE", &log_path)
                 .env("CPU_NUM", &cpu_num)
                 .stdout(std::process::Stdio::from(log.try_clone().unwrap_or_else(
@@ -640,7 +643,10 @@ fn base_env() -> Vec<(String, String)> {
             "ZAPCTL".into(),
             zap_path().join("zapctl").to_string_lossy().into_owned(),
         ),
-        ("APPS_DIR".into(), apps_dir().to_string_lossy().into_owned()),
+        (
+            "APPS_DIR".into(),
+            super::install_root().to_string_lossy().into_owned(),
+        ),
     ]
 }
 
@@ -662,9 +668,12 @@ fn task_env(
     env.push(("APP_PATH".into(), app_path.to_string_lossy().into_owned()));
     env.push((
         "BUILD_PATH".into(),
-        apps_dir()
-            .join(".build")
-            .join(app_name)
+        // 编译目录归属本次运行现场:runs/<run_id>/build,与脚本快照同生命周期
+        // (成功随 cleanup_snapshot 整目录清理,失败保留供排查/重跑),
+        // 同一应用并发运行互不干扰。
+        runs_dir()
+            .join(run_id)
+            .join("build")
             .to_string_lossy()
             .into_owned(),
     ));

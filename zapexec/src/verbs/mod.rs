@@ -11,7 +11,20 @@ mod ssh_key;
 mod time;
 mod user;
 
+use std::path::PathBuf;
+
 use zap_proto::{Request, Response};
+
+/// 软件安装根目录：第三方软件本体安装到此处（与 zap 面板数据解耦）。
+/// 默认 `/usr/local/apps`；可用环境变量 `ZAP_APPS_DIR` 覆盖
+/// （rundev / systemd / 自定义脚本均可设置）。
+/// 注意：安装元数据（meta.yaml / info.yaml）仍在 `{ZAP_PATH}/data/apps`，
+/// 两者职责不同。
+pub(super) fn install_root() -> PathBuf {
+    std::env::var("ZAP_APPS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/usr/local/apps"))
+}
 
 /// 白名单动词分发：这里没有、也不会有任意 shell 执行入口。
 pub async fn dispatch(req: Request, gid: u32) -> Response {

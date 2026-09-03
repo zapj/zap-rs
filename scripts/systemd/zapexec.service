@@ -7,6 +7,8 @@ StartLimitBurst=5
 [Service]
 Type=simple
 Environment=ZAP_PATH=/usr/local/zap
+# 第三方软件安装根，默认 /usr/local/apps；自定义安装位置时取消注释并修改：
+# Environment=ZAP_APPS_DIR=/data/apps
 ExecStart=/usr/local/zap/zapexec --socket /run/zap/exec.sock --secret /etc/zap/exec.key --client-user zapadm
 RuntimeDirectory=zap
 RuntimeDirectoryMode=0750
