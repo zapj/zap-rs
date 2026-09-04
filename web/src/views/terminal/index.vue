@@ -77,14 +77,19 @@
       <!-- 标签栏 -->
       <div class="tabs-bar" v-if="tabs.length > 0">
         <div
-          v-for="(tab, index) in tabs"
+          v-for="tab in tabs"
           :key="tab.id"
           class="tab-item"
           :class="{ active: activeTabId === tab.id }"
+          :title="tab.name + (tab.status === 'connecting' ? '（连接中…）' : tab.status === 'disconnected' ? '（已断开，可重新连接）' : '')"
           @click="switchTab(tab.id)"
+          @auxclick="onTabAuxClick($event, tab.id)"
         >
+          <i class="tab-dot" :class="tab.status"></i>
           <span class="tab-label">{{ tab.name }}</span>
-          <span class="tab-close" @click.stop="closeTab(tab.id)">×</span>
+          <span class="tab-close" @click.stop="closeTab(tab.id)">
+            <el-icon :size="12"><Close /></el-icon>
+          </span>
         </div>
       </div>
 
@@ -234,7 +239,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Link, Monitor, Key, Search, MoreFilled } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Link, Monitor, Key, Search, MoreFilled, Close } from '@element-plus/icons-vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -371,6 +376,8 @@ interface TerminalTab {
   term: Terminal
   fitAddon: FitAddon
   ws: WebSocket | null
+  /** connecting=正在连接 connected=已连接 disconnected=已断开（可重新连接） */
+  status: 'connecting' | 'connected' | 'disconnected'
 }
 
 const tabs = ref<TerminalTab[]>([])
@@ -578,11 +585,26 @@ async function openTerminal(conn: SshConnection) {
     ElMessage.warning('演示账号仅支持浏览，不能使用终端')
     return
   }
-  // Check if already open
+  // 已存在该连接的标签页
   const existing = tabs.value.find(t => t.connId === conn.id)
   if (existing) {
+    // 会话仍存活 → 直接切换过去
+    if (existing.ws && existing.ws.readyState === WebSocket.OPEN) {
+      activeTabId.value = existing.id
+      existing.term.focus()
+      return
+    }
+    // 正在建立连接中 → 防止重复点击重复建会话
+    if (existing.ws && existing.ws.readyState === WebSocket.CONNECTING) {
+      activeTabId.value = existing.id
+      return
+    }
+    // 会话已断开（如 shell 内 exit）→ 复用标签页重新连接
     activeTabId.value = existing.id
-    existing.term.focus()
+    await nextTick()
+    existing.term.clear()
+    existing.term.writeln('\r\n\x1b[36m正在重新连接 ' + conn.name + ' ...\x1b[0m')
+    connectTab(existing, conn)
     return
   }
 
@@ -597,6 +619,7 @@ async function openTerminal(conn: SshConnection) {
     term: null as any,
     fitAddon: null as any,
     ws: null,
+    status: 'connecting',
   }
   tabs.value.push(tab)
 
@@ -635,19 +658,50 @@ async function openTerminal(conn: SshConnection) {
   // Focus the terminal
   term.focus()
 
-  // Connect WebSocket
+  // 终端输入 → WebSocket（只注册一次；发送时读取当前 ws，重连后依然生效）
+  term.onData((data) => {
+    const w = tab.ws
+    if (w && w.readyState === WebSocket.OPEN) {
+      w.send(data)
+    }
+  })
+
+  // 建立 WebSocket 会话
+  connectTab(tab, conn)
+
+  // 容器尺寸变化时重新 fit 并同步 pty 尺寸（观察父容器，而非单个实例）
+  const resizeObserver = new ResizeObserver(() => {
+    fitTerminal(tab)
+  })
+  if (containerRef.value) resizeObserver.observe(containerRef.value)
+  ;(tab as any)._resizeObserver = resizeObserver
+}
+
+// 建立（或重连）某标签页的 WebSocket 会话；复用已有的 xterm 实例
+function connectTab(tab: TerminalTab, conn: SshConnection) {
+  // 已连接 / 正在连接则不重复建立
+  if (tab.ws && tab.ws.readyState !== WebSocket.CLOSED) return
+
+  const term = tab.term
+  tab.status = 'connecting'
+
   const wsUrl = getWsUrl(conn.id)
   const ws = new WebSocket(wsUrl)
   // Receive binary as ArrayBuffer (no async FileReader overhead)
   ws.binaryType = 'arraybuffer'
+  tab.ws = ws
 
   ws.onopen = () => {
+    if (tab.ws !== ws) return // 已关闭/被新会话替换
+    tab.status = 'connected'
     term.writeln('\x1b[32m已连接到 ' + conn.name + ' (' + conn.host + ':' + conn.port + ')\x1b[0m')
     // 连接建立后同步一次当前实际窗口尺寸
     fitTerminal(tab)
+    term.focus()
   }
 
   ws.onmessage = (event) => {
+    if (tab.ws !== ws) return
     if (event.data instanceof ArrayBuffer) {
       term.write(new Uint8Array(event.data))
     } else if (typeof event.data === 'string') {
@@ -656,28 +710,15 @@ async function openTerminal(conn: SshConnection) {
   }
 
   ws.onerror = () => {
+    if (tab.ws !== ws) return
     term.writeln('\r\n\x1b[31m连接错误\x1b[0m')
   }
 
   ws.onclose = () => {
-    term.writeln('\r\n\x1b[33m连接已断开\x1b[0m')
+    if (tab.ws !== ws) return
+    tab.status = 'disconnected'
+    term.writeln('\r\n\x1b[33m连接已断开，双击左侧连接或点击「连接」可重连\x1b[0m')
   }
-
-  tab.ws = ws
-
-  // Send terminal input to WebSocket
-  term.onData((data) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data)
-    }
-  })
-
-  // 容器尺寸变化时重新 fit 并同步 pty 尺寸（观察父容器，而非单个实例）
-  const resizeObserver = new ResizeObserver(() => {
-    fitTerminal(tab)
-  })
-  if (containerRef.value) resizeObserver.observe(containerRef.value)
-  ;(tab as any)._resizeObserver = resizeObserver
 }
 
 function switchTab(tabId: string) {
@@ -699,6 +740,11 @@ function closeTab(tabId: string) {
 
   // Cleanup
   if (tab.ws) {
+    // 解除事件回调，避免 dispose 后 onclose 再写入已销毁的 terminal
+    tab.ws.onopen = null
+    tab.ws.onmessage = null
+    tab.ws.onerror = null
+    tab.ws.onclose = null
     tab.ws.close()
   }
   if ((tab as any)._resizeObserver) {
@@ -720,6 +766,11 @@ function tabIdx(idx: number): string | null {
   return tabs.value[newIdx]?.id ?? null
 }
 
+// 中键点击标签关闭
+function onTabAuxClick(e: MouseEvent, tabId: string) {
+  if (e.button === 1) closeTab(tabId)
+}
+
 // ── 生命周期 ───────────────────────────────────────────────
 
 onMounted(() => {
@@ -730,7 +781,13 @@ onMounted(() => {
 onBeforeUnmount(() => {
   // Cleanup all terminals
   for (const tab of tabs.value) {
-    if (tab.ws) tab.ws.close()
+    if (tab.ws) {
+      tab.ws.onopen = null
+      tab.ws.onmessage = null
+      tab.ws.onerror = null
+      tab.ws.onclose = null
+      tab.ws.close()
+    }
     if ((tab as any)._resizeObserver) (tab as any)._resizeObserver.disconnect()
     if (tab.term) tab.term.dispose()
   }
@@ -975,52 +1032,113 @@ onBeforeUnmount(() => {
 
 .tabs-bar {
   display: flex;
+  align-items: stretch;
+  height: 38px;
   background: #252526;
-  border-bottom: 1px solid #3c3c3c;
+  border-bottom: 1px solid #1b1b1c;
   overflow-x: auto;
+  overflow-y: hidden;
   flex-shrink: 0;
 }
 
 .tabs-bar::-webkit-scrollbar {
-  height: 3px;
+  height: 4px;
+}
+
+.tabs-bar::-webkit-scrollbar-thumb {
+  background: #3c3c3c;
+  border-radius: 2px;
 }
 
 .tab-item {
+  position: relative;
   display: flex;
   align-items: center;
-  padding: 8px 16px;
+  gap: 7px;
+  min-width: 0;
+  padding: 0 8px 0 14px;
   font-size: 12px;
-  color: #969696;
-  background: #2d2d2d;
-  border-right: 1px solid #252526;
+  color: #9c9c9c;
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
-  transition: all 0.15s;
+  flex-shrink: 0;
+  border-right: 1px solid #1e1e1e;
+  transition: background 0.12s, color 0.12s;
 }
 
 .tab-item:hover {
-  color: #ccc;
+  background: #2d2d30;
+  color: #dcdcdc;
 }
 
 .tab-item.active {
-  color: #fff;
   background: #1e1e1e;
+  color: #fff;
+}
+
+/* 激活标签顶部色条（与编辑器风格一致） */
+.tab-item.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #007acc;
+}
+
+/* 连接状态点：绿=已连接 黄脉冲=连接中 红=已断开 */
+.tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tab-dot.connected {
+  background: #6cc644;
+  box-shadow: 0 0 4px rgba(108, 198, 68, 0.7);
+}
+
+.tab-dot.connecting {
+  background: #e2c08d;
+  animation: tab-dot-pulse 1s ease-in-out infinite;
+}
+
+.tab-dot.disconnected {
+  background: #da3633;
+}
+
+@keyframes tab-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .tab-label {
-  margin-right: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
 }
 
 .tab-close {
-  font-size: 14px;
-  padding: 0 4px;
-  border-radius: 3px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: #8f8f8f;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.tab-item:hover .tab-close {
+  color: #c9c9c9;
 }
 
 .tab-close:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.14);
   color: #fff;
 }
 
