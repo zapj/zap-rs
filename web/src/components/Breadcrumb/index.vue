@@ -59,15 +59,15 @@ watch(
   margin-left: 8px;
 
   .no-redirect {
-    color: #97a8be;
+    color: var(--el-text-color-placeholder);
     cursor: text;
   }
 
   a {
-    color: #666;
+    color: var(--el-text-color-regular);
     cursor: pointer;
     &:hover {
-      color: #409eff;
+      color: var(--el-color-primary);
     }
   }
 }

@@ -859,13 +859,13 @@ onMounted(() => {
 .stat-label {
   margin-top: 6px;
   font-size: 13px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .stat-green {
   color: #67c23a;
 }
 .stat-gray {
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .mode-alert {
@@ -909,12 +909,12 @@ onMounted(() => {
   font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
 }
 .dim {
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
 }
 .form-tip {
   width: 100%;
   font-size: 12px;
   line-height: 18px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 </style>

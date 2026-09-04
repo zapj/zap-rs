@@ -248,7 +248,7 @@ async function savePrefs() {
               >
                 {{ roleLabel(r) }}
               </el-tag>
-              <span v-if="!userInfo.roles?.length" style="color: #909399">-</span>
+              <span v-if="!userInfo.roles?.length" style="color: var(--el-text-color-secondary)">-</span>
             </el-form-item>
             <el-form-item label="昵称">
               <el-input v-model="infoForm.nickname" placeholder="请输入昵称" />
@@ -400,7 +400,7 @@ async function savePrefs() {
 }
 
 .totp-tip {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 13px;
   line-height: 1.7;
   margin: 12px 0;
@@ -415,17 +415,17 @@ async function savePrefs() {
 .totp-qr {
   width: 180px;
   height: 180px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--el-border-color-light);
   border-radius: 4px;
 }
 
 .totp-secret-label {
-  color: #606266;
+  color: var(--el-text-color-regular);
   font-size: 13px;
 }
 
 .totp-secret code {
-  background: #f4f4f5;
+  background: var(--el-fill-color);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 13px;
@@ -440,14 +440,14 @@ async function savePrefs() {
   margin: 0 0 8px;
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 .prefs-group-title {
   margin-top: 28px;
 }
 .prefs-desc {
   margin: 0 0 16px;
-  color: #606266;
+  color: var(--el-text-color-regular);
   font-size: 13px;
 }
 .prefs-item {
@@ -459,7 +459,7 @@ async function savePrefs() {
 }
 .prefs-sub {
   margin: 0 0 12px 32px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .prefs-radio-group {
   display: flex;

@@ -186,13 +186,13 @@ onMounted(() => {
   align-items: flex-start;
   gap: 10px;
   padding: 14px 4px;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .msg-item:hover {
-  background: #fafbfc;
+  background: var(--el-bg-color-page);
 }
 
 .msg-item__dot {
@@ -218,23 +218,23 @@ onMounted(() => {
 
 .msg-item__title {
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .msg-item.unread .msg-item__title {
-  color: #409eff;
+  color: var(--el-color-primary);
 }
 
 .msg-item__time {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   flex-shrink: 0;
 }
 
 .msg-item__body {
   margin-top: 6px;
   font-size: 13px;
-  color: #606266;
+  color: var(--el-text-color-regular);
   line-height: 1.7;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -263,13 +263,13 @@ onMounted(() => {
 <style>
 .msg-detail__meta {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-bottom: 12px;
 }
 
 .msg-detail__body {
   font-size: 14px;
-  color: #303133;
+  color: var(--el-text-color-primary);
   line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-word;

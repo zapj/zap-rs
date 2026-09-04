@@ -410,7 +410,7 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding-bottom: 10px;
   margin-bottom: 10px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .toolbar-spacer {
@@ -419,7 +419,7 @@ onBeforeUnmount(() => {
 
 .exit-code {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .snap-hint {
@@ -427,7 +427,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   padding-bottom: 8px;
 }
 
@@ -451,7 +451,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid #e4e7ed;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -461,8 +461,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  border-bottom: 1px solid #f0f2f5;
-  background: #fafafa;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color-page);
 }
 
 .snap-files-title {
@@ -482,16 +482,16 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-bottom: 1px solid #f5f7fa;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .snap-file:hover {
-  background: #f0f7ff;
+  background: var(--el-color-primary-light-9);
 }
 
 .snap-file.active {
-  background: #ecf5ff;
-  color: #409eff;
+  background: var(--el-color-primary-light-8);
+  color: var(--el-color-primary);
 }
 
 .snap-main {
@@ -511,7 +511,7 @@ onBeforeUnmount(() => {
 .snap-path {
   font-size: 13px;
   font-family: Menlo, Monaco, 'Courier New', monospace;
-  color: #606266;
+  color: var(--el-text-color-regular);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -535,6 +535,6 @@ onBeforeUnmount(() => {
   gap: 6px;
   margin-top: 10px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 </style>

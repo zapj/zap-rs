@@ -109,6 +109,7 @@
 
 <script setup lang="ts">
 import Chart from 'chart.js/auto';
+import { applyChartTheme, watchChartTheme } from '@/utils/chart-theme'
 import { onMounted, onUnmounted } from 'vue';
 import { getSystemInfo, getRTStatus } from '@/api/dashboard.ts'
 import { ref } from 'vue';
@@ -136,6 +137,7 @@ onMounted(async () => {
   var memory_container = document.getElementById("memory_chart") as HTMLCanvasElement;
   var loadavg_container = document.getElementById("loadavg_chart") as HTMLCanvasElement;
   var network_container = document.getElementById("network_chart") as HTMLCanvasElement;
+  applyChartTheme()
   cpu_chart = new Chart(cpu_container,{
       type: 'line',
       data: {
@@ -250,6 +252,8 @@ onMounted(async () => {
   window.addEventListener('resize', resizeChart)
 })
 
+
+watchChartTheme(() => [cpu_chart, memory_chart, loadavg_chart, network_chart])
 
 onUnmounted(() => {
   destroyed = true
@@ -415,13 +419,13 @@ const FetchRTStatus = async () => {
 .stat-value {
   font-size: 20px;
   font-weight: bold;
-  color: #303133;
+  color: var(--el-text-color-primary);
   margin-bottom: 5px;
 }
 
 .stat-title {
   font-size: 14px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .chart-row {

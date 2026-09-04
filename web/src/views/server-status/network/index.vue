@@ -43,6 +43,7 @@
 
 <script setup lang="ts">
 import Chart from 'chart.js/auto'
+import { applyChartTheme, watchChartTheme } from '@/utils/chart-theme'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { getRTStatus } from '@/api/dashboard.ts'
@@ -60,6 +61,7 @@ let destroyed = false
 
 onMounted(async () => {
   const container = document.getElementById('network_chart') as HTMLCanvasElement
+  applyChartTheme()
   network_chart = new Chart(container, {
     type: 'line',
     data: {
@@ -109,6 +111,8 @@ onMounted(async () => {
   if (destroyed) return
   timer = setInterval(FetchRTStatus, 5000)
 })
+
+watchChartTheme(() => [network_chart])
 
 onUnmounted(() => {
   destroyed = true

@@ -26,7 +26,7 @@ const goHome = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #f5f7fa;
+  background-color: var(--el-bg-color-page);
 }
 
 .error-content {
@@ -44,14 +44,14 @@ const goHome = () => {
 
 .error-title {
   font-size: 32px;
-  color: #333;
+  color: var(--el-text-color-primary);
   margin: 20px 0;
   font-weight: 500;
 }
 
 .error-desc {
   font-size: 16px;
-  color: #666;
+  color: var(--el-text-color-regular);
   margin-bottom: 30px;
 }
 </style>

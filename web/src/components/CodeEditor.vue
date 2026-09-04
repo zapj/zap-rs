@@ -48,11 +48,17 @@ const baseTheme = EditorView.theme({
     lineHeight: '1.6',
     overflow: 'auto',
   },
-  '.cm-content': { padding: '8px 0', caretColor: 'var(--el-color-primary, #409eff)' },
+  '.cm-content': {
+    padding: '8px 0',
+    caretColor: 'var(--el-color-primary, #409eff)',
+    // 用 EP 变量，浅色 / 深色主题自动适配
+    color: 'var(--el-text-color-primary)',
+    backgroundColor: 'transparent',
+  },
   '.cm-gutters': {
-    backgroundColor: '#f7f8fa',
-    color: '#c0c4cc',
-    borderRight: '1px solid #ebeef5',
+    backgroundColor: 'var(--el-fill-color-light)',
+    color: 'var(--el-text-color-placeholder)',
+    borderRight: '1px solid var(--el-border-color-lighter)',
   },
   '&.cm-focused': { outline: 'none' },
   '.cm-activeLine': { backgroundColor: 'rgba(64, 158, 255, 0.05)' },
@@ -113,7 +119,7 @@ watch(
   position: relative;
   height: 100%;
   min-height: 120px;
-  background: #fff;
+  background: var(--el-bg-color);
 }
 
 .code-editor :deep(.cm-editor) {
@@ -121,7 +127,7 @@ watch(
 }
 
 .code-editor.is-readonly :deep(.cm-editor) {
-  background: #f5f7fa;
+  background: var(--el-fill-color-light);
 }
 
 .code-editor.is-readonly :deep(.cm-content) {

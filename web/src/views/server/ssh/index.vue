@@ -285,7 +285,7 @@ onUnmounted(() => {
 .ssh-container { padding: 20px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; }
 .empty-actions { display: flex; gap: 12px; justify-content: center; margin-top: 8px; }
-.empty-tip { margin-top: 12px; font-size: 12px; color: #909399; }
+.empty-tip { margin-top: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
 .install-log {
   margin: 0;
   height: 300px;
@@ -308,5 +308,5 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 1.6;
 }
-.config-tip { margin-top: 8px; font-size: 12px; color: #909399; line-height: 1.5; }
+.config-tip { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.5; }
 </style>

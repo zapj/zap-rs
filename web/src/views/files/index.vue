@@ -104,7 +104,7 @@
           <el-table-column label="名称" min-width="280">
             <template #default="{ row }">
               <div class="fm-file-name">
-                <el-icon :size="18" :color="row.is_dir ? '#409EFF' : '#909399'">
+                <el-icon :size="18" :color="row.is_dir ? 'var(--el-color-primary)' : 'var(--el-text-color-secondary)'">
                   <Folder v-if="row.is_dir" />
                   <Document v-else />
                 </el-icon>
@@ -179,7 +179,7 @@
               @click="onRowClick(row)"
               @dblclick="onRowDblClick(row)"
             >
-              <el-icon :size="40" :color="row.is_dir ? '#409EFF' : '#909399'">
+              <el-icon :size="40" :color="row.is_dir ? 'var(--el-color-primary)' : 'var(--el-text-color-secondary)'">
                 <Folder v-if="row.is_dir" />
                 <Document v-else />
               </el-icon>
@@ -600,7 +600,7 @@ onMounted(() => {
 .file-manager {
   display: flex;
   height: calc(100vh - 110px);
-  background: #fff;
+  background: var(--el-bg-color);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -608,16 +608,16 @@ onMounted(() => {
 .fm-sidebar {
   width: 240px;
   min-width: 200px;
-  border-right: 1px solid #e4e7ed;
+  border-right: 1px solid var(--el-border-color-lighter);
   display: flex;
   flex-direction: column;
-  background: #fafafa;
+  background: var(--el-bg-color-page);
 
   &-header {
     padding: 12px 16px;
     font-weight: 600;
     font-size: 14px;
-    border-bottom: 1px solid #e4e7ed;
+    border-bottom: 1px solid var(--el-border-color-lighter);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -651,13 +651,13 @@ onMounted(() => {
 
 .fm-toolbar {
   padding: 8px 16px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  background: #fafafa;
+  background: var(--el-bg-color-page);
 
   &-left {
     display: flex;
@@ -715,7 +715,7 @@ onMounted(() => {
   text-align: center;
 
   &:hover {
-    background: #f0f2f5;
+    background: var(--el-fill-color-light);
   }
 }
 
@@ -733,7 +733,7 @@ onMounted(() => {
 
 .fm-grid-size {
   font-size: 11px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-top: 2px;
 }
 
@@ -741,11 +741,11 @@ onMounted(() => {
   grid-column: 1 / -1;
   text-align: center;
   padding: 40px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .text-muted {
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
 }
 
 .mono {
@@ -754,14 +754,14 @@ onMounted(() => {
 }
 
 :deep(.el-breadcrumb__item .is-last) {
-  color: #303133;
+  color: var(--el-text-color-primary);
   font-weight: 500;
   cursor: default;
 }
 
 .fm-editor {
   height: min(62vh, 620px);
-  border: 1px solid #e4e7ed;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;
   overflow: hidden;
 }

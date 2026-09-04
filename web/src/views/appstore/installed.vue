@@ -354,11 +354,11 @@ const stateMeta: Record<
   { label: string; tag: 'success' | 'info' | 'danger' | 'warning'; color: string }
 > = {
   running: { label: '运行中', tag: 'success', color: '#67c23a' },
-  stopped: { label: '已停止', tag: 'info', color: '#909399' },
+  stopped: { label: '已停止', tag: 'info', color: 'var(--el-text-color-secondary)' },
   failed: { label: '异常', tag: 'danger', color: '#f56c6c' },
   starting: { label: '启动中', tag: 'warning', color: '#e6a23c' },
   stopping: { label: '停止中', tag: 'warning', color: '#e6a23c' },
-  unknown: { label: '未知', tag: 'info', color: '#c0c4cc' },
+  unknown: { label: '未知', tag: 'info', color: 'var(--el-text-color-placeholder)' },
 }
 
 const ACT_LABELS: Record<string, string> = {

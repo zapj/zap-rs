@@ -207,15 +207,15 @@ async function confirmMigrate() {
   font-weight: 600;
 }
 .card-sub {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 .form-tip {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 .dim-text {
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
 }
 .warn-text {
   color: #e6a23c;

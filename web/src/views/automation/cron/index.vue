@@ -370,12 +370,12 @@ onMounted(() => {
 .cron-schedule {
   font-family: monospace;
   font-size: 12px;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .cron-desc {
   font-size: 11px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-top: 2px;
 }
 
@@ -390,7 +390,7 @@ onMounted(() => {
 
 .field-tip {
   font-size: 11px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   line-height: 1.5;
   margin-top: 2px;
 }

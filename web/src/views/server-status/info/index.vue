@@ -203,7 +203,7 @@ onUnmounted(() => {
 }
 .card-header-icon {
   font-size: 18px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .kv-grid {
   display: grid;
@@ -217,7 +217,7 @@ onUnmounted(() => {
 }
 .kv-label {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-bottom: 2px;
 }
 .kv-value {
@@ -246,7 +246,7 @@ onUnmounted(() => {
 .load-label {
   margin-top: 4px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .usage-block {
   padding: 4px 0;
@@ -258,7 +258,7 @@ onUnmounted(() => {
 }
 .usage-label {
   font-size: 14px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   white-space: nowrap;
 }
 .stat-row {
@@ -275,7 +275,7 @@ onUnmounted(() => {
 .stat-cell-label {
   margin-top: 2px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .swap-block {
   border-top: 1px solid var(--el-border-color-lighter);
@@ -283,7 +283,7 @@ onUnmounted(() => {
 }
 .swap-title {
   font-size: 13px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-bottom: 10px;
 }
 .disk-usage-text {

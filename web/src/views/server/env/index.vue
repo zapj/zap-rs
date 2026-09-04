@@ -909,7 +909,7 @@ onMounted(() => {
         </el-form-item>
         <el-form-item v-if="fpmStr.pm === 'dynamic'" label="空闲下限 / 上限">
           <el-input-number v-model="fpmNum.min_spare_servers" :min="1" :max="128" controls-position="right" />
-          <span style="margin: 0 8px; color: #909399">~</span>
+          <span style="margin: 0 8px; color: var(--el-text-color-secondary)">~</span>
           <el-input-number v-model="fpmNum.max_spare_servers" :min="1" :max="256" controls-position="right" />
         </el-form-item>
         <el-form-item label="单进程最大请求数">
@@ -963,7 +963,7 @@ onMounted(() => {
   align-items: center;
 }
 .detected-at {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
   margin-right: 12px;
 }
@@ -972,12 +972,12 @@ onMounted(() => {
 }
 .section-title {
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
   display: flex;
   align-items: center;
 }
 .form-tip {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -986,7 +986,7 @@ onMounted(() => {
 }
 .card-sub {
   margin-left: 8px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 .spec-preview-trigger {
@@ -1074,7 +1074,7 @@ onMounted(() => {
 }
 :global(.spec-popover-sub) {
   flex: 1;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
   overflow: hidden;
   white-space: nowrap;
@@ -1106,7 +1106,7 @@ onMounted(() => {
 }
 .mode-sub {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   line-height: 1.5;
   margin-top: 2px;
 }

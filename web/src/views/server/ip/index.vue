@@ -409,7 +409,7 @@ onMounted(load)
 .stat-label {
   margin-top: 6px;
   font-size: 13px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .stat-blue { color: #409eff; }
 .stat-purple { color: #b37feb; }
@@ -440,6 +440,6 @@ onMounted(load)
 .form-tip {
   margin-left: 10px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 </style>

@@ -168,7 +168,7 @@ onMounted(() => {
         <el-table-column label="类型/强度" width="160">
           <template #default="{ row }">
             <el-tag size="small">{{ row.key_type }}</el-tag>
-            <span v-if="row.bits" style="margin-left:6px;color:#909399">{{ row.bits }} bit</span>
+            <span v-if="row.bits" style="margin-left:6px;color:var(--el-text-color-secondary)">{{ row.bits }} bit</span>
           </template>
         </el-table-column>
         <el-table-column prop="fingerprint" label="指纹" min-width="220" show-overflow-tooltip />
@@ -205,7 +205,7 @@ onMounted(() => {
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span>authorized_keys（本机）</span>
-          <span style="font-size:12px;color:#909399">仅记录于 ZAP 本机，不推送到远程主机；登录远程请用「推送公钥」或手动复制公钥</span>
+          <span style="font-size:12px;color:var(--el-text-color-secondary)">仅记录于 ZAP 本机，不推送到远程主机；登录远程请用「推送公钥」或手动复制公钥</span>
         </div>
       </template>
       <el-table :data="authEntries" v-loading="authLoading" stripe>

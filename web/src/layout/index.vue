@@ -147,15 +147,15 @@ watchDeviceWidth()
   height: 50px;
   overflow: hidden;
   position: relative;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+  background: var(--el-bg-color);
+  box-shadow: var(--el-box-shadow-light);
 }
 
 .tags-view-container {
   height: 34px;
   width: 100%;
-  background: #fff;
-  border-bottom: 1px solid #d8dce5;
+  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color-light);
   box-shadow:
     0 1px 3px 0 rgba(0, 0, 0, 0.12),
     0 0 3px 0 rgba(0, 0, 0, 0.04);
@@ -166,7 +166,7 @@ watchDeviceWidth()
   padding: 10px;
   position: relative;
   overflow: hidden;
-  background-color: #f0f2f5;
+  background-color: var(--el-bg-color-page);
 }
 
 /* 遮罩层 */

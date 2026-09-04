@@ -189,7 +189,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
               class="strength-segment"
               :class="{ active: i <= passwordStrength.level }"
               :style="{
-                backgroundColor: i <= passwordStrength.level ? passwordStrength.color : '#e0e0e0'
+                backgroundColor: i <= passwordStrength.level ? passwordStrength.color : 'var(--el-border-color-lighter)'
               }"
             />
           </div>
@@ -231,7 +231,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
 .login-container {
   min-height: 100vh;
   width: 100%;
-  background-color: #f0f2f5;
+  background-color: var(--el-fill-color-light);
   overflow: hidden;
   display: flex;
   justify-content: center;
@@ -241,9 +241,9 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
     width: 420px;
     max-width: 100%;
     padding: 30px 35px;
-    background: #fff;
+    background: var(--el-bg-color);
     border-radius: 4px;
-    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+    box-shadow: var(--el-box-shadow-light);
   }
 
   .title-container {
@@ -253,7 +253,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
 
     .title {
       font-size: 26px;
-      color: #333;
+      color: var(--el-text-color-primary);
       margin: 0;
       font-weight: bold;
     }
@@ -262,7 +262,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
   .totp-tip {
     margin-top: 6px;
     font-size: 12px;
-    color: #909399;
+    color: var(--el-text-color-secondary);
     line-height: 1.5;
   }
 
@@ -275,7 +275,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
 
     .strength-label {
       font-size: 12px;
-      color: #909399;
+      color: var(--el-text-color-secondary);
     }
 
     .strength-text {

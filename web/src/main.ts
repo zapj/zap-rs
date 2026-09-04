@@ -3,6 +3,8 @@ import { createPinia } from 'pinia'
 import { addCollection } from '@iconify/vue'
 import { icons as epIcons } from '@iconify-json/ep'
 import 'element-plus/dist/index.css'
+// Element Plus 官方深色主题变量（配合 <html class="dark"> 生效，见 composables/useTheme.ts）
+import 'element-plus/theme-chalk/dark/css-vars.css'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import App from './App.vue'
 import router from './router'

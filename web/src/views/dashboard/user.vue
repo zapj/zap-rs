@@ -164,13 +164,13 @@ const tableData = ref([
 .stat-value {
   font-size: 20px;
   font-weight: bold;
-  color: #303133;
+  color: var(--el-text-color-primary);
   margin-bottom: 5px;
 }
 
 .stat-title {
   font-size: 14px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .chart-row {

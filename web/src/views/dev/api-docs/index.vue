@@ -134,24 +134,24 @@ onMounted(async () => {
 .docs-layout { display: flex; gap: 16px; align-items: flex-start; }
 
 .docs-nav { width: 230px; flex-shrink: 0; position: sticky; top: 80px; }
-.nav-title { padding: 4px 8px 10px; border-bottom: 1px solid #ebeef5; margin-bottom: 8px; }
+.nav-title { padding: 4px 8px 10px; border-bottom: 1px solid var(--el-border-color-lighter); margin-bottom: 8px; }
 .nav-title .title { font-size: 15px; font-weight: 700; }
-.nav-title .sub { font-size: 12px; color: #909399; margin-top: 2px; }
+.nav-title .sub { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 2px; }
 
 .docs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-.auth-card .auth-list { margin: 0; padding-left: 20px; line-height: 1.9; color: #303133; }
-.auth-list code { background: #f4f4f5; border-radius: 3px; padding: 1px 5px; }
+.auth-card .auth-list { margin: 0; padding-left: 20px; line-height: 1.9; color: var(--el-text-color-primary); }
+.auth-list code { background: var(--el-fill-color); border-radius: 3px; padding: 1px 5px; }
 
 .group-card .group-head { display: flex; align-items: baseline; gap: 10px; }
 .group-name { font-weight: 700; font-size: 15px; }
-.group-desc { color: #909399; font-size: 13px; }
+.group-desc { color: var(--el-text-color-secondary); font-size: 13px; }
 
-.endpoint { padding: 12px 0; border-bottom: 1px dashed #ebeef5; }
+.endpoint { padding: 12px 0; border-bottom: 1px dashed var(--el-border-color-lighter); }
 .endpoint:last-child { border-bottom: none; padding-bottom: 0; }
 .ep-head { display: flex; align-items: center; gap: 10px; }
 .ep-method { width: 64px; text-align: center; font-weight: 700; }
-.ep-path { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: #303133; }
-.ep-summary { margin: 8px 0 0; color: #606266; font-size: 13px; }
+.ep-path { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: var(--el-text-color-primary); }
+.ep-summary { margin: 8px 0 0; color: var(--el-text-color-regular); font-size: 13px; }
 .ep-params { margin-top: 10px; }
 .ep-note { margin-top: 8px; font-size: 12px; color: #e6a23c; }
 </style>

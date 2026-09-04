@@ -627,12 +627,12 @@ onMounted(() => {
 }
 
 .form-tip {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .muted {
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
 }
 </style>

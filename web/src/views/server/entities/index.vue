@@ -161,7 +161,7 @@ onMounted(loadMode)
   font-weight: 600;
 }
 .card-sub {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 .mode-cards {
@@ -204,7 +204,7 @@ onMounted(loadMode)
   margin-bottom: 8px;
 }
 .result-mode {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 .result-title {

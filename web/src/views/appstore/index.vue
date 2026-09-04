@@ -854,7 +854,7 @@ onMounted(() => {
 
 .opt-tip {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   line-height: 1.5;
   margin-top: 2px;
   white-space: pre-line;
@@ -865,8 +865,8 @@ onMounted(() => {
   align-items: flex-start;
   gap: 6px;
   font-size: 12px;
-  color: #909399;
-  background: #f5f7fa;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
   border-radius: 4px;
   padding: 8px 10px;
   line-height: 1.6;
@@ -897,12 +897,12 @@ onMounted(() => {
 .repo-title {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .repo-sub {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-top: 4px;
 }
 
@@ -918,9 +918,9 @@ onMounted(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
-  background: #fafafa;
+  background: var(--el-bg-color-page);
 }
 
 .repo-item-left {
@@ -930,7 +930,7 @@ onMounted(() => {
 .repo-item-name {
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -938,7 +938,7 @@ onMounted(() => {
 
 .repo-item-url {
   font-size: 12px;
-  color: #606266;
+  color: var(--el-text-color-regular);
   margin-top: 4px;
   word-break: break-all;
 }
@@ -949,7 +949,7 @@ onMounted(() => {
   gap: 12px;
   margin-top: 6px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .repo-item-actions {
@@ -985,7 +985,7 @@ onMounted(() => {
 .pkg-name {
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -998,12 +998,12 @@ onMounted(() => {
 
 .pkg-title {
   font-size: 13px;
-  color: #606266;
+  color: var(--el-text-color-regular);
 }
 
 .pkg-desc {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin: 6px 0;
   min-height: 32px;
   line-height: 1.5;
@@ -1018,7 +1018,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 8px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-bottom: 6px;
 }
 
@@ -1032,7 +1032,7 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-  border-top: 1px solid #f0f2f5;
+  border-top: 1px solid var(--el-border-color-lighter);
   padding-top: 10px;
 }
 

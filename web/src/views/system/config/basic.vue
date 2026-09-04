@@ -269,7 +269,7 @@ onMounted(load)
   gap: 10px;
 }
 .card-header .sub {
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-size: 13px;
 }
 </style>

@@ -206,13 +206,13 @@ onMounted(loadUsage)
 
 .usage-label {
   font-size: 14px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-bottom: 4px;
 }
 
 .usage-text {
   font-size: 12px;
-  color: #606266;
+  color: var(--el-text-color-regular);
   margin-top: 4px;
   word-break: break-all;
 }
@@ -224,15 +224,15 @@ onMounted(loadUsage)
 .group-title {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
   margin-bottom: 12px;
   border-left: 3px solid #409eff;
   padding-left: 10px;
 }
 
 .app-tile {
-  background: #fff;
-  border: 1px solid #ebeef5;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   padding: 20px 8px;
   text-align: center;
@@ -249,12 +249,12 @@ onMounted(loadUsage)
 
 .app-icon {
   font-size: 32px;
-  color: #409eff;
+  color: var(--el-color-primary);
   margin-bottom: 8px;
 }
 
 .app-title {
   font-size: 14px;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 </style>

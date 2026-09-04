@@ -737,10 +737,10 @@ onBeforeUnmount(() => {
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 .tip code {
-  background: #f4f4f5; border-radius: 3px; padding: 1px 5px;
+  background: var(--el-fill-color); border-radius: 3px; padding: 1px 5px;
 }
-.form-hint { margin-left: 10px; color: #909399; font-size: 12px; }
-.never { color: #c0c4cc; }
+.form-hint { margin-left: 10px; color: var(--el-text-color-secondary); font-size: 12px; }
+.never { color: var(--el-text-color-placeholder); }
 .pem-group { margin-top: 14px; }
 .pem-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -753,22 +753,22 @@ onBeforeUnmount(() => {
 .pem-title-wrap:hover .pem-title { color: var(--el-color-primary); }
 .pem-actions { display: flex; align-items: center; gap: 4px; }
 .arrow {
-  font-size: 12px; color: #909399;
+  font-size: 12px; color: var(--el-text-color-secondary);
   transition: transform 0.2s ease-in-out;
 }
 .arrow.is-open { transform: rotate(90deg); }
-.pem-title { font-size: 13px; font-weight: 600; color: #303133; }
-.parse-box { margin-top: 6px; font-size: 12px; color: #606266; }
+.pem-title { font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); }
+.parse-box { margin-top: 6px; font-size: 12px; color: var(--el-text-color-regular); }
 .parse-info {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
   padding: 7px 10px; border-radius: 4px;
-  background: #f4f9f4; border: 1px solid #e1f0e1;
+  background: var(--el-color-success-light-9); border: 1px solid var(--el-color-success-light-7);
 }
 .parse-info .fp {
   font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 11px; color: #909399; word-break: break-all;
+  font-size: 11px; color: var(--el-text-color-secondary); word-break: break-all;
 }
-.parse-tip { display: inline-flex; align-items: center; gap: 5px; color: #909399; }
+.parse-tip { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-secondary); }
 .parse-tip.is-error { color: var(--el-color-danger); }
 .parse-chain {
   margin-top: 6px; display: flex; align-items: center; gap: 4px; color: #e6a23c;
@@ -781,7 +781,7 @@ onBeforeUnmount(() => {
 .detail-toolbar { margin-bottom: 8px; }
 .pem-view {
   max-height: 300px; overflow: auto; margin: 0; padding: 10px 12px;
-  background: #f6f6f7; border: 1px solid #e4e7ed; border-radius: 4px;
+  background: var(--el-fill-color-light); border: 1px solid var(--el-border-color-lighter); border-radius: 4px;
   font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
 }
 </style>

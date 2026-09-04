@@ -184,8 +184,8 @@ onBeforeUnmount(() => {
 .tags-view-container {
   height: 34px;
   width: 100%;
-  background: #fff;
-  border-bottom: 1px solid #d8dce5;
+  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color-light);
   box-shadow:
     0 1px 3px 0 rgba(0, 0, 0, 0.12),
     0 0 3px 0 rgba(0, 0, 0, 0.04);
@@ -203,9 +203,9 @@ onBeforeUnmount(() => {
   cursor: pointer;
   height: 26px;
   line-height: 26px;
-  border: 1px solid #d8dce5;
-  color: #495060;
-  background: #fff;
+  border: 1px solid var(--el-border-color-light);
+  color: var(--el-text-color-regular);
+  background: var(--el-bg-color);
   padding: 0 8px;
   font-size: 12px;
   margin-left: 5px;
@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
 
 .contextmenu {
   margin: 0;
-  background: #fff;
+  background: var(--el-bg-color-overlay);
   z-index: 3000;
   position: absolute;
   list-style-type: none;
@@ -257,14 +257,14 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   font-size: 12px;
   font-weight: 400;
-  color: #333;
-  box-shadow: 2px 2px 3px 0 rgba(0, 0, 0, 0.3);
+  color: var(--el-text-color-primary);
+  box-shadow: var(--el-box-shadow);
   li {
     margin: 0;
     padding: 7px 16px;
     cursor: pointer;
     &:hover {
-      background: #eee;
+      background: var(--el-fill-color-light);
     }
   }
 }

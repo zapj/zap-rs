@@ -111,7 +111,7 @@
         ></div>
 
         <div v-if="tabs.length === 0" class="terminal-placeholder">
-          <el-icon :size="48" color="#909399"><Monitor /></el-icon>
+          <el-icon :size="48" style="color: var(--el-text-color-secondary)"><Monitor /></el-icon>
           <p>双击左侧连接开始 SSH 会话</p>
         </div>
       </div>
@@ -889,21 +889,22 @@ onBeforeUnmount(() => {
 .terminal-page {
   display: flex;
   height: calc(100vh - 84px - 20px);
-  background: #fff;
+  background: var(--el-bg-color);
   border-radius: 4px;
   overflow: hidden;
 }
 
 /* ── 左侧栏 ─────────────────────────────── */
+/* 注：xterm 终端本身固定深色主题（#1e1e1e），与面板主题无关，不随暗色模式变化 */
 
 .terminal-sidebar {
   position: relative;
   flex-shrink: 0;
   min-width: 230px;
-  border-right: 1px solid #e4e7ed;
+  border-right: 1px solid var(--el-border-color-lighter);
   display: flex;
   flex-direction: column;
-  background: #fafafa;
+  background: var(--el-bg-color-page);
 }
 
 .sidebar-header {
@@ -916,7 +917,7 @@ onBeforeUnmount(() => {
 .sidebar-title {
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 /* ── 搜索 ─────────────────────────────────── */
@@ -927,7 +928,7 @@ onBeforeUnmount(() => {
 
 .sidebar-search .el-input__wrapper {
   border-radius: 8px;
-  box-shadow: 0 0 0 1px #dcdfe6 inset;
+  box-shadow: 0 0 0 1px var(--el-border-color-light) inset;
 }
 
 .sidebar-search .el-input__wrapper.is-focus {
@@ -956,13 +957,13 @@ onBeforeUnmount(() => {
 }
 
 .connection-item:hover {
-  background: #f0f7ff;
-  border-color: #d9ecff;
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-8);
 }
 
 .connection-item.active {
-  background: #ecf5ff;
-  border-color: #409eff;
+  background: var(--el-color-primary-light-8);
+  border-color: var(--el-color-primary);
 }
 
 .connection-item.disabled {
@@ -1009,7 +1010,7 @@ onBeforeUnmount(() => {
 .conn-name {
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1020,7 +1021,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -1053,7 +1054,7 @@ onBeforeUnmount(() => {
 }
 
 .status-dot.off {
-  background: #c0c4cc;
+  background: var(--el-text-color-placeholder);
 }
 
 /* 行内操作：hover 浮层，不占文档流空间 */
@@ -1067,7 +1068,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   padding: 2px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--el-bg-color-overlay);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
   z-index: 2;
 }
@@ -1084,7 +1085,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 32px 0;
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
   font-size: 13px;
 }
 
@@ -1112,7 +1113,7 @@ onBeforeUnmount(() => {
 .key-tip {
   margin-top: 6px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   line-height: 1.6;
   display: flex;
   align-items: center;
@@ -1133,8 +1134,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: stretch;
   height: 38px;
-  background: #f5f6f7;
-  border-bottom: 1px solid #dcdfe6;
+  background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color-light);
   overflow-x: auto;
   overflow-y: hidden;
   flex-shrink: 0;
@@ -1145,7 +1146,7 @@ onBeforeUnmount(() => {
 }
 
 .tabs-bar::-webkit-scrollbar-thumb {
-  background: #c0c4cc;
+  background: var(--el-text-color-placeholder);
   border-radius: 2px;
 }
 
@@ -1157,23 +1158,23 @@ onBeforeUnmount(() => {
   min-width: 0;
   padding: 0 10px 0 16px;
   font-size: 13px;
-  color: #606266;
+  color: var(--el-text-color-regular);
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
   flex-shrink: 0;
-  border-right: 1px solid #e4e7ed;
+  border-right: 1px solid var(--el-border-color-lighter);
   transition: background 0.12s, color 0.12s;
 }
 
 .tab-item:hover {
-  background: #eef1f5;
-  color: #303133;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
 }
 
 .tab-item.active {
-  background: #fff;
-  color: #303133;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-primary);
   font-weight: 600;
 }
 
@@ -1227,18 +1228,18 @@ onBeforeUnmount(() => {
   width: 18px;
   height: 18px;
   border-radius: 4px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
 
 .tab-item:hover .tab-close {
-  color: #606266;
+  color: var(--el-text-color-regular);
 }
 
 .tab-close:hover {
   background: rgba(0, 0, 0, 0.08);
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .terminal-container {
@@ -1265,7 +1266,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   gap: 16px;
 }
 

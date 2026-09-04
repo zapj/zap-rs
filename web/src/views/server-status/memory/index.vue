@@ -40,6 +40,7 @@
 
 <script setup lang="ts">
 import Chart from 'chart.js/auto'
+import { applyChartTheme, watchChartTheme } from '@/utils/chart-theme'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getRTStatus, getSystemInfo } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt'
@@ -65,6 +66,7 @@ let destroyed = false
 
 onMounted(async () => {
   const container = document.getElementById('memory_chart') as HTMLCanvasElement
+  applyChartTheme()
   memory_chart = new Chart(container, {
     type: 'line',
     data: {
@@ -99,6 +101,8 @@ onMounted(async () => {
   if (destroyed) return
   timer = setInterval(FetchRTStatus, 5000)
 })
+
+watchChartTheme(() => [memory_chart])
 
 onUnmounted(() => {
   destroyed = true
@@ -149,12 +153,12 @@ const FetchRTStatus = async () => {
 .stat-title {
   margin-top: 8px;
   font-size: 14px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .stat-sub {
   margin-top: 4px;
   font-size: 13px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .card-header {
   display: flex;

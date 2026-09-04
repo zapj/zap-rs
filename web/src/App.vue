@@ -28,17 +28,18 @@ body {
   height: 6px;
 }
 
+/* 用 Element Plus 变量，浅色 / 深色主题自动适配 */
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: var(--el-fill-color-light);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #909399;
+  background: var(--el-border-color-darker);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #606266;
+  background: var(--el-text-color-secondary);
 }
 </style>

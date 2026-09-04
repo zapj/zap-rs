@@ -250,10 +250,10 @@ onMounted(() => {
 .card-header { display: flex; align-items: center; justify-content: space-between; }
 .title { font-size: 16px; font-weight: 600; }
 .tip code, .token-prefix {
-  background: #f4f4f5; border-radius: 3px; padding: 1px 5px;
+  background: var(--el-fill-color); border-radius: 3px; padding: 1px 5px;
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
-.form-hint { margin-left: 10px; color: #909399; font-size: 12px; }
-.created-meta { margin-top: 8px; color: #606266; font-size: 13px; }
-.never { color: #c0c4cc; }
+.form-hint { margin-left: 10px; color: var(--el-text-color-secondary); font-size: 12px; }
+.created-meta { margin-top: 8px; color: var(--el-text-color-regular); font-size: 13px; }
+.never { color: var(--el-text-color-placeholder); }
 </style>

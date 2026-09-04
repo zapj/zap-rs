@@ -9,6 +9,41 @@
     <breadcrumb class="breadcrumb-container" />
 
     <div class="right-menu">
+      <el-dropdown trigger="click" @command="handleThemeCommand">
+        <div class="icon-button theme-trigger" :title="`主题：${currentThemeLabel}`">
+          <el-icon :size="18">
+            <icon-ep-sunny v-if="themeMode === 'light'" />
+            <icon-ep-moon v-else-if="themeMode === 'dark'" />
+            <icon-ep-monitor v-else />
+          </el-icon>
+        </div>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="light">
+              <span class="theme-item">
+                <el-icon><icon-ep-check v-if="themeMode === 'light'" /></el-icon>
+                <el-icon><icon-ep-sunny /></el-icon>
+                <span>浅色 Light</span>
+              </span>
+            </el-dropdown-item>
+            <el-dropdown-item command="dark">
+              <span class="theme-item">
+                <el-icon><icon-ep-check v-if="themeMode === 'dark'" /></el-icon>
+                <el-icon><icon-ep-moon /></el-icon>
+                <span>深色 Dark</span>
+              </span>
+            </el-dropdown-item>
+            <el-dropdown-item command="auto">
+              <span class="theme-item">
+                <el-icon><icon-ep-check v-if="themeMode === 'auto'" /></el-icon>
+                <el-icon><icon-ep-monitor /></el-icon>
+                <span>跟随系统 Auto</span>
+              </span>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
       <el-popover
         ref="noticePopover"
         placement="bottom-end"
@@ -96,6 +131,19 @@ import { getNotices, getUnreadCount, readAllNotices, readNotice } from '@/api/no
 import type { NoticeMessage } from '@/api/notice'
 import Breadcrumb from '@/components/Breadcrumb/index.vue'
 import Hamburger from '@/components/Hamburger/index.vue'
+import { setThemeMode, themeMode, type ThemeMode } from '@/composables/useTheme'
+
+const THEME_LABELS: Record<ThemeMode, string> = {
+  light: '浅色',
+  dark: '深色',
+  auto: '跟随系统',
+}
+
+const currentThemeLabel = computed(() => THEME_LABELS[themeMode.value])
+
+function handleThemeCommand(mode: ThemeMode) {
+  setThemeMode(mode)
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -220,8 +268,8 @@ async function handleLogout() {
   height: 50px;
   overflow: hidden;
   position: relative;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+  background: var(--el-bg-color);
+  box-shadow: var(--el-box-shadow-light);
   display: flex;
   align-items: center;
 
@@ -234,7 +282,7 @@ async function handleLogout() {
     transition: background 0.3s;
 
     &:hover {
-      background: rgba(0, 0, 0, 0.025);
+      background: var(--el-fill-color-light);
     }
   }
 
@@ -255,12 +303,25 @@ async function handleLogout() {
       cursor: pointer;
       padding: 6px;
       border-radius: 4px;
-      color: #606266;
+      color: var(--el-text-color-primary);
       line-height: 1;
 
       &:hover {
-        background: rgba(0, 0, 0, 0.05);
-        color: #409eff;
+        background: var(--el-fill-color-light);
+        color: var(--el-color-primary);
+      }
+    }
+
+    .theme-trigger {
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 4px;
+      color: var(--el-text-color-primary);
+      line-height: 1;
+
+      &:hover {
+        background: var(--el-fill-color-light);
+        color: var(--el-color-primary);
       }
     }
 
@@ -281,17 +342,17 @@ async function handleLogout() {
 
         .user-name {
           font-size: 14px;
-          color: #333;
+          color: var(--el-text-color-primary);
           margin-right: 4px;
         }
 
         .el-icon-caret-bottom {
           font-size: 12px;
-          color: #999;
+          color: var(--el-text-color-secondary);
         }
 
         &:hover {
-          background: rgba(0, 0, 0, 0.025);
+          background: var(--el-fill-color-light);
         }
       }
     }
@@ -311,14 +372,27 @@ async function handleLogout() {
   align-items: center;
   justify-content: space-between;
   padding: 4px 8px 10px;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   margin-bottom: 4px;
 }
 
 .notice-pop__heading {
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
+}
+
+/* 主题切换下拉项（下拉菜单 teleport 到 body，不能用 scoped 样式） */
+.theme-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 130px;
+}
+
+.theme-item .el-icon:first-child {
+  width: 14px;
+  color: var(--el-color-primary);
 }
 
 .notice-pop__item {
@@ -332,7 +406,7 @@ async function handleLogout() {
 }
 
 .notice-pop__item:hover {
-  background: #f5f7fa;
+  background: var(--el-fill-color-light);
 }
 
 .notice-pop__dot {
@@ -345,7 +419,7 @@ async function handleLogout() {
 }
 
 .notice-pop__dot.read {
-  background: #dcdfe6;
+  background: var(--el-border-color);
 }
 
 .notice-pop__main {
@@ -362,27 +436,27 @@ async function handleLogout() {
 
 .notice-pop__title {
   font-size: 13px;
-  color: #606266;
+  color: var(--el-text-color-regular);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .notice-pop__title.unread {
-  color: #303133;
+  color: var(--el-text-color-primary);
   font-weight: 600;
 }
 
 .notice-pop__time {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   flex-shrink: 0;
 }
 
 .notice-pop__body {
   margin-top: 4px;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   line-height: 1.6;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -394,9 +468,9 @@ async function handleLogout() {
   text-align: center;
   padding: 10px 0 4px;
   font-size: 13px;
-  color: #409eff;
+  color: var(--el-color-primary);
   cursor: pointer;
-  border-top: 1px solid #f0f2f5;
+  border-top: 1px solid var(--el-border-color-lighter);
   margin-top: 4px;
 }
 

@@ -220,7 +220,7 @@ onBeforeUnmount(() => {
   display: flex;
   /* 视口高 - 顶部导航 50 - 标签栏 34 - 底部 Footer 50 - app-main 上下 padding 20 */
   height: calc(100vh - 154px);
-  background: #fff;
+  background: var(--el-bg-color);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -228,10 +228,10 @@ onBeforeUnmount(() => {
 .scripts-sidebar {
   width: 280px;
   min-width: 280px;
-  border-right: 1px solid #e4e7ed;
+  border-right: 1px solid var(--el-border-color-lighter);
   display: flex;
   flex-direction: column;
-  background: #fafafa;
+  background: var(--el-bg-color-page);
 }
 
 .sidebar-header {
@@ -239,13 +239,13 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .sidebar-title {
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .sidebar-tree {
@@ -271,11 +271,11 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 6px;
   padding: 10px 12px;
-  border-top: 1px solid #e4e7ed;
+  border-top: 1px solid var(--el-border-color-lighter);
   font-size: 11px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   line-height: 1.5;
-  background: #f5f7fa;
+  background: var(--el-fill-color-light);
 }
 
 .sidebar-tip .el-icon {
@@ -295,12 +295,12 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .editor-path {
   font-size: 13px;
-  color: #409eff;
+  color: var(--el-color-primary);
   font-family: monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -316,11 +316,11 @@ onBeforeUnmount(() => {
 .editor-area {
   flex: 1;
   min-height: 0;
-  border-top: 1px solid #e4e7ed;
-  background: #fff;
+  border-top: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color);
 }
 
 .editor-area.is-readonly {
-  background: #f5f7fa;
+  background: var(--el-fill-color-light);
 }
 </style>
