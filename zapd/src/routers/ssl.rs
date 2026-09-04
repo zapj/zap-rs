@@ -307,9 +307,11 @@ pub async fn cert_delete(
 }
 
 // ── 证书解析（自动读取域名 / 有效期等，供添加证书时自动填充）──
-
-/// subjectAltName 的 OID（2.5.29.17 → 55 1D 11）。
-const OID_SUBJECT_ALT_NAME: &[u8] = &[0x55, 0x1d, 0x11];
+//
+// 安全说明：这里刻意不走 OpenSSL。证书 / CSR 是用户在页面上粘贴的**不可信输入**，
+// 而 X.509 / ASN.1 解析历史上是 OpenSSL 的高危区域（Heartbleed、ASN.1 BIO 系列漏洞等）。
+// 改用纯 Rust 的 `x509-parser`（基于 nom 的 DER 解析，无 C 代码、无 unsafe），
+// 可让这条链路完全处于 Rust 的内存安全保证之内；指纹用 RustCrypto 的 sha2 自行计算。
 
 #[derive(Debug, serde::Serialize)]
 struct ParsedCertInfo {
@@ -332,43 +334,6 @@ struct ParsedCertInfo {
     cert_count: usize,
 }
 
-/// 极简 DER 读取器：只解析 TLV（单字节 tag + 短/长型长度）。
-struct Der<'a> {
-    buf: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Der<'a> {
-    fn new(buf: &'a [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
-
-    fn next_tlv(&mut self) -> Option<(u8, &'a [u8])> {
-        let tag = *self.buf.get(self.pos)?;
-        self.pos += 1;
-        let first = *self.buf.get(self.pos)? as usize;
-        self.pos += 1;
-        let len = if first & 0x80 != 0 {
-            let n = first & 0x7f;
-            if n == 0 || n > 4 {
-                return None;
-            }
-            let mut v = 0usize;
-            for _ in 0..n {
-                v = (v << 8) | (*self.buf.get(self.pos)? as usize);
-                self.pos += 1;
-            }
-            v
-        } else {
-            first
-        };
-        let end = self.pos.checked_add(len)?;
-        let data = self.buf.get(self.pos..end)?;
-        self.pos = end;
-        Some((tag, data))
-    }
-}
-
 fn push_uniq(v: &mut Vec<String>, s: String) {
     let s = s.trim().to_string();
     if s.is_empty() {
@@ -379,164 +344,109 @@ fn push_uniq(v: &mut Vec<String>, s: String) {
     }
 }
 
-/// 拆开 X509Extension 的 DER：Extension ::= SEQUENCE { oid, [critical], OCTET STRING }。
-fn split_extension_der(der: &[u8]) -> Option<(&[u8], &[u8])> {
-    let mut outer = Der::new(der);
-    let (tag, seq) = outer.next_tlv()?;
-    if tag != 0x30 {
-        return None;
+/// 从 PEM 中取出第一张证书（fullchain 时即叶子证书），并统计证书总数量。
+fn first_cert_der(pem: &str) -> Option<(Vec<u8>, usize)> {
+    use x509_parser::pem::Pem;
+
+    let mut count = 0usize;
+    let mut first: Option<Vec<u8>> = None;
+    for item in Pem::iter_from_buffer(pem.as_bytes()) {
+        let Ok(block) = item else { continue };
+        let label = block.label.trim().to_ascii_uppercase();
+        // 跳过 CSR（CERTIFICATE REQUEST）等非证书块
+        if !label.contains("CERTIFICATE") || label.contains("REQUEST") {
+            continue;
+        }
+        count += 1;
+        if first.is_none() {
+            first = Some(block.contents.clone());
+        }
     }
-    let mut inner = Der::new(seq);
-    let (tag, oid) = inner.next_tlv()?;
-    if tag != 0x06 {
-        return None;
-    }
-    let (mut tag, mut val) = inner.next_tlv()?;
-    if tag == 0x01 {
-        // critical 标志，跳过
-        (tag, val) = inner.next_tlv()?;
-    }
-    if tag != 0x04 {
-        return None;
-    }
-    Some((oid, val))
+    first.map(|der| (der, count))
 }
 
-/// 解析 SEQUENCE OF GeneralName，只取 dNSName(2) 与 iPAddress(7)。
-fn general_name_domains(der: &[u8]) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut outer = Der::new(der);
-    let Some((tag, seq)) = outer.next_tlv() else {
-        return out;
-    };
-    if tag != 0x30 {
-        return out;
-    }
-    let mut inner = Der::new(seq);
-    while let Some((tag, val)) = inner.next_tlv() {
-        match tag {
-            0x82 => {
-                if let Ok(s) = std::str::from_utf8(val) {
-                    push_uniq(&mut out, s.to_string());
-                }
-            }
-            0x87 => {
-                if val.len() == 4 {
+/// 收集 GeneralName 列表中的 dNSName / iPAddress。
+fn collect_general_names(names: &[x509_parser::extensions::GeneralName<'_>], out: &mut Vec<String>) {
+    use x509_parser::extensions::GeneralName;
+
+    for gn in names {
+        match gn {
+            GeneralName::DNSName(d) => push_uniq(out, (*d).to_string()),
+            GeneralName::IPAddress(b) => {
+                if b.len() == 4 {
                     let mut a = [0u8; 4];
-                    a.copy_from_slice(val);
-                    push_uniq(&mut out, std::net::Ipv4Addr::from(a).to_string());
-                } else if val.len() == 16 {
+                    a.copy_from_slice(b);
+                    push_uniq(out, std::net::Ipv4Addr::from(a).to_string());
+                } else if b.len() == 16 {
                     let mut a = [0u8; 16];
-                    a.copy_from_slice(val);
-                    push_uniq(&mut out, std::net::Ipv6Addr::from(a).to_string());
+                    a.copy_from_slice(b);
+                    push_uniq(out, std::net::Ipv6Addr::from(a).to_string());
                 }
             }
             _ => {}
         }
     }
-    out
 }
 
-/// 把 X509Name 渲染成 `C=CN, O=xxx, CN=yyy` 形式。
-fn name_to_string(name: &openssl::x509::X509NameRef) -> String {
-    name.entries()
-        .map(|e| {
-            let key = e.object().nid().short_name().unwrap_or("?");
-            let val = String::from_utf8_lossy(e.data().as_slice()).trim().to_string();
-            format!("{key}={val}")
-        })
+/// SHA256 指纹（冒号分隔）。
+fn sha256_fingerprint(der: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode_upper(Sha256::digest(der))
+        .as_bytes()
+        .chunks(2)
+        .map(|c| String::from_utf8_lossy(c).to_string())
         .collect::<Vec<_>>()
-        .join(", ")
+        .join(":")
 }
 
-fn common_name(name: &openssl::x509::X509NameRef) -> String {
-    use openssl::nid::Nid;
-    name.entries_by_nid(Nid::COMMONNAME)
+/// X509Name → 常用名（CN）。
+fn common_name(name: &x509_parser::x509::X509Name<'_>) -> String {
+    name.iter_common_name()
+        .filter_map(|a| a.as_str().ok())
         .next()
-        .map(|e| String::from_utf8_lossy(e.data().as_slice()).trim().to_string())
-        .unwrap_or_default()
+        .unwrap_or("")
+        .to_string()
 }
 
-/// ASN1 时间 → Unix 时间戳（秒）。
-fn asn1_ts(t: &openssl::asn1::Asn1TimeRef) -> i64 {
-    use openssl::asn1::Asn1Time;
-    let Ok(epoch) = Asn1Time::from_unix(0) else {
-        return 0;
-    };
-    match epoch.diff(t) {
-        Ok(d) => d.days as i64 * 86400 + d.secs as i64,
-        Err(_) => 0,
-    }
-}
+/// 公钥类型与位数（Ed25519 / Ed448 等 `parsed()` 未覆盖的算法按 OID 兜底）。
+fn key_meta(spki: &x509_parser::x509::SubjectPublicKeyInfo<'_>) -> (String, u32) {
+    use x509_parser::public_key::PublicKey;
 
-/// 公钥类型与位数。
-fn key_meta(pkey: &openssl::pkey::PKeyRef<openssl::pkey::Public>) -> (String, u32) {
-    use openssl::pkey::Id;
-    let name = match pkey.id() {
-        Id::RSA => "RSA",
-        Id::EC => "EC",
-        Id::ED25519 => "Ed25519",
-        Id::ED448 => "Ed448",
-        Id::DSA => "DSA",
-        _ => "未知",
+    let bits = spki.parsed().map(|k| k.key_size() as u32).unwrap_or(0);
+    let name = match spki.parsed() {
+        Ok(PublicKey::RSA(_)) => "RSA",
+        Ok(PublicKey::EC(_)) => "EC",
+        Ok(PublicKey::DSA(_)) => "DSA",
+        Ok(PublicKey::GostR3410(_)) | Ok(PublicKey::GostR3410_2012(_)) => "GOST",
+        _ => match spki.algorithm.algorithm.to_id_string().as_str() {
+            "1.3.101.112" => "Ed25519",
+            "1.3.101.113" => "Ed448",
+            _ => "未知",
+        },
     };
-    (name.to_string(), pkey.bits())
+    (name.to_string(), bits)
 }
 
 fn parse_certificate(pem: &str) -> Option<ParsedCertInfo> {
-    use openssl::hash::MessageDigest;
-    use openssl::x509::X509;
+    use x509_parser::prelude::*;
 
-    let cert = X509::from_pem(pem.as_bytes()).ok()?;
-    let subject = name_to_string(cert.subject_name());
-    let issuer = name_to_string(cert.issuer_name());
-    let cn = common_name(cert.subject_name());
+    let (der, cert_count) = first_cert_der(pem)?;
+    let (_, cert) = X509Certificate::from_der(&der).ok()?;
+    let subject = cert.subject().to_string();
+    let issuer = cert.issuer().to_string();
+    let cn = common_name(cert.subject());
 
     let mut domains: Vec<String> = Vec::new();
-    if let Some(sans) = cert.subject_alt_names() {
-        for gn in sans.iter() {
-            if let Some(dns) = gn.dnsname() {
-                push_uniq(&mut domains, dns.to_string());
-            } else if let Some(ip) = gn.ipaddress() {
-                if ip.len() == 4 {
-                    let mut a = [0u8; 4];
-                    a.copy_from_slice(ip);
-                    push_uniq(&mut domains, std::net::Ipv4Addr::from(a).to_string());
-                } else if ip.len() == 16 {
-                    let mut a = [0u8; 16];
-                    a.copy_from_slice(ip);
-                    push_uniq(&mut domains, std::net::Ipv6Addr::from(a).to_string());
-                }
-            }
-        }
+    if let Ok(Some(san)) = cert.subject_alternative_name() {
+        collect_general_names(&san.value.general_names, &mut domains);
     }
     let sans_count = domains.len();
     // 无 SAN 时退回 CN（老式证书 / 自签名证书常见）
     if domains.is_empty() && !cn.is_empty() {
         domains.push(cn.clone());
     }
-
-    let (key_type, key_bits) = match cert.public_key() {
-        Ok(pk) => key_meta(&pk),
-        Err(_) => (String::new(), 0),
-    };
-    let serial = cert
-        .serial_number()
-        .to_bn()
-        .ok()
-        .and_then(|b| b.to_hex_str().ok())
-        .map(|s| s.to_string())
-        .unwrap_or_default();
-    let fingerprint = match cert.digest(MessageDigest::sha256()) {
-        Ok(d) => hex::encode_upper(d)
-            .as_bytes()
-            .chunks(2)
-            .map(|c| String::from_utf8_lossy(c).to_string())
-            .collect::<Vec<_>>()
-            .join(":"),
-        Err(_) => String::new(),
-    };
-    let cert_count = pem.matches("-----BEGIN CERTIFICATE-----").count();
+    let validity = cert.validity();
+    let (key_type, key_bits) = key_meta(cert.public_key());
 
     Some(ParsedCertInfo {
         kind: "cert".to_string(),
@@ -545,10 +455,10 @@ fn parse_certificate(pem: &str) -> Option<ParsedCertInfo> {
         common_name: cn,
         subject,
         issuer,
-        not_before: asn1_ts(cert.not_before()),
-        not_after: asn1_ts(cert.not_after()),
-        serial,
-        fingerprint,
+        not_before: validity.not_before.timestamp(),
+        not_after: validity.not_after.timestamp(),
+        serial: cert.raw_serial_as_string(),
+        fingerprint: sha256_fingerprint(&der),
         key_type,
         key_bits,
         sans_count,
@@ -557,24 +467,19 @@ fn parse_certificate(pem: &str) -> Option<ParsedCertInfo> {
 }
 
 fn parse_csr_pem(pem: &str) -> Option<ParsedCertInfo> {
-    use openssl::x509::X509Req;
+    use x509_parser::prelude::*;
 
-    let req = X509Req::from_pem(pem.as_bytes()).ok()?;
-    let subject = name_to_string(req.subject_name());
-    let cn = common_name(req.subject_name());
+    let (_, block) = parse_x509_pem(pem.as_bytes()).ok()?;
+    let (_, req) = X509CertificationRequest::from_der(&block.contents).ok()?;
+    let info = &req.certification_request_info;
+    let subject = info.subject.to_string();
+    let cn = common_name(&info.subject);
 
     let mut domains: Vec<String> = Vec::new();
-    if let Ok(exts) = req.extensions() {
-        for ext in exts.iter() {
-            let Ok(der) = ext.to_der() else { continue };
-            let Some((oid, val)) = split_extension_der(&der) else {
-                continue;
-            };
-            if oid != OID_SUBJECT_ALT_NAME {
-                continue;
-            }
-            for d in general_name_domains(val) {
-                push_uniq(&mut domains, d);
+    if let Some(exts) = req.requested_extensions() {
+        for ext in exts {
+            if let ParsedExtension::SubjectAlternativeName(san) = ext {
+                collect_general_names(&san.general_names, &mut domains);
             }
         }
     }
@@ -582,10 +487,7 @@ fn parse_csr_pem(pem: &str) -> Option<ParsedCertInfo> {
     if domains.is_empty() && !cn.is_empty() {
         domains.push(cn.clone());
     }
-    let (key_type, key_bits) = match req.public_key() {
-        Ok(pk) => key_meta(&pk),
-        Err(_) => (String::new(), 0),
-    };
+    let (key_type, key_bits) = key_meta(&info.subject_pki);
 
     Some(ParsedCertInfo {
         kind: "csr".to_string(),
@@ -630,7 +532,10 @@ pub struct CertParsePayload {
 }
 
 /// 解析证书 / CSR：返回域名、有效期、签发者、指纹等，用于添加证书时自动填充。
-pub async fn cert_parse(_claims: ValidatedClaims, Json(payload): Json<CertParsePayload>) -> ZapJsonResult {
+pub async fn cert_parse(
+    _claims: ValidatedClaims,
+    Json(payload): Json<CertParsePayload>,
+) -> ZapJsonResult {
     match parse_pem_info(&payload.pem) {
         Some(info) => Ok(Json(json!({ "code": 0, "message": "OK", "data": info }))),
         None => Err(ZapError::New(
@@ -639,7 +544,6 @@ pub async fn cert_parse(_claims: ValidatedClaims, Json(payload): Json<CertParseP
         )),
     }
 }
-
 // ── 自签名生成 ───────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
