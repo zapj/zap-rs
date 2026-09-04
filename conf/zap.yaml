@@ -11,3 +11,7 @@ server:
   cert_file: conf/zap.crt
   key_file: conf/zap.key
   port: 2600
+  # 统一 URL 前缀：设置后页面与接口全部位于 /<url_prefix>/ 下，
+  # 例：https://host:2600/zap/dashboard、/zap/api/auth/login
+  # 留空（删掉本行或置空）则不启用前缀，接口仍在 /api/*、页面在根路径
+  url_prefix: ""

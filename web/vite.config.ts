@@ -19,6 +19,10 @@ export default defineConfig(({ mode }) => {
   const useMock = env.VITE_USE_MOCK === 'true'
 
   return {
+    // 静态资源用相对路径：面板支持通过 zap.yaml 的 server.url_prefix
+    // 部署在任意前缀下（如 /zap/），写死 /assets 会在子路径下 404。
+    // 后端会在 index.html 注入 <base href="/zap/">，保证相对路径解析正确。
+    base: './',
     plugins: [
       vue(),
       // vueDevTools(),

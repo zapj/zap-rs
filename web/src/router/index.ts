@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { BASE } from '@/utils/base'
 
 import Layout from '@/layout/index.vue'
 import { useUserStore } from '@/stores/user'
@@ -260,7 +261,8 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  // 带上后端配置的前缀（zap.yaml 的 server.url_prefix），无前缀时为 '/'
+  history: createWebHistory(BASE || '/'),
   routes: constantRoutes,
   // 刷新时滚动到顶部
   scrollBehavior: () => ({ left: 0, top: 0 }),
@@ -269,7 +271,7 @@ const router = createRouter({
 // 重置路由
 export function resetRouter() {
   const newRouter = createRouter({
-    history: createWebHistory(),
+    history: createWebHistory(BASE || '/'),
     routes: constantRoutes,
     scrollBehavior: () => ({ left: 0, top: 0 }),
   })

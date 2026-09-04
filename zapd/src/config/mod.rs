@@ -24,6 +24,11 @@ pub struct ServerConfig {
     pub port: u16,
     pub cert_file: String,
     pub key_file: String,
+    /// 统一 URL 前缀。配置如 `zap` 后，页面与接口全部位于 `/zap/` 下
+    /// （例：`https://host:2600/zap/dashboard`、`/zap/api/auth/login`）。
+    /// 留空则不启用前缀，行为与之前完全一致。
+    #[serde(default)]
+    pub url_prefix: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -64,6 +69,38 @@ impl Default for DbConfig {
 
 const DEFAULT_JWT_SECURE: &str = "secure-key-zap-default";
 
+/// 规范化 URL 前缀：去掉首尾空白与斜杠，并过滤掉空白段。
+///
+/// `"/zap/"` → `"zap"`，`"zap"` → `"zap"`，`""` → `""`（不启用前缀）。
+/// 拼接时再补上 `/`，即 `/{prefix}`。
+pub fn normalize_url_prefix(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('/')
+        .split('/')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// 读取规范化后的 URL 前缀（不带首尾斜杠）。空串表示未启用前缀。
+pub fn url_prefix() -> String {
+    get_config()
+        .read()
+        .map(|c| c.server.url_prefix.clone())
+        .unwrap_or_default()
+}
+
+/// 拼好的前缀路径：`/zap`；未启用时为空串（便于直接拼接路径）。
+pub fn url_prefix_path() -> String {
+    let p = url_prefix();
+    if p.is_empty() {
+        String::new()
+    } else {
+        format!("/{p}")
+    }
+}
+
 pub fn new() -> ZapConfig {
     ZapConfig {
         server: ServerConfig {
@@ -71,6 +108,7 @@ pub fn new() -> ZapConfig {
             port: 2600,
             cert_file: "conf/zap.crt".to_string(),
             key_file: "conf/zap.key".to_string(),
+            url_prefix: String::new(),
         },
         jwt: JWTConfig {
             jwt_secure: DEFAULT_JWT_SECURE.to_string(),
@@ -81,11 +119,11 @@ pub fn new() -> ZapConfig {
     }
 }
 
-/// 配置文件路径：
+/// 配置文件路径（启动时打印，便于排查"改了配置没生效"）：
 /// 1. 环境变量 `ZAP_CONFIG`（若设置）
-/// 2. 生产默认 `/etc/zap/zap.yaml`（若存在）
+/// 2. 生产默认 `/etc/zap/zap.yaml`（若存在）——注意它优先于 `conf/zap.yaml`
 /// 3. 开发回退 `conf/zap.yaml`
-fn config_path() -> PathBuf {
+pub fn config_path() -> PathBuf {
     if let Ok(p) = std::env::var("ZAP_CONFIG")
         && !p.is_empty()
     {
@@ -148,6 +186,7 @@ pub fn get_config() -> &'static RwLock<ZapConfig> {
                         default_conf.server.port = cnf.server.port;
                         default_conf.server.cert_file = cnf.server.cert_file;
                         default_conf.server.key_file = cnf.server.key_file;
+                        default_conf.server.url_prefix = normalize_url_prefix(&cnf.server.url_prefix);
                         default_conf.exec = cnf.exec;
 
                         // Rotate JWT secret if still using default

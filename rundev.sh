@@ -50,6 +50,14 @@ EXEC_SECRET="$RUN_DIR/exec.key"
 DEV_CONF="$RUN_DIR/zap.dev.yaml"
 DEV_USER="$(id -un)"
 
+# URL 前缀沿用 conf/zap.yaml 的配置（server.url_prefix）。
+# 开发配置是独立文件，不同步的话改 conf/zap.yaml 不会生效。
+CONF_URL_PREFIX=""
+if [ -f "$ROOT_DIR/conf/zap.yaml" ]; then
+  CONF_URL_PREFIX=$(sed -n 's/^[[:space:]]*url_prefix:[[:space:]]*"\{0,1\}\([^"#]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+    "$ROOT_DIR/conf/zap.yaml" | head -1 | sed 's/[[:space:]]*$//')
+fi
+
 if [ "$RELEASE" = true ]; then
   BIN_DIR="$ROOT_DIR/target/release"
   CARGO_FLAGS=(--release)
@@ -108,6 +116,7 @@ server:
   port: 2600
   cert_file: $ROOT_DIR/conf/zap.crt
   key_file: $ROOT_DIR/conf/zap.key
+  url_prefix: "$CONF_URL_PREFIX"
 jwt:
   jwt_secure: zap-dev-insecure-secret
   jwt_expire: 3600
@@ -118,6 +127,19 @@ db:
   path: $ROOT_DIR/data/zap.db
 EOF
   ok "开发配置已生成"
+fi
+
+# 已存在的开发配置（首次生成后不再重建）：同步 conf/zap.yaml 的 url_prefix，
+# 否则在 conf/zap.yaml 里改前缀不会生效。
+if [ -f "$DEV_CONF" ]; then
+  if grep -qE '^[[:space:]]*url_prefix:' "$DEV_CONF"; then
+    sed -i "s|^[[:space:]]*url_prefix:.*|  url_prefix: \"$CONF_URL_PREFIX\"|" "$DEV_CONF"
+  else
+    sed -i "0,\|^[[:space:]]*key_file:.*|s||&\n  url_prefix: \"$CONF_URL_PREFIX\"|" "$DEV_CONF"
+  fi
+  if [ -n "$CONF_URL_PREFIX" ]; then
+    ok "URL 前缀: /$CONF_URL_PREFIX/ （同步自 conf/zap.yaml）"
+  fi
 fi
 
 # ── 3.5 删除数据库（--reset-db）──────────────────────────────

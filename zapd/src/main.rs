@@ -55,6 +55,22 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    // 打印实际生效的配置文件：生产环境 /etc/zap/zap.yaml 优先于 conf/zap.yaml，
+    // rundev.sh 则通过 ZAP_CONFIG 指向 data/run/zap.dev.yaml。
+    // 显示绝对路径 + 存在性，便于排查"改了配置但没生效"。
+    let cfg_path = config::config_path();
+    let cfg_display = cfg_path
+        .canonicalize()
+        .unwrap_or_else(|_| cfg_path.clone());
+    if cfg_path.exists() {
+        info!("using config file: {}", cfg_display.display());
+    } else {
+        warn!(
+            "配置文件不存在，将使用内置默认值（url_prefix 等设置不会生效）: {}",
+            cfg_display.display()
+        );
+    }
+
     // 一次性读取配置并转为 owned 值：配置读写锁不跨 await 持有
     let (cert_file, key_file, bind, web_port) = {
         let cfg = config::get_config().read().unwrap();
@@ -65,6 +81,8 @@ async fn main() {
             cfg.server.port,
         )
     };
+    // 统一 URL 前缀（server.url_prefix）：留空则不启用
+    let url_prefix = config::url_prefix();
 
     // Ensure TLS certificates exist (generate self-signed if missing)
     if !zap::certmgr::ensure_certs(&cert_file, &key_file) {
@@ -80,6 +98,14 @@ async fn main() {
         .unwrap_or_else(|_| std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
     info!("listening on https://{}:{}", primary_ip, web_port);
     info!("Zap server listening on https://{}.", bind);
+    if url_prefix.is_empty() {
+        info!("URL prefix: (none) — 页面在 / ，接口在 /api/");
+    } else {
+        info!(
+            "URL prefix: /{} — 页面在 /{}/ ，接口在 /{}/api/",
+            url_prefix, url_prefix, url_prefix
+        );
+    }
 
     // init db
     db::init_db::init_schema().await;

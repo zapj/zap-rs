@@ -71,13 +71,44 @@ static INDEX_HTML: &str = "index.html";
 async fn index_html() -> Response {
     match Assets::get(INDEX_HTML) {
         Some(content) => {
-            let body = Body::from(content.data);
+            let html = String::from_utf8_lossy(&content.data).into_owned();
+            let html = inject_base_tag(&html, &crate::config::url_prefix_path());
             Response::builder()
                 .header(header::CONTENT_TYPE, "text/html")
-                .body(body)
+                .body(Body::from(html))
                 .unwrap()
         }
         None => not_found().await,
+    }
+}
+
+/// 向 SPA 首页注入 `<base>` 与 URL 前缀。
+///
+/// 前端构建产物用相对路径引用资源（vite `base: './'`），因此**必须**注入 `<base>`：
+/// 否则在多级路由（如 `/system/users`、`/zap/system/users`）直接刷新时，
+/// `./assets/xxx.js` 会被解析成 `/system/assets/xxx.js` 而 404，页面一片空白。
+///
+/// - 未启用前缀：注入 `<base href="/">`
+/// - 启用前缀：注入 `<base href="/zap/">`
+///
+/// 同时注入 `window.__ZAP_BASE__`（无前缀时为空串），供前端 axios baseURL、
+/// vue-router base 与 WebSocket 使用。
+fn inject_base_tag(html: &str, prefix_path: &str) -> String {
+    let base = if prefix_path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("{prefix_path}/")
+    };
+    let inject = format!(
+        "\n    <base href=\"{base}\">\n    <script>window.__ZAP_BASE__=\"{prefix_path}\"</script>"
+    );
+    match html.find("<head>") {
+        Some(pos) => {
+            let at = pos + "<head>".len();
+            let (head, tail) = html.split_at(at);
+            format!("{head}{inject}{tail}")
+        }
+        None => format!("{inject}{html}"),
     }
 }
 
@@ -89,7 +120,18 @@ async fn not_found() -> Response {
 }
 
 async fn static_handler(uri: Uri) -> Response {
-    let path = uri.path().trim_start_matches('/');
+    let mut full = uri.path().to_string();
+    // `Router::nest` 会剥离前缀，这里再幂等剥一次：
+    // 保证无论拿到的是完整路径还是剥离后的路径都能命中文件。
+    let prefix = crate::config::url_prefix_path();
+    if !prefix.is_empty() {
+        if full == prefix {
+            full = "/".to_string();
+        } else if let Some(rest) = full.strip_prefix(&format!("{prefix}/")) {
+            full = format!("/{rest}");
+        }
+    }
+    let path = full.trim_start_matches('/');
 
     if path.is_empty() || path == INDEX_HTML {
         return index_html().await;
@@ -124,10 +166,40 @@ async fn health_check() -> Json<serde_json::Value> {
     }))
 }
 
+/// 组装完整路由：前缀取自 `zap.yaml` 的 `server.url_prefix`。
 pub fn routers() -> Router {
-    Router::new()
+    build_routers(&crate::config::url_prefix())
+}
+
+/// 按给定前缀组装路由（`prefix` 为空表示不启用前缀）。
+///
+/// 配置 `server.url_prefix` 后，页面与接口全部挂到 `/{prefix}` 下：
+/// - 页面：`/zap/dashboard`
+/// - 接口：`/zap/api/auth/login`
+///
+/// 前缀之外的路径（`/`、`/api/*` 等）一律返回 **404**，不做重定向：
+/// 这样外部探测根路径时无法发现真实入口，起到隐藏后台入口的作用。
+///
+/// 未配置前缀时行为与之前完全一致（`/api/*` + 根路径 SPA）。
+fn build_routers(prefix: &str) -> Router {
+    let inner = Router::new()
         .fallback(static_handler)
-        .nest("/api", api_routers())
+        .nest("/api", api_routers());
+
+    let prefix = prefix.trim().trim_matches('/');
+    if prefix.is_empty() {
+        return inner;
+    }
+
+    let nested = format!("/{prefix}");
+    // nest 的 catch-all 能匹配 /zap 与 /zap/xxx，但匹配不到 /zap/（尾斜杠），
+    // 补一条显式路由，保证 /zap 与 /zap/ 两种写法都能打开首页。
+    let nested_slash = format!("{nested}/");
+    Router::new()
+        .nest(&nested, inner)
+        .route(&nested_slash, get(index_html))
+        // 前缀之外的任何路径都 404（不回跳，避免暴露前缀）
+        .fallback(not_found)
 }
 
 fn api_routers() -> Router {
@@ -378,4 +450,105 @@ fn api_routers() -> Router {
         .route("/dev/api-token/delete", post(dev::api_token_delete))
         .route("/dev/api-docs", get(dev::api_docs))
         .layer(middleware::from_fn(demo_readonly_guard))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::StatusCode;
+    use tower::ServiceExt; // oneshot
+
+    async fn status_of(app: Router, uri: &str) -> StatusCode {
+        get(app, uri).await.0
+    }
+
+    /// 返回（状态码，响应体文本），用于区分"命中接口"还是"落到 SPA fallback"
+    async fn get(app: Router, uri: &str) -> (StatusCode, String) {
+        let req = axum::http::Request::builder()
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    #[tokio::test]
+    async fn no_prefix_keeps_legacy_paths() {
+        let app = build_routers("");
+        // 健康检查仍在 /api 下
+        let (s, body) = get(app.clone(), "/api/health").await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(body.contains("\"status\":\"ok\""), "应命中 health 接口");
+        // 未启用前缀时 /zap/... 走 SPA fallback，不会命中接口
+        let (_s, body) = get(app, "/zap/api/health").await;
+        assert!(!body.contains("\"status\":\"ok\""), "前缀路径不应命中接口");
+    }
+
+    #[tokio::test]
+    async fn prefix_moves_api_and_pages() {
+        let app = build_routers("zap");
+        // 接口搬到前缀下
+        let (s, body) = get(app.clone(), "/zap/api/health").await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(body.contains("\"status\":\"ok\""), "应命中 health 接口");
+        // 旧路径不再可访问：一律 404（不重定向，避免暴露前缀）
+        assert_eq!(status_of(app.clone(), "/api/health").await, StatusCode::NOT_FOUND);
+        // 根路径同样 404
+        assert_eq!(status_of(app.clone(), "/").await, StatusCode::NOT_FOUND);
+        // 相近但不同的前缀也不应命中
+        assert_eq!(status_of(app.clone(), "/zap2/api/health").await, StatusCode::NOT_FOUND);
+        // 前缀根路径（含尾斜杠）应能打开首页
+        assert_eq!(status_of(app.clone(), "/zap").await, StatusCode::OK);
+        assert_eq!(status_of(app, "/zap/").await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn prefix_is_normalized() {
+        // 首尾斜杠与多级前缀都能正常工作
+        assert_eq!(
+            status_of(build_routers("/zap/"), "/zap/api/health").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_of(build_routers("a/b"), "/a/b/api/health").await,
+            StatusCode::OK
+        );
+    }
+
+    #[test]
+    fn base_tag_injection() {
+        let html = "<html><head><title>x</title></head><body></body></html>";
+
+        // 有前缀：注入 /zap/ 与全局变量
+        let out = inject_base_tag(html, "/zap");
+        assert!(out.contains(r#"<base href="/zap/">"#));
+        assert!(out.contains(r#"window.__ZAP_BASE__="/zap""#));
+
+        // 无前缀：也要注入 <base href="/">，否则多级路由刷新时资源路径会错
+        let out = inject_base_tag(html, "");
+        assert!(out.contains(r#"<base href="/">"#));
+        assert!(out.contains(r#"window.__ZAP_BASE__="""#));
+
+        // base 必须在页面资源引用之前（紧跟 <head>）
+        let out = inject_base_tag(html, "/zap");
+        let base_pos = out.find("<base").unwrap();
+        let title_pos = out.find("<title>").unwrap();
+        assert!(base_pos < title_pos, "base 标签必须在页面资源之前");
+    }
+
+    #[test]
+    fn normalize_url_prefix_rules() {
+        use crate::config::normalize_url_prefix;
+        assert_eq!(normalize_url_prefix(""), "");
+        assert_eq!(normalize_url_prefix("   "), "");
+        assert_eq!(normalize_url_prefix("zap"), "zap");
+        assert_eq!(normalize_url_prefix("/zap/"), "zap");
+        assert_eq!(normalize_url_prefix("  /zap/  "), "zap");
+        assert_eq!(normalize_url_prefix("a/b"), "a/b");
+    }
 }

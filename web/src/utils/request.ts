@@ -2,6 +2,7 @@ import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import { getToken, getTokenExpire, removeToken, setToken } from './auth'
+import { API_BASE, withBase } from './base'
 
 // 是否正在刷新 token（避免并发刷新）
 let isRefreshing = false
@@ -17,7 +18,8 @@ function addRefreshSubscriber(cb: (token: string) => void) {
 }
 
 const service: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  // 优先用后端注入的前缀（zap.yaml 的 server.url_prefix），开发环境回退 .env
+  baseURL: API_BASE || import.meta.env.VITE_API_URL,
   timeout: 15000,
 })
 
@@ -87,7 +89,7 @@ service.interceptors.response.use(
               removeToken()
               ElMessage({ message: '登录已过期，请重新登录', type: 'error', duration: 5000 })
               setTimeout(() => {
-                window.location.href = '/login'
+                window.location.href = withBase('/login')
               }, 1500)
             } finally {
               isRefreshing = false
@@ -131,7 +133,7 @@ service.interceptors.response.use(
 // ── Token 刷新 ──────────────────────────────────────────────
 async function refreshToken(): Promise<string> {
   const resp = await axios.post(
-    `${import.meta.env.VITE_API_URL}/auth/reflash_token`,
+    `${API_BASE || import.meta.env.VITE_API_URL}/auth/reflash_token`,
     {},
     { headers: { 'Content-Type': 'application/json' } },
   )

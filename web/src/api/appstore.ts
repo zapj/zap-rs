@@ -1,5 +1,6 @@
 import { http } from '@/utils/request'
 import { getToken } from '@/utils/auth'
+import { wsUrl } from '@/utils/base'
 
 export interface RepoSource {
   id: string
@@ -170,9 +171,7 @@ export const retryRun = (runId: string) =>
   http.post<any>('/appstore/run/retry', { run_id: runId })
 
 export function wsLogUrl(runId: string): string {
-  const apiBase = import.meta.env.VITE_API_URL || window.location.origin
-  const wsBase = apiBase.replace(/^http/, 'ws')
-  return `${wsBase}/appstore/ws/${runId}?token=${getToken()}`
+  return wsUrl(`/api/appstore/ws/${runId}?token=${getToken()}`)
 }
 
 // ── 已安装应用（实例管理）───────────────────────────────────

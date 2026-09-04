@@ -262,6 +262,7 @@ import {
   type SshConnection,
 } from '@/api/terminal'
 import { getToken } from '@/utils/auth'
+import { wsUrl } from '@/utils/base'
 import { useUserStore } from '@/stores/user'
 
 // ── 状态 ───────────────────────────────────────────────────
@@ -621,10 +622,8 @@ function fitTerminal(tab: TerminalTab) {
 }
 
 function getWsUrl(connId: number): string {
-  const apiBase = import.meta.env.VITE_API_URL || window.location.origin
-  const wsBase = apiBase.replace(/^http/, 'ws')
   const token = getToken()
-  return `${wsBase}/terminal/ws/${connId}?token=${token}&rows=24&cols=80`
+  return wsUrl(`/api/terminal/ws/${connId}?token=${token}&rows=24&cols=80`)
 }
 
 async function openTerminal(conn: SshConnection) {
