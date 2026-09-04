@@ -465,6 +465,31 @@ async function handleTest(id: number) {
 
 // ── 终端管理 ───────────────────────────────────────────────
 
+// 把当前 pty 窗口尺寸通过 WebSocket 控制消息同步给后端
+function syncResize(tab: TerminalTab) {
+  const term = tab.term
+  if (!term || !tab.ws || tab.ws.readyState !== WebSocket.OPEN) return
+  const { cols, rows } = term
+  if (!cols || !rows) return
+  tab.ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+}
+
+// 自动适配容器尺寸：等字体加载与 DOM 布局稳定后再 fit，并同步 pty 大小
+function fitTerminal(tab: TerminalTab) {
+  if (!tab.fitAddon) return
+  const doFit = () => {
+    tab.fitAddon?.fit()
+    syncResize(tab)
+  }
+  requestAnimationFrame(doFit)
+  // xterm 依赖等宽字体度量，字体未就绪时 fit 出的列/行数会偏小
+  if (document.fonts?.ready) {
+    document.fonts.ready.then(() => {
+      if (tab.term) requestAnimationFrame(doFit)
+    })
+  }
+}
+
 function getWsUrl(connId: number): string {
   const apiBase = import.meta.env.VITE_API_URL || window.location.origin
   const wsBase = apiBase.replace(/^http/, 'ws')
@@ -524,10 +549,12 @@ async function openTerminal(conn: SshConnection) {
   term.loadAddon(new WebLinksAddon())
 
   term.open(el)
-  fitAddon.fit()
 
   tab.term = term
   tab.fitAddon = fitAddon
+
+  // 初始 fit 放在字体/布局就绪后，避免列数偏小导致终端窗口不撑满
+  fitTerminal(tab)
 
   // Focus the terminal
   term.focus()
@@ -540,6 +567,8 @@ async function openTerminal(conn: SshConnection) {
 
   ws.onopen = () => {
     term.writeln('\x1b[32m已连接到 ' + conn.name + ' (' + conn.host + ':' + conn.port + ')\x1b[0m')
+    // 连接建立后同步一次当前实际窗口尺寸
+    fitTerminal(tab)
   }
 
   ws.onmessage = (event) => {
@@ -567,11 +596,11 @@ async function openTerminal(conn: SshConnection) {
     }
   })
 
-  // Handle resize (fit only; resize signaling to backend not yet implemented)
+  // 容器尺寸变化时重新 fit 并同步 pty 尺寸（观察父容器，而非单个实例）
   const resizeObserver = new ResizeObserver(() => {
-    fitAddon.fit()
+    fitTerminal(tab)
   })
-  resizeObserver.observe(el)
+  if (containerRef.value) resizeObserver.observe(containerRef.value)
   ;(tab as any)._resizeObserver = resizeObserver
 }
 
@@ -581,7 +610,7 @@ function switchTab(tabId: string) {
   if (tab?.term) {
     nextTick(() => {
       tab.term.focus()
-      tab.fitAddon?.fit()
+      fitTerminal(tab)
     })
   }
 }

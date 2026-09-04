@@ -517,12 +517,20 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
     let (ssh_read_tx, mut ssh_read_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     // Channel: WebSocket → SSH write
     let (ssh_write_tx, mut ssh_write_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    // Channel: WebSocket → PTY resize (cols, rows)
+    let (resize_tx, mut resize_rx) = tokio::sync::mpsc::channel::<(u32, u32)>(16);
 
     // Spawn blocking SSH I/O task (owns the channel, no mutex needed)
     let ssh_handle = tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 4096];
         let mut write_buf: Vec<u8> = Vec::new();
         loop {
+            // Apply any pending PTY resize requests (window-change)
+            while let Ok((cols, rows)) = resize_rx.try_recv() {
+                if let Err(e) = channel.request_pty_size(cols, rows, None, None) {
+                    warn!("PTY resize to {}x{} failed: {}", cols, rows, e);
+                }
+            }
             // Try to read from SSH
             match channel.read(&mut buf) {
                 Ok(0) => break,
@@ -574,16 +582,32 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
         let _ = ws_tx.close().await;
     });
 
-    // Forward WebSocket writes to SSH
+    // Forward WebSocket writes to SSH，并识别 resize 控制消息
     while let Some(Ok(msg)) = ws_rx.next().await {
-        let data: Vec<u8> = match msg {
-            Message::Binary(d) => d.to_vec(),
-            Message::Text(t) => t.as_bytes().to_vec(),
+        match msg {
+            Message::Binary(d) => {
+                if ssh_write_tx.send(d.to_vec()).await.is_err() {
+                    break;
+                }
+            }
+            Message::Text(t) => {
+                let txt = t.as_ref();
+                // resize 控制消息：前端 fit 后自动同步窗口尺寸
+                if let Ok(resize) = serde_json::from_str::<ResizeMsg>(txt) {
+                    if resize.kind == "resize" && resize.cols > 0 && resize.rows > 0 {
+                        if resize_tx.send((resize.cols, resize.rows)).await.is_err() {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+                // 其余文本一律作为终端输入
+                if ssh_write_tx.send(txt.as_bytes().to_vec()).await.is_err() {
+                    break;
+                }
+            }
             Message::Close(_) => break,
             _ => continue,
-        };
-        if ssh_write_tx.send(data).await.is_err() {
-            break;
         }
     }
 
@@ -642,6 +666,19 @@ struct ConnectionInfo {
     auth_type: String,
     password: String,
     ssh_key_name: String,
+}
+
+/// WebSocket 终端 resize 控制消息（前端 fit 后发送），形如
+/// `{"type":"resize","cols":120,"rows":40}`。
+/// 收到后调用 `Channel::request_pty_size` 向远端发送 window-change，用于动态调整 pty 窗口。
+#[derive(Debug, Deserialize)]
+struct ResizeMsg {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    cols: u32,
+    #[serde(default)]
+    rows: u32,
 }
 
 async fn load_connection_info(id: i64) -> Result<ConnectionInfo, ZapError> {
