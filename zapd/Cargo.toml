@@ -1,6 +1,6 @@
 [package]
 name = "zapd"
-version = "1.0.2"
+version.workspace = true
 edition = "2024"
 
 [dependencies]

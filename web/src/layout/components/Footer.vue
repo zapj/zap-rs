@@ -10,21 +10,17 @@
     >
       v{{ APP_VERSION }}
     </span>
-    <template v-for="c in extraVersions" :key="c.label">
+    <template v-if="WEB_VERSION">
       <span class="sep">·</span>
       <span
-        class="extra verlink"
+        class="web-version verlink"
         :class="{ 'no-cursor': !canGoUpdate }"
         :title="canGoUpdate ? '系统设置 → 系统更新' : ''"
         @click="goUpdate"
       >
-        {{ c.label }} v{{ c.version }}
+        Web v{{ WEB_VERSION }}
       </span>
     </template>
-    <span v-if="formattedBuildTime" class="sep">·</span>
-    <span v-if="formattedBuildTime" class="build">
-      Build {{ formattedBuildTime }}
-    </span>
     <span class="copyright">© {{ year }}</span>
   </div>
 </template>
@@ -34,11 +30,10 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
-// 面板版本以后端 zapd 为准（构建时从 zapd/Cargo.toml 注入 VITE_APP_VERSION）
+// zap 版本：workspace 统一版本（构建时从根 Cargo.toml 的 [workspace.package] 注入 VITE_APP_VERSION）
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || ''
-const EXEC_VERSION = import.meta.env.VITE_EXEC_VERSION || ''
+// web 包自身版本（构建时从 web/package.json 注入 VITE_WEB_VERSION）
 const WEB_VERSION = import.meta.env.VITE_WEB_VERSION || ''
-const BUILD_TIME = import.meta.env.VITE_BUILD_TIME || ''
 
 const year = new Date().getFullYear()
 
@@ -51,31 +46,6 @@ const canGoUpdate = computed(() => userStore.roles.includes('admin'))
 function goUpdate() {
   if (canGoUpdate.value) router.push('/system/update')
 }
-
-/**
- * 与主版本（zapd）不一致的附加组件版本，以小字显示：
- * - Exec：执行器 zapexec（构建时从 zapexec/Cargo.toml 注入 VITE_EXEC_VERSION）
- * - Web：前端 web 包（构建时注入 VITE_WEB_VERSION）
- * 与 zapd 版本一致时省略，避免冗余
- */
-const extraVersions = computed(() =>
-  [
-    { label: 'Exec', version: EXEC_VERSION },
-    { label: 'Web', version: WEB_VERSION },
-  ].filter((c) => c.version && c.version !== APP_VERSION),
-)
-
-/** 构建时间转本地可读格式 yyyy-MM-dd HH:mm */
-const formattedBuildTime = computed(() => {
-  if (!BUILD_TIME) return ''
-  const d = new Date(BUILD_TIME)
-  if (isNaN(d.getTime())) return BUILD_TIME
-  const p = (n: number) => String(n).padStart(2, '0')
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
-    `${p(d.getHours())}:${p(d.getMinutes())}`
-  )
-})
 </script>
 
 <style scoped>

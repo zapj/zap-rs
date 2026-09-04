@@ -38,9 +38,9 @@ fi
 [ -n "${COS_ID:-}" ]  || die "环境变量 COS_ID 未设置"
 [ -n "${COS_KEY:-}" ] || die "环境变量 COS_KEY 未设置"
 
-# ── 版本号（从 zapd/Cargo.toml 读取，避免依赖二进制输出格式）─
-VERSION=$(awk -F'"' '/^version/{print $2; exit}' zapd/Cargo.toml)
-[ -n "$VERSION" ] || die "无法从 zapd/Cargo.toml 解析版本号"
+# ── 版本号（从根 Cargo.toml 的 [workspace.package] 读取，各 crate 统一继承）─
+VERSION=$(awk -F'"' '/^\[workspace\.package\]/{f=1} f&&/^version/{print $2; exit}' Cargo.toml)
+[ -n "$VERSION" ] || die "无法从 Cargo.toml 解析 workspace 版本号"
 info "版本: ${VERSION}"
 
 # ── 构建 ────────────────────────────────────────────────────
