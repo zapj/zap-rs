@@ -159,6 +159,12 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         meta: { title: '进程管理', icon: 'ep:cpu', affix: true },
       },
       {
+        path: 'entities',
+        name: 'ServerEntities',
+        component: () => import('@/views/server/entities/index.vue'),
+        meta: { title: '同步运行环境', icon: 'ep:user-filled', affix: true },
+      },
+      {
         path: 'network',
         name: 'ServerNetwork',
         component: () => import('@/views/server/network/index.vue'),

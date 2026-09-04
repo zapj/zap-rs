@@ -38,8 +38,6 @@ pub async fn init_schema() {
     ensure_audit_menu().await;
     // 「已安装应用」子菜单（应用商店下，幂等补插）
     ensure_installed_menu().await;
-    // 「运行环境」子菜单（服务器配置目录下，仅 admin，幂等补插）
-    ensure_server_env_menu().await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -250,6 +248,10 @@ async fn init_menus_table() {
     VALUES (75, 7, 'server-network', 'network', 'server/network/index', 'menu', '网络设置', 'ep:link', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (76, 7, 'server-ip', 'ip', 'server/ip/index', 'menu', 'IP 设置', 'ep:postcard', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (77, 7, 'server-env', 'env', 'server/env/index', 'menu', '运行环境', 'ep:magic-stick', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (78, 7, 'server-entities', 'entities', 'server/entities/index', 'menu', '同步运行环境', 'ep:user-filled', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Terminal（Layout 包裹 + 一级直链：单个子菜单）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -372,6 +374,8 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 74);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 75);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 76);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 77);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 78);
     -- 站点管理：admin 全部 / user 自己的站点 / reseller 所属客户的站点
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 9);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 9);
@@ -938,44 +942,6 @@ async fn init_server_env_table() {
     );
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-}
-
-/// 幂等补插「运行环境」子菜单（位于「服务器配置」目录下 sort_order=7，仅 admin）。
-/// 可安全重复执行：仅当菜单不存在时插入（新库/旧库均适用）。
-async fn ensure_server_env_menu() {
-    let pool = get_db_pool().await;
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT id, 'server-env', 'env', 'server/env/index', 'menu', '运行环境', 'ep:magic-stick', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now')
-        FROM menus
-        WHERE parent_id = 0 AND name = 'server'
-          AND NOT EXISTS (
-              SELECT 1 FROM menus m2
-              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'server')
-                AND m2.name = 'server-env'
-          )
-        "#,
-        )
-        .await;
-    // role_menus 授权：仅 admin × server-env
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO role_menus (role_id, menu_id)
-        SELECT r.id, m.id
-        FROM roles r
-        JOIN menus m
-          ON m.name = 'server-env'
-         AND m.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'server')
-        WHERE r.role_key = 'admin'
-          AND NOT EXISTS (
-              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
-          )
-        "#,
-        )
-        .await;
 }
 
 // ── helper ─────────────────────────────────────────────────

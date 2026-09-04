@@ -20,15 +20,6 @@
         <el-button type="primary" @click="handleAdd">
           <el-icon><Plus /></el-icon>{{ isAdmin ? '新增用户' : '新增客户' }}
         </el-button>
-        <el-tooltip
-          v-if="isAdmin"
-          content="按当前虚拟主机运行模式补齐所有用户运行实体：www 模式补家目录骨架；system 模式创建 Linux 账号并赋权家目录"
-          placement="top"
-        >
-          <el-button :loading="syncingHome" @click="handleHomeSync">
-            <el-icon><FolderOpened /></el-icon>同步运行实体
-          </el-button>
-        </el-tooltip>
       </div>
 
       <el-table :data="tableData" v-loading="loading" stripe>
@@ -212,7 +203,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Plus, FolderOpened } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
@@ -221,7 +212,6 @@ import {
   updateUser,
   deleteUser,
   getResellerList,
-  userHomeSync,
   type UserListItem,
   type ResellerItem,
   type CreateUserPayload,
@@ -594,50 +584,6 @@ async function handleDelete(row: UserListItem) {
     loadList()
   } catch {
     // 拦截器已弹窗
-  }
-}
-
-// ── 家目录同步 ─────────────────────────────────────────────
-const syncingHome = ref(false)
-
-async function handleHomeSync() {
-  try {
-    await ElMessageBox.confirm(
-      '将按当前虚拟主机运行模式补齐所有用户的运行实体：\n• www 模式：家目录骨架（www / logs / tmp）\n• system 模式：创建 Linux 账号（nologin）+ 独立用户家目录赋权\n此操作幂等，不影响已有站点。',
-      '同步运行实体',
-      {
-        type: 'info',
-        confirmButtonText: '开始同步',
-      },
-    )
-  } catch {
-    return
-  }
-  syncingHome.value = true
-  try {
-    const res = await userHomeSync()
-    const { ok, fail } = res.data ?? { ok: [], fail: [] }
-    if (fail.length > 0) {
-      const detail = fail
-        .map((f) => `${f.username}（${f.home_dir}）: ${f.error}`)
-        .join('\n')
-      await ElMessageBox.alert(
-        `成功 ${ok.length} 个，失败 ${fail.length} 个：\n${detail}`,
-        '运行实体同步完成（部分失败）',
-        {
-          type: 'warning',
-          confirmButtonText: '知道了',
-          customStyle: { whiteSpace: 'pre-line' },
-        },
-      )
-    } else {
-      ElMessage.success(`运行实体同步完成：成功 ${ok.length} 个`)
-    }
-    loadList()
-  } catch {
-    // 拦截器已弹窗
-  } finally {
-    syncingHome.value = false
   }
 }
 

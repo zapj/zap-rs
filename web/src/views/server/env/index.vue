@@ -864,15 +864,15 @@ onMounted(() => {
             </el-radio>
             <el-radio value="system">
               独立系统用户
-              <div class="mode-sub">每个面板用户对应一个 Linux 账号，PHP-FPM 以该账号运行</div>
+              <div class="mode-sub">每个面板用户分配一个专属 Linux 账号，网站与 PHP-FPM 均以该账号运行，用户间互相隔离</div>
             </el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label=" ">
           <el-alert
             :title="form.vhost_mode === 'system'
-              ? '切换后：新用户创建时将自动 useradd（nologin）并 chown 家目录；存量用户请到「用户管理 → 同步家目录/运行实体」补齐，站点同步时自动生成独立 PHP-FPM pool（每用户每 PHP 版本一个）。'
-              : '统一 www 模式：站点文件与 PHP-FPM 均归 www 用户，站点使用全局 PHP socket。'"
+              ? '切换后：新建用户将自动生成专属 Linux 账号（nologin）并 chown 家目录；存量用户请到「服务器配置 → 同步运行环境」点击「一键修复/同步」补齐（幂等、不影响已有站点），网站同步后自动生成每用户每 PHP 版本的独立 PHP-FPM pool。'
+              : '统一 www 模式：站点文件与 PHP-FPM 均归 www 用户，站点使用全局 PHP socket。存量用户如需回退，请到「服务器配置 → 同步运行环境」一键修复/同步。'"
             type="info"
             :closable="false"
             show-icon
