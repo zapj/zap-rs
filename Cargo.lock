@@ -4349,6 +4349,7 @@ dependencies = [
  "local-ip-address",
  "mime_guess",
  "once_cell",
+ "openssl",
  "public-ip-address",
  "rand 0.8.5",
  "rcgen",

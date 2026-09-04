@@ -20,6 +20,8 @@
           支持三种来源：手动导入（粘贴 / 从文件读取 PEM）、rcgen 生成<strong>自签名</strong>证书、通过 ACME
           HTTP-01 向 <strong>Let's Encrypt</strong> 自动申请。每份证书保存四段材料：
           <code>crt</code>（证书）、<code>key</code>（私钥）、<code>ca-bundle</code>（中间链）、<code>csr</code>（签名请求）。
+          手动添加时只需粘贴证书，<strong>域名与有效期会自动解析</strong>；<code>ca-bundle</code> 与 <code>csr</code>
+          为选填项，默认折叠，点标题即可展开填写。
         </p>
         <p style="margin: 0">
           安全提示：私钥属敏感信息，仅存储在服务器数据库中；请勿将本页面内容分享给无关人员。
@@ -85,12 +87,21 @@
         <el-row :gutter="14">
           <el-col :span="12">
             <el-form-item label="证书名称">
-              <el-input v-model="editForm.name" placeholder="如 example.com" maxlength="80" />
+              <el-input
+                v-model="editForm.name"
+                placeholder="留空则自动取证书 CN / 主域名"
+                maxlength="80"
+                @input="nameManual = true"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="域名">
-              <el-input v-model="editForm.domains" placeholder="example.com, www.example.com" />
+              <el-input
+                v-model="editForm.domains"
+                placeholder="留空，粘贴证书后自动解析"
+                @input="domainsManual = true"
+              />
             </el-form-item>
           </el-col>
         </el-row>
@@ -101,21 +112,56 @@
 
       <div v-for="g in pemGroups" :key="g.key" class="pem-group">
         <div class="pem-header">
-          <span class="pem-title">{{ g.title }}</span>
-          <div>
+          <div class="pem-title-wrap" @click="togglePem(g)">
+            <el-icon class="arrow" :class="{ 'is-open': !collapsed[g.key] }"><ArrowRight /></el-icon>
+            <span class="pem-title">{{ g.title }}</span>
+            <el-tag v-if="g.optional" size="small" effect="plain" type="info">选填</el-tag>
+            <el-tag v-if="editForm[g.key]" size="small" effect="plain" type="success">已填写</el-tag>
+          </div>
+          <div class="pem-actions">
             <el-button size="small" @click="pickFile(g.key)">从文件导入</el-button>
             <el-button v-if="editForm[g.key]" size="small" type="danger" link @click="editForm[g.key] = ''">
               清空
             </el-button>
           </div>
         </div>
-        <el-input
-          v-model="editForm[g.key]"
-          type="textarea"
-          :rows="5"
-          class="mono"
-          :placeholder="g.placeholder"
-        />
+
+        <el-collapse-transition>
+          <div v-show="!collapsed[g.key]">
+            <el-input
+              v-model="editForm[g.key]"
+              type="textarea"
+              :rows="g.rows || 5"
+              class="mono"
+              :placeholder="g.placeholder"
+            />
+
+            <!-- 证书解析结果（自动读取域名，无需手工填写） -->
+            <div v-if="g.key === 'cert_content'" class="parse-box">
+              <span v-if="parseState.loading" class="parse-tip">
+                <el-icon class="is-loading"><Loading /></el-icon> 正在解析证书…
+              </span>
+              <div v-else-if="parseState.info" class="parse-info">
+                <el-tag size="small" type="success" effect="dark">已自动解析</el-tag>
+                <span>域名 {{ parseState.info.domains.length }} 个</span>
+                <span v-if="parseState.info.not_after">
+                  有效期至 {{ fmtTime(parseState.info.not_after) }}（剩余 {{ daysLeft(parseState.info.not_after) }} 天）
+                </span>
+                <span v-if="parseState.info.issuer">签发者 {{ parseState.info.issuer }}</span>
+                <span v-if="parseState.info.key_type">
+                  {{ parseState.info.key_type }} {{ parseState.info.key_bits }} 位
+                </span>
+                <span v-if="parseState.info.fingerprint" class="fp">SHA256 {{ parseState.info.fingerprint }}</span>
+              </div>
+              <span v-else-if="parseState.error" class="parse-tip is-error">{{ parseState.error }}</span>
+
+              <div v-if="parseState.info?.cert_count && parseState.info.cert_count > 1" class="parse-chain">
+                检测到 {{ parseState.info.cert_count }} 张证书（含中间链）
+                <el-button size="small" text type="primary" @click="splitChain">拆到 CA 中间链</el-button>
+              </div>
+            </div>
+          </div>
+        </el-collapse-transition>
       </div>
 
       <template #footer>
@@ -209,8 +255,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { Plus, Key, MagicStick } from '@element-plus/icons-vue'
+import { ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
+import { Plus, Key, MagicStick, ArrowRight, Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getCertList,
@@ -220,8 +266,10 @@ import {
   deleteCert,
   selfSignCert,
   letsEncryptCert,
+  parseCert,
   type SslCertItem,
   type SslCertDetail,
+  type SslCertParseResult,
 } from '@/api/ssl'
 
 const nowTs = ref(Math.floor(Date.now() / 1000))
@@ -251,17 +299,23 @@ function certTypeTag(t: string) {
   return TYPE_META[t]?.tag ?? 'info'
 }
 
+type PemKey = 'cert_content' | 'key_content' | 'ca_bundle' | 'csr'
+
 interface PemField {
-  key: 'cert_content' | 'key_content' | 'ca_bundle' | 'csr'
+  key: PemKey
   title: string
   placeholder: string
+  /** 选填项：默认折叠，可展开填写 */
+  optional?: boolean
+  rows?: number
   filename: (d: SslCertDetail) => string
 }
 
 const pemGroups: PemField[] = [
   {
     key: 'cert_content', title: '证书（crt）',
-    placeholder: '-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----',
+    placeholder: '-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----\n粘贴后自动解析域名与有效期',
+    rows: 6,
     filename: (d) => `${d.name}.crt`,
   },
   {
@@ -271,15 +325,32 @@ const pemGroups: PemField[] = [
   },
   {
     key: 'ca_bundle', title: 'CA 中间链（ca-bundle）',
-    placeholder: '（可选）中间证书链，多个证书依次粘贴',
+    placeholder: '（选填）中间证书链，多个证书依次粘贴',
+    optional: true, rows: 4,
     filename: (d) => `${d.name}-ca-bundle.crt`,
   },
   {
     key: 'csr', title: '证书签名请求（csr）',
-    placeholder: '（可选）-----BEGIN CERTIFICATE REQUEST-----\n…\n-----END CERTIFICATE REQUEST-----',
+    placeholder: '（选填）-----BEGIN CERTIFICATE REQUEST-----\n…\n-----END CERTIFICATE REQUEST-----',
+    optional: true, rows: 4,
     filename: (d) => `${d.name}.csr`,
   },
 ]
+
+/** CA 中间链与 CSR 默认折叠，需要时点标题展开 */
+const collapsed = reactive<Record<PemKey, boolean>>({
+  cert_content: false,
+  key_content: false,
+  ca_bundle: true,
+  csr: true,
+})
+
+function resetCollapse() {
+  for (const g of pemGroups) collapsed[g.key] = !!g.optional
+}
+function togglePem(g: PemField) {
+  collapsed[g.key] = !collapsed[g.key]
+}
 
 type EditForm = Pick<SslCertDetail, 'cert_content' | 'key_content' | 'ca_bundle' | 'csr'> &
   Record<string, string | number | undefined>
@@ -297,6 +368,15 @@ const editForm = reactive<EditForm & { id?: number }>({
   remark: '',
 })
 
+/** 用户是否手工改过名称 / 域名：改过之后不再被自动解析覆盖 */
+const nameManual = ref(false)
+const domainsManual = ref(false)
+const parseState = reactive<{
+  loading: boolean
+  info?: SslCertParseResult
+  error: string
+}>({ loading: false, error: '' })
+
 function resetEdit() {
   editForm.id = undefined
   editForm.name = ''
@@ -306,11 +386,74 @@ function resetEdit() {
   editForm.ca_bundle = ''
   editForm.csr = ''
   editForm.remark = ''
+  nameManual.value = false
+  domainsManual.value = false
+  parseState.info = undefined
+  parseState.error = ''
+  resetCollapse()
 }
 
 function openAdd() {
   resetEdit()
   editVisible.value = true
+}
+
+// ── 证书自动解析（域名 / 有效期 / 名称）──────────────────────
+let parseTimer: ReturnType<typeof setTimeout> | undefined
+
+function scheduleParse() {
+  if (parseTimer) clearTimeout(parseTimer)
+  parseTimer = setTimeout(runParse, 500)
+}
+
+async function runParse() {
+  if (parseTimer) {
+    clearTimeout(parseTimer)
+    parseTimer = undefined
+  }
+  if (!editVisible.value) return
+  const pem =
+    String(editForm.cert_content || '').trim() || String(editForm.csr || '').trim()
+  if (!pem) {
+    parseState.info = undefined
+    parseState.error = ''
+    return
+  }
+  parseState.loading = true
+  try {
+    const res = await parseCert(pem)
+    parseState.info = res.data
+    parseState.error = ''
+    if (!domainsManual.value && res.data?.domains_str) {
+      editForm.domains = res.data.domains_str
+    }
+    if (!nameManual.value) {
+      const auto = res.data?.common_name || res.data?.domains?.[0] || ''
+      if (auto) editForm.name = auto
+    }
+  } catch (e: any) {
+    parseState.info = undefined
+    parseState.error = `证书解析失败：${e?.response?.data?.message || e?.message || '请检查 PEM 是否完整'}`
+  } finally {
+    parseState.loading = false
+  }
+}
+
+watch([() => editForm.cert_content, () => editForm.csr], scheduleParse)
+
+/** 粘贴的是 fullchain 时，把叶子证书之外的证书挪到 CA 中间链 */
+function splitChain() {
+  const raw = String(editForm.cert_content || '')
+  const blocks = raw.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g)
+  if (!blocks || blocks.length < 2) return
+  editForm.cert_content = blocks[0]
+  editForm.ca_bundle = blocks.slice(1).join('\n')
+  collapsed.ca_bundle = true
+  ElMessage.success(`已拆出 ${blocks.length - 1} 张中间证书到 CA 中间链`)
+}
+
+function daysLeft(ts: number) {
+  return Math.max(0, Math.ceil((ts - nowTs.value) / 86400))
 }
 
 async function openEdit(row: SslCertItem | SslCertDetail | undefined) {
@@ -329,7 +472,14 @@ async function openEdit(row: SslCertItem | SslCertDetail | undefined) {
   editForm.ca_bundle = detail.ca_bundle
   editForm.csr = detail.csr
   editForm.remark = detail.remark
+  // 有内容的分组默认展开展示；选填项为空则保持折叠
+  for (const g of pemGroups) {
+    collapsed[g.key] = g.optional ? !String(editForm[g.key] ?? '').trim() : false
+  }
+  nameManual.value = !!detail.name
+  domainsManual.value = !!detail.domains
   editVisible.value = true
+  runParse()
 }
 
 function pickFile(key: string) {
@@ -533,6 +683,10 @@ onMounted(() => {
   loadList()
   setInterval(() => { nowTs.value = Math.floor(Date.now() / 1000) }, 30000)
 })
+
+onBeforeUnmount(() => {
+  if (parseTimer) clearTimeout(parseTimer)
+})
 </script>
 
 <style scoped>
@@ -553,7 +707,33 @@ onMounted(() => {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 6px;
 }
+.pem-title-wrap {
+  display: flex; align-items: center; gap: 6px;
+  cursor: pointer; user-select: none;
+}
+.pem-title-wrap:hover .pem-title { color: var(--el-color-primary); }
+.pem-actions { display: flex; align-items: center; gap: 4px; }
+.arrow {
+  font-size: 12px; color: #909399;
+  transition: transform 0.2s ease-in-out;
+}
+.arrow.is-open { transform: rotate(90deg); }
 .pem-title { font-size: 13px; font-weight: 600; color: #303133; }
+.parse-box { margin-top: 6px; font-size: 12px; color: #606266; }
+.parse-info {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  padding: 7px 10px; border-radius: 4px;
+  background: #f4f9f4; border: 1px solid #e1f0e1;
+}
+.parse-info .fp {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 11px; color: #909399; word-break: break-all;
+}
+.parse-tip { display: inline-flex; align-items: center; gap: 5px; color: #909399; }
+.parse-tip.is-error { color: var(--el-color-danger); }
+.parse-chain {
+  margin-top: 6px; display: flex; align-items: center; gap: 4px; color: #e6a23c;
+}
 .detail-toolbar { margin-bottom: 8px; }
 .pem-view {
   max-height: 300px; overflow: auto; margin: 0; padding: 10px 12px;

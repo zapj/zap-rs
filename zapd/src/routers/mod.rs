@@ -365,6 +365,7 @@ fn api_routers() -> Router {
         // SSL/TLS：证书管理（手动导入 / 自签名 / Let's Encrypt）
         .route("/ssl/cert/list", get(ssl::cert_list))
         .route("/ssl/cert/detail", get(ssl::cert_detail))
+        .route("/ssl/cert/parse", post(ssl::cert_parse))
         .route("/ssl/cert/add", post(ssl::cert_add))
         .route("/ssl/cert/update", post(ssl::cert_update))
         .route("/ssl/cert/delete", post(ssl::cert_delete))

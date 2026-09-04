@@ -254,7 +254,10 @@
         { "method": "GET", "path": "/ssl/cert/detail", "summary": "证书详情（含 crt / key / ca-bundle / csr 明文）", "params": [
           { "name": "id", "type": "int", "required": true, "desc": "证书 ID" }
         ] },
-        { "method": "POST", "path": "/ssl/cert/add", "summary": "手动添加证书（至少提供 cert / key / csr 之一）", "params": [
+        { "method": "POST", "path": "/ssl/cert/parse", "summary": "解析证书 / CSR：自动读取域名（SAN + CN）、有效期、签发者、公钥、指纹", "params": [
+          { "name": "pem", "type": "string", "required": true, "desc": "PEM 文本（证书 crt 或 CSR；多张证书时只解析第一张叶子证书）" }
+        ] },
+        { "method": "POST", "path": "/ssl/cert/add", "summary": "手动添加证书（至少提供 cert / key / csr 之一；域名留空时自动从证书解析）", "params": [
           { "name": "name", "type": "string", "required": true, "desc": "证书名称" },
           { "name": "domains", "type": "string", "required": false, "desc": "覆盖域名，逗号分隔" },
           { "name": "cert_content", "type": "string", "required": false, "desc": "证书 PEM（crt）" },
