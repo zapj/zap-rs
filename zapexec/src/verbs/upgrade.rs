@@ -24,8 +24,7 @@ fn zap_path() -> PathBuf {
 fn valid_token(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 48
-        && s
-            .chars()
+        && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
@@ -96,9 +95,7 @@ pub async fn run(run_id: String, stage_dir: String, log_path: String) -> Respons
                 .open(&args[7])
                 .ok();
             let mut c = root_cmd(&args[0]);
-            let mut spawn = c
-                .args(&args[1..])
-                .stdin(std::process::Stdio::null());
+            let mut spawn = c.args(&args[1..]).stdin(std::process::Stdio::null());
             if let Some(f) = log_file {
                 let stdout = f.try_clone().ok();
                 let stderr = Some(f);

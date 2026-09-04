@@ -953,7 +953,10 @@ pub async fn push_key_to_host(
         &conn_info.username,
         &conn_info.ssh_key_name,
         payload.password.as_deref(),
-        format!("{}@{}:{}", conn_info.username, conn_info.host, conn_info.port),
+        format!(
+            "{}@{}:{}",
+            conn_info.username, conn_info.host, conn_info.port
+        ),
     )
     .await
 }
@@ -1036,8 +1039,7 @@ async fn push_key_core(
     session
         .handshake()
         .map_err(|e| ZapError::Error(format!("SSH 握手失败: {}", e)))?;
-    let password = password
-        .ok_or_else(|| ZapError::New(-1, "远程主机密码不能为空".to_string()))?;
+    let password = password.ok_or_else(|| ZapError::New(-1, "远程主机密码不能为空".to_string()))?;
     session
         .userauth_password(username, password)
         .map_err(|e| ZapError::Error(format!("远程主机密码认证失败: {}", e)))?;

@@ -354,9 +354,11 @@ fn vhost_sync_inner(
         Some(c) => c,
         None => {
             return if enabled {
-                Err("未找到 Nginx 安装（安装根 /usr/local/apps 下无 conf/nginx.conf）。\
+                Err(
+                    "未找到 Nginx 安装（安装根 /usr/local/apps 下无 conf/nginx.conf）。\
                      请先在「应用商店 → Web服务器 → Nginx」安装并部署 Nginx"
-                    .to_string())
+                        .to_string(),
+                )
             } else {
                 // 站点停用且无 Nginx：无事可清理
                 Ok(Response::ok("站点已停用（Nginx 未安装，无需清理）", None))

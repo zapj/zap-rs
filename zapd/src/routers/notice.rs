@@ -96,7 +96,10 @@ pub struct ReadPayload {
 }
 
 /// POST /user/notices/read —— 标记单条已读（仅限本人的消息）。
-pub async fn notices_read(claims: ValidatedClaims, Json(payload): Json<ReadPayload>) -> ZapJsonResult {
+pub async fn notices_read(
+    claims: ValidatedClaims,
+    Json(payload): Json<ReadPayload>,
+) -> ZapJsonResult {
     let uid = claims.id as i64;
     let pool = db::get_db_pool().await;
     sqlx::query("UPDATE notice_message SET is_read = 1 WHERE id = ? AND user_id = ?")

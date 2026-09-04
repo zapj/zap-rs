@@ -59,9 +59,7 @@ async fn main() {
     // rundev.sh 则通过 ZAP_CONFIG 指向 data/run/zap.dev.yaml。
     // 显示绝对路径 + 存在性，便于排查"改了配置但没生效"。
     let cfg_path = config::config_path();
-    let cfg_display = cfg_path
-        .canonicalize()
-        .unwrap_or_else(|_| cfg_path.clone());
+    let cfg_display = cfg_path.canonicalize().unwrap_or_else(|_| cfg_path.clone());
     if cfg_path.exists() {
         info!("using config file: {}", cfg_display.display());
     } else {

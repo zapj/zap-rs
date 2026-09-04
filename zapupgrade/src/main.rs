@@ -99,10 +99,7 @@ fn run_upgrade(cli: &Cli) -> i32 {
         log_line(&cli.log, "升级包内没有可更新的二进制，中止");
         return 1;
     }
-    log_line(
-        &cli.log,
-        &format!("待更新二进制: {}", targets.join(", ")),
-    );
+    log_line(&cli.log, &format!("待更新二进制: {}", targets.join(", ")));
 
     // 3) 备份当前二进制到 data/upgrade/backup/{ts}-{version}/
     let ts = SystemTime::now()
@@ -203,10 +200,7 @@ fn run_upgrade(cli: &Cli) -> i32 {
         } else {
             log_line(
                 &cli.log,
-                &format!(
-                    "升级完成（{} 需手动重启后生效）",
-                    manual.join(", ")
-                ),
+                &format!("升级完成（{} 需手动重启后生效）", manual.join(", ")),
             );
         }
         0

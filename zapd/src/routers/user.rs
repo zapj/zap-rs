@@ -286,7 +286,9 @@ pub async fn user_prefs_save(claims: Claims, Json(payload): Json<NoticePrefs>) -
         .bind(claims.id as i64)
         .execute(pool)
         .await?;
-    Ok(Json(json!({ "code": 0, "message": "偏好设置已保存", "data": data })))
+    Ok(Json(
+        json!({ "code": 0, "message": "偏好设置已保存", "data": data }),
+    ))
 }
 
 /// List users — admin sees all, reseller sees only own customers
@@ -603,21 +605,28 @@ pub async fn user_update(
     }
     if let Some(ref fpm) = payload.fpm_pool {
         let norm = normalize_fpm_spec(Some(fpm.clone()))?.unwrap_or_default();
-        separated.push("fpm_pool = ").push_bind_unseparated(norm.clone());
+        separated
+            .push("fpm_pool = ")
+            .push_bind_unseparated(norm.clone());
         // 自定义 JSON 与模板引用互斥：提交自定义时清空引用
         if payload.fpm_spec_ref.is_none() {
-            separated.push("fpm_spec_ref = ").push_bind_unseparated(String::new());
+            separated
+                .push("fpm_spec_ref = ")
+                .push_bind_unseparated(String::new());
         }
     }
     if let Some(ref rv) = payload.fpm_spec_ref {
         let norm = rv.trim().to_string();
-        if jwt::is_admin(&claims) && !norm.is_empty() && norm != crate::routers::fpm_spec::INHERIT
-        {
+        if jwt::is_admin(&claims) && !norm.is_empty() && norm != crate::routers::fpm_spec::INHERIT {
             crate::routers::fpm_spec::validate_spec_ref(&norm, true, "").await?;
         }
-        separated.push("fpm_spec_ref = ").push_bind_unseparated(norm);
+        separated
+            .push("fpm_spec_ref = ")
+            .push_bind_unseparated(norm);
         // 切到「模板 / 继承 / 面板默认」后清除旧的自定义 JSON，避免遮蔽新选择
-        separated.push("fpm_pool = ").push_bind_unseparated(String::new());
+        separated
+            .push("fpm_pool = ")
+            .push_bind_unseparated(String::new());
     }
     separated.push("updated_at = ").push_bind_unseparated(now);
 

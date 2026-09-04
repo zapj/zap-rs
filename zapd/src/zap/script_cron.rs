@@ -11,8 +11,8 @@ use sqlx::FromRow;
 use tokio::time::Duration;
 use tracing::{info, warn};
 
-use crate::zap::appstore as ast;
 use crate::zap::ZapError;
+use crate::zap::appstore as ast;
 use crate::zapexec;
 use zap_proto::Request;
 
@@ -36,9 +36,9 @@ pub struct CronJob {
 pub struct Cron {
     minutes: [bool; 60],
     hours: [bool; 24],
-    doms: [bool; 32],  // 1..=31
+    doms: [bool; 32],   // 1..=31
     months: [bool; 13], // 1..=12
-    dows: [bool; 8],   // 0..=6（解析期允许 7，合并到 0）
+    dows: [bool; 8],    // 0..=6（解析期允许 7，合并到 0）
     dom_all: bool,
     dow_all: bool,
 }
@@ -119,7 +119,13 @@ impl Cron {
 }
 
 /// 解析单个 cron 字段（支持 `*`、`*/n`、`a-b`、`a-b/n`、`n`、逗号列表）。
-fn parse_field(s: &str, min: usize, max: usize, out: &mut [bool], sunday_seven: bool) -> Result<(), String> {
+fn parse_field(
+    s: &str,
+    min: usize,
+    max: usize,
+    out: &mut [bool],
+    sunday_seven: bool,
+) -> Result<(), String> {
     for item in s.split(',') {
         let item = item.trim();
         if item.is_empty() {
@@ -141,8 +147,14 @@ fn parse_field(s: &str, min: usize, max: usize, out: &mut [bool], sunday_seven: 
         let (lo, hi) = if range_part == "*" {
             (min, max)
         } else if let Some((a, b)) = range_part.split_once('-') {
-            let a: usize = a.trim().parse().map_err(|_| format!("cron 数值非法: {item}"))?;
-            let b: usize = b.trim().parse().map_err(|_| format!("cron 数值非法: {item}"))?;
+            let a: usize = a
+                .trim()
+                .parse()
+                .map_err(|_| format!("cron 数值非法: {item}"))?;
+            let b: usize = b
+                .trim()
+                .parse()
+                .map_err(|_| format!("cron 数值非法: {item}"))?;
             (a, b)
         } else {
             let v: usize = range_part
@@ -181,7 +193,12 @@ pub async fn get_job(id: i64) -> Result<Option<CronJob>, sqlx::Error> {
         .await
 }
 
-pub async fn insert_job(name: &str, script_path: &str, schedule: &str, remark: &str) -> Result<i64, sqlx::Error> {
+pub async fn insert_job(
+    name: &str,
+    script_path: &str,
+    schedule: &str,
+    remark: &str,
+) -> Result<i64, sqlx::Error> {
     let pool = crate::db::get_db_pool().await;
     let now = chrono::Local::now().timestamp();
     sqlx::query(
@@ -253,22 +270,26 @@ pub async fn set_job_enabled(id: i64, enabled: bool) -> Result<(), sqlx::Error> 
 async fn mark_last_run(id: i64, run_id: &str) {
     let pool = crate::db::get_db_pool().await;
     let now = chrono::Local::now().timestamp();
-    let _ = sqlx::query("UPDATE cron_jobs SET last_run_at = ?, last_run_id = ?, updated_at = ? WHERE id = ?")
-        .bind(now)
-        .bind(run_id)
-        .bind(now)
-        .bind(id)
-        .execute(pool)
-        .await;
+    let _ = sqlx::query(
+        "UPDATE cron_jobs SET last_run_at = ?, last_run_id = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(now)
+    .bind(run_id)
+    .bind(now)
+    .bind(id)
+    .execute(pool)
+    .await;
 }
 
 async fn mark_next_run(id: i64, next: i64) {
     let pool = crate::db::get_db_pool().await;
-    let _ = sqlx::query("UPDATE cron_jobs SET next_run_at = ?, updated_at = strftime('%s','now') WHERE id = ?")
-        .bind(next)
-        .bind(id)
-        .execute(pool)
-        .await;
+    let _ = sqlx::query(
+        "UPDATE cron_jobs SET next_run_at = ?, updated_at = strftime('%s','now') WHERE id = ?",
+    )
+    .bind(next)
+    .bind(id)
+    .execute(pool)
+    .await;
 }
 
 /// 计算任务的“下次运行时间”（若已过期或为 0 则重新计算并回写），用于列表展示。

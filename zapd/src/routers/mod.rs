@@ -51,7 +51,6 @@ pub mod ssl;
 pub mod system_audit;
 pub mod system_basic;
 pub mod system_config;
-pub mod system_migrate;
 pub mod system_cron;
 pub mod system_env;
 pub mod system_file;
@@ -59,6 +58,7 @@ pub mod system_info;
 pub mod system_ip;
 pub mod system_job;
 pub mod system_menu;
+pub mod system_migrate;
 pub mod system_role;
 pub mod system_update;
 pub mod user;
@@ -218,7 +218,10 @@ fn api_routers() -> Router {
         .route("/auth/totp/disable", post(auth::totp_disable))
         .route("/auth/totp/status", get(auth::totp_status))
         .route("/user/info", get(user::user_info))
-        .route("/user/prefs", get(user::user_prefs_get).post(user::user_prefs_save))
+        .route(
+            "/user/prefs",
+            get(user::user_prefs_get).post(user::user_prefs_save),
+        )
         // 站内信（通知中心，登录用户本人）
         .route("/user/notices", get(notice::notices_list))
         .route("/user/notices/unread", get(notice::notices_unread))
@@ -295,8 +298,14 @@ fn api_routers() -> Router {
             get(system_config::ssh_install_log),
         )
         // 数据迁移（服务器配置 → 数据迁移，admin only）
-        .route("/system/migrate/users", get(system_migrate::migrate_users_preview))
-        .route("/system/migrate/home", post(system_migrate::migrate_home_mv))
+        .route(
+            "/system/migrate/users",
+            get(system_migrate::migrate_users_preview),
+        )
+        .route(
+            "/system/migrate/home",
+            post(system_migrate::migrate_home_mv),
+        )
         // 基础设置（系统设置 → 基础设置，admin only）
         .route(
             "/system/config/basic",
@@ -381,10 +390,7 @@ fn api_routers() -> Router {
             "/terminal/connections/{id}/push-key",
             post(ssh_terminal::push_key_to_host),
         )
-        .route(
-            "/terminal/push-key",
-            post(ssh_terminal::push_key_direct),
-        )
+        .route("/terminal/push-key", post(ssh_terminal::push_key_direct))
         .route("/terminal/ws/{id}", get(ssh_terminal::ws_terminal))
         // System
         .route("/system/info", get(system_info::system_info))
@@ -504,11 +510,17 @@ mod tests {
         assert_eq!(s, StatusCode::OK);
         assert!(body.contains("\"status\":\"ok\""), "应命中 health 接口");
         // 旧路径不再可访问：一律 404（不重定向，避免暴露前缀）
-        assert_eq!(status_of(app.clone(), "/api/health").await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            status_of(app.clone(), "/api/health").await,
+            StatusCode::NOT_FOUND
+        );
         // 根路径同样 404
         assert_eq!(status_of(app.clone(), "/").await, StatusCode::NOT_FOUND);
         // 相近但不同的前缀也不应命中
-        assert_eq!(status_of(app.clone(), "/zap2/api/health").await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            status_of(app.clone(), "/zap2/api/health").await,
+            StatusCode::NOT_FOUND
+        );
         // 前缀根路径（含尾斜杠）应能打开首页
         assert_eq!(status_of(app.clone(), "/zap").await, StatusCode::OK);
         assert_eq!(status_of(app, "/zap/").await, StatusCode::OK);

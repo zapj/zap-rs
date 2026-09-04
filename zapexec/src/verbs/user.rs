@@ -269,7 +269,9 @@ fn migrate_home_inner(
     let dest = dest_home.trim().trim_end_matches('/').to_string();
     for (name, p) in [("源家目录", src.as_str()), ("目标家目录", dest.as_str())] {
         if p.is_empty() || !home_dir_ok(p) {
-            return Err(format!("{name}非法（必须为挂载点下的绝对路径，不含 ..）: {p}"));
+            return Err(format!(
+                "{name}非法（必须为挂载点下的绝对路径，不含 ..）: {p}"
+            ));
         }
     }
     if src == dest {

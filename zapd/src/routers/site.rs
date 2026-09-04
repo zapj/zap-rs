@@ -999,8 +999,19 @@ pub(crate) async fn sync_one_site(
     .bind(id)
     .fetch_optional(pool)
     .await?;
-    let Some((name, status, php_instance, web_root, log_root, uid, uhome, _ulu, ufpm, uref, uowner)) =
-        row
+    let Some((
+        name,
+        status,
+        php_instance,
+        web_root,
+        log_root,
+        uid,
+        uhome,
+        _ulu,
+        ufpm,
+        uref,
+        uowner,
+    )) = row
     else {
         return Err(ZapError::New(-1, "站点不存在".to_string()));
     };

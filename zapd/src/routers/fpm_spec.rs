@@ -26,8 +26,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::db;
-use crate::zap::{ZapError, ZapJsonResult, audit};
 use crate::zap::jwt::ValidatedClaims;
+use crate::zap::{ZapError, ZapJsonResult, audit};
 
 /// `user.fpm_spec_ref` 中表示「继承 owner(reseller) 名下默认」的保留值。
 pub const INHERIT: &str = "inherit";
@@ -76,15 +76,22 @@ fn validate_name(name: &str) -> Result<String, ZapError> {
     let ok = n
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
-        && n.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false);
+        && n.chars()
+            .next()
+            .map(|c| c.is_ascii_alphanumeric())
+            .unwrap_or(false);
     if !ok {
         return Err(ZapError::New(
             -1,
-            "模板名只能包含字母、数字、_ . -，且须以字母或数字开头（建议形如 resellerA_high）".to_string(),
+            "模板名只能包含字母、数字、_ . -，且须以字母或数字开头（建议形如 resellerA_high）"
+                .to_string(),
         ));
     }
     if n == INHERIT {
-        return Err(ZapError::New(-1, format!("{INHERIT} 为保留字，不能用作模板名")));
+        return Err(ZapError::New(
+            -1,
+            format!("{INHERIT} 为保留字，不能用作模板名"),
+        ));
     }
     Ok(n.to_string())
 }
@@ -92,13 +99,17 @@ fn validate_name(name: &str) -> Result<String, ZapError> {
 fn validate_spec_json(spec: &str) -> Result<String, ZapError> {
     let s = spec.trim().to_string();
     if s.is_empty() {
-        return Err(ZapError::New(-1, "spec 不能为空，至少为 {}（JSON 对象）".to_string()));
+        return Err(ZapError::New(
+            -1,
+            "spec 不能为空，至少为 {}（JSON 对象）".to_string(),
+        ));
     }
     match serde_json::from_str::<Value>(&s) {
         Ok(Value::Object(_)) => Ok(s),
         _ => Err(ZapError::New(
             -1,
-            "spec 必须是 JSON 对象（如 {\"max_children\": 16, \"memory_limit\": \"512M\"}）".to_string(),
+            "spec 必须是 JSON 对象（如 {\"max_children\": 16, \"memory_limit\": \"512M\"}）"
+                .to_string(),
         )),
     }
 }
@@ -128,7 +139,10 @@ pub async fn validate_spec_ref(
         .fetch_all(pool)
         .await?;
     if !names.iter().any(|n| n == r) {
-        return Err(ZapError::New(-1, format!("FPM 规格模板「{r}」不存在，请刷新后重试")));
+        return Err(ZapError::New(
+            -1,
+            format!("FPM 规格模板「{r}」不存在，请刷新后重试"),
+        ));
     }
     if !is_admin {
         let usernames = load_all_usernames().await;
@@ -185,7 +199,9 @@ async fn owner_default_template_spec(owner_username: &str) -> Option<String> {
         return None;
     }
     // 显式默认模板（{username}_default）优先
-    let explicit = owned.iter().find(|(n, _, _)| *n == format!("{prefix}default"));
+    let explicit = owned
+        .iter()
+        .find(|(n, _, _)| *n == format!("{prefix}default"));
     if let Some((_, spec, _)) = explicit {
         return Some(spec.clone());
     }
@@ -339,7 +355,9 @@ pub async fn spec_add(
         &format!("name={name} spec={spec}"),
     )
     .await;
-    Ok(Json(json!({ "code": 0, "message": "规格模板已创建", "data": { "id": new_id } })))
+    Ok(Json(
+        json!({ "code": 0, "message": "规格模板已创建", "data": { "id": new_id } }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -385,7 +403,12 @@ pub async fn spec_update(
     let now = chrono::Local::now().timestamp();
     for (k, v) in &ups {
         let sql = format!("UPDATE fpm_spec SET {k} = ?, updated_at = ? WHERE id = ?");
-        let result = sqlx::query(&sql).bind(v).bind(now).bind(payload.id).execute(pool).await;
+        let result = sqlx::query(&sql)
+            .bind(v)
+            .bind(now)
+            .bind(payload.id)
+            .execute(pool)
+            .await;
         if let Err(sqlx::Error::Database(e)) = &result
             && e.message().contains("idx_fpm_spec_name")
         {

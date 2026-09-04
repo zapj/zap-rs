@@ -479,12 +479,22 @@ mod tests {
         // 迁移到 /home2 后：目标前缀放行，旧前缀拒绝
         let c = claims_for("alice");
         assert!(
-            check_access(&c, Path::new("/home2/alice/www"), "/home2/alice", "/tmp/zap-alice")
-                .is_ok()
+            check_access(
+                &c,
+                Path::new("/home2/alice/www"),
+                "/home2/alice",
+                "/tmp/zap-alice"
+            )
+            .is_ok()
         );
         assert!(
-            check_access(&c, Path::new("/home/alice/www"), "/home2/alice", "/tmp/zap-alice")
-                .is_err()
+            check_access(
+                &c,
+                Path::new("/home/alice/www"),
+                "/home2/alice",
+                "/tmp/zap-alice"
+            )
+            .is_err()
         );
     }
 

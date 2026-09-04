@@ -867,11 +867,10 @@ async fn ensure_system_update_menu() {
         return;
     }
     let pool = get_db_pool().await;
-    let exists: Result<(i64,), sqlx::Error> = sqlx::query_as(
-        "SELECT id FROM menus WHERE name = 'system-update' OR id = 27 LIMIT 1",
-    )
-    .fetch_one(pool)
-    .await;
+    let exists: Result<(i64,), sqlx::Error> =
+        sqlx::query_as("SELECT id FROM menus WHERE name = 'system-update' OR id = 27 LIMIT 1")
+            .fetch_one(pool)
+            .await;
     if exists.is_ok() {
         return;
     }

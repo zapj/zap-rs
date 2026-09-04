@@ -186,7 +186,8 @@ pub fn get_config() -> &'static RwLock<ZapConfig> {
                         default_conf.server.port = cnf.server.port;
                         default_conf.server.cert_file = cnf.server.cert_file;
                         default_conf.server.key_file = cnf.server.key_file;
-                        default_conf.server.url_prefix = normalize_url_prefix(&cnf.server.url_prefix);
+                        default_conf.server.url_prefix =
+                            normalize_url_prefix(&cnf.server.url_prefix);
                         default_conf.exec = cnf.exec;
 
                         // Rotate JWT secret if still using default

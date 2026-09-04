@@ -135,9 +135,7 @@ pub async fn cert_add(
         ));
     }
     // 证书（或 CSR）与私钥必须配对，否则保存后无法部署
-    if let Err(e) =
-        check_cert_key_pair(&payload.cert_content, &payload.csr, &payload.key_content)
-    {
+    if let Err(e) = check_cert_key_pair(&payload.cert_content, &payload.csr, &payload.key_content) {
         return Err(ZapError::New(-1, e));
     }
     // 域名 / 有效期：未提供域名时自动从证书（或 CSR）解析
@@ -268,9 +266,11 @@ pub async fn cert_update(
     let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new("UPDATE ssl_cert SET ");
     {
         let mut sep = qb.separated(", ");
-        sep.push("name = ").push_bind_unseparated(payload.name.trim());
+        sep.push("name = ")
+            .push_bind_unseparated(payload.name.trim());
         sep.push("domains = ").push_bind_unseparated(domains);
-        sep.push("remark = ").push_bind_unseparated(payload.remark.trim());
+        sep.push("remark = ")
+            .push_bind_unseparated(payload.remark.trim());
         sep.push("status = ").push_bind_unseparated(status);
         sep.push("updated_at = ").push_bind_unseparated(now);
     }
@@ -403,7 +403,10 @@ fn first_cert_der(pem: &str) -> Option<(Vec<u8>, usize)> {
 }
 
 /// 收集 GeneralName 列表中的 dNSName / iPAddress。
-fn collect_general_names(names: &[x509_parser::extensions::GeneralName<'_>], out: &mut Vec<String>) {
+fn collect_general_names(
+    names: &[x509_parser::extensions::GeneralName<'_>],
+    out: &mut Vec<String>,
+) {
     use x509_parser::extensions::GeneralName;
 
     for gn in names {
@@ -578,19 +581,18 @@ fn key_matches(pem: &str, key_pem: &str) -> Result<bool, String> {
     use openssl::x509::{X509, X509Req};
 
     let t = pem.trim();
-    let pub_key = if t.contains("BEGIN CERTIFICATE REQUEST")
-        || t.contains("BEGIN NEW CERTIFICATE REQUEST")
-    {
-        X509Req::from_pem(t.as_bytes())
-            .map_err(|e| format!("CSR 无法解析：{e}"))?
-            .public_key()
-            .map_err(|e| format!("CSR 公钥读取失败：{e}"))?
-    } else {
-        X509::from_pem(t.as_bytes())
-            .map_err(|e| format!("证书无法解析：{e}"))?
-            .public_key()
-            .map_err(|e| format!("证书公钥读取失败：{e}"))?
-    };
+    let pub_key =
+        if t.contains("BEGIN CERTIFICATE REQUEST") || t.contains("BEGIN NEW CERTIFICATE REQUEST") {
+            X509Req::from_pem(t.as_bytes())
+                .map_err(|e| format!("CSR 无法解析：{e}"))?
+                .public_key()
+                .map_err(|e| format!("CSR 公钥读取失败：{e}"))?
+        } else {
+            X509::from_pem(t.as_bytes())
+                .map_err(|e| format!("证书无法解析：{e}"))?
+                .public_key()
+                .map_err(|e| format!("证书公钥读取失败：{e}"))?
+        };
 
     // 私钥优先；也接受直接粘贴公钥（便于只做比对）
     if let Ok(key) = PKey::private_key_from_pem(key_pem.as_bytes()) {
@@ -616,7 +618,9 @@ fn check_cert_key_pair(cert: &str, csr: &str, key: &str) -> Result<(), String> {
     }
     match key_matches(material, key) {
         Ok(true) => Ok(()),
-        Ok(false) => Err("证书与私钥不匹配：该私钥不属于这张证书（或 CSR），保存后无法部署".to_string()),
+        Ok(false) => {
+            Err("证书与私钥不匹配：该私钥不属于这张证书（或 CSR），保存后无法部署".to_string())
+        }
         Err(e) => Err(e),
     }
 }
@@ -1021,9 +1025,11 @@ mod tests {
     /// 证书 / CSR 的域名、有效期应能被自动解析出来（添加证书时无需手工填写域名）。
     #[test]
     fn parse_self_signed_materials() {
-        let (cert_pem, _key, csr_pem, not_before, not_after) =
-            gen_self_signed(&["example.com".to_string(), "www.example.com".to_string()], 30)
-                .expect("生成自签名证书失败");
+        let (cert_pem, _key, csr_pem, not_before, not_after) = gen_self_signed(
+            &["example.com".to_string(), "www.example.com".to_string()],
+            30,
+        )
+        .expect("生成自签名证书失败");
 
         let cert = parse_pem_info(&cert_pem).expect("解析证书失败");
         assert_eq!(cert.kind, "cert");

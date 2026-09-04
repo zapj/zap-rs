@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::Row;
 
-use crate::zap::{appstore as ast, ZapError};
+use crate::zap::{ZapError, appstore as ast};
 use crate::{config, db, zapexec};
 use sha2::Digest;
 use zap_proto::Request;
@@ -340,10 +340,7 @@ async fn launch_update_inner(username: &str) -> Result<LaunchInfo, ZapError> {
     };
     if !has_update(current, &latest) {
         record_check(&latest, 0, "").await;
-        return Err(ZapError::New(
-            -1,
-            format!("当前已是最新版本 v{current}"),
-        ));
+        return Err(ZapError::New(-1, format!("当前已是最新版本 v{current}")));
     }
     record_check(&latest, 1, "").await;
 

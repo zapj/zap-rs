@@ -51,12 +51,11 @@ const K_CONTACT_REMARK: &str = "basic_contact_remark";
 /// 读取 scope='conf' 全部键值。
 async fn load_conf() -> HashMap<String, String> {
     let pool = db::get_db_pool().await;
-    let rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT k, v FROM server_env WHERE scope = ?")
-            .bind(CONF_SCOPE)
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT k, v FROM server_env WHERE scope = ?")
+        .bind(CONF_SCOPE)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
     rows.into_iter().collect()
 }
 

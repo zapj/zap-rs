@@ -24,7 +24,10 @@ fn ensure_admin(claims: &ValidatedClaims) -> Result<(), ZapError> {
 fn check_script_path(path: &str) -> Result<(), ZapError> {
     let p = path.trim();
     if !p.starts_with("scripts/") {
-        return Err(ZapError::New(-1, "只允许选择 scripts/ 下的脚本".to_string()));
+        return Err(ZapError::New(
+            -1,
+            "只允许选择 scripts/ 下的脚本".to_string(),
+        ));
     }
     if p.contains("..") || p.starts_with('/') {
         return Err(ZapError::New(-1, "脚本路径不合法".to_string()));
@@ -92,8 +95,7 @@ pub async fn cron_add(
         return Err(ZapError::New(-1, "任务名称不能为空".to_string()));
     }
     check_script_path(&path)?;
-    Cron::parse(&schedule)
-        .map_err(|e| ZapError::New(-1, format!("cron 表达式错误：{e}")))?;
+    Cron::parse(&schedule).map_err(|e| ZapError::New(-1, format!("cron 表达式错误：{e}")))?;
     let id = script_cron::insert_job(&name, &path, &schedule, payload.remark.trim()).await?;
     audit::log(
         Some(&claims),
@@ -103,7 +105,9 @@ pub async fn cron_add(
         &path,
     )
     .await;
-    Ok(Json(json!({ "code": 0, "message": "计划任务已创建", "data": { "id": id } })))
+    Ok(Json(
+        json!({ "code": 0, "message": "计划任务已创建", "data": { "id": id } }),
+    ))
 }
 
 /// POST /system/cron/update
@@ -120,13 +124,19 @@ pub async fn cron_update(
         return Err(ZapError::New(-1, "任务名称不能为空".to_string()));
     }
     check_script_path(&path)?;
-    Cron::parse(&schedule)
-        .map_err(|e| ZapError::New(-1, format!("cron 表达式错误：{e}")))?;
+    Cron::parse(&schedule).map_err(|e| ZapError::New(-1, format!("cron 表达式错误：{e}")))?;
     if script_cron::get_job(payload.id).await?.is_none() {
         return Err(ZapError::New(-1, "计划任务不存在".to_string()));
     }
-    script_cron::update_job(payload.id, &name, &path, &schedule, payload.remark.trim(), payload.enabled)
-        .await?;
+    script_cron::update_job(
+        payload.id,
+        &name,
+        &path,
+        &schedule,
+        payload.remark.trim(),
+        payload.enabled,
+    )
+    .await?;
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
@@ -170,7 +180,11 @@ pub async fn cron_toggle(
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
-        if payload.enabled { "cron_enable" } else { "cron_disable" },
+        if payload.enabled {
+            "cron_enable"
+        } else {
+            "cron_disable"
+        },
         &payload.id.to_string(),
         "",
     )

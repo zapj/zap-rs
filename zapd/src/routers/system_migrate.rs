@@ -104,7 +104,10 @@ pub async fn migrate_home_mv(
         return Err(ZapError::New(-1, "源/目标挂载点非法".to_string()));
     }
     if src == dest {
-        return Err(ZapError::New(-1, "源与目标挂载点相同，无需迁移".to_string()));
+        return Err(ZapError::New(
+            -1,
+            "源与目标挂载点相同，无需迁移".to_string(),
+        ));
     }
     if dest == "/home" {
         return Err(ZapError::New(-1, "目标挂载点不能是默认 /home".to_string()));
