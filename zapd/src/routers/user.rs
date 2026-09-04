@@ -1,5 +1,5 @@
 use axum::{Json, extract::Extension};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{QueryBuilder, Sqlite};
 use std::net::SocketAddr;
@@ -202,6 +202,91 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
         "code": -1,
         "message": "User not found",
     }))
+}
+
+// ── 个人中心 → 偏好设置 ──────────────────────────────────────
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_autossl_mode() -> String {
+    "deferrals".to_string()
+}
+
+/// 当前用户通知/其它偏好（个人中心 → 偏好设置），存 user.prefs（JSON）。
+/// 子项 `*_disable`：对应父通知类别下的子通知被禁用（cPanel 风格偏好覆盖）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct NoticePrefs {
+    /// 账户接近磁盘配额
+    #[serde(default = "default_true")]
+    pub notify_disk_quota: bool,
+    /// 账户接近带宽限制
+    #[serde(default = "default_true")]
+    pub notify_bandwidth: bool,
+    /// SSL 证书即将过期
+    #[serde(default = "default_true")]
+    pub notify_ssl_expiry: bool,
+    /// 账户密码变化
+    #[serde(default = "default_true")]
+    pub notify_password_change: bool,
+    #[serde(default)]
+    pub password_change_disable: bool,
+    /// 有人登录我的账户（成功登录通知）
+    #[serde(default)]
+    pub notify_login: bool,
+    #[serde(default)]
+    pub login_disable: bool,
+    /// AutoSSL 通知模式：deferrals=失败及延后 / failures=仅失败 / disabled=禁用
+    #[serde(default = "default_autossl_mode")]
+    pub autossl_notify_mode: String,
+}
+
+impl Default for NoticePrefs {
+    fn default() -> Self {
+        Self {
+            notify_disk_quota: true,
+            notify_bandwidth: true,
+            notify_ssl_expiry: true,
+            notify_password_change: true,
+            password_change_disable: false,
+            notify_login: false,
+            login_disable: false,
+            autossl_notify_mode: "deferrals".to_string(),
+        }
+    }
+}
+
+/// GET /user/prefs：读取当前用户的偏好设置（无记录时返回默认值）。
+pub async fn user_prefs_get(claims: Claims) -> ZapJsonResult {
+    let pool = db::get_db_pool().await;
+    let prefs: Option<String> = sqlx::query_scalar("SELECT prefs FROM user WHERE id = ?")
+        .bind(claims.id as i64)
+        .fetch_optional(pool)
+        .await?;
+    let prefs = prefs
+        .and_then(|s| serde_json::from_str::<NoticePrefs>(&s).ok())
+        .unwrap_or_default();
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": prefs })))
+}
+
+/// POST /user/prefs：保存当前用户的偏好设置（仅能改自己）。
+pub async fn user_prefs_save(claims: Claims, Json(payload): Json<NoticePrefs>) -> ZapJsonResult {
+    let mut data = payload;
+    // 约束 AutoSSL 通知模式取值，避免非法字符进入
+    match data.autossl_notify_mode.as_str() {
+        "failures" | "disabled" => {}
+        _ => data.autossl_notify_mode = "deferrals".to_string(),
+    }
+    let store = serde_json::to_string(&data).unwrap_or_default();
+    let pool = db::get_db_pool().await;
+    sqlx::query("UPDATE user SET prefs = ? WHERE id = ?")
+        .bind(&store)
+        .bind(claims.id as i64)
+        .execute(pool)
+        .await?;
+    Ok(Json(json!({ "code": 0, "message": "偏好设置已保存", "data": data })))
 }
 
 /// List users — admin sees all, reseller sees only own customers
@@ -567,6 +652,10 @@ pub async fn user_update(
     let mut resp = json!({ "code": 0, "message": "用户更新成功" });
     if payload.password.is_some() && claims.pwd_is_default {
         resp["must_relogin"] = json!(true);
+    }
+    // 密码被修改（本人或管理员/经销商改密）→ 向目标用户发站内信（受其通知偏好控制）
+    if payload.password.is_some() {
+        crate::zap::notify::password_changed(payload.id as i64, &claims.sub).await;
     }
     Ok(Json(resp))
 }

@@ -184,3 +184,33 @@ export function totpDisable(code: string) {
 export function totpStatus() {
   return http.get<ApiResponse<{ enabled: boolean }>>('/auth/totp/status')
 }
+
+// ── 个人中心 → 偏好设置 ─────────────────────────────────────
+
+/** 当前用户通知偏好（个人中心 → 偏好设置） */
+export interface NoticePrefs {
+  /** 账户接近磁盘配额 */
+  notify_disk_quota: boolean
+  /** 账户接近带宽限制 */
+  notify_bandwidth: boolean
+  /** SSL 证书即将过期 */
+  notify_ssl_expiry: boolean
+  /** 账户密码变化 */
+  notify_password_change: boolean
+  password_change_disable: boolean
+  /** 有人登录我的账户（成功登录通知） */
+  notify_login: boolean
+  login_disable: boolean
+  /** AutoSSL 通知模式：deferrals=失败及延后 / failures=仅失败 / disabled=禁用 */
+  autossl_notify_mode: 'deferrals' | 'failures' | 'disabled'
+}
+
+/** 读取当前用户偏好设置 */
+export function getMyPrefs() {
+  return http.get<ApiResponse<NoticePrefs>>('/user/prefs')
+}
+
+/** 保存当前用户偏好设置 */
+export function saveMyPrefs(data: NoticePrefs) {
+  return http.post<ApiResponse<NoticePrefs>>('/user/prefs', data)
+}

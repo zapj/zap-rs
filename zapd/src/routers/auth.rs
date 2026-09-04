@@ -196,6 +196,8 @@ pub async fn login(
                     .execute(pool)
                     .await;
             audit::log(None, Some(&ip), "login_success", &row.username, "").await;
+            // 登录成功站内信（是否发送取决于该用户通知偏好，默认不发送）
+            crate::zap::notify::login_success(row.id as i64, &row.username, &ip).await;
             return Ok(Json(json!({
                 "code": 0,
                 "access_token": token,
@@ -294,6 +296,9 @@ pub async fn change_password(
         "",
     )
     .await;
+
+    // 密码变更站内信（是否发送取决于该用户通知偏好，默认发送）
+    crate::zap::notify::password_changed(claims.id as i64, &claims.sub).await;
 
     tracing::info!("Password changed for user {}", claims.sub);
     Ok(Json(json!({

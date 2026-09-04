@@ -55,6 +55,19 @@ export const constantRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
+  {
+    path: '/messages',
+    component: Layout,
+    meta: { hidden: true },
+    children: [
+      {
+        path: '',
+        name: 'Messages',
+        component: () => import('@/views/messages/index.vue'),
+        meta: { title: '消息中心', affix: false },
+      },
+    ],
+  },
 ]
 
 // 动态路由，基于用户权限动态加载

@@ -4,7 +4,16 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import QRCode from 'qrcode'
 import { useUserStore } from '@/stores/user'
-import { updateUser, totpSetup, totpVerify, totpDisable, totpStatus } from '@/api/user'
+import {
+  updateUser,
+  totpSetup,
+  totpVerify,
+  totpDisable,
+  totpStatus,
+  getMyPrefs,
+  saveMyPrefs,
+} from '@/api/user'
+import type { NoticePrefs } from '@/api/user'
 import { roleLabel } from '@/utils/role'
 
 const userStore = useUserStore()
@@ -26,6 +35,7 @@ onMounted(async () => {
   infoForm.email = userInfo.email
   infoForm.phone = userInfo.phone
   await loadTotpStatus()
+  await loadPrefs()
 })
 
 async function saveInfo() {
@@ -176,6 +186,44 @@ async function copySecret() {
     ElMessage.warning('复制失败，请手动复制')
   }
 }
+
+// ── 偏好设置 ───────────────────────────────────────────────
+const prefs = reactive<NoticePrefs>({
+  notify_disk_quota: true,
+  notify_bandwidth: true,
+  notify_ssl_expiry: true,
+  notify_password_change: true,
+  password_change_disable: false,
+  notify_login: false,
+  login_disable: false,
+  autossl_notify_mode: 'deferrals',
+})
+const prefsLoading = ref(false)
+const prefsSaving = ref(false)
+
+async function loadPrefs() {
+  prefsLoading.value = true
+  try {
+    const res = await getMyPrefs()
+    if (res.data) Object.assign(prefs, res.data)
+  } catch {
+    // 拦截器已弹窗
+  } finally {
+    prefsLoading.value = false
+  }
+}
+
+async function savePrefs() {
+  prefsSaving.value = true
+  try {
+    const res = await saveMyPrefs({ ...prefs })
+    ElMessage.success(res.message || '偏好设置已保存')
+  } catch {
+    // 拦截器已弹窗
+  } finally {
+    prefsSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -292,6 +340,51 @@ async function copySecret() {
             </template>
           </div>
         </el-tab-pane>
+
+        <!-- 偏好设置 -->
+        <el-tab-pane label="偏好设置" name="prefs">
+          <div class="prefs-panel" v-loading="prefsLoading">
+            <h4 class="prefs-title">通知偏好</h4>
+            <p class="prefs-desc">选择您希望接收的提醒方式。在以下情况发生时通知我：</p>
+
+            <el-checkbox v-model="prefs.notify_disk_quota" class="prefs-item">
+              我的账户接近磁盘配额。
+            </el-checkbox>
+
+            <el-checkbox v-model="prefs.notify_bandwidth" class="prefs-item">
+              我的账户接近带宽用量限制。
+            </el-checkbox>
+
+            <el-checkbox v-model="prefs.notify_ssl_expiry" class="prefs-item">
+              SSL 证书将过期。（非 AutoSSL 证书快过期时会提醒。）
+            </el-checkbox>
+
+            <el-checkbox v-model="prefs.notify_password_change" class="prefs-item">
+              账户密码变更通知
+            </el-checkbox>
+            <div v-if="prefs.notify_password_change" class="prefs-sub">
+              <el-checkbox v-model="prefs.password_change_disable">不通知</el-checkbox>
+            </div>
+
+            <el-checkbox v-model="prefs.notify_login" class="prefs-item">
+              登录成功通知
+            </el-checkbox>
+            <div v-if="prefs.notify_login" class="prefs-sub">
+              <el-checkbox v-model="prefs.login_disable">不通知</el-checkbox>
+            </div>
+
+            <h4 class="prefs-title prefs-group-title">AutoSSL 通知</h4>
+            <el-radio-group v-model="prefs.autossl_notify_mode" class="prefs-radio-group">
+              <el-radio value="deferrals" class="prefs-radio">AutoSSL 失败及延后时。（默认）</el-radio>
+              <el-radio value="failures" class="prefs-radio">仅 AutoSSL 失败时。</el-radio>
+              <el-radio value="disabled" class="prefs-radio">禁用 AutoSSL 事件通知。</el-radio>
+            </el-radio-group>
+
+            <div style="margin-top: 28px">
+              <el-button type="primary" :loading="prefsSaving" @click="savePrefs">保存修改</el-button>
+            </div>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -337,5 +430,43 @@ async function copySecret() {
   border-radius: 4px;
   font-size: 13px;
   word-break: break-all;
+}
+
+/* ── 偏好设置 ── */
+.prefs-panel {
+  max-width: 680px;
+}
+.prefs-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+.prefs-group-title {
+  margin-top: 28px;
+}
+.prefs-desc {
+  margin: 0 0 16px;
+  color: #606266;
+  font-size: 13px;
+}
+.prefs-item {
+  display: flex;
+  align-items: flex-start;
+  margin: 0 0 10px;
+  white-space: normal;
+  line-height: 1.6;
+}
+.prefs-sub {
+  margin: 0 0 12px 32px;
+  color: #909399;
+}
+.prefs-radio-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.prefs-radio {
+  margin: 0 0 10px;
 }
 </style>

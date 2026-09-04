@@ -43,6 +43,7 @@ pub mod appstore;
 pub mod auth;
 pub mod dev;
 pub mod fpm_spec;
+pub mod notice;
 pub mod site;
 pub mod ssh_keys;
 pub mod ssh_terminal;
@@ -144,6 +145,13 @@ fn api_routers() -> Router {
         .route("/auth/totp/disable", post(auth::totp_disable))
         .route("/auth/totp/status", get(auth::totp_status))
         .route("/user/info", get(user::user_info))
+        .route("/user/prefs", get(user::user_prefs_get).post(user::user_prefs_save))
+        // 站内信（通知中心，登录用户本人）
+        .route("/user/notices", get(notice::notices_list))
+        .route("/user/notices/unread", get(notice::notices_unread))
+        .route("/user/notices/read", post(notice::notices_read))
+        .route("/user/notices/read_all", post(notice::notices_read_all))
+        .route("/user/notices/delete", post(notice::notices_delete))
         // User management (admin + reseller)
         .route("/system/user/list", get(user::user_list))
         .route("/system/user/add", post(user::user_add))

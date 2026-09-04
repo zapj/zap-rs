@@ -77,16 +77,52 @@ pub struct NetWorkInfo {
     pub ipaddrs: Vec<String>,
 }
 
-pub async fn get_system_info() -> ZapJsonResult {
-    let mut sys = System::new_all();
-    let load_avg = System::load_average();
-    let pub_ip_address = match public_ip_address::perform_lookup(None).await {
-        Ok(ip) => ip.ip.to_string(),
-        Err(_) => match local_ip_address::local_ip() {
+/// 公网 IP 查询缓存（60s），避免每次刷新首页都访问外网服务。
+const PUB_IP_CACHE_TTL: StdDuration = StdDuration::from_secs(60);
+static PUB_IP_CACHE: OnceLock<Mutex<(Instant, String)>> = OnceLock::new();
+
+/// 获取公网 IP（尽力而为）：
+/// - 查询自带 3 秒超时（无外网/被墙环境下 `public_ip_address` 会长时间挂起，
+///   曾导致 /system/info 超过服务端 10s TimeoutLayer 而被掐断返回 408）；
+/// - 失败回退内网 IP，再失败回退 127.0.0.1；
+/// - 结果缓存 60s。
+async fn public_ip_cached() -> String {
+    let cell = PUB_IP_CACHE.get_or_init(|| {
+        Mutex::new((
+            Instant::now() - PUB_IP_CACHE_TTL.checked_mul(2).unwrap_or(PUB_IP_CACHE_TTL),
+            String::new(),
+        ))
+    });
+    {
+        let guard = cell.lock().unwrap();
+        if guard.0.elapsed() < PUB_IP_CACHE_TTL {
+            let cached = guard.1.clone();
+            if !cached.is_empty() {
+                return cached;
+            }
+        }
+    }
+    let ip = match tokio::time::timeout(
+        StdDuration::from_secs(3),
+        public_ip_address::perform_lookup(None),
+    )
+    .await
+    {
+        Ok(Ok(found)) => found.ip.to_string(),
+        _ => match local_ip_address::local_ip() {
             Ok(ip) => ip.to_string(),
             Err(_) => "127.0.0.1".to_string(),
         },
     };
+    let mut guard = cell.lock().unwrap();
+    *guard = (Instant::now(), ip.clone());
+    ip
+}
+
+pub async fn get_system_info() -> ZapJsonResult {
+    let mut sys = System::new_all();
+    let load_avg = System::load_average();
+    let pub_ip_address = public_ip_cached().await;
 
     let mut disk_info: Vec<DiskInfo> = Vec::new();
     let disks = Disks::new_with_refreshed_list();

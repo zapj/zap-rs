@@ -26,6 +26,10 @@ pub async fn init_schema() {
     // PHP-FPM 规格模板表 + user.fpm_spec_ref 列（老库幂等补列）
     init_fpm_spec_table().await;
     ensure_user_fpm_spec_ref_column().await;
+    // user.prefs 列（个人中心 → 偏好设置，老库幂等补列）
+    ensure_user_prefs_column().await;
+    // 站内信（通知中心）表
+    init_notice_message_table().await;
     // 全局运行环境状态表（scope=auto 自动探测快照 / scope=conf 面板默认配置）
     init_server_env_table().await;
     // API Token 管理表
@@ -55,6 +59,7 @@ async fn init_system_user_table_schema() {
         home_dir TEXT NOT NULL DEFAULT '',
         linux_user TEXT NOT NULL DEFAULT '',
         fpm_pool TEXT NOT NULL DEFAULT '',
+        prefs TEXT NOT NULL DEFAULT '',
         last_login_time INTEGER,
         last_login_ip TEXT,
         status INTEGER DEFAULT 1,
@@ -761,6 +766,48 @@ async fn ensure_user_fpm_spec_ref_column() {
     let _ = sqlx::query("ALTER TABLE user ADD COLUMN fpm_spec_ref TEXT NOT NULL DEFAULT ''")
         .execute(pool)
         .await;
+}
+
+/// 老库兼容：user 表缺少 prefs 列时幂等补列（已有列则跳过）。
+/// prefs 存当前用户个人偏好（个人中心 → 偏好设置），JSON 字符串。
+async fn ensure_user_prefs_column() {
+    if !table_exists("user").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let rows = sqlx::query("PRAGMA table_info(user)")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let has = rows.iter().any(|r| {
+        r.try_get::<String, _>("name")
+            .map(|n| n == "prefs")
+            .unwrap_or(false)
+    });
+    if has {
+        return;
+    }
+    let _ = sqlx::query("ALTER TABLE user ADD COLUMN prefs TEXT NOT NULL DEFAULT ''")
+        .execute(pool)
+        .await;
+}
+
+// ── notice_message（站内信 / 通知中心）────────────────────────
+
+async fn init_notice_message_table() {
+    let sql = r#"
+    CREATE TABLE IF NOT EXISTS notice_message (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL DEFAULT 0,
+        type TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '',
+        is_read INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_notice_user ON notice_message(user_id, id);
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
 }
 
 // ── server_env（全局运行环境状态表）───────────────────────────
