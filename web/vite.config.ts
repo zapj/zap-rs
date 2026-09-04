@@ -31,8 +31,9 @@ export default defineConfig(({ mode }) => {
         resolvers: [
           ElementPlusResolver(),
           IconsResolver({
-            prefix: "icon", 
-            enabledCollections: ['ep','mdi'],
+            prefix: "icon",
+            // 只启用 ep：mdi 未安装图标包，内网下自动安装会失败
+            enabledCollections: ['ep'],
           }),
         ],
         imports:['vue','vue-router','pinia']
@@ -41,8 +42,8 @@ export default defineConfig(({ mode }) => {
         resolvers: [
           ElementPlusResolver(),
           IconsResolver({
-            prefix: "icon", 
-            enabledCollections: ['ep','mdi'],
+            prefix: "icon",
+            enabledCollections: ['ep'],
           }),
         ],
       }),
@@ -59,7 +60,9 @@ export default defineConfig(({ mode }) => {
       //   open:true //如果存在本地服务端口，将在打包后自动展示
       // }),
       Icons({
-        autoInstall: true,
+        // 关闭自动安装：内网/离线构建时 npm 拉取图标包会失败。
+        // 需要的图标集需显式安装（当前只用 @iconify-json/ep）。
+        autoInstall: false,
         compiler: 'vue3',
       }),
     ],

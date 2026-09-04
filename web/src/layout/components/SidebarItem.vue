@@ -26,7 +26,7 @@
       <template #title>
         <el-icon v-if="item.meta && item.meta.icon">
           <!-- <component :is="item.meta.icon" /> -->
-          <Icon :icon="item.meta.icon" />
+          <Icon :icon="resolveIcon(item.meta.icon)" />
         </el-icon>
         <span>{{ item.meta.title }}</span>
       </template>
@@ -48,7 +48,8 @@ import { computed, ref } from 'vue'
 import { isExternal } from '@/utils/validate'
 import AppLink from './AppLink.vue'
 import path from 'path-browserify'
-import {Icon} from '@iconify/vue'
+// 离线版 Icon：不含任何联网代码，图标数据来自 main.ts 注册的本地 ep 集合
+import { Icon, resolveIcon } from '@/utils/icon'
 
 const props = defineProps({
   item: {
@@ -68,9 +69,12 @@ const props = defineProps({
 // 唯一子菜单
 const onlyOneChild = ref<any>(null)
 
-// 单子菜单显示时：优先子菜单图标，缺失则回退父菜单图标
+// 单子菜单显示时：优先子菜单图标，缺失则回退父菜单图标。
+// 菜单图标来自数据库，管理员可能填了未注册集合的图标名（内网下无法加载），
+// 因此统一走 resolveIcon 做前缀校验与兜底。
 const resolvedIcon = computed(() => {
-  return onlyOneChild.value?.meta?.icon || props.item.meta?.icon || ''
+  const raw = onlyOneChild.value?.meta?.icon || props.item.meta?.icon || ''
+  return resolveIcon(raw)
 })
 
 /**

@@ -4,6 +4,21 @@ import { login, getUserInfo, logout as logoutApi } from '@/api/user'
 import { setToken, removeToken,setTokenExpire } from '@/utils/auth'
 import { ElMessage } from 'element-plus'
 
+/**
+ * 默认头像：内联 SVG（data URI）。
+ * 面板可能部署在纯内网，不能引用任何外网图片（原先用的是 cube.elemecdn.com，
+ * 内网下会加载失败导致头像空白），这里直接内联一个灰色人像图标。
+ */
+const DEFAULT_AVATAR =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">' +
+      '<circle cx="512" cy="512" r="512" fill="#d9d9d9"/>' +
+      '<circle cx="512" cy="380" r="150" fill="#ffffff"/>' +
+      '<path d="M512 570c-143 0-260 90-282 207-9 47 21 87 70 87h424c49 0 79-40 70-87-22-117-139-207-282-207z" fill="#ffffff"/>' +
+      '</svg>',
+  )
+
 export const useUserStore = defineStore('user', () => {
   const token = ref('')
   const userId = ref<number>(0)
@@ -20,7 +35,7 @@ export const useUserStore = defineStore('user', () => {
     name: name.value || '用户',
     username: name.value || '用户',
     nickname: nickname.value || name.value || '用户',
-    avatar: avatar.value || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png',
+    avatar: avatar.value || DEFAULT_AVATAR,
     roles: roles.value,
     permissions: permissions.value,
     email: email.value || '',

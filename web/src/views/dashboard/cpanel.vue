@@ -33,7 +33,7 @@
           :key="item.title"
         >
           <div class="app-tile" @click="handleClick(item)">
-            <el-icon class="app-icon"><Icon :icon="item.icon" /></el-icon>
+            <el-icon class="app-icon"><Icon :icon="resolveIcon(item.icon)" /></el-icon>
             <div class="app-title">{{ item.title }}</div>
           </div>
         </el-col>
@@ -46,7 +46,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Icon } from '@iconify/vue'
+import { Icon, resolveIcon } from '@/utils/icon'
 import { useUserStore } from '@/stores/user'
 import { getSystemInfo } from '@/api/dashboard'
 import { formatBytes } from '@/utils/fmt'

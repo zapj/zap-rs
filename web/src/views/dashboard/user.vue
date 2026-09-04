@@ -4,7 +4,7 @@
       <el-col :sm="6" v-for="(item, index) in statCards" :key="index">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-icon" :style="{ backgroundColor: item.color }">
-            <Icon :icon="item.icon" />
+            <Icon :icon="resolveIcon(item.icon)" />
           </div>
           <div class="stat-info">
             <div class="stat-value">{{ item.value }}</div>
@@ -65,7 +65,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import {Icon} from '@iconify/vue'
+import { Icon, resolveIcon } from '@/utils/icon'
 
 // import('@/views/dashboard/')
 
