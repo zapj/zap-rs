@@ -260,6 +260,18 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         owner: Option<String>,
     },
+    /// 将用户家目录整体迁移到新挂载点（如 /home → /home2，磁盘扩容场景）。
+    /// 支持跨文件系统（mv 失败自动回退 cp -a + 清理源）；完成后按运行模式重置属主。
+    /// owner Some(linux 账号)（system 模式）时同步更新系统账号家目录指针（usermod -d）。
+    #[serde(rename = "user.home_migrate")]
+    UserHomeMigrate {
+        /// 源家目录完整路径（绝对路径，不含 `..`）
+        src_home: String,
+        /// 目标家目录完整路径（须为挂载点下路径，basename 与源一致）
+        dest_home: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
+    },
     /// 为面板用户创建 Linux 系统账号（useradd，nologin，home 指向 home_dir），幂等。
     /// 虚拟主机运行模式为「独立系统用户」时，面板用户在 user.add / 站点同步前调用。
     #[serde(rename = "user.system_init")]

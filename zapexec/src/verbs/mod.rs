@@ -160,6 +160,11 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::UserHomeInit { home_dir, owner } => {
             user::home_init(&home_dir, owner.as_deref()).await
         }
+        Request::UserHomeMigrate {
+            src_home,
+            dest_home,
+            owner,
+        } => user::migrate_home(&src_home, &dest_home, owner.as_deref()).await,
         Request::UserSystemInit {
             linux_user,
             home_dir,

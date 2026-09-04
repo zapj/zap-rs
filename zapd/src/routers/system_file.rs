@@ -10,6 +10,7 @@ use serde_json::json;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
+use crate::db;
 use crate::zap::{
     ZapError, ZapJsonResult, audit,
     jwt::{Claims, is_admin},
@@ -73,22 +74,34 @@ fn resolve_path(requested: &str) -> Result<PathBuf, ZapError> {
 }
 
 /// 非管理员可访问的私有目录前缀（自己的 home 与私有临时目录）。
-fn user_allowed_prefix(username: &str) -> (String, String) {
-    (format!("/home/{username}"), format!("/tmp/zap-{username}"))
+/// home 跟随 `user.home_dir`（迁移挂载点后文件管理自动切到新路径），
+/// 无记录时回退 `/home/{username}`。
+async fn user_private_prefixes(claims: &Claims) -> (String, String) {
+    let pool = db::get_db_pool().await;
+    let home: Option<String> =
+        sqlx::query_scalar("SELECT home_dir FROM user WHERE username = ? AND home_dir != ''")
+            .bind(&claims.sub)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    let home = home.unwrap_or_else(|| format!("/home/{}", claims.sub));
+    (home, format!("/tmp/zap-{}", claims.sub))
 }
 
 /// Check if user has read access to a path.
 ///
 /// 权限模型：
 /// - 管理员：任意路径；
-/// - 普通用户：仅自己 home（`/home/{username}`）与私有临时目录（`/tmp/zap-{username}`）。
+/// - 普通用户：仅自己 home（`user.home_dir`，回退 `/home/{username}`）与
+///   私有临时目录（`/tmp/zap-{username}`）。
 ///   彻底移除此前"所有人可读 /var/www、/var/log"的越权隐患。
-fn check_access(claims: &Claims, path: &Path) -> Result<(), ZapError> {
+/// home/tmp 前缀由调用方异步查询后传入。
+fn check_access(claims: &Claims, path: &Path, home: &str, tmp: &str) -> Result<(), ZapError> {
     if is_admin(claims) {
         return Ok(());
     }
     let path_str = path.to_string_lossy().to_string();
-    let (home, tmp) = user_allowed_prefix(&claims.sub);
     if path_str == home
         || path_str.starts_with(&format!("{home}/"))
         || path_str == tmp
@@ -100,29 +113,27 @@ fn check_access(claims: &Claims, path: &Path) -> Result<(), ZapError> {
 }
 
 /// Check if user can write to a path（与读权限同一套隔离规则）。
-fn check_write_access(claims: &Claims, path: &Path) -> Result<(), ZapError> {
-    check_access(claims, path)
+fn check_write_access(claims: &Claims, path: &Path, home: &str, tmp: &str) -> Result<(), ZapError> {
+    check_access(claims, path, home, tmp)
 }
 
 // ── handlers ───────────────────────────────────────────────
 
 /// GET /system/files/list?path=/
 pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJsonResult {
+    let (home, tmp) = user_private_prefixes(&claims).await;
     // 非管理员默认进入自己的 home 目录
     let raw_path = match (is_admin(&claims), query.path.as_deref()) {
-        (false, None) | (false, Some("/")) => format!("/home/{}", claims.sub),
+        (false, None) | (false, Some("/")) => home.clone(),
         (_, Some(p)) => p.to_string(),
         (_, None) => "/".to_string(),
     };
     let resolved = resolve_path(&raw_path)?;
-    check_access(&claims, &resolved)?;
+    check_access(&claims, &resolved, &home, &tmp)?;
 
     // 首次访问自己的 home 时自动创建（zapexec 以 root 执行）
-    if !is_admin(&claims) {
-        let home = format!("/home/{}", claims.sub);
-        if resolved.to_string_lossy() == home && !resolved.exists() {
-            let _ = crate::zapexec::call(Request::FileMkdir { path: home }).await;
-        }
+    if !is_admin(&claims) && resolved.as_path() == Path::new(&home) && !resolved.exists() {
+        let _ = crate::zapexec::call(Request::FileMkdir { path: home }).await;
     }
 
     let resp = crate::zapexec::call(Request::FileList {
@@ -146,8 +157,9 @@ pub async fn file_read(
     if raw_path.is_empty() {
         return Err(ZapError::New(-1, "缺少路径参数".to_string()));
     }
+    let (home, tmp) = user_private_prefixes(&claims).await;
     let resolved = resolve_path(raw_path)?;
-    check_access(&claims, &resolved)?;
+    check_access(&claims, &resolved, &home, &tmp)?;
 
     let resp = crate::zapexec::call(Request::FileRead {
         path: resolved.to_string_lossy().to_string(),
@@ -165,8 +177,9 @@ pub async fn file_write(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<FileOpPayload>,
 ) -> ZapJsonResult {
+    let (home, tmp) = user_private_prefixes(&claims).await;
     let resolved = resolve_path(&payload.path)?;
-    check_write_access(&claims, &resolved)?;
+    check_write_access(&claims, &resolved, &home, &tmp)?;
 
     let resp = crate::zapexec::call(Request::FileWrite {
         path: resolved.to_string_lossy().to_string(),
@@ -195,8 +208,9 @@ pub async fn file_delete(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<DeletePayload>,
 ) -> ZapJsonResult {
+    let (home, tmp) = user_private_prefixes(&claims).await;
     let resolved = resolve_path(&payload.path)?;
-    check_write_access(&claims, &resolved)?;
+    check_write_access(&claims, &resolved, &home, &tmp)?;
 
     let resp = crate::zapexec::call(Request::FileDelete {
         path: resolved.to_string_lossy().to_string(),
@@ -222,8 +236,9 @@ pub async fn file_mkdir(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<MkdirPayload>,
 ) -> ZapJsonResult {
+    let (home, tmp) = user_private_prefixes(&claims).await;
     let resolved = resolve_path(&payload.path)?;
-    check_write_access(&claims, &resolved)?;
+    check_write_access(&claims, &resolved, &home, &tmp)?;
 
     let resp = crate::zapexec::call(Request::FileMkdir {
         path: resolved.to_string_lossy().to_string(),
@@ -251,15 +266,16 @@ pub async fn file_rename(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<FileOpPayload>,
 ) -> ZapJsonResult {
+    let (home, tmp) = user_private_prefixes(&claims).await;
     let old_path = resolve_path(&payload.path)?;
-    check_write_access(&claims, &old_path)?;
+    check_write_access(&claims, &old_path, &home, &tmp)?;
 
     if !old_path.exists() {
         return Err(ZapError::New(-1, "源文件不存在".to_string()));
     }
 
     let new_path = resolve_path(&payload.new_path)?;
-    check_write_access(&claims, &new_path)?;
+    check_write_access(&claims, &new_path, &home, &tmp)?;
 
     let resp = crate::zapexec::call(Request::FileRename {
         path: old_path.to_string_lossy().to_string(),
@@ -295,8 +311,9 @@ pub async fn file_download(
     if raw_path.is_empty() {
         return Err(ZapError::New(-1, "缺少路径参数".to_string()));
     }
+    let (home, tmp) = user_private_prefixes(&claims).await;
     let resolved = resolve_path(raw_path)?;
-    check_access(&claims, &resolved)?;
+    check_access(&claims, &resolved, &home, &tmp)?;
 
     let resp = crate::zapexec::call(Request::FileDownload {
         path: resolved.to_string_lossy().to_string(),
@@ -336,8 +353,9 @@ pub async fn file_upload(
     mut multipart: Multipart,
 ) -> Result<Response, ZapError> {
     let target_dir = query.path.as_deref().unwrap_or("/tmp");
+    let (home, tmp) = user_private_prefixes(&claims).await;
     let resolved_dir = resolve_path(target_dir)?;
-    check_write_access(&claims, &resolved_dir)?;
+    check_write_access(&claims, &resolved_dir, &home, &tmp)?;
 
     let mut uploaded: Vec<String> = Vec::new();
 
@@ -389,8 +407,9 @@ pub async fn file_upload(
 /// GET /system/files/info?path=...
 pub async fn file_info(claims: Claims, Query(query): Query<PathQuery>) -> ZapJsonResult {
     let raw_path = query.path.as_deref().unwrap_or("/");
+    let (home, tmp) = user_private_prefixes(&claims).await;
     let resolved = resolve_path(raw_path)?;
-    check_access(&claims, &resolved)?;
+    check_access(&claims, &resolved, &home, &tmp)?;
 
     let resp = crate::zapexec::call(Request::FileInfo {
         path: resolved.to_string_lossy().to_string(),
@@ -427,27 +446,55 @@ mod tests {
         c
     }
 
+    /// 测试辅助：以 claims.sub 推导 home/tmp 前缀并校验读权限
+    fn access(c: &Claims, p: &str) -> Result<(), ZapError> {
+        let home = format!("/home/{}", c.sub);
+        let tmp = format!("/tmp/zap-{}", c.sub);
+        check_access(c, Path::new(p), &home, &tmp)
+    }
+
+    /// 测试辅助：以 claims.sub 推导 home/tmp 前缀并校验写权限
+    fn waccess(c: &Claims, p: &str) -> Result<(), ZapError> {
+        let home = format!("/home/{}", c.sub);
+        let tmp = format!("/tmp/zap-{}", c.sub);
+        check_write_access(c, Path::new(p), &home, &tmp)
+    }
+
     #[test]
     fn admin_can_access_any_path() {
         let c = admin_claims();
-        assert!(check_access(&c, Path::new("/etc/shadow")).is_ok());
-        assert!(check_access(&c, Path::new("/var/www")).is_ok());
+        assert!(access(&c, "/etc/shadow").is_ok());
+        assert!(access(&c, "/var/www").is_ok());
     }
 
     #[test]
     fn user_can_access_own_home() {
         let c = claims_for("alice");
-        assert!(check_access(&c, Path::new("/home/alice")).is_ok());
-        assert!(check_access(&c, Path::new("/home/alice/www/index.html")).is_ok());
+        assert!(access(&c, "/home/alice").is_ok());
+        assert!(access(&c, "/home/alice/www/index.html").is_ok());
+    }
+
+    #[test]
+    fn home_prefix_follows_given_root() {
+        // 迁移到 /home2 后：目标前缀放行，旧前缀拒绝
+        let c = claims_for("alice");
+        assert!(
+            check_access(&c, Path::new("/home2/alice/www"), "/home2/alice", "/tmp/zap-alice")
+                .is_ok()
+        );
+        assert!(
+            check_access(&c, Path::new("/home/alice/www"), "/home2/alice", "/tmp/zap-alice")
+                .is_err()
+        );
     }
 
     #[test]
     fn user_cannot_access_others_home() {
         let c = claims_for("alice");
-        assert!(check_access(&c, Path::new("/home/bob")).is_err());
-        assert!(check_access(&c, Path::new("/home/bob/secret")).is_err());
+        assert!(access(&c, "/home/bob").is_err());
+        assert!(access(&c, "/home/bob/secret").is_err());
         // 前缀混淆攻击：/home/aliceevil 不属于 alice
-        assert!(check_access(&c, Path::new("/home/aliceevil")).is_err());
+        assert!(access(&c, "/home/aliceevil").is_err());
     }
 
     #[test]
@@ -455,22 +502,22 @@ mod tests {
         let c = claims_for("alice");
         // 此前普通用户可读 /var/www、/var/log，现已禁止
         for p in ["/var/www", "/var/log", "/etc/passwd", "/root", "/tmp"] {
-            assert!(check_access(&c, Path::new(p)).is_err(), "{p} 应被拒绝");
+            assert!(access(&c, p).is_err(), "{p} 应被拒绝");
         }
     }
 
     #[test]
     fn user_can_access_private_tmp() {
         let c = claims_for("alice");
-        assert!(check_access(&c, Path::new("/tmp/zap-alice")).is_ok());
-        assert!(check_access(&c, Path::new("/tmp/zap-alice/t.txt")).is_ok());
-        assert!(check_access(&c, Path::new("/tmp/zap-bob/t.txt")).is_err());
+        assert!(access(&c, "/tmp/zap-alice").is_ok());
+        assert!(access(&c, "/tmp/zap-alice/t.txt").is_ok());
+        assert!(access(&c, "/tmp/zap-bob/t.txt").is_err());
     }
 
     #[test]
     fn write_access_same_as_read() {
         let c = claims_for("alice");
-        assert!(check_write_access(&c, Path::new("/home/alice/x")).is_ok());
-        assert!(check_write_access(&c, Path::new("/var/www")).is_err());
+        assert!(waccess(&c, "/home/alice/x").is_ok());
+        assert!(waccess(&c, "/var/www").is_err());
     }
 }

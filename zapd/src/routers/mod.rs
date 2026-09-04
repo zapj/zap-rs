@@ -50,6 +50,7 @@ pub mod ssl;
 pub mod system_audit;
 pub mod system_basic;
 pub mod system_config;
+pub mod system_migrate;
 pub mod system_cron;
 pub mod system_env;
 pub mod system_file;
@@ -212,6 +213,9 @@ fn api_routers() -> Router {
             "/system/config/ssh/install/log/{run_id}",
             get(system_config::ssh_install_log),
         )
+        // 数据迁移（服务器配置 → 数据迁移，admin only）
+        .route("/system/migrate/users", get(system_migrate::migrate_users_preview))
+        .route("/system/migrate/home", post(system_migrate::migrate_home_mv))
         // 基础设置（系统设置 → 基础设置，admin only）
         .route(
             "/system/config/basic",

@@ -13,17 +13,20 @@
 //!
 //! 安全边界：家目录只接受 `/home/` 下绝对路径；禁止 `..`；Linux 账号名白名单校验。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use zap_proto::Response;
 
 use super::root_cmd;
 
+/// 家目录路径校验：必须是绝对路径、不含 `..`、且不是文件系统根。
+/// 允许任意挂载点前缀（/home、/home2、/data/home 等），便于磁盘扩容迁移。
 fn home_dir_ok(home: &str) -> bool {
-    home.starts_with("/home/")
-        && PathBuf::from(home).is_absolute()
+    PathBuf::from(home).is_absolute()
         && !home.split('/').any(|s| s == "..")
+        && home != "/"
+        && !home.contains(' ')
 }
 
 fn linux_user_ok(u: &str) -> bool {
@@ -86,7 +89,7 @@ fn home_init_inner(home_dir: &str, owner: Option<&str>) -> Result<Response, Stri
     }
     if !home_dir_ok(home) {
         return Err(format!(
-            "home_dir 非法（必须为 /home/ 下的绝对路径）: {home}"
+            "home_dir 非法（必须为挂载点下的绝对路径，不含 ..）: {home}"
         ));
     }
     if let Some(u) = owner
@@ -158,7 +161,7 @@ fn system_init_inner(linux_user: &str, home_dir: &str) -> Result<Response, Strin
     }
     if !home_dir_ok(home_dir) {
         return Err(format!(
-            "home_dir 非法（必须为 /home/ 下的绝对路径）: {home_dir}"
+            "home_dir 非法（必须为挂载点下的绝对路径，不含 ..）: {home_dir}"
         ));
     }
     let id = root_cmd("id")
@@ -242,5 +245,100 @@ fn system_remove_inner(linux_user: &str) -> Result<Response, String> {
     Ok(Response::ok(
         format!("Linux 账号 {linux_user} 已移除"),
         None,
+    ))
+}
+
+// ── user.home_migrate（家目录跨挂载点迁移）──────────────────
+
+pub async fn migrate_home(src_home: &str, dest_home: &str, owner: Option<&str>) -> Response {
+    let src_home = src_home.to_string();
+    let dest_home = dest_home.to_string();
+    let owner = owner.map(|s| s.to_string());
+    tokio::task::spawn_blocking(move || migrate_home_inner(&src_home, &dest_home, owner.as_deref()))
+        .await
+        .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+        .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+fn migrate_home_inner(
+    src_home: &str,
+    dest_home: &str,
+    owner: Option<&str>,
+) -> Result<Response, String> {
+    let src = src_home.trim().trim_end_matches('/').to_string();
+    let dest = dest_home.trim().trim_end_matches('/').to_string();
+    for (name, p) in [("源家目录", src.as_str()), ("目标家目录", dest.as_str())] {
+        if p.is_empty() || !home_dir_ok(p) {
+            return Err(format!("{name}非法（必须为挂载点下的绝对路径，不含 ..）: {p}"));
+        }
+    }
+    if src == dest {
+        return Err("源与目标家目录相同，无需迁移".to_string());
+    }
+    let src_name = src.rsplit('/').next().unwrap_or("");
+    let dest_name = dest.rsplit('/').next().unwrap_or("");
+    if src_name != dest_name {
+        return Err(format!(
+            "目标家目录名称必须与源一致（源为 {src_name}）: {dest_name}"
+        ));
+    }
+
+    let q = |p: &str| sh_quote(p);
+    let src_p = Path::new(&src);
+    let dest_p = Path::new(&dest);
+    if !src_p.exists() {
+        return Err(format!("源家目录不存在: {src}"));
+    }
+    if dest_p.exists() {
+        // 目标已存在：仅允许空目录（数据不能覆盖），清空后继续
+        let entries = dest_p
+            .read_dir()
+            .map_err(|e| format!("读取目标目录失败 {dest}: {e}"))?
+            .next()
+            .transpose()
+            .map_err(|e| format!("读取目标目录失败 {dest}: {e}"))?;
+        if entries.is_some() {
+            return Err(format!("目标家目录已存在且非空，拒绝覆盖: {dest}"));
+        }
+        run_bash(&format!("rmdir {}", q(&dest)))?;
+    }
+    // 目标挂载点目录须已存在（挂载检查由上层/系统负责），仅创建到目标家目录
+    if let Some(parent) = dest_p.parent()
+        && !parent.exists()
+    {
+        run_bash(&format!("mkdir -p {}", q(&parent.to_string_lossy())))?;
+    }
+
+    // 优先 mv（同文件系统瞬时完成）；跨文件系统（EXDEV）自动回退 cp -a 后删除源。
+    // 回退场景下属主会变为 root，随后统一由 home_init 重置归属。
+    run_bash(&format!(
+        "mv {} {} 2>/dev/null || (mkdir -p {} && cp -a {}/. {}/ && rm -rf {})",
+        q(&src),
+        q(&dest),
+        q(&dest),
+        q(&src),
+        q(&dest),
+        q(&src),
+    ))?;
+
+    // 按当前运行模式重置家目录骨架属主/权限（幂等），并补全 www/logs/tmp 子目录。
+    // 文件搬移已成功，权限重置失败仅追加提示、不阻断迁移结果（避免数据与记录状态不一致）。
+    let mut warn_msg = String::new();
+    if let Err(e) = home_init_inner(&dest, owner) {
+        warn_msg = format!("（权限重置提示：{e}）");
+    }
+
+    // system 模式：同步 Linux 系统账号家目录指针（账号可能不存在，失败不阻断）
+    if let Some(u) = owner {
+        let _ = run_bash(&format!(
+            "usermod -d {} {} 2>/dev/null || true",
+            q(&dest),
+            q(u)
+        ));
+    }
+
+    Ok(Response::ok(
+        format!("数据迁移完成：{src} → {dest}{warn_msg}"),
+        Some(json!({ "src_home": src, "dest_home": dest })),
     ))
 }

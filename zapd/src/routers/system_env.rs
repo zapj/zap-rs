@@ -139,6 +139,7 @@ fn conf_json(conf: &HashMap<String, String>) -> Value {
         "database": conf.get("database").cloned().unwrap_or_default(),
         "vhost_mode": conf.get("vhost_mode").cloned().unwrap_or_else(|| "www".into()),
         "fpm_pool_defaults": conf.get("fpm_pool_defaults").cloned().unwrap_or_else(default_fpm_spec_json),
+        "user_home_root": conf.get("user_home_root").cloned().unwrap_or_else(|| "/home".into()),
     })
 }
 
@@ -229,6 +230,8 @@ pub struct EnvDefaultsPayload {
     pub vhost_mode: Option<String>,
     /// PHP-FPM 默认 pool 规格（JSON 字符串）
     pub fpm_pool_defaults: Option<String>,
+    /// 用户家目录默认挂载点（如 /home /home2），新用户创建时的 home_dir 前缀
+    pub user_home_root: Option<String>,
 }
 
 /// POST /system/env/defaults：保存全局默认配置（admin only）。
@@ -274,6 +277,21 @@ pub async fn env_defaults_save(
             ));
         }
         upserts.push(("fpm_pool_defaults".to_string(), v));
+    }
+    if let Some(v) = payload.user_home_root {
+        let v = v.trim().trim_end_matches('/').to_string();
+        if v.is_empty()
+            || !v.starts_with('/')
+            || v.contains("..")
+            || v.contains(char::is_whitespace)
+            || v == "/"
+        {
+            return Err(ZapError::New(
+                -1,
+                "user_home_root 必须是合法挂载点绝对路径（如 /home 或 /home2）".to_string(),
+            ));
+        }
+        upserts.push(("user_home_root".to_string(), v));
     }
 
     let pool = db::get_db_pool().await;

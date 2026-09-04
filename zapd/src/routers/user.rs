@@ -303,8 +303,11 @@ pub async fn user_add(
         crate::routers::fpm_spec::validate_spec_ref(&fpm_spec_ref, false, &claims.sub).await?;
     }
 
-    // 家目录 / Linux 账号：/home/{linux_username(username)} 派生，
-    // 站点文档根与站点日志均规划于其下；派生名与已有账号冲突时追加 -n 后缀
+    // 家目录 / Linux 账号：{默认挂载点}/{linux_username(username)} 派生，
+    // 站点文档根与站点日志均规划于其下；派生名与已有账号冲突时追加 -n 后缀。
+    // 默认挂载点取自运行环境默认设置（conf: user_home_root，默认 /home）；
+    // /home 磁盘不足时管理员可切换到新挂载点（如 /home2），此后新建用户即落到新挂载点，
+    // 存量用户不受影响（数据迁移请使用「服务器配置 → 数据迁移」）。
     let lu_base = zap_proto::linux_username(&payload.username);
     let pool = db::get_db_pool().await;
     let mut lu = lu_base.clone();
@@ -322,7 +325,11 @@ pub async fn user_add(
         lu = format!("{lu_base}-{n}");
         n += 1;
     }
-    let home_dir = format!("/home/{lu}");
+    let home_root = crate::routers::system_env::conf_get("user_home_root")
+        .await
+        .filter(|s| s.starts_with('/') && !s.contains("..") && s.len() > 1)
+        .unwrap_or_else(|| "/home".to_string());
+    let home_dir = format!("{home_root}/{lu}");
 
     let result = sqlx::query(
         "INSERT INTO user (username, home_dir, linux_user, fpm_pool, fpm_spec_ref, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",

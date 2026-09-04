@@ -24,6 +24,7 @@ const form = reactive<EnvConf>({
   database: '',
   vhost_mode: 'www',
   fpm_pool_defaults: '',
+  user_home_root: '/home',
 })
 
 /** fpm pool 默认规格 —— 数值字段 */
@@ -103,6 +104,7 @@ function openDefaultsDialog() {
   form.php_default = c?.php_default ?? ''
   form.database = c?.database ?? ''
   form.vhost_mode = c?.vhost_mode === 'system' ? 'system' : 'www'
+  form.user_home_root = c?.user_home_root || '/home'
   // 回填 fpm 默认规格（先重置再覆盖）
   resetFpmForm()
   const raw = c?.fpm_pool_defaults
@@ -164,6 +166,7 @@ async function saveDefaults() {
       database: form.database,
       vhost_mode: form.vhost_mode,
       fpm_pool_defaults: fpmSpecJson(),
+      user_home_root: form.user_home_root.trim(),
     })
     ElMessage.success(res.message || '默认配置已保存')
     dialogVisible.value = false
@@ -853,6 +856,16 @@ onMounted(() => {
           >
             <el-option v-for="d in dbOptions" :key="d" :label="d" :value="d" />
           </el-select>
+        </el-form-item>
+
+        <el-divider content-position="left">用户家目录挂载点</el-divider>
+        <el-form-item label="挂载点">
+          <el-input v-model="form.user_home_root" placeholder="/home" style="max-width: 360px" />
+          <div class="form-tip">
+            新建面板用户的家目录根目录。默认 /home；当 /home 磁盘不足时，可把新磁盘挂载到
+            /home2 等目录并在此设置新挂载点，此后新用户的数据即落到新挂载点；
+            存量用户不受影响，需要搬迁时请到「服务器配置 → 数据迁移」整体迁移。
+          </div>
         </el-form-item>
 
         <el-divider content-position="left">虚拟主机运行模式</el-divider>

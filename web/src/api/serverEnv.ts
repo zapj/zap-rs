@@ -41,6 +41,8 @@ export interface EnvConf {
   vhost_mode: 'www' | 'system'
   /** PHP-FPM 默认 pool 规格（JSON 字符串；用户未自定义时的兜底） */
   fpm_pool_defaults: string
+  /** 用户家目录默认挂载点（如 /home /home2），新建用户时 home_dir 前缀 */
+  user_home_root: string
 }
 
 export interface EnvData {
@@ -60,6 +62,7 @@ export interface EnvDefaultsPayload {
   database?: string
   vhost_mode?: 'www' | 'system'
   fpm_pool_defaults?: string
+  user_home_root?: string
 }
 
 export const getServerEnv = () =>

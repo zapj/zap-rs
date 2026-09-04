@@ -983,8 +983,8 @@ pub async fn site_sync(
     Ok(Json(json!({ "code": 0, "message": msg, "data": data })))
 }
 
-/// 单个站点全量同步核心（幂等，被 /site/sync 与 /site/sync_all 复用）
-async fn sync_one_site(
+/// 单个站点全量同步核心（幂等，被 /site/sync、/site/sync_all 与数据迁移复用）
+pub(crate) async fn sync_one_site(
     id: i64,
 ) -> Result<(String, Option<serde_json::Value>, String, i32), ZapError> {
     let pool = db::get_db_pool().await;
