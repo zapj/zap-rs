@@ -9,6 +9,8 @@ interface ImportMetaEnv {
   readonly VITE_USE_PROXY?: string
   /** 后端 zapd 版本（构建时从 zapd/Cargo.toml 读取） */
   readonly VITE_APP_VERSION?: string
+  /** 执行器 zapexec 版本（构建时从 zapexec/Cargo.toml 读取） */
+  readonly VITE_EXEC_VERSION?: string
   /** 前端 web 包版本（web/package.json） */
   readonly VITE_WEB_VERSION?: string
   /** 构建时间 */

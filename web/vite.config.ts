@@ -12,14 +12,15 @@ import Icons from 'unplugin-icons/vite'
 import IconsResolver from 'unplugin-icons/resolver'
 
 /**
- * 读取后端 zapd 版本：解析 ../zapd/Cargo.toml 的 [package].version。
- * 面板版本以后端为准（前端 web/package.json 的 version 仅代表前端产物，
- * 前端展示用 `import.meta.env.VITE_APP_VERSION` 即后端版本）。
+ * 读取 workspace 中某 crate 的版本：解析 <crate>/Cargo.toml 的 [package].version。
+ * - zapd：面板后端/主程序，前端展示的主版本
+ * - zapexec：任务执行器，展示为附加组件版本
+ * 前端 web/package.json 的 version 仅代表前端产物本身。
  */
-function readZapdVersion(): string {
+function readCrateVersion(crate: string): string {
   try {
     const cargo = readFileSync(
-      fileURLToPath(new URL('../zapd/Cargo.toml', import.meta.url)),
+      fileURLToPath(new URL(`../${crate}/Cargo.toml`, import.meta.url)),
       'utf-8',
     )
     // 只匹配 [package] 段内的 version（依赖项里的 version 均不在行首）
@@ -104,8 +105,11 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       "import.meta.env.VITE_BUILD_TIME": JSON.stringify(new Date().toISOString()),
-      // 版本以后端 zapd/Cargo.toml 为准；读不到时退回前端包版本
-      "import.meta.env.VITE_APP_VERSION": JSON.stringify(readZapdVersion() || process.env.npm_package_version),
+      // 主版本以后端 zapd/Cargo.toml 为准；读不到时退回前端包版本
+      "import.meta.env.VITE_APP_VERSION": JSON.stringify(readCrateVersion('zapd') || process.env.npm_package_version),
+      // 执行器 zapexec 版本（zapexec/Cargo.toml）
+      "import.meta.env.VITE_EXEC_VERSION": JSON.stringify(readCrateVersion('zapexec')),
+      // 前端 web 包版本
       "import.meta.env.VITE_WEB_VERSION": JSON.stringify(process.env.npm_package_version),
     },
    
