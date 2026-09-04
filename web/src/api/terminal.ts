@@ -11,6 +11,8 @@ export interface SshConnection {
   username: string
   auth_type: 'password' | 'key'
   password: string
+  /** 是否已保存密码；false 且 auth_type=password 时连接需弹窗临时输入 */
+  has_password: boolean
   ssh_key_name: string
   remark: string
   status: number

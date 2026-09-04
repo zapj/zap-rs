@@ -30,29 +30,63 @@ use crate::zap::{ZapError, ZapJsonResult};
 // ── Database schema ────────────────────────────────────────
 
 pub async fn init_table() {
-    if table_exists("ssh_connections").await {
+    if !table_exists("ssh_connections").await {
+        let sql = r#"
+        CREATE TABLE ssh_connections (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(128) NOT NULL,
+            host VARCHAR(256) NOT NULL,
+            port INTEGER DEFAULT 22,
+            username VARCHAR(128) NOT NULL DEFAULT 'root',
+            auth_type VARCHAR(32) NOT NULL DEFAULT 'password',
+            password VARCHAR(512) DEFAULT '',
+            ssh_key_name VARCHAR(128) DEFAULT '',
+            remark TEXT DEFAULT '',
+            status INTEGER DEFAULT 1,
+            sort_order INTEGER DEFAULT 0,
+            created_at INTEGER,
+            updated_at INTEGER
+        )
+        "#;
+        let pool = db::get_db_pool().await;
+        pool.execute(sql).await.unwrap();
+        info!("ssh_connections table created");
+    }
+    // 默认本地连接：面板本机 127.0.0.1/root，密码留空。
+    // 新库与老库都幂等补插（已存在 root@127.0.0.1 或 root@localhost 则跳过），
+    // 用户后续自行编辑填写密码或改为密钥。
+    ensure_default_loopback_connection().await;
+}
+
+/// 幂等补插默认本地连接（127.0.0.1 / root / 22，密码为空）。
+/// 空密码连接双击时由前端弹窗输入密码、仅本次会话使用不落库。
+async fn ensure_default_loopback_connection() {
+    let pool = db::get_db_pool().await;
+    let existing = sqlx::query(
+        "SELECT id FROM ssh_connections
+         WHERE username = 'root' AND (host = '127.0.0.1' OR host = 'localhost')
+         LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    if existing.is_some() {
         return;
     }
-    let sql = r#"
-    CREATE TABLE ssh_connections (
-        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        name VARCHAR(128) NOT NULL,
-        host VARCHAR(256) NOT NULL,
-        port INTEGER DEFAULT 22,
-        username VARCHAR(128) NOT NULL DEFAULT 'root',
-        auth_type VARCHAR(32) NOT NULL DEFAULT 'password',
-        password VARCHAR(512) DEFAULT '',
-        ssh_key_name VARCHAR(128) DEFAULT '',
-        remark TEXT DEFAULT '',
-        status INTEGER DEFAULT 1,
-        sort_order INTEGER DEFAULT 0,
-        created_at INTEGER,
-        updated_at INTEGER
+    let now = chrono::Utc::now().timestamp();
+    let remark = "本机默认连接：未设置密码，双击连接时输入密码（仅本次会话使用，不会保存）";
+    sqlx::query(
+        "INSERT INTO ssh_connections (name, host, port, username, auth_type, password, ssh_key_name, remark, status, sort_order, created_at, updated_at)
+         VALUES ('localhost', '127.0.0.1', 22, 'root', 'password', '', '', ?, 1, 0, ?, ?)",
     )
-    "#;
-    let pool = db::get_db_pool().await;
-    pool.execute(sql).await.unwrap();
-    info!("ssh_connections table created");
+    .bind(remark)
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await
+    .ok();
+    info!("Default loopback SSH connection seeded (root@127.0.0.1, no password)");
 }
 
 async fn table_exists(table_name: &str) -> bool {
@@ -77,6 +111,8 @@ pub struct SshConnection {
     pub auth_type: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub password: String,
+    /// 是否已保存密码（空密码 = 未设置，连接时由前端弹窗临时输入，不落库）
+    pub has_password: bool,
     pub ssh_key_name: String,
     pub remark: String,
     pub status: i32,
@@ -86,6 +122,7 @@ pub struct SshConnection {
 }
 
 fn row_to_conn(row: &sqlx::sqlite::SqliteRow) -> SshConnection {
+    let stored_password: String = row.try_get("password").unwrap_or_default();
     SshConnection {
         id: row.get("id"),
         name: row.get("name"),
@@ -93,7 +130,8 @@ fn row_to_conn(row: &sqlx::sqlite::SqliteRow) -> SshConnection {
         port: row.get("port"),
         username: row.get("username"),
         auth_type: row.get("auth_type"),
-        password: row.try_get("password").unwrap_or_default(),
+        password: String::new(), // 一律不回传密文
+        has_password: !stored_password.is_empty(),
         ssh_key_name: row.try_get("ssh_key_name").unwrap_or_default(),
         remark: row.try_get("remark").unwrap_or_default(),
         status: row.try_get("status").unwrap_or(1),
@@ -157,11 +195,7 @@ pub async fn list_connections(_claims: ValidatedClaims) -> ZapJsonResult {
     .fetch_all(pool)
     .await?;
 
-    let mut connections: Vec<SshConnection> = rows.iter().map(row_to_conn).collect();
-    // 敏感信息脱敏：不回传已加密的密码字段
-    for c in connections.iter_mut() {
-        c.password = String::new();
-    }
+    let connections: Vec<SshConnection> = rows.iter().map(row_to_conn).collect();
     Ok(Json(json!({ "code": 0, "data": connections })))
 }
 
@@ -203,9 +237,7 @@ pub async fn create_connection(
             "认证类型仅支持 password 或 key".to_string(),
         ));
     }
-    if payload.auth_type == "password" && payload.password.is_empty() {
-        return Err(ZapError::New(-1, "密码认证时密码不能为空".to_string()));
-    }
+    // 密码认证允许密码为空：表示「未设置密码」，连接时由前端弹窗临时输入、不落库
     if payload.auth_type == "key" && payload.ssh_key_name.is_empty() {
         return Err(ZapError::New(
             -1,
@@ -481,9 +513,63 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
         return;
     }
 
-    if let Err(e) = authenticate(&mut session, &conn_info) {
+    // 密码认证但未保存密码（如默认的 localhost 连接）：先等待前端通过 WebSocket
+    // 下发本次会话的临时密码 {"type":"auth","password":"..."}，认证后即丢弃、不落库
+    let mut temporary_password: Option<String> = None;
+    let need_ask_password = conn_info.auth_type == "password" && conn_info.password.is_empty();
+    let (mut ws_tx, mut ws_rx) = if need_ask_password {
+        let (mut tx, mut rx) = socket.split();
+        let _ = tx
+            .send(Message::Text(axum::extract::ws::Utf8Bytes::from(
+                "\x1b[33m需要 SSH 密码，请在弹窗中输入（仅本次会话使用，不会保存）\x1b[0m\r\n",
+            )))
+            .await;
+        let pwd = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                match rx.next().await {
+                    Some(Ok(Message::Text(t))) => {
+                        if let Ok(auth) = serde_json::from_str::<AuthMsg>(t.as_ref()) {
+                            if auth.kind == "auth" && !auth.password.is_empty() {
+                                break auth.password;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break String::new(),
+                    _ => continue,
+                }
+            }
+        })
+        .await
+        .unwrap_or_default();
+        if pwd.is_empty() {
+            let _ = tx
+                .send(Message::Text(axum::extract::ws::Utf8Bytes::from(
+                    "密码输入超时或已取消，连接已关闭\r\n",
+                )))
+                .await;
+            let _ = tx.close().await;
+            return;
+        }
+        temporary_password = Some(pwd);
+        (tx, rx)
+    } else {
+        socket.split()
+    };
+
+    // 认证：临时密码优先（空密码连接由前端下发），否则使用库中保存的凭据
+    let mut auth_info = conn_info;
+    if let Some(pwd) = temporary_password {
+        auth_info.password = pwd;
+    }
+    if let Err(e) = authenticate(&mut session, &auth_info) {
         error!("SSH authentication failed: {}", e);
-        send_error_and_close(socket, &format!("认证失败: {}\r\n", e)).await;
+        let _ = ws_tx
+            .send(Message::Text(axum::extract::ws::Utf8Bytes::from(format!(
+                "认证失败: {}\r\n",
+                e
+            ))))
+            .await;
+        let _ = ws_tx.close().await;
         return;
     }
 
@@ -491,18 +577,38 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
         Ok(c) => c,
         Err(e) => {
             error!("Failed to open SSH channel: {}", e);
-            send_error_and_close(socket, &format!("打开通道失败: {}\r\n", e)).await;
+            let _ = ws_tx
+                .send(Message::Text(axum::extract::ws::Utf8Bytes::from(format!(
+                    "打开通道失败: {}\r\n",
+                    e
+                ))))
+                .await;
+            let _ = ws_tx.close().await;
             return;
         }
     };
 
     if let Err(e) = channel.request_pty("xterm-256color", None, Some((cols, rows, 0, 0))) {
         error!("Failed to request PTY: {}", e);
+        let _ = ws_tx
+            .send(Message::Text(axum::extract::ws::Utf8Bytes::from(format!(
+                "请求 PTY 失败: {}\r\n",
+                e
+            ))))
+            .await;
+        let _ = ws_tx.close().await;
         return;
     }
 
     if let Err(e) = channel.shell() {
         error!("Failed to start shell: {}", e);
+        let _ = ws_tx
+            .send(Message::Text(axum::extract::ws::Utf8Bytes::from(format!(
+                "启动 shell 失败: {}\r\n",
+                e
+            ))))
+            .await;
+        let _ = ws_tx.close().await;
         return;
     }
 
@@ -510,8 +616,6 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
     session.set_blocking(false);
 
     info!("SSH terminal started for connection {}", conn_id);
-
-    let (mut ws_tx, mut ws_rx) = socket.split();
 
     // Channel: SSH read → WebSocket
     let (ssh_read_tx, mut ssh_read_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
@@ -679,6 +783,17 @@ struct ResizeMsg {
     cols: u32,
     #[serde(default)]
     rows: u32,
+}
+
+/// WebSocket 密码下发消息（未保存密码的连接），形如
+/// `{"type":"auth","password":"..."}`，由前端弹窗输入后发送，
+/// 仅用于本次会话认证，不会写入数据库。
+#[derive(Debug, Deserialize)]
+struct AuthMsg {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    password: String,
 }
 
 async fn load_connection_info(id: i64) -> Result<ConnectionInfo, ZapError> {

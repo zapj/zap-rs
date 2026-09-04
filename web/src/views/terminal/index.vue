@@ -34,6 +34,13 @@
             <span class="conn-host" :title="`${conn.username}@${conn.host}:${conn.port}`">
               <i class="status-dot" :class="conn.status === 0 ? 'off' : 'on'" />
               {{ conn.username }}@{{ conn.host }}:{{ conn.port }}
+              <span
+                v-if="conn.auth_type === 'password' && !conn.has_password"
+                class="pwd-badge"
+                title="未保存密码：双击连接时会弹窗输入（仅本次会话，不保存）"
+              >
+                弹窗输密码
+              </span>
             </span>
           </div>
 
@@ -141,7 +148,7 @@
             v-model="form.password"
             type="password"
             show-password
-            placeholder="输入 SSH 密码"
+            placeholder="输入 SSH 密码（留空则连接时弹窗输入，不保存）"
           />
         </el-form-item>
         <el-form-item v-if="form.auth_type === 'key'" label="SSH 密钥">
@@ -599,14 +606,21 @@ async function openTerminal(conn: SshConnection) {
       activeTabId.value = existing.id
       return
     }
-    // 会话已断开（如 shell 内 exit）→ 复用标签页重新连接
+    // 会话已断开（如 shell 内 exit）→ 复用标签页重新连接。
+    // 密码认证且未保存密码 → 先弹窗输入本次会话临时密码（不落库）
+    const tempPwd = await askPasswordIfNeeded(conn)
+    if (needTempPassword(conn) && !tempPwd) return // 用户取消输入
     activeTabId.value = existing.id
     await nextTick()
     existing.term.clear()
     existing.term.writeln('\r\n\x1b[36m正在重新连接 ' + conn.name + ' ...\x1b[0m')
-    connectTab(existing, conn)
+    connectTab(existing, conn, tempPwd)
     return
   }
+
+  // 新连接：密码认证且未保存密码 → 先弹窗输入本次会话临时密码（不落库）
+  const tempPwd = await askPasswordIfNeeded(conn)
+  if (needTempPassword(conn) && !tempPwd) return // 用户取消输入
 
   const tabId = `term-${conn.id}-${Date.now()}`
   activeTabId.value = tabId
@@ -667,7 +681,7 @@ async function openTerminal(conn: SshConnection) {
   })
 
   // 建立 WebSocket 会话
-  connectTab(tab, conn)
+  connectTab(tab, conn, tempPwd)
 
   // 容器尺寸变化时重新 fit 并同步 pty 尺寸（观察父容器，而非单个实例）
   const resizeObserver = new ResizeObserver(() => {
@@ -677,8 +691,34 @@ async function openTerminal(conn: SshConnection) {
   ;(tab as any)._resizeObserver = resizeObserver
 }
 
-// 建立（或重连）某标签页的 WebSocket 会话；复用已有的 xterm 实例
-function connectTab(tab: TerminalTab, conn: SshConnection) {
+/** 密码认证且未保存密码的连接，需要弹窗临时输入（仅本次会话，不落库） */
+function needTempPassword(conn: SshConnection): boolean {
+  return conn.auth_type === 'password' && !conn.has_password
+}
+
+/** 需要临时密码时弹窗输入；无需输入或用户取消时返回 null */
+async function askPasswordIfNeeded(conn: SshConnection): Promise<string | null> {
+  if (!needTempPassword(conn)) return null
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `请输入 ${conn.username}@${conn.host} 的 SSH 密码（仅本次会话使用，不会保存）`,
+      `连接 ${conn.name}`,
+      {
+        inputType: 'password',
+        confirmButtonText: '连接',
+        cancelButtonText: '取消',
+        inputValidator: (v: string) => (v.trim() ? true : '密码不能为空'),
+      },
+    )
+    return value ?? null
+  } catch {
+    return null // 用户点击取消
+  }
+}
+
+// 建立（或重连）某标签页的 WebSocket 会话；复用已有的 xterm 实例。
+// authPassword：未保存密码的连接，连接后将其作为临时密码下发（不落库）
+function connectTab(tab: TerminalTab, conn: SshConnection, authPassword?: string | null) {
   // 已连接 / 正在连接则不重复建立
   if (tab.ws && tab.ws.readyState !== WebSocket.CLOSED) return
 
@@ -694,7 +734,13 @@ function connectTab(tab: TerminalTab, conn: SshConnection) {
   ws.onopen = () => {
     if (tab.ws !== ws) return // 已关闭/被新会话替换
     tab.status = 'connected'
-    term.writeln('\x1b[32m已连接到 ' + conn.name + ' (' + conn.host + ':' + conn.port + ')\x1b[0m')
+    if (authPassword) {
+      // 后端凭据里无密码：把本次输入的临时密码下发给后端完成 SSH 认证
+      term.writeln('\x1b[36m正在认证（使用本次输入的密码，不会保存）…\x1b[0m')
+      ws.send(JSON.stringify({ type: 'auth', password: authPassword }))
+    } else {
+      term.writeln('\x1b[32m已连接到 ' + conn.name + ' (' + conn.host + ':' + conn.port + ')\x1b[0m')
+    }
     // 连接建立后同步一次当前实际窗口尺寸
     fitTerminal(tab)
     term.focus()
@@ -939,6 +985,19 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 未保存密码的连接角标：双击连接时弹窗输入 */
+.pwd-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 15px;
+  color: #b88230;
+  background: rgba(224, 193, 141, 0.16);
+  border: 1px solid rgba(184, 130, 48, 0.45);
+  border-radius: 3px;
+  font-family: inherit;
 }
 
 .status-dot {
