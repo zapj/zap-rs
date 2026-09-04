@@ -96,8 +96,14 @@ zapfile upload zap/releases/ "$ZAP_FILE_NAME" || die "上传失败"
 printf '%s' "$(sha256sum "$ZAP_FILE_NAME" | awk '{print $1}')" > "$ZAP_FILE_NAME.sha256"
 info "上传校验文件 ${ZAP_FILE_NAME}.sha256 ..."
 zapfile upload zap/releases/ "$ZAP_FILE_NAME.sha256" || die "上传校验文件失败"
+# latest.txt 用于安装/升级查询最新版本（install.sh、zapd updater 拉取）。
+# 写本地文件后走与 tar.gz/sha256 相同的 upload 路径：以文件名覆盖远端同名对象，
+# 避免依赖 zapfile put 的内容写入语义（此前 put 未生效导致 latest.txt 停滞在旧版本）。
 info "更新版本文件 latest.txt ..."
-zapfile put zap/releases/latest.txt "$VERSION" || die "更新版本文件失败"
+LATEST_FILE="$DIST_DIR/latest.txt"
+printf '%s' "$VERSION" > "$LATEST_FILE"
+zapfile upload zap/releases/ "$LATEST_FILE" || die "更新版本文件失败"
+rm -f "$LATEST_FILE"
 ok "上传完成"
 
 # ── 完成总结 ────────────────────────────────────────────────
