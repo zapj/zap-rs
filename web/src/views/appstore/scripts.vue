@@ -46,13 +46,12 @@
           </el-button>
         </div>
       </div>
-      <el-input
+      <CodeEditor
         v-model="content"
-        type="textarea"
         class="editor-area"
-        :disabled="!currentPath"
-        placeholder="选择左侧脚本进行编辑，或新建脚本"
-        spellcheck="false"
+        :lang="editorLang"
+        :readonly="!currentPath"
+        :placeholder="currentPath ? '在此编辑脚本…' : '选择左侧脚本进行编辑，或新建脚本'"
       />
     </div>
 
@@ -62,7 +61,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Folder, Document, InfoFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
@@ -73,6 +72,8 @@ import {
   runScript,
 } from '@/api/appstore'
 import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
+import CodeEditor from '@/components/CodeEditor.vue'
+import { langFromPath } from '@/utils/editorLang'
 
 const userStore = useUserStore()
 
@@ -90,6 +91,12 @@ const content = ref('')
 const originalContent = ref('')
 const running = ref(false)
 const dirty = computed(() => content.value !== originalContent.value)
+// 脚本页默认 shell 高亮;若检测到其它语言(如 .py/.js)则按其语法高亮
+const editorLang = computed(() => {
+  if (!currentPath.value) return 'text'
+  const l = langFromPath(currentPath.value)
+  return l === 'text' ? 'shell' : l
+})
 
 async function loadTree() {
   try {
@@ -189,8 +196,22 @@ async function handleRun() {
 
 const logDrawerRef = ref<InstanceType<typeof AppStoreLogDrawer> | null>(null)
 
+// Ctrl/Cmd + S 保存当前脚本
+function onKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    if (!currentPath.value || !dirty.value) return
+    e.preventDefault()
+    void handleSave()
+  }
+}
+
 onMounted(() => {
   loadTree()
+  window.addEventListener('keydown', onKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -295,27 +316,11 @@ onMounted(() => {
 .editor-area {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  border-top: 1px solid #e4e7ed;
+  background: #fff;
 }
 
-.editor-area :deep(.el-textarea__inner) {
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  height: 100%;
-  flex: 1;
-  border: none;
-  border-radius: 0;
-  padding: 14px 16px;
-  resize: none;
-  overflow-y: auto;
-  background: #fafafa;
-  color: #303133;
-  box-shadow: none;
-}
-
-.editor-area :deep(.el-textarea__inner:focus) {
-  box-shadow: none;
+.editor-area.is-readonly {
+  background: #f5f7fa;
 }
 </style>

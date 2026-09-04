@@ -283,14 +283,12 @@
               <div v-else-if="t.error" class="cfg-error">{{ t.error }}</div>
               <template v-else-if="t.loaded">
                 <div class="cfg-path-tip mono">{{ t.path }}</div>
-                <el-input
+                <CodeEditor
                   v-model="t.content"
-                  type="textarea"
-                  :rows="20"
                   class="cfg-editor"
-                  spellcheck="false"
-                  :disabled="cfgSaving"
-                  @input="onCfgInput(t)"
+                  :path="t.path"
+                  :readonly="cfgSaving"
+                  :placeholder="'# ' + t.path"
                 />
               </template>
             </div>
@@ -301,14 +299,12 @@
           <div v-else-if="activeCfg.error" class="cfg-error">{{ activeCfg.error }}</div>
           <template v-else-if="activeCfg.loaded">
             <div class="cfg-path-tip mono">{{ activeCfg.path }}</div>
-            <el-input
+            <CodeEditor
               v-model="activeCfg.content"
-              type="textarea"
-              :rows="20"
               class="cfg-editor"
-              spellcheck="false"
-              :disabled="cfgSaving"
-              @input="onCfgInput(activeCfg)"
+              :path="activeCfg.path"
+              :readonly="cfgSaving"
+              :placeholder="'# ' + activeCfg.path"
             />
           </template>
         </div>
@@ -335,12 +331,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Box, Refresh, Search } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { getInstalledApps, instanceAction, type InstalledApp } from '@/api/appstore'
 import { readFile, writeFile } from '@/api/file'
+import CodeEditor from '@/components/CodeEditor.vue'
 
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
@@ -553,9 +550,13 @@ function onTabChange(name: string | number) {
   void loadTab(String(name))
 }
 
-function onCfgInput(t: CfgTab) {
-  t.dirty = t.content !== t.original
-}
+// 任一 tab 内容变化(来自 CodeMirror 编辑)时刷新脏标记
+watch(
+  () => cfgTabs.value.map((t) => t.content),
+  () => {
+    for (const t of cfgTabs.value) t.dirty = t.content !== t.original
+  },
+)
 
 function openCfgEditor(files: EditableFile[], activePath?: string) {
   cfgTabs.value = files.map((f) => ({
@@ -888,10 +889,11 @@ onUnmounted(() => {
   margin-bottom: 8px;
   word-break: break-all;
 }
-.cfg-editor :deep(textarea) {
-  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.6;
+.cfg-editor {
+  height: min(48vh, 460px);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  overflow: hidden;
 }
 .cfg-save-bar {
   display: flex;

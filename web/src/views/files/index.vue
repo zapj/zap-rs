@@ -229,12 +229,12 @@
       top="5vh"
       @opened="onEditorOpened"
     >
-      <el-input
+      <CodeEditor
         v-model="editContent"
-        type="textarea"
-        :rows="25"
+        class="fm-editor"
+        :path="editingFullPath"
+        :readonly="!isAdmin"
         placeholder="文件内容"
-        style="font-family: monospace"
       />
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -270,6 +270,7 @@ import {
   uploadFiles,
   type FileEntry,
 } from '@/api/file'
+import CodeEditor from '@/components/CodeEditor.vue'
 
 // ── store ──────────────────────────────────────────────────
 
@@ -307,6 +308,7 @@ const renameTarget = ref<FileEntry | null>(null)
 const renameName = ref('')
 const editVisible = ref(false)
 const editingFile = ref('')
+const editingFullPath = ref('')
 const editContent = ref('')
 const saving = ref(false)
 
@@ -431,6 +433,7 @@ async function openFileEditor(row: FileEntry) {
   try {
     const res = await readFile(row.path)
     editingFile.value = row.name
+    editingFullPath.value = row.path
     editContent.value = res.data?.content || ''
     editVisible.value = true
   } catch {
@@ -441,9 +444,11 @@ async function openFileEditor(row: FileEntry) {
 async function doSaveEdit() {
   saving.value = true
   try {
-    const fullPath = currentPath.value === '/'
-      ? '/' + editingFile.value
-      : currentPath.value + '/' + editingFile.value
+    const fullPath =
+      editingFullPath.value ||
+      (currentPath.value === '/'
+        ? '/' + editingFile.value
+        : currentPath.value + '/' + editingFile.value)
     await writeFile(fullPath, editContent.value)
     ElMessage.success('保存成功')
     editVisible.value = false
@@ -735,5 +740,12 @@ onMounted(() => {
   color: #303133;
   font-weight: 500;
   cursor: default;
+}
+
+.fm-editor {
+  height: min(62vh, 620px);
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  overflow: hidden;
 }
 </style>

@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AppStoreLogDrawer: typeof import('./src/components/AppStoreLogDrawer.vue')['default']
     Breadcrumb: typeof import('./src/components/Breadcrumb/index.vue')['default']
+    CodeEditor: typeof import('./src/components/CodeEditor.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElBreadcrumb: typeof import('element-plus/es')['ElBreadcrumb']
     ElBreadcrumbItem: typeof import('element-plus/es')['ElBreadcrumbItem']
