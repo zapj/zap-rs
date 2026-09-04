@@ -67,6 +67,20 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="FPM 规格" width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag v-if="fpmSpecLabel(row) === '面板默认'" size="small" type="info" effect="plain">
+              面板默认
+            </el-tag>
+            <el-tag v-else-if="fpmSpecLabel(row) === '继承 reseller 默认'" size="small" type="success">
+              继承 reseller
+            </el-tag>
+            <el-tag v-else-if="fpmSpecLabel(row) === '自定义 JSON'" size="small" type="warning">
+              自定义 JSON
+            </el-tag>
+            <span v-else class="spec-name">{{ fpmSpecLabel(row) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="isAdmin" label="归属" width="120">
           <template #default="{ row }">
             <el-tag v-if="row.owner_id === 0" size="small" type="info">系统</el-tag>
@@ -132,7 +146,7 @@
           </el-select>
         </el-form-item>
         <el-form-item v-if="isAdmin && dialogType === 'add'" label="归属">
-          <el-select v-model="form.owner_id">
+          <el-select v-model="form.owner_id" @change="onOwnerChange">
             <el-option label="系统直属" :value="0" />
             <el-option
               v-for="r in resellerList"
@@ -142,14 +156,44 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="isAdmin" label="FPM 规格">
+        <el-form-item v-if="isAdmin || isReseller" label="FPM 规格">
+          <el-select
+            v-model="fpmMode"
+            :loading="fpmLoading"
+            placeholder="面板默认"
+            style="width: 100%"
+          >
+            <el-option
+              v-if="inheritOwnerName"
+              :value="'inherit'"
+              :label="`继承 ${inheritOwnerName} 名下默认规格`"
+            />
+            <el-option
+              v-for="opt in fpmOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :label="opt.label"
+            />
+            <el-option v-if="isAdmin" :value="'custom'" label="自定义 JSON（高级）" />
+          </el-select>
+          <div class="form-tip">{{ fpmModeTip() }}</div>
           <el-input
-            v-model="form.fpm_pool"
+            v-if="fpmMode === 'custom'"
+            v-model="fpmCustomJson"
             type="textarea"
             :rows="4"
-            placeholder='选填 JSON，覆盖面板默认，如 {"max_children": 16, "memory_limit": "512M"}；留空 = 使用面板默认'
+            spellcheck="false"
+            style="margin-top: 8px"
+            placeholder='覆盖面板默认的 JSON，如 {"max_children": 16, "memory_limit": "512M"}'
           />
-          <div class="form-tip">独立系统用户模式下，每用户每 PHP 版本生成独立 pool，规格按此（面板默认 + 此处覆盖）</div>
+          <el-alert
+            v-else-if="fpmMode === '__keep__'"
+            :title="`保留该用户原自定义规格（${fpmCustomJson.slice(0, 120)}${fpmCustomJson.length > 120 ? '…' : ''}）。如需修改请改选模板或自定义。`"
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-top: 8px"
+          />
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="form.status">
@@ -185,6 +229,7 @@ import {
 } from '@/api/user'
 import { roleLabel, ROLE_OPTIONS } from '@/utils/role'
 import { useUserStore } from '@/stores/user'
+import { getFpmSpecs, type FpmSpecItem } from '@/api/serverEnv'
 
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
@@ -224,6 +269,128 @@ async function loadResellers() {
 function ownerName(ownerId: number) {
   const r = resellerList.value.find((x) => x.id === ownerId)
   return r ? r.username : `#${ownerId}`
+}
+
+// ── PHP-FPM 规格模板选择 ────────────────────────────────────
+
+/** 规格模板列表（后端：admin 全量；reseller 仅自己名下 + 全局） */
+const specs = ref<FpmSpecItem[]>([])
+const fpmLoading = ref(false)
+
+async function loadSpecs() {
+  fpmLoading.value = true
+  try {
+    const res = await getFpmSpecs()
+    specs.value = res.data ?? []
+  } catch {
+    // 拦截器已弹窗
+  } finally {
+    fpmLoading.value = false
+  }
+}
+
+/**
+ * 当前归属者用户名（决定可选的"名下模板"与"继承"目标）。
+ * - add：admin 按归属下拉；reseller 为本人
+ * - edit：按被编辑用户的 owner_id（reseller 场景 owner 为本人）
+ * 系统直属（owner_id=0 且 admin）返回空串 → 只有全局通用模板可用，无"继承"。
+ */
+function targetResellerName(): string {
+  if (dialogType.value === 'edit') {
+    const row = editingId.value
+      ? tableData.value.find((r) => r.id === editingId.value)
+      : undefined
+    if (!row) return ''
+    if (!isAdmin.value) return userStore.name
+    if (!row.owner_id) return ''
+    const n = ownerName(row.owner_id)
+    return n.startsWith('#') ? '' : n
+  }
+  // add
+  if (!isAdmin.value) return userStore.name
+  const owner = form.owner_id
+  if (!owner) return ''
+  const n = ownerName(owner)
+  return n.startsWith('#') ? '' : n
+}
+
+/** 目标归属者名下模板（无前缀的全局模板始终可见可选） */
+const targetTemplates = computed(() => {
+  const owner = targetResellerName()
+  return specs.value.filter((s) => !s.owner || (owner && s.owner === owner))
+})
+
+const inheritOwnerName = computed(() => targetResellerName())
+
+/** 下拉选项：面板默认 → 可用模板（全局 + 名下） */
+const fpmOptions = computed(() => [
+  { value: '', label: '面板默认（使用服务器运行环境中的全局默认规格）' },
+  ...targetTemplates.value.map((s) => ({
+    value: s.name,
+    label: s.owner ? `${s.name}（${s.owner} 名下）` : `${s.name}（全局）`,
+  })),
+])
+
+/** 编辑时旧自定义 JSON 的保留哨兵（不向后端提交，保持原值） */
+const KEEP_CUSTOM = '__keep__'
+/** 自定义 JSON（高级模式） */
+const CUSTOM = 'custom'
+
+/** 用户 FPM 规格引用选择：''=默认 / inherit=继承 reseller / 模板名 / __keep__ / custom */
+const fpmMode = ref('')
+/** 自定义 JSON 模式下的文本 */
+const fpmCustomJson = ref('')
+
+function fpmModeTip(): string {
+  if (fpmMode.value === 'inherit') {
+    return `选用「${inheritOwnerName.value}」名下默认规格：优先 ${inheritOwnerName.value}_default 模板，其次名下最新模板；若名下没有模板则回退面板默认。`
+  }
+  if (fpmMode.value === 'custom') {
+    return '按 JSON 覆盖全局默认规格（独立系统用户模式下，每用户每 PHP 版本生成独立 pool）。'
+  }
+  if (fpmMode.value === KEEP_CUSTOM) {
+    return '保留该用户旧的自定义规格，不修改。'
+  }
+  if (fpmMode.value) {
+    return '模板字段覆盖于全局默认之上，未填字段沿用全局默认；改名/删除模板后此用户将回退面板默认。'
+  }
+  return '用户未指定规格时，建站将使用全局默认规格；独立系统用户模式下每用户每 PHP 版本生成独立 pool。'
+}
+
+/** 编辑回显：根据 row 的 fpm_pool / fpm_spec_ref 计算下拉初始值 */
+function fpmEditInitial(row: UserListItem): string {
+  const ref = row.fpm_spec_ref ?? ''
+  if (ref) return ref // '' / inherit / 模板名
+  if (row.fpm_pool && row.fpm_pool.trim()) return KEEP_CUSTOM
+  return ''
+}
+
+/** 行 FPM 规格展示标签 */
+function fpmSpecLabel(row: UserListItem): string {
+  const ref = row.fpm_spec_ref ?? ''
+  if (ref === 'inherit') return '继承 reseller 默认'
+  if (ref) return ref
+  if (row.fpm_pool && row.fpm_pool.trim()) return '自定义 JSON'
+  return '面板默认'
+}
+
+/** 校验自定义 FPM JSON（空 = 不允许，自定义模式必须填对象） */
+function fpmCustomValid(raw: string): boolean {
+  const v = raw.trim()
+  if (!v) return false
+  try {
+    const obj = JSON.parse(v)
+    return typeof obj === 'object' && obj !== null && !Array.isArray(obj)
+  } catch {
+    return false
+  }
+}
+
+function onOwnerChange() {
+  // 归属切换后：若原选择为「继承」且新归属无 reseller，则回到面板默认
+  if (fpmMode.value === 'inherit' && !targetResellerName()) {
+    fpmMode.value = ''
+  }
 }
 
 function handleSearch() {
@@ -287,6 +454,8 @@ function handleAdd() {
   dialogType.value = 'add'
   editingId.value = null
   Object.assign(form, defaultForm())
+  fpmMode.value = ''
+  fpmCustomJson.value = ''
   dialogVisible.value = true
 }
 
@@ -303,19 +472,31 @@ function handleEdit(row: UserListItem) {
     status: row.status,
     fpm_pool: row.fpm_pool ?? '',
   })
+  fpmMode.value = fpmEditInitial(row)
+  fpmCustomJson.value =
+    row.fpm_pool && row.fpm_pool.trim() ? row.fpm_pool : ''
   dialogVisible.value = true
 }
 
-/** 校验用户 FPM 规格 JSON（空 = 允许） */
-function fpmSpecValid(raw: string): boolean {
-  const v = raw.trim()
-  if (!v) return true
-  try {
-    const obj = JSON.parse(v)
-    return typeof obj === 'object' && obj !== null && !Array.isArray(obj)
-  } catch {
-    return false
+/**
+ * 依据当前下拉选择构造 FPM 提交字段。
+ * - __keep__：保留旧自定义 JSON（不提交）
+ * - custom：提交 fpm_pool（后端自动清空模板引用）
+ * - 其它（'' / inherit / 模板名）：提交 fpm_spec_ref（后端自动清空旧自定义 JSON）
+ * 返回 null 表示校验失败（已提示）。
+ */
+function resolveFpmPayload(): Record<string, string> | null {
+  const m = fpmMode.value
+  if (m === KEEP_CUSTOM) return {}
+  if (m === CUSTOM) {
+    if (!isAdmin.value) return {}
+    if (!fpmCustomValid(fpmCustomJson.value)) {
+      ElMessage.warning('自定义规格必须是 JSON 对象')
+      return null
+    }
+    return { fpm_pool: fpmCustomJson.value.trim() }
   }
+  return { fpm_spec_ref: m }
 }
 
 function resetForm() {
@@ -326,6 +507,9 @@ async function submitForm() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
+  const fpmPayload = resolveFpmPayload()
+  if (fpmPayload === null) return
+
   submitting.value = true
   try {
     if (dialogType.value === 'add') {
@@ -335,14 +519,14 @@ async function submitForm() {
         email: form.email,
         nickname: form.nickname,
       }
-      if (!fpmSpecValid(form.fpm_pool)) {
-        ElMessage.warning('FPM 规格必须是 JSON 对象（留空 = 面板默认）')
-        return
-      }
       if (isAdmin.value) {
         payload.roles = form.roles
         payload.owner_id = form.owner_id || 0
-        if (form.fpm_pool.trim()) payload.fpm_pool = form.fpm_pool.trim()
+      }
+      if (fpmPayload.fpm_spec_ref !== undefined) {
+        payload.fpm_spec_ref = fpmPayload.fpm_spec_ref
+      } else if (fpmPayload.fpm_pool !== undefined) {
+        payload.fpm_pool = fpmPayload.fpm_pool
       }
       const res = await createUser(payload)
       ElMessage.success(
@@ -355,15 +539,12 @@ async function submitForm() {
         nickname: form.nickname,
         status: form.status,
       }
-      if (isAdmin.value) {
-        payload.roles = form.roles
-        if (form.fpm_pool.trim()) {
-          if (!fpmSpecValid(form.fpm_pool)) {
-            ElMessage.warning('FPM 规格必须是 JSON 对象（留空 = 面板默认）')
-            return
-          }
-          payload.fpm_pool = form.fpm_pool.trim()
-        }
+      if (isAdmin.value) payload.roles = form.roles
+      if (fpmPayload.fpm_spec_ref !== undefined) {
+        payload.fpm_spec_ref = fpmPayload.fpm_spec_ref
+      }
+      if (fpmPayload.fpm_pool !== undefined) {
+        payload.fpm_pool = fpmPayload.fpm_pool
       }
       await updateUser(payload)
       ElMessage.success('更新成功')
@@ -469,6 +650,7 @@ function fmtTime(ts: number) {
 onMounted(() => {
   loadList()
   loadResellers()
+  loadSpecs()
 })
 </script>
 

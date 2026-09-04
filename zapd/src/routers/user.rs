@@ -23,6 +23,8 @@ struct UserInfo {
     home_dir: String,
     linux_user: String,
     fpm_pool: String,
+    /// PHP-FPM 规格引用：''=面板默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名
+    fpm_spec_ref: String,
     last_login_ip: String,
     last_login_time: i64,
     status: i32,
@@ -44,6 +46,8 @@ pub struct CreateUserPayload {
     pub owner_id: Option<i64>,
     /// 该用户 PHP-FPM pool 规格（JSON 字符串；空 = 使用面板默认规格）
     pub fpm_pool: Option<String>,
+    /// PHP-FPM 规格引用：''=面板默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名
+    pub fpm_spec_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +61,9 @@ pub struct UpdateUserPayload {
     pub password: Option<String>,
     /// 该用户 PHP-FPM pool 规格（JSON 字符串；空 = 恢复面板默认）
     pub fpm_pool: Option<String>,
+    /// PHP-FPM 规格引用：''=面板默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名；
+    /// 提交引用（含面板默认）时后端会同步清空旧的自定义 fpm_pool
+    pub fpm_spec_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +190,7 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
                 "home_dir": user.home_dir,
                 "linux_user": user.linux_user,
                 "fpm_pool": user.fpm_pool,
+                "fpm_spec_ref": user.fpm_spec_ref,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
                 "roles": user.roles.split(',').collect::<Vec<&str>>(),
@@ -207,7 +215,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
 
     let mut querybuilder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
-        "SELECT id,username,email,phone,nickname,home_dir,linux_user,fpm_pool,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
+        "SELECT id,username,email,phone,nickname,home_dir,linux_user,fpm_pool,fpm_spec_ref,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
     );
     if is_reseller && !is_admin {
         querybuilder
@@ -230,6 +238,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
                 "home_dir": user.home_dir,
                 "linux_user": user.linux_user,
                 "fpm_pool": user.fpm_pool,
+                "fpm_spec_ref": user.fpm_spec_ref,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
                 "status": user.status,
@@ -278,9 +287,21 @@ pub async fn user_add(
         .phone
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
-    // fpm pool 规格（空 = 面板默认）
-    let fpm_pool = normalize_fpm_spec(payload.fpm_pool)?;
-    let fpm_pool = fpm_pool.unwrap_or_default();
+    // fpm 规格：fpm_pool（旧版自定义 JSON）与 fpm_spec_ref（模板/继承/默认）互斥。
+    // 前端新流程只传 fpm_spec_ref；一旦显式指定引用，不再保留自定义 JSON（避免遮蔽模板）。
+    let mut fpm_pool = normalize_fpm_spec(payload.fpm_pool)?.unwrap_or_default();
+    let fpm_spec_ref = payload.fpm_spec_ref.unwrap_or_default().trim().to_string();
+    if !fpm_spec_ref.is_empty() {
+        fpm_pool.clear();
+    }
+    // 引用校验：reseller 只能选自己名下或全局通用模板；admin 校验模板存在性
+    if fpm_spec_ref.is_empty() || fpm_spec_ref == crate::routers::fpm_spec::INHERIT {
+        // '' 与 inherit 恒允许
+    } else if is_admin {
+        crate::routers::fpm_spec::validate_spec_ref(&fpm_spec_ref, true, "").await?;
+    } else {
+        crate::routers::fpm_spec::validate_spec_ref(&fpm_spec_ref, false, &claims.sub).await?;
+    }
 
     // 家目录 / Linux 账号：/home/{linux_username(username)} 派生，
     // 站点文档根与站点日志均规划于其下；派生名与已有账号冲突时追加 -n 后缀
@@ -304,12 +325,13 @@ pub async fn user_add(
     let home_dir = format!("/home/{lu}");
 
     let result = sqlx::query(
-        "INSERT INTO user (username, home_dir, linux_user, fpm_pool, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        "INSERT INTO user (username, home_dir, linux_user, fpm_pool, fpm_spec_ref, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
     )
     .bind(&payload.username)
     .bind(&home_dir)
     .bind(&lu)
     .bind(&fpm_pool)
+    .bind(&fpm_spec_ref)
     .bind(&hashed)
     .bind(&payload.email)
     .bind(phone)
@@ -392,6 +414,7 @@ pub async fn user_update(
             || payload.roles.is_some()
             || payload.status.is_some()
             || payload.fpm_pool.is_some()
+            || payload.fpm_spec_ref.is_some()
         {
             return Err(ZapError::New(
                 -1,
@@ -408,8 +431,15 @@ pub async fn user_update(
     if !jwt::is_admin(&claims) && payload.fpm_pool.is_some() {
         return Err(ZapError::New(
             -1,
-            "权限不足，不能修改 PHP-FPM 规格".to_string(),
+            "权限不足，不能修改 PHP-FPM 自定义规格".to_string(),
         ));
+    }
+    // fpm_spec_ref（模板 / 继承）：reseller 可为自己客户设置，但只能选自己名下或全局通用模板
+    if !jwt::is_admin(&claims) && payload.fpm_spec_ref.is_some() {
+        let rv = payload.fpm_spec_ref.as_deref().unwrap_or("").trim();
+        if !rv.is_empty() && rv != crate::routers::fpm_spec::INHERIT {
+            crate::routers::fpm_spec::validate_spec_ref(rv, false, &claims.sub).await?;
+        }
     }
 
     // 更新他人时的归属/权限校验
@@ -439,7 +469,8 @@ pub async fn user_update(
         || payload.roles.is_some()
         || payload.status.is_some()
         || payload.password.is_some()
-        || payload.fpm_pool.is_some();
+        || payload.fpm_pool.is_some()
+        || payload.fpm_spec_ref.is_some();
 
     if !has_any_field {
         return Err(ZapError::New(-1, "没有需要更新的字段".to_string()));
@@ -480,7 +511,21 @@ pub async fn user_update(
     }
     if let Some(ref fpm) = payload.fpm_pool {
         let norm = normalize_fpm_spec(Some(fpm.clone()))?.unwrap_or_default();
-        separated.push("fpm_pool = ").push_bind_unseparated(norm);
+        separated.push("fpm_pool = ").push_bind_unseparated(norm.clone());
+        // 自定义 JSON 与模板引用互斥：提交自定义时清空引用
+        if payload.fpm_spec_ref.is_none() {
+            separated.push("fpm_spec_ref = ").push_bind_unseparated(String::new());
+        }
+    }
+    if let Some(ref rv) = payload.fpm_spec_ref {
+        let norm = rv.trim().to_string();
+        if jwt::is_admin(&claims) && !norm.is_empty() && norm != crate::routers::fpm_spec::INHERIT
+        {
+            crate::routers::fpm_spec::validate_spec_ref(&norm, true, "").await?;
+        }
+        separated.push("fpm_spec_ref = ").push_bind_unseparated(norm);
+        // 切到「模板 / 继承 / 面板默认」后清除旧的自定义 JSON，避免遮蔽新选择
+        separated.push("fpm_pool = ").push_bind_unseparated(String::new());
     }
     separated.push("updated_at = ").push_bind_unseparated(now);
 

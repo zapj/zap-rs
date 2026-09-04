@@ -42,6 +42,7 @@ async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Respo
 pub mod appstore;
 pub mod auth;
 pub mod dev;
+pub mod fpm_spec;
 pub mod site;
 pub mod ssh_keys;
 pub mod ssh_terminal;
@@ -226,6 +227,11 @@ fn api_routers() -> Router {
         .route("/system/env", get(system_env::env_get))
         .route("/system/env/refresh", post(system_env::env_refresh))
         .route("/system/env/defaults", post(system_env::env_defaults_save))
+        // PHP-FPM 规格模板库（admin 维护；reseller 可读自己名下 + 全局模板）
+        .route("/system/fpm-specs/list", get(fpm_spec::spec_list))
+        .route("/system/fpm-specs/add", post(fpm_spec::spec_add))
+        .route("/system/fpm-specs/update", post(fpm_spec::spec_update))
+        .route("/system/fpm-specs/delete", post(fpm_spec::spec_delete))
         // SSH key management (admin only)
         .route("/system/config/ssh/keys", get(ssh_keys::list_keys))
         .route(

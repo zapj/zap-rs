@@ -132,27 +132,6 @@ pub async fn vhost_mode() -> String {
     }
 }
 
-/// 合并后的最终 pool 规格 JSON（全局默认 + 用户覆盖），供 PhpPoolSync 使用。
-pub async fn merged_fpm_spec(user_spec_json: Option<&str>) -> String {
-    let mut base = default_fpm_spec();
-    if let Some(v) = conf_get("fpm_pool_defaults").await
-        && let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&v)
-    {
-        for (k, val) in obj {
-            base.insert(k, val);
-        }
-    }
-    if let Some(us) = user_spec_json
-        && !us.trim().is_empty()
-        && let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(us)
-    {
-        for (k, val) in obj {
-            base.insert(k, val);
-        }
-    }
-    serde_json::Value::Object(base).to_string()
-}
-
 fn conf_json(conf: &HashMap<String, String>) -> Value {
     json!({
         "webserver": conf.get("webserver").cloned().unwrap_or_default(),

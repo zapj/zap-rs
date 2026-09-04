@@ -55,6 +55,8 @@ type SyncOneRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
+    Option<i64>,
 );
 
 #[derive(sqlx::FromRow, Debug)]
@@ -990,14 +992,16 @@ async fn sync_one_site(
     // 站点 + 归属用户（LEFT JOIN：站点可能无主 / 用户已删）
     let row: Option<SyncOneRow> = sqlx::query_as(
         "SELECT s.name, s.status, s.php_instance, s.web_root, s.log_root,
-                u.id, u.home_dir, u.linux_user, u.fpm_pool
+                u.id, u.home_dir, u.linux_user, u.fpm_pool, u.fpm_spec_ref, u.owner_id
          FROM site s LEFT JOIN user u ON u.id = s.user_id
          WHERE s.id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
     .await?;
-    let Some((name, status, php_instance, web_root, log_root, uid, uhome, _ulu, ufpm)) = row else {
+    let Some((name, status, php_instance, web_root, log_root, uid, uhome, _ulu, ufpm, uref, uowner)) =
+        row
+    else {
         return Err(ZapError::New(-1, "站点不存在".to_string()));
     };
     let mode = crate::routers::system_env::vhost_mode().await;
@@ -1044,7 +1048,13 @@ async fn sync_one_site(
     } else if mode == "system" {
         match &owner_user {
             Some(lu) => {
-                let spec = crate::routers::system_env::merged_fpm_spec(ufpm.as_deref()).await;
+                // 解析用户最终 pool 规格：存量自定义 fpm_pool → 模板/inherit(继承 reseller) → 全局默认
+                let spec = crate::routers::fpm_spec::resolve_user_spec(
+                    ufpm.as_deref(),
+                    uref.as_deref().unwrap_or(""),
+                    uowner,
+                )
+                .await;
                 let resp = crate::zapexec::call(Request::PhpPoolSync {
                     php_instance: php_instance.clone(),
                     linux_user: lu.clone(),

@@ -21,6 +21,9 @@ pub async fn init_schema() {
     init_site_table().await;
     ensure_site_php_column().await;
     ensure_site_vhost_column().await;
+    // PHP-FPM 规格模板表 + user.fpm_spec_ref 列（老库幂等补列）
+    init_fpm_spec_table().await;
+    ensure_user_fpm_spec_ref_column().await;
     // 全局运行环境状态表（scope=auto 自动探测快照 / scope=conf 面板默认配置）
     init_server_env_table().await;
     // API Token 管理表（幂等建表，新旧库均生效）
@@ -876,6 +879,47 @@ async fn ensure_installed_menu() {
           )
         "#,
         )
+        .await;
+}
+
+// ── fpm_spec（PHP-FPM 规格模板库，仅 admin 维护）────────────────
+
+async fn init_fpm_spec_table() {
+    let sql = r#"
+    CREATE TABLE IF NOT EXISTS fpm_spec (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL DEFAULT '',
+        spec TEXT NOT NULL DEFAULT '',
+        remark TEXT NOT NULL DEFAULT '',
+        created_at INTEGER,
+        updated_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_fpm_spec_name ON fpm_spec(name);
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+/// 老库兼容：user 表缺少 fpm_spec_ref 列时幂等补列（已有列则跳过）。
+/// fpm_spec_ref 取值：''=面板全局默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名
+async fn ensure_user_fpm_spec_ref_column() {
+    if !table_exists("user").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let rows = sqlx::query("PRAGMA table_info(user)")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let has = rows.iter().any(|r| {
+        r.try_get::<String, _>("name")
+            .map(|n| n == "fpm_spec_ref")
+            .unwrap_or(false)
+    });
+    if has {
+        return;
+    }
+    let _ = sqlx::query("ALTER TABLE user ADD COLUMN fpm_spec_ref TEXT NOT NULL DEFAULT ''")
+        .execute(pool)
         .await;
 }
 

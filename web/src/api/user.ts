@@ -30,6 +30,11 @@ export interface UserListItem {
   linux_user: string
   /** 该用户 PHP-FPM pool 规格 JSON；空 = 使用面板默认规格 */
   fpm_pool: string
+  /**
+   * PHP-FPM 规格引用：''=面板默认 / 'inherit'=继承 owner(reseller) 名下默认 /
+   * 具体模板名（见运行环境页的 FPM 规格模板库）
+   */
+  fpm_spec_ref: string
   last_login_ip: string
   last_login_time: number
   status: number
@@ -73,6 +78,11 @@ export interface CreateUserPayload {
   owner_id?: number
   /** 该用户 PHP-FPM pool 规格 JSON；缺省用面板默认（admin） */
   fpm_pool?: string
+  /**
+   * PHP-FPM 规格引用：''=面板默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名
+   * （与 fpm_pool 互斥，提交其一即可）
+   */
+  fpm_spec_ref?: string
 }
 
 /** 新增用户（返回 id / 家目录 / Linux 账号） */
@@ -93,6 +103,11 @@ export interface UpdateUserPayload {
   password?: string
   /** 该用户 PHP-FPM pool 规格 JSON；空 = 恢复面板默认（admin） */
   fpm_pool?: string
+  /**
+   * PHP-FPM 规格引用：''=面板默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名；
+   * 与 fpm_pool 互斥，提交引用时后端会清空旧的自定义 JSON（reseller 仅限自己名下模板）
+   */
+  fpm_spec_ref?: string
 }
 
 /** 更新用户结果（首次改密成功后返回 must_relogin） */
