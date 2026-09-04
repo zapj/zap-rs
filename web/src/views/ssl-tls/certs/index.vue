@@ -155,6 +155,18 @@
               </div>
               <span v-else-if="parseState.error" class="parse-tip is-error">{{ parseState.error }}</span>
 
+              <!-- 证书与私钥配对校验 -->
+              <div v-if="parseState.info?.key_match === true" class="parse-pair is-ok">
+                <el-icon><CircleCheckFilled /></el-icon> 证书与私钥匹配
+              </div>
+              <div v-else-if="parseState.info?.key_match === false" class="parse-pair is-bad">
+                <el-icon><CircleCloseFilled /></el-icon>
+                证书与私钥不匹配：该私钥不属于这张证书，保存后无法部署
+              </div>
+              <div v-else-if="parseState.info?.key_error" class="parse-pair is-bad">
+                <el-icon><WarningFilled /></el-icon> {{ parseState.info.key_error }}
+              </div>
+
               <div v-if="parseState.info?.cert_count && parseState.info.cert_count > 1" class="parse-chain">
                 检测到 {{ parseState.info.cert_count }} 张证书（含中间链）
                 <el-button size="small" text type="primary" @click="splitChain">拆到 CA 中间链</el-button>
@@ -256,7 +268,16 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
-import { Plus, Key, MagicStick, ArrowRight, Loading } from '@element-plus/icons-vue'
+import {
+  Plus,
+  Key,
+  MagicStick,
+  ArrowRight,
+  Loading,
+  CircleCheckFilled,
+  CircleCloseFilled,
+  WarningFilled,
+} from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getCertList,
@@ -421,7 +442,7 @@ async function runParse() {
   }
   parseState.loading = true
   try {
-    const res = await parseCert(pem)
+    const res = await parseCert(pem, String(editForm.key_content || ''))
     parseState.info = res.data
     parseState.error = ''
     if (!domainsManual.value && res.data?.domains_str) {
@@ -439,7 +460,10 @@ async function runParse() {
   }
 }
 
-watch([() => editForm.cert_content, () => editForm.csr], scheduleParse)
+watch(
+  [() => editForm.cert_content, () => editForm.csr, () => editForm.key_content],
+  scheduleParse,
+)
 
 /** 粘贴的是 fullchain 时，把叶子证书之外的证书挪到 CA 中间链 */
 function splitChain() {
@@ -514,6 +538,21 @@ async function submitSave() {
     ElMessage.warning('请至少填写 证书 / 私钥 / CSR 之一')
     return
   }
+
+  // 证书与私钥同时存在时，提交前先确认两者配对（后端也会校验，这里只做即时拦截）
+  const hasKey = !!String(editForm.key_content || '').trim()
+  if (hasKey && (String(editForm.cert_content || '').trim() || String(editForm.csr || '').trim())) {
+    if (!parseState.info) await runParse()
+    if (parseState.info?.key_match === false) {
+      ElMessage.error('证书与私钥不匹配：该私钥不属于这张证书，无法保存')
+      return
+    }
+    if (parseState.info?.key_error) {
+      ElMessage.error(parseState.info.key_error)
+      return
+    }
+  }
+
   saving.value = true
   try {
     const data = {
@@ -734,6 +773,11 @@ onBeforeUnmount(() => {
 .parse-chain {
   margin-top: 6px; display: flex; align-items: center; gap: 4px; color: #e6a23c;
 }
+.parse-pair {
+  margin-top: 6px; display: flex; align-items: center; gap: 5px;
+}
+.parse-pair.is-ok { color: #67c23a; }
+.parse-pair.is-bad { color: var(--el-color-danger); }
 .detail-toolbar { margin-bottom: 8px; }
 .pem-view {
   max-height: 300px; overflow: auto; margin: 0; padding: 10px 12px;

@@ -53,6 +53,10 @@ export interface SslCertParseResult {
   sans_count: number
   /** PEM 中的证书数量（>1 说明是含中间链的 fullchain） */
   cert_count: number
+  /** 与私钥的匹配结果（仅当调用时传了 keyPem 才有值） */
+  key_match?: boolean | null
+  /** 无法完成匹配校验的原因（如私钥格式错误 / 带密码） */
+  key_error?: string
 }
 
 export function getCertList() {
@@ -63,9 +67,9 @@ export function getCertDetail(id: number) {
   return http.get<ApiResponse<SslCertDetail>>('/ssl/cert/detail', { params: { id } })
 }
 
-/** 解析证书 / CSR，自动读取域名等信息 */
-export function parseCert(pem: string) {
-  return http.post<ApiResponse<SslCertParseResult>>('/ssl/cert/parse', { pem })
+/** 解析证书 / CSR，自动读取域名等信息；传 keyPem 时一并校验证书与私钥是否匹配 */
+export function parseCert(pem: string, keyPem?: string) {
+  return http.post<ApiResponse<SslCertParseResult>>('/ssl/cert/parse', { pem, key_pem: keyPem ?? '' })
 }
 
 export function addCert(data: SslCertUpsertData) {

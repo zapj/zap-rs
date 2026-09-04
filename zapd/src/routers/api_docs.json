@@ -254,10 +254,11 @@
         { "method": "GET", "path": "/ssl/cert/detail", "summary": "证书详情（含 crt / key / ca-bundle / csr 明文）", "params": [
           { "name": "id", "type": "int", "required": true, "desc": "证书 ID" }
         ] },
-        { "method": "POST", "path": "/ssl/cert/parse", "summary": "解析证书 / CSR：自动读取域名（SAN + CN）、有效期、签发者、公钥、指纹", "params": [
-          { "name": "pem", "type": "string", "required": true, "desc": "PEM 文本（证书 crt 或 CSR；多张证书时只解析第一张叶子证书）" }
+        { "method": "POST", "path": "/ssl/cert/parse", "summary": "解析证书 / CSR：自动读取域名（SAN + CN）、有效期、签发者、公钥、指纹；传 key_pem 时一并校验两者是否配对", "params": [
+          { "name": "pem", "type": "string", "required": true, "desc": "PEM 文本（证书 crt 或 CSR；多张证书时只解析第一张叶子证书）" },
+          { "name": "key_pem", "type": "string", "required": false, "desc": "私钥 PEM；提供时返回 key_match（true/false）或 key_error（私钥无法解析）" }
         ] },
-        { "method": "POST", "path": "/ssl/cert/add", "summary": "手动添加证书（至少提供 cert / key / csr 之一；域名留空时自动从证书解析）", "params": [
+        { "method": "POST", "path": "/ssl/cert/add", "summary": "手动添加证书（至少提供 cert / key / csr 之一；域名留空时自动从证书解析；cert 与 key 同时提供时会校验配对，不匹配则拒绝）", "params": [
           { "name": "name", "type": "string", "required": true, "desc": "证书名称" },
           { "name": "domains", "type": "string", "required": false, "desc": "覆盖域名，逗号分隔" },
           { "name": "cert_content", "type": "string", "required": false, "desc": "证书 PEM（crt）" },
@@ -266,7 +267,7 @@
           { "name": "csr", "type": "string", "required": false, "desc": "CSR PEM" },
           { "name": "remark", "type": "string", "required": false, "desc": "备注" }
         ] },
-        { "method": "POST", "path": "/ssl/cert/update", "summary": "修改证书（名称 / 内容 / 备注 / 状态）", "params": [
+        { "method": "POST", "path": "/ssl/cert/update", "summary": "修改证书（名称 / 内容 / 备注 / 状态）；PEM 四段未传则保持原值，传空串才清空；key 与 cert 不匹配时拒绝", "params": [
           { "name": "id", "type": "int", "required": true, "desc": "证书 ID" },
           { "name": "name", "type": "string", "required": true, "desc": "证书名称" },
           { "name": "status", "type": "int", "required": false, "desc": "1 启用 / 0 停用" }

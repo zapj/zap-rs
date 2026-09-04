@@ -134,6 +134,12 @@ pub async fn cert_add(
             "证书内容为空：至少提供 cert / key / csr 中的一种".to_string(),
         ));
     }
+    // 证书（或 CSR）与私钥必须配对，否则保存后无法部署
+    if let Err(e) =
+        check_cert_key_pair(&payload.cert_content, &payload.csr, &payload.key_content)
+    {
+        return Err(ZapError::New(-1, e));
+    }
     // 域名 / 有效期：未提供域名时自动从证书（或 CSR）解析
     let parsed = parse_pem_info(&payload.cert_content).or_else(|| parse_pem_info(&payload.csr));
     let domains = if payload.domains.trim().is_empty() {
@@ -215,6 +221,31 @@ pub async fn cert_update(
     let pool = db::get_db_pool().await;
     let now = chrono::Utc::now().timestamp();
     let status = payload.status.unwrap_or(1);
+
+    // 证书（或 CSR）与私钥必须配对；只改私钥时用库里现有的证书 / CSR 比对
+    if let Some(key) = payload.key_content.as_deref()
+        && !key.trim().is_empty()
+    {
+        let mut material = payload
+            .cert_content
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| payload.csr.clone().filter(|s| !s.trim().is_empty()))
+            .unwrap_or_default();
+        if material.trim().is_empty() {
+            let row: Option<(String, String)> =
+                sqlx::query_as("SELECT cert_content, csr FROM ssl_cert WHERE id = ?")
+                    .bind(payload.id)
+                    .fetch_optional(pool)
+                    .await?;
+            material = row
+                .map(|(c, s)| if !c.trim().is_empty() { c } else { s })
+                .unwrap_or_default();
+        }
+        if let Err(e) = check_cert_key_pair(&material, "", key) {
+            return Err(ZapError::New(-1, e));
+        }
+    }
 
     // 未提供域名时，若本次上传了证书（或 CSR）则自动解析填充
     let mut domains = payload.domains.trim().to_string();
@@ -332,6 +363,12 @@ struct ParsedCertInfo {
     sans_count: usize,
     /// PEM 中包含的证书数量（>1 说明粘贴的是含中间链的 fullchain）
     cert_count: usize,
+    /// 与私钥的匹配结果（仅当同时提交了私钥时才有值）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_match: Option<bool>,
+    /// 无法完成匹配校验的原因（如私钥格式错误 / 带密码）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_error: Option<String>,
 }
 
 fn push_uniq(v: &mut Vec<String>, s: String) {
@@ -463,6 +500,8 @@ fn parse_certificate(pem: &str) -> Option<ParsedCertInfo> {
         key_bits,
         sans_count,
         cert_count,
+        key_match: None,
+        key_error: None,
     })
 }
 
@@ -504,6 +543,8 @@ fn parse_csr_pem(pem: &str) -> Option<ParsedCertInfo> {
         key_bits,
         sans_count,
         cert_count: 0,
+        key_match: None,
+        key_error: None,
     })
 }
 
@@ -525,24 +566,93 @@ fn parse_pem_info(raw: &str) -> Option<ParsedCertInfo> {
     None
 }
 
+// ── 证书 / CSR 与私钥配对校验 ────────────────────────────────
+
+/// 校验证书（或 CSR）里的公钥与给定私钥是否属于同一对密钥。
+///
+/// - `Ok(true)`：公钥一致，私钥与该证书匹配
+/// - `Ok(false)`：两者都能解析，但公钥不一致
+/// - `Err(msg)`：私钥 / 证书无法解析，无法完成校验
+fn key_matches(pem: &str, key_pem: &str) -> Result<bool, String> {
+    use openssl::pkey::PKey;
+    use openssl::x509::{X509, X509Req};
+
+    let t = pem.trim();
+    let pub_key = if t.contains("BEGIN CERTIFICATE REQUEST")
+        || t.contains("BEGIN NEW CERTIFICATE REQUEST")
+    {
+        X509Req::from_pem(t.as_bytes())
+            .map_err(|e| format!("CSR 无法解析：{e}"))?
+            .public_key()
+            .map_err(|e| format!("CSR 公钥读取失败：{e}"))?
+    } else {
+        X509::from_pem(t.as_bytes())
+            .map_err(|e| format!("证书无法解析：{e}"))?
+            .public_key()
+            .map_err(|e| format!("证书公钥读取失败：{e}"))?
+    };
+
+    // 私钥优先；也接受直接粘贴公钥（便于只做比对）
+    if let Ok(key) = PKey::private_key_from_pem(key_pem.as_bytes()) {
+        return Ok(pub_key.public_eq(&key));
+    }
+    if let Ok(key) = PKey::public_key_from_pem(key_pem.as_bytes()) {
+        return Ok(pub_key.public_eq(&key));
+    }
+    Err("私钥无法解析：请粘贴 PEM 格式私钥（暂不支持带密码的私钥）".to_string())
+}
+
+/// 保存前的配对校验：证书（或 CSR）与私钥同时提供时必须能配上，
+/// 避免把无法部署的材料存进库里。
+fn check_cert_key_pair(cert: &str, csr: &str, key: &str) -> Result<(), String> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Ok(());
+    }
+    let material = if !cert.trim().is_empty() { cert } else { csr };
+    if material.trim().is_empty() {
+        // 只填了私钥、没有证书 / CSR，无从比对
+        return Ok(());
+    }
+    match key_matches(material, key) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("证书与私钥不匹配：该私钥不属于这张证书（或 CSR），保存后无法部署".to_string()),
+        Err(e) => Err(e),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CertParsePayload {
     #[serde(default)]
     pub pem: String,
+    /// 可选的私钥 PEM：提供时顺便校验两者是否匹配
+    #[serde(default)]
+    pub key_pem: String,
 }
 
-/// 解析证书 / CSR：返回域名、有效期、签发者、指纹等，用于添加证书时自动填充。
+/// 解析证书 / CSR：返回域名、有效期、签发者、指纹等，用于添加证书时自动填充；
+/// 同时传入 `key_pem` 时会一并给出「证书与私钥是否匹配」的结果。
 pub async fn cert_parse(
     _claims: ValidatedClaims,
     Json(payload): Json<CertParsePayload>,
 ) -> ZapJsonResult {
-    match parse_pem_info(&payload.pem) {
-        Some(info) => Ok(Json(json!({ "code": 0, "message": "OK", "data": info }))),
-        None => Err(ZapError::New(
-            -1,
-            "无法识别证书内容：请粘贴 PEM 格式的证书（crt）或 CSR".to_string(),
-        )),
+    let mut info = match parse_pem_info(&payload.pem) {
+        Some(i) => i,
+        None => {
+            return Err(ZapError::New(
+                -1,
+                "无法识别证书内容：请粘贴 PEM 格式的证书（crt）或 CSR".to_string(),
+            ));
+        }
+    };
+    let key = payload.key_pem.trim();
+    if !key.is_empty() {
+        match key_matches(&payload.pem, key) {
+            Ok(m) => info.key_match = Some(m),
+            Err(e) => info.key_error = Some(e),
+        }
     }
+    Ok(Json(json!({ "code": 0, "message": "OK", "data": info })))
 }
 // ── 自签名生成 ───────────────────────────────────────────────
 
@@ -933,5 +1043,30 @@ mod tests {
         assert!(parse_pem_info("").is_none());
         assert!(parse_pem_info("   ").is_none());
         assert!(parse_pem_info("not a pem at all").is_none());
+    }
+
+    /// 证书 / CSR 与私钥的配对校验：配套的应为 true，换一把私钥应为 false。
+    #[test]
+    fn cert_key_pair_check() {
+        let (cert_pem, key_pem, csr_pem, _, _) =
+            gen_self_signed(&["example.com".to_string()], 30).unwrap();
+
+        assert_eq!(key_matches(&cert_pem, &key_pem), Ok(true));
+        assert_eq!(key_matches(&csr_pem, &key_pem), Ok(true));
+        assert_eq!(check_cert_key_pair(&cert_pem, "", &key_pem), Ok(()));
+        assert_eq!(check_cert_key_pair("", &csr_pem, &key_pem), Ok(()));
+
+        // 另一把私钥（自签名生成时用的是随机密钥对）
+        let (_c2, other_key, _csr2, _, _) =
+            gen_self_signed(&["example.com".to_string()], 30).unwrap();
+        assert_eq!(key_matches(&cert_pem, &other_key), Ok(false));
+        assert!(check_cert_key_pair(&cert_pem, "", &other_key).is_err());
+
+        // 没填私钥 / 没填证书时不做校验
+        assert_eq!(check_cert_key_pair(&cert_pem, "", ""), Ok(()));
+        assert_eq!(check_cert_key_pair("", "", &key_pem), Ok(()));
+
+        // 私钥内容非法时应给出可读错误而不是 panic
+        assert!(key_matches(&cert_pem, "not a key").is_err());
     }
 }
