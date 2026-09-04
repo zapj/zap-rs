@@ -611,7 +611,7 @@ onMounted(() => {
   border-right: 1px solid var(--el-border-color-lighter);
   display: flex;
   flex-direction: column;
-  background: var(--el-bg-color-page);
+  /*background: var(--el-bg-color-page);*/
 
   &-header {
     padding: 12px 16px;
@@ -657,7 +657,6 @@ onMounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  background: var(--el-bg-color-page);
 
   &-left {
     display: flex;

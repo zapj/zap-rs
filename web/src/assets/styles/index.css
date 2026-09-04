@@ -110,6 +110,13 @@ body {
   --el-menu-item-font-size: 14px;
 }
 
+/* 深色模式：浮层用深蓝色（--el-bg-color-overlay），与整体色板一致 */
+html.dark .el-popper .el-menu--popup {
+  background-color: #0d2237 !important;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+}
+
 .el-popper .el-menu--popup .el-menu-item {
   position: relative;
   margin: 2px 0;
@@ -138,6 +145,10 @@ body {
 
 .el-popper .el-menu--popup .el-popper__arrow::before {
   background: #001529 !important;
+}
+
+html.dark .el-popper .el-menu--popup .el-popper__arrow::before {
+  background: #0d2237 !important;
 }
 
 /* 页面通用样式 */
@@ -460,4 +471,34 @@ body {
 }
 .pr-5 {
   padding-right: 20px;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   深色模式：把 Element Plus 默认的"深灰"色板整体改成"深蓝"色板，
+   让顶栏 / 标签栏 / 内容区与左侧深蓝侧栏 (#001529) 风格统一。
+   浅色模式（:root）的变量保持不变，dark/css-vars.css 在这里被覆盖。
+   ────────────────────────────────────────────────────────────── */
+html.dark {
+  --el-bg-color: #0a1929;
+  --el-bg-color-page: #051324;
+  --el-bg-color-overlay: #0d2237;
+  --el-bg-color-elevated: #0d2237;
+  --el-text-color-primary: #e8eef5;
+  --el-text-color-regular: #c0c8d4;
+  --el-text-color-secondary: #8a98aa;
+  --el-text-color-placeholder: #6a7a8d;
+  --el-text-color-disabled: #6a7a8d;
+  --el-border-color-lighter: #1c3047;
+  --el-border-color-light: #22466b;
+  --el-border-color: #2c5075;
+  --el-border-color-dark: #3a6690;
+  --el-border-color-darker: #4d7faa;
+  --el-fill-color-light: #1a2f44;
+  --el-fill-color: #16334f;
+  --el-fill-color-blank: #0a1929;
+  --el-fill-color-dark: #16334f;
+  --el-disabled-bg-color: #1a2f44;
+  --el-mask-color: rgba(0, 0, 0, 0.7);
+  --el-box-shadow-light: 0 0 12px rgba(0, 0, 0, 0.3);
+  --el-box-shadow: 0 0 16px rgba(0, 0, 0, 0.4);
 }

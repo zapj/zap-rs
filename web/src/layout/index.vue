@@ -123,9 +123,18 @@ watchDeviceWidth()
   width: 210px;
   height: 100%;
   background-color: #001529;
+  /* 浅色侧栏：深蓝 + 浅阴影，经典 Element Plus admin 风格 */
+  box-shadow: 2px 0 8px rgba(0, 21, 41, 0.08);
   transition: width 0.3s;
   z-index: 1001;
   overflow: hidden;
+}
+
+/* 深色模式：保持品牌深蓝 #001529 不变（与右侧深蓝色板一体），
+   仅把浅色阴影换成更柔和的深色阴影，蓝色光晕保持低调 */
+html.dark .sidebar-container {
+  background-color: #001529;
+  box-shadow: 2px 0 8px rgba(0, 21, 41, 0.4);
 }
 
 .sidebar-container.hide-sidebar {
