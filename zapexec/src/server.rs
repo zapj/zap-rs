@@ -95,6 +95,9 @@ async fn handle_conn(
     frame::send(&mut wr, &Message::Welcome).await?;
 
     // 3) 请求/响应循环
+    //
+    // 客户端（zapd 的 `zapexec::call`、zapctl）是"单请求-断开"模型：
+    // 完成一次握手与一个请求后即关闭连接，因此读到 EOF 是预期的正常结束。
     loop {
         match frame::recv(&mut rd).await {
             Ok(Message::Request(req)) => {
@@ -107,6 +110,10 @@ async fn handle_conn(
                 }
             }
             Ok(_) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                // 对端正常断开，不属于错误，静默结束连接
+                break;
+            }
             Err(e) => {
                 debug!("读取错误: {e}");
                 break;

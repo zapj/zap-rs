@@ -10,6 +10,8 @@ export interface FileEntry {
   size: number
   modified: string
   permissions: string
+  owner?: string
+  group?: string
 }
 
 export interface FileListData {

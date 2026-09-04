@@ -125,7 +125,19 @@
           </el-table-column>
           <el-table-column label="权限" width="120">
             <template #default="{ row }">
-              {{ row.permissions }}
+              <span class="mono">{{ row.permissions }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="用户" width="100">
+            <template #default="{ row }">
+              <span v-if="row.owner" class="mono">{{ row.owner }}</span>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="组" width="100">
+            <template #default="{ row }">
+              <span v-if="row.group" class="mono">{{ row.group }}</span>
+              <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="220" fixed="right">
@@ -734,6 +746,11 @@ onMounted(() => {
 
 .text-muted {
   color: #c0c4cc;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 
 :deep(.el-breadcrumb__item .is-last) {
