@@ -1,7 +1,7 @@
 <template>
   <div class="terminal-page">
     <!-- 左侧连接管理器 -->
-    <div class="terminal-sidebar">
+    <div class="terminal-sidebar" :style="{ width: sidebarWidth + 'px' }">
       <div class="sidebar-header">
         <span class="sidebar-title">连接管理</span>
         <el-button type="primary" size="small" :icon="Plus" :disabled="isReadOnly" @click="showAddDialog = true">
@@ -9,57 +9,67 @@
         </el-button>
       </div>
 
+      <div class="sidebar-search">
+        <el-input
+          v-model="connKeyword"
+          placeholder="搜索名称 / 主机 / 用户"
+          size="small"
+          clearable
+          :prefix-icon="Search"
+        />
+      </div>
+
       <div class="connection-list">
         <div
-          v-for="conn in connections"
+          v-for="conn in filteredConnections"
           :key="conn.id"
           class="connection-item"
-          :class="{ active: activeConnId === conn.id }"
+          :class="{ active: activeConnId === conn.id, disabled: conn.status === 0 }"
           @dblclick="openTerminal(conn)"
           @click="activeConnId = conn.id"
         >
+          <div class="conn-avatar" :class="avatarClass(conn.id)">{{ avatarText(conn.name) }}</div>
           <div class="conn-info">
-            <span class="conn-name">{{ conn.name }}</span>
-            <span class="conn-host">{{ conn.username }}@{{ conn.host }}:{{ conn.port }}</span>
+            <span class="conn-name" :title="conn.name">{{ conn.name }}</span>
+            <span class="conn-host" :title="`${conn.username}@${conn.host}:${conn.port}`">
+              <i class="status-dot" :class="conn.status === 0 ? 'off' : 'on'" />
+              {{ conn.username }}@{{ conn.host }}:{{ conn.port }}
+            </span>
           </div>
-          <div class="conn-actions">
-            <el-button
-              :icon="Link"
-              size="small"
-              text
-              @click.stop="openTerminal(conn)"
-              title="连接"
-            />
-            <el-button
-              v-if="conn.auth_type === 'key'"
-              :icon="Key"
-              size="small"
-              text
-              :disabled="isReadOnly || (isLoopbackHost(conn.host) && !isAdmin)"
-              :title="isLoopbackHost(conn.host) ? '写入本机 SSH 授权' : '推送公钥到远程主机'"
-              @click.stop="openPushKey(conn.id)"
-            />
-            <el-button
-              :icon="Edit"
-              size="small"
-              text
-              :disabled="isReadOnly"
-              @click.stop="editConnection(conn)"
-              title="编辑"
-            />
-            <el-popconfirm
-              title="确定删除此连接？"
-              @confirm="handleDelete(conn.id)"
-            >
-              <template #reference>
-                <el-button :icon="Delete" size="small" text title="删除" :disabled="isReadOnly" />
+
+          <!-- 行内操作：hover 才出现，避免常驻按钮挤压/遮挡连接信息 -->
+          <div class="conn-actions" @click.stop>
+            <el-button class="row-btn" :icon="Link" size="small" text title="连接" @click="openTerminal(conn)" />
+            <el-dropdown trigger="click" @command="onRowCommand(conn, $event)">
+              <el-button class="row-btn" :icon="MoreFilled" size="small" text title="更多操作" />
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :icon="Edit" command="edit" :disabled="isReadOnly">编辑</el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="conn.auth_type === 'key'"
+                    :icon="Key"
+                    command="pushKey"
+                    :disabled="isReadOnly || (isLoopbackHost(conn.host) && !isAdmin)"
+                  >
+                    {{ isLoopbackHost(conn.host) ? '写入本机 SSH 授权' : '推送公钥到主机' }}
+                  </el-dropdown-item>
+                  <el-dropdown-item :icon="Monitor" command="test">测试连接</el-dropdown-item>
+                  <el-dropdown-item :icon="Delete" command="delete" divided :disabled="isReadOnly">删除</el-dropdown-item>
+                </el-dropdown-menu>
               </template>
-            </el-popconfirm>
+            </el-dropdown>
           </div>
         </div>
 
-        <el-empty v-if="connections.length === 0" description="暂无连接" :image-size="60" />
+        <el-empty v-if="connections.length === 0" description="暂无连接，点击右上角添加" :image-size="60" />
+        <div v-else-if="filteredConnections.length === 0" class="search-empty">
+          <el-icon><Search /></el-icon>
+          <span>未找到匹配的连接</span>
+        </div>
       </div>
+
+      <!-- 拖拽调宽手柄 -->
+      <div class="sidebar-resizer" title="拖拽调整宽度" @mousedown.prevent="startSidebarResize" />
     </div>
 
     <!-- 右侧终端区域 -->
@@ -223,8 +233,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Plus, Edit, Delete, Link, Monitor, Key } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Edit, Delete, Link, Monitor, Key, Search, MoreFilled } from '@element-plus/icons-vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -250,6 +260,44 @@ const isAdmin = computed(() => userStore.roles.includes('admin'))
 const connections = ref<SshConnection[]>([])
 const sshKeys = ref<{ name: string }[]>([])
 const activeConnId = ref<number | null>(null)
+
+// 搜索过滤
+const connKeyword = ref('')
+const filteredConnections = computed(() => {
+  const kw = connKeyword.value.trim().toLowerCase()
+  if (!kw) return connections.value
+  return connections.value.filter(c =>
+    [c.name, c.host, c.username, `${c.host}:${c.port}`].join(' ').toLowerCase().includes(kw),
+  )
+})
+
+// 侧栏拖拽宽度（px）
+const sidebarWidth = ref(300)
+let dragStart: { x: number; w: number } | null = null
+function startSidebarResize(e: MouseEvent) {
+  dragStart = { x: e.clientX, w: sidebarWidth.value }
+  window.addEventListener('mousemove', onSidebarResize)
+  window.addEventListener('mouseup', endSidebarResize)
+}
+function onSidebarResize(e: MouseEvent) {
+  if (!dragStart) return
+  const w = dragStart.w + (e.clientX - dragStart.x)
+  sidebarWidth.value = Math.min(520, Math.max(230, w))
+}
+function endSidebarResize() {
+  dragStart = null
+  window.removeEventListener('mousemove', onSidebarResize)
+  window.removeEventListener('mouseup', endSidebarResize)
+}
+
+// 连接项头像（首字母 + 按 id 分配渐变色）
+const AVATAR_COLORS = 6
+function avatarText(name: string) {
+  return (name.trim()[0] || '?').toUpperCase()
+}
+function avatarClass(id: number) {
+  return `ac-${Math.abs(id) % AVATAR_COLORS}`
+}
 
 const showAddDialog = ref(false)
 const editingConn = ref<SshConnection | null>(null)
@@ -463,6 +511,34 @@ async function handleTest(id: number) {
   }
 }
 
+// 连接项「更多」下拉命令分发
+function onRowCommand(conn: SshConnection, cmd: string | number | object) {
+  handleRowAction(conn, String(cmd))
+}
+
+function handleRowAction(conn: SshConnection, cmd: string) {
+  switch (cmd) {
+    case 'edit':
+      editConnection(conn)
+      break
+    case 'pushKey':
+      openPushKey(conn.id)
+      break
+    case 'test':
+      handleTest(conn.id)
+      break
+    case 'delete':
+      ElMessageBox.confirm('确定删除此连接？', '提示', {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      })
+        .then(() => handleDelete(conn.id))
+        .catch(() => {})
+      break
+  }
+}
+
 // ── 终端管理 ───────────────────────────────────────────────
 
 // 把当前 pty 窗口尺寸通过 WebSocket 控制消息同步给后端
@@ -658,6 +734,11 @@ onBeforeUnmount(() => {
     if ((tab as any)._resizeObserver) (tab as any)._resizeObserver.disconnect()
     if (tab.term) tab.term.dispose()
   }
+  // 清理侧栏拖拽监听
+  if (dragStart) {
+    window.removeEventListener('mousemove', onSidebarResize)
+    window.removeEventListener('mouseup', endSidebarResize)
+  }
 })
 </script>
 
@@ -673,8 +754,9 @@ onBeforeUnmount(() => {
 /* ── 左侧栏 ─────────────────────────────── */
 
 .terminal-sidebar {
-  width: 260px;
-  min-width: 260px;
+  position: relative;
+  flex-shrink: 0;
+  min-width: 230px;
   border-right: 1px solid #e4e7ed;
   display: flex;
   flex-direction: column;
@@ -685,36 +767,53 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e4e7ed;
+  padding: 14px 16px 12px;
 }
 
 .sidebar-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: #303133;
 }
 
+/* ── 搜索 ─────────────────────────────────── */
+
+.sidebar-search {
+  padding: 0 12px 10px;
+}
+
+.sidebar-search .el-input__wrapper {
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px #dcdfe6 inset;
+}
+
+.sidebar-search .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px #409eff inset;
+}
+
+/* ── 连接列表 ─────────────────────────────── */
+
 .connection-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 4px 8px 8px;
 }
 
 .connection-item {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 8px 10px;
   margin-bottom: 4px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.15s, border-color 0.15s;
   border: 1px solid transparent;
 }
 
 .connection-item:hover {
-  background: #ecf5ff;
+  background: #f0f7ff;
   border-color: #d9ecff;
 }
 
@@ -723,15 +822,50 @@ onBeforeUnmount(() => {
   border-color: #409eff;
 }
 
+.connection-item.disabled {
+  opacity: 0.55;
+}
+
+.connection-item:hover .conn-actions,
+.connection-item:focus-within .conn-actions {
+  display: flex;
+}
+
+/* 头像：首字母 + 渐变底色 */
+.conn-avatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  user-select: none;
+}
+
+.conn-avatar.ac-0 { background: linear-gradient(135deg, #409eff, #2f7fe6); }
+.conn-avatar.ac-1 { background: linear-gradient(135deg, #7c5cf0, #5a3fd6); }
+.conn-avatar.ac-2 { background: linear-gradient(135deg, #13c2c2, #08979c); }
+.conn-avatar.ac-3 { background: linear-gradient(135deg, #fa8c16, #d46b08); }
+.conn-avatar.ac-4 { background: linear-gradient(135deg, #52c41a, #389e0d); }
+.conn-avatar.ac-5 { background: linear-gradient(135deg, #f759ab, #d63096); }
+
 .conn-info {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  gap: 3px;
+  /* 预留右侧操作按钮空间，避免 hover 时遮挡/挤压信息 */
+  padding-right: 72px;
 }
 
 .conn-name {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: #303133;
   white-space: nowrap;
   overflow: hidden;
@@ -739,16 +873,80 @@ onBeforeUnmount(() => {
 }
 
 .conn-host {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   color: #909399;
-  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.on {
+  background: #67c23a;
+  box-shadow: 0 0 0 2px rgba(103, 194, 58, 0.2);
+}
+
+.status-dot.off {
+  background: #c0c4cc;
+}
+
+/* 行内操作：hover 浮层，不占文档流空间 */
 .conn-actions {
-  display: flex;
+  display: none;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  align-items: center;
   gap: 2px;
-  opacity: 0;
-  transition: opacity 0.2s;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  z-index: 2;
+}
+
+.row-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
+.search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 0;
+  color: #c0c4cc;
+  font-size: 13px;
+}
+
+/* 侧栏拖拽调宽手柄 */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  transition: background 0.15s;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer:active {
+  background: rgba(64, 158, 255, 0.45);
 }
 
 .key-select-wrap {
@@ -764,10 +962,6 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-.connection-item:hover .conn-actions {
-  opacity: 1;
 }
 
 /* ── 右侧终端区 ─────────────────────────── */
