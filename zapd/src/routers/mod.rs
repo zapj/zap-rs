@@ -308,6 +308,10 @@ fn api_routers() -> Router {
             "/terminal/connections/{id}/push-key",
             post(ssh_terminal::push_key_to_host),
         )
+        .route(
+            "/terminal/push-key",
+            post(ssh_terminal::push_key_direct),
+        )
         .route("/terminal/ws/{id}", get(ssh_terminal::ws_terminal))
         // System
         .route("/system/info", get(system_info::system_info))

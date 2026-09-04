@@ -910,6 +910,16 @@ pub struct PushKeyPayload {
     pub password: Option<String>,
 }
 
+/// 表单直推请求（添加/编辑对话框中「推送公钥」用，连接无需先入库）
+#[derive(Deserialize)]
+pub struct PushKeyRequest {
+    pub host: String,
+    pub port: i32,
+    pub username: String,
+    pub ssh_key_name: String,
+    pub password: Option<String>,
+}
+
 /// 判断目标主机是否为本地回环（localhost / 127.0.0.1 / ::1）
 fn is_loopback_host(host: &str) -> bool {
     let h = host.trim().trim_matches(['[', ']']).to_lowercase();
@@ -936,38 +946,88 @@ pub async fn push_key_to_host(
     if conn_info.ssh_key_name.is_empty() {
         return Err(ZapError::New(-1, "连接未绑定 SSH 密钥".to_string()));
     }
+    push_key_core(
+        &claims,
+        &conn_info.host,
+        conn_info.port,
+        &conn_info.username,
+        &conn_info.ssh_key_name,
+        payload.password.as_deref(),
+        format!("{}@{}:{}", conn_info.username, conn_info.host, conn_info.port),
+    )
+    .await
+}
 
+/// 表单直推（连接尚未入库也可用，供添加/编辑对话框中的「推送公钥」按钮调用）
+pub async fn push_key_direct(
+    claims: ValidatedClaims,
+    Json(payload): Json<PushKeyRequest>,
+) -> ZapJsonResult {
+    let host = payload.host.trim().trim_matches(['[', ']']).to_string();
+    if host.is_empty() {
+        return Err(ZapError::New(-1, "主机地址不能为空".to_string()));
+    }
+    if payload.username.trim().is_empty() {
+        return Err(ZapError::New(-1, "用户名不能为空".to_string()));
+    }
+    if payload.ssh_key_name.is_empty() {
+        return Err(ZapError::New(-1, "请选择要推送的 SSH 密钥".to_string()));
+    }
+    push_key_core(
+        &claims,
+        &host,
+        payload.port,
+        &payload.username,
+        &payload.ssh_key_name,
+        payload.password.as_deref(),
+        format!("{}@{}:{}", payload.username, host, payload.port),
+    )
+    .await
+}
+
+/// 推送核心实现：
+/// - 本地回环（localhost/127.0.0.1）走 zapexec 写本机系统用户 authorized_keys（仅 admin，无需密码）
+/// - 远程主机用密码做一次性认证，经 SFTP 追加公钥
+async fn push_key_core(
+    claims: &ValidatedClaims,
+    host: &str,
+    port: i32,
+    username: &str,
+    ssh_key_name: &str,
+    password: Option<&str>,
+    target: String,
+) -> ZapJsonResult {
     // 本地回环主机：root 特权写本机 authorized_keys，仅 admin
-    if is_loopback_host(&conn_info.host) {
-        if !crate::zap::jwt::is_admin(&claims) {
+    if is_loopback_host(host) {
+        if !crate::zap::jwt::is_admin(claims) {
             return Err(ZapError::New(
                 403,
                 "仅 admin 角色可以写入本机 SSH 授权".to_string(),
             ));
         }
         let resp = crate::zapexec::call(Request::SshKeyInstallLocal {
-            username: conn_info.username.clone(),
-            key_name: conn_info.ssh_key_name.clone(),
+            username: username.to_string(),
+            key_name: ssh_key_name.to_string(),
         })
         .await?;
         if resp.code != 0 {
             return Err(ZapError::New(resp.code, resp.message));
         }
         audit::log(
-            Some(&claims),
+            Some(claims),
             None,
             "push_key_local",
-            &format!("{}@{}", conn_info.username, conn_info.host),
+            &target,
             "将公钥写入本机用户 authorized_keys",
         )
         .await;
         return Ok(Json(json!({ "code": 0, "message": resp.message })));
     }
 
-    let pub_content = get_pub_key_content(&conn_info.ssh_key_name)
-        .ok_or_else(|| ZapError::New(-1, format!("公钥 '{}' 不存在", conn_info.ssh_key_name)))?;
+    let pub_content = get_pub_key_content(ssh_key_name)
+        .ok_or_else(|| ZapError::New(-1, format!("公钥 '{}' 不存在", ssh_key_name)))?;
 
-    let addr = format!("{}:{}", conn_info.host, conn_info.port);
+    let addr = format!("{}:{}", host, port);
     let tcp =
         TcpStream::connect(&addr).map_err(|e| ZapError::Error(format!("TCP 连接失败: {}", e)))?;
     let mut session =
@@ -976,12 +1036,10 @@ pub async fn push_key_to_host(
     session
         .handshake()
         .map_err(|e| ZapError::Error(format!("SSH 握手失败: {}", e)))?;
-    let password = payload
-        .password
-        .as_deref()
+    let password = password
         .ok_or_else(|| ZapError::New(-1, "远程主机密码不能为空".to_string()))?;
     session
-        .userauth_password(&conn_info.username, password)
+        .userauth_password(username, password)
         .map_err(|e| ZapError::Error(format!("远程主机密码认证失败: {}", e)))?;
     if !session.authenticated() {
         return Err(ZapError::New(-1, "远程主机密码认证失败".to_string()));
@@ -1030,13 +1088,10 @@ pub async fn push_key_to_host(
     drop(f);
 
     audit::log(
-        Some(&claims),
+        Some(claims),
         None,
         "push_key",
-        &format!(
-            "{}@{}:{}",
-            conn_info.username, conn_info.host, conn_info.port
-        ),
+        &target,
         "推送公钥到远程主机 authorized_keys",
     )
     .await;

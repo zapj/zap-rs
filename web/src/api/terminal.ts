@@ -83,3 +83,14 @@ export function testConnection(id: number) {
 export function pushKeyToHost(id: number, password: string) {
   return http.post<ApiResponse>(`/terminal/connections/${id}/push-key`, { password })
 }
+
+/** 表单直推公钥（连接无需先保存，添加/编辑对话框内使用） */
+export function pushKeyDirect(data: {
+  host: string
+  port: number
+  username: string
+  ssh_key_name: string
+  password: string
+}) {
+  return http.post<ApiResponse>('/terminal/push-key', data)
+}

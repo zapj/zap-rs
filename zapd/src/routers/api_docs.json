@@ -152,6 +152,7 @@
         { "method": "POST", "path": "/terminal/connections/{id}/delete", "summary": "删除连接" },
         { "method": "GET", "path": "/terminal/connections/test", "summary": "测试连接连通性" },
         { "method": "POST", "path": "/terminal/connections/{id}/push-key", "summary": "推送本机公钥到目标主机" },
+        { "method": "POST", "path": "/terminal/push-key", "summary": "按表单参数直推公钥（连接无需先保存）" },
         { "method": "WS", "path": "/terminal/ws/{id}", "summary": "WebSocket 终端通道（使用 query 携带 JWT）" }
       ]
     },

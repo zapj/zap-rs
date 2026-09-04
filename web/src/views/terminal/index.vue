@@ -172,7 +172,7 @@
                 size="small"
                 :icon="Key"
                 :disabled="!form.ssh_key_name || isReadOnly || (form.host && isLoopbackHost(form.host) && !isAdmin)"
-                @click="openPushKey(editingConn?.id)"
+                @click="openPushKeyFromForm"
               >
                 {{ form.host && isLoopbackHost(form.host) ? '写入本机 SSH 授权' : '推送公钥到远程主机' }}
               </el-button>
@@ -258,6 +258,7 @@ import {
   deleteConnection,
   testConnection,
   pushKeyToHost,
+  pushKeyDirect,
   type SshConnection,
 } from '@/api/terminal'
 import { getToken } from '@/utils/auth'
@@ -318,6 +319,8 @@ const testing = ref(false)
 
 const showPushKeyDialog = ref(false)
 const pushKeyConnId = ref<number | null>(null)
+/** 表单直推来源快照（pushKeyConnId 为 null 时使用），来自添加/编辑对话框当前表单 */
+const pushKeyForm = ref<{ host: string; port: number; username: string; key: string } | null>(null)
 const pushKeyTarget = ref('')
 const pushKeyIsLocal = ref(false)
 const pushKeyPwd = ref('')
@@ -330,19 +333,45 @@ function isLoopbackHost(host: string): boolean {
   return h === 'localhost' || h === '127.0.0.1' || h === '::1'
 }
 
+/** 行菜单「推送公钥」：基于已保存的连接 */
 function openPushKey(connId?: number | null) {
   if (connId == null) return
   const conn = connections.value.find(c => c.id === connId)
   if (!conn) return
   pushKeyConnId.value = conn.id
+  pushKeyForm.value = null
   pushKeyTarget.value = `${conn.username}@${conn.host}:${conn.port}`
   pushKeyIsLocal.value = isLoopbackHost(conn.host)
   pushKeyPwd.value = ''
   showPushKeyDialog.value = true
 }
 
+/** 添加/编辑对话框内「推送公钥」：基于表单参数直推，连接无需先保存 */
+function openPushKeyFromForm() {
+  const f = form.value
+  if (!f.host.trim()) {
+    ElMessage.warning('请先填写主机地址')
+    return
+  }
+  if (!f.ssh_key_name) {
+    ElMessage.warning('请先选择 SSH 密钥')
+    return
+  }
+  pushKeyConnId.value = null
+  pushKeyForm.value = {
+    host: f.host.trim(),
+    port: f.port,
+    username: f.username.trim() || 'root',
+    key: f.ssh_key_name,
+  }
+  pushKeyTarget.value = `${f.username.trim() || 'root'}@${f.host.trim()}:${f.port}`
+  pushKeyIsLocal.value = isLoopbackHost(f.host)
+  pushKeyPwd.value = ''
+  showPushKeyDialog.value = true
+}
+
 async function confirmPushKey() {
-  if (pushKeyConnId.value == null) return
+  if (pushKeyConnId.value == null && !pushKeyForm.value) return
   if (!pushKeyIsLocal.value && !pushKeyPwd.value) {
     ElMessage.warning('请输入远程主机密码')
     return
@@ -353,7 +382,18 @@ async function confirmPushKey() {
   }
   pushing.value = true
   try {
-    await pushKeyToHost(pushKeyConnId.value, pushKeyIsLocal.value ? '' : pushKeyPwd.value)
+    if (pushKeyConnId.value != null) {
+      await pushKeyToHost(pushKeyConnId.value, pushKeyIsLocal.value ? '' : pushKeyPwd.value)
+    } else {
+      const pf = pushKeyForm.value!
+      await pushKeyDirect({
+        host: pf.host,
+        port: pf.port,
+        username: pf.username,
+        ssh_key_name: pf.key,
+        password: pushKeyIsLocal.value ? '' : pushKeyPwd.value,
+      })
+    }
     ElMessage.success(pushKeyIsLocal.value ? '公钥已写入本机 authorized_keys' : '公钥已推送到远程主机，现在可以尝试连接了')
     showPushKeyDialog.value = false
   } catch (e: any) {
