@@ -48,7 +48,9 @@ pub mod ssh_keys;
 pub mod ssh_terminal;
 pub mod ssl;
 pub mod system_audit;
+pub mod system_basic;
 pub mod system_config;
+pub mod system_cron;
 pub mod system_env;
 pub mod system_file;
 pub mod system_info;
@@ -210,6 +212,11 @@ fn api_routers() -> Router {
             "/system/config/ssh/install/log/{run_id}",
             get(system_config::ssh_install_log),
         )
+        // 基础设置（系统设置 → 基础设置，admin only）
+        .route(
+            "/system/config/basic",
+            get(system_basic::basic_get).post(system_basic::basic_save),
+        )
         .route("/system/config/services", get(system_config::list_services))
         .route(
             "/system/config/services/action",
@@ -227,6 +234,13 @@ fn api_routers() -> Router {
         .route("/system/env", get(system_env::env_get))
         .route("/system/env/refresh", post(system_env::env_refresh))
         .route("/system/env/defaults", post(system_env::env_defaults_save))
+        // 脚本/自动化：计划任务（admin only）
+        .route("/system/cron/list", get(system_cron::cron_list))
+        .route("/system/cron/add", post(system_cron::cron_add))
+        .route("/system/cron/update", post(system_cron::cron_update))
+        .route("/system/cron/delete", post(system_cron::cron_delete))
+        .route("/system/cron/toggle", post(system_cron::cron_toggle))
+        .route("/system/cron/run_now", post(system_cron::cron_run_now))
         // PHP-FPM 规格模板库（admin 维护；reseller 可读自己名下 + 全局模板）
         .route("/system/fpm-specs/list", get(fpm_spec::spec_list))
         .route("/system/fpm-specs/add", post(fpm_spec::spec_add))

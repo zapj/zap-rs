@@ -15,6 +15,8 @@ pub async fn init_schema() {
     crate::routers::ssh_terminal::init_table().await;
     // AppStore: run records table + menu
     init_appstore_runs_table().await;
+    // 脚本/自动化：计划任务表
+    init_cron_jobs_table().await;
     // IP 池管理表
     init_ip_pool_table().await;
     // 用户站点管理表（php_instance / vhost_state 老库幂等补列）
@@ -26,18 +28,13 @@ pub async fn init_schema() {
     ensure_user_fpm_spec_ref_column().await;
     // 全局运行环境状态表（scope=auto 自动探测快照 / scope=conf 面板默认配置）
     init_server_env_table().await;
-    // API Token 管理表（幂等建表，新旧库均生效）
+    // API Token 管理表
     init_api_token_table().await;
-    // 「开发」菜单（API Tokens / API 文档，幂等补插）
-    ensure_dev_menus().await;
     // SSL/TLS 证书管理表
     init_ssl_cert_table().await;
-    // 「SSL/TLS」菜单（位于应用商店上方，幂等补插）
-    ensure_ssl_menus().await;
-    // 「审计日志」子菜单（系统设置目录下，仅 admin，幂等补插）
-    ensure_audit_menu().await;
-    // 「已安装应用」子菜单（应用商店下，幂等补插）
-    ensure_installed_menu().await;
+    // 菜单（menus/role_menus）为静态基础数据：SSL/TLS、应用商店（含已安装应用）、
+    // 服务器状态、脚本/自动化（自定义脚本+计划任务）、系统设置（含审计日志）、
+    // 服务器配置、开发 —— 均已直接 seed，无需运行时补插。
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -221,21 +218,25 @@ async fn init_menus_table() {
 
     -- System dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统设置', 'ep:setting', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统设置', 'ep:setting', 1, 'admin', 10, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- System children
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (21, 2, 'user', 'user', 'system/users/index', 'menu', '用户管理', 'ep:user', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (26, 2, 'basic-config', 'basic-config', 'system/config/basic', 'menu', '基础设置', 'ep:set-up', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (22, 2, 'roles', 'roles', 'system/roles/index', 'menu', '角色管理', 'ep:view', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (21, 2, 'user', 'user', 'system/users/index', 'menu', '用户管理', 'ep:user', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (23, 2, 'menus', 'menus', 'system/menus/index', 'menu', '菜单管理', 'ep:menu', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (22, 2, 'roles', 'roles', 'system/roles/index', 'menu', '角色管理', 'ep:view', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (23, 2, 'menus', 'menus', 'system/menus/index', 'menu', '菜单管理', 'ep:menu', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (24, 2, 'audit', 'audit', 'system/audit/index', 'menu', '审计日志', 'ep:tickets', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Server config dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (7, 0, 'server', '/server', 'Layout', '/server/time', 'dir', '服务器配置', 'ep:set-up', 1, 'admin', 9, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (7, 0, 'server', '/server', 'Layout', '/server/time', 'dir', '服务器配置', 'ep:set-up', 1, 'admin', 11, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (71, 7, 'server-time', 'time', 'server/time/index', 'menu', '服务器时间', 'ep:clock', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -271,17 +272,23 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
+    -- SSL/TLS（Layout + 子菜单，位于应用商店之前，admin/user）
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (11, 0, 'ssl-tls', '/ssl-tls', 'Layout', '/ssl-tls/certs', 'dir', 'SSL/TLS', 'ep:lock', 1, 'admin,user', 6, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (111, 11, 'ssl-certs', 'certs', 'ssl-tls/certs/index', 'menu', 'SSL证书', 'ep:lock', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+
     -- AppStore (Layout + children)
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (6, 0, 'appstore', '/appstore', 'Layout', '/appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 6, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (6, 0, 'appstore', '/appstore', 'Layout', '/appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 7, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (61, 6, 'appstore-index', 'index', 'appstore/index', 'menu', '应用商店', 'ep:goods', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (62, 6, 'appstore-scripts', 'scripts', 'appstore/scripts', 'menu', '脚本管理', 'ep:document', 1, 'admin,user', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (62, 6, 'installed', 'installed', 'appstore/installed', 'menu', '已安装应用', 'ep:box', 1, 'admin,user,reseller', 2, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Server status dir（应用商店之后）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (8, 0, 'server-status', '/server-status', 'Layout', '/server-status/info', 'dir', '服务器状态', 'ep:data-line', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (8, 0, 'server-status', '/server-status', 'Layout', '/server-status/info', 'dir', '服务器状态', 'ep:data-line', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (81, 8, 'server-status-info', 'info', 'server-status/info/index', 'menu', '服务器信息', 'ep:info-filled', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -294,6 +301,24 @@ async fn init_menus_table() {
     VALUES (85, 8, 'server-status-cpu', 'cpu', 'server-status/cpu/index', 'menu', 'CPU', 'ep:cpu', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (86, 8, 'server-status-disk', 'disk', 'server-status/disk/index', 'menu', '硬盘', 'ep:box', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- 脚本/自动化（Layout + 子菜单，仅 admin，位于服务器状态之后）
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (10, 0, 'automation', '/automation', 'Layout', '/automation/scripts', 'dir', '脚本/自动化', 'ep:timer', 1, 'admin', 9, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (101, 10, 'appstore-scripts', 'scripts', 'automation/scripts/index', 'menu', '自定义脚本', 'ep:document', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (102, 10, 'script-cron', 'cron', 'automation/cron/index', 'menu', '计划任务', 'ep:alarm-clock', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- Dev（Layout + 子菜单，位于最下方，admin/user/reseller）
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (12, 0, 'dev', '/dev', 'Layout', '/dev/api-tokens', 'dir', '开发', 'ep:tools', 1, 'admin,user,reseller', 12, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (121, 12, 'api-tokens', 'api-tokens', 'dev/api-tokens/index', 'menu', 'API Tokens', 'ep:key', 1, 'admin,user,reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (122, 12, 'api-docs', 'api-docs', 'dev/api-docs/index', 'menu', 'API 文档', 'ep:document', 1, 'admin,user,reseller', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (123, 12, 'app-script-guide', 'app-script-guide', 'dev/app-script-guide/index', 'menu', '应用脚本编写', 'ep:notebook', 1, 'admin,user,reseller', 3, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -344,20 +369,16 @@ async fn init_role_menus_table() {
     -- AppStore: admin / user / reseller 均可访问
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 6);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 61);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 62);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 6);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 61);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 62);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 6);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 61);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 62);
     -- Demo: dashboard, files, terminal, appstore（与普通用户一致）
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 1);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 3);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 4);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 6);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 61);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 62);
     -- Server status: admin 专属
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 8);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 81);
@@ -383,6 +404,36 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 91);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 91);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 91);
+    -- SSL/TLS：admin / user
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 11);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 111);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 11);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 111);
+    -- 已安装应用：admin / user / reseller
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 62);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 62);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 62);
+    -- 基础设置：仅 admin
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 26);
+    -- 审计日志：仅 admin
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 24);
+    -- 脚本/自动化（自定义脚本 + 计划任务）：仅 admin
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 10);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 101);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 102);
+    -- 开发：admin / user / reseller
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 12);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 121);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 122);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 123);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 12);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 121);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 122);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 123);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 12);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 121);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 122);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 123);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -465,6 +516,29 @@ async fn init_hourly_stats_tables() {
         "#;
         let _ = get_db_pool().await.execute(sql).await;
     }
+}
+
+// ── appstore ────────────────────────────────────────────────
+
+// ── cron_jobs（脚本/自动化：计划任务）────────────────────────
+
+async fn init_cron_jobs_table() {
+    let sql = r#"
+    CREATE TABLE IF NOT EXISTS cron_jobs (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL DEFAULT '',
+        script_path TEXT NOT NULL DEFAULT '',
+        schedule TEXT NOT NULL DEFAULT '',
+        remark TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_run_at INTEGER NOT NULL DEFAULT 0,
+        last_run_id TEXT NOT NULL DEFAULT '',
+        next_run_at INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0
+    );
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
 }
 
 // ── appstore ────────────────────────────────────────────────
@@ -621,87 +695,6 @@ async fn init_api_token_table() {
     let _ = get_db_pool().await.execute(sql).await;
 }
 
-/// 幂等补插「开发」顶级菜单及子菜单（API Tokens / API 文档 / 应用脚本编写），并授权 admin/user/reseller。
-/// 可安全重复执行：已存在则跳过（新库/旧库均适用，无需重置数据库）。
-async fn ensure_dev_menus() {
-    let pool = get_db_pool().await;
-    // 顶级目录：开发（sort_order=10，位于最下方）
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT 0, 'dev', '/dev', 'Layout', '/dev/api-tokens', 'dir', '开发', 'ep:tools', 1, 'admin,user,reseller', 10, 1, strftime('%s','now'), strftime('%s','now')
-        WHERE NOT EXISTS (SELECT 1 FROM menus WHERE parent_id = 0 AND name = 'dev')
-        "#,
-        )
-        .await;
-    // 子菜单：API Tokens
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT id, 'api-tokens', 'api-tokens', 'dev/api-tokens/index', 'menu', 'API Tokens', 'ep:key', 1, 'admin,user,reseller', 1, 1, strftime('%s','now'), strftime('%s','now')
-        FROM menus
-        WHERE parent_id = 0 AND name = 'dev'
-          AND NOT EXISTS (
-              SELECT 1 FROM menus m2
-              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev')
-                AND m2.name = 'api-tokens'
-          )
-        "#,
-        )
-        .await;
-    // 子菜单：API 文档
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT id, 'api-docs', 'api-docs', 'dev/api-docs/index', 'menu', 'API 文档', 'ep:document', 1, 'admin,user,reseller', 2, 1, strftime('%s','now'), strftime('%s','now')
-        FROM menus
-        WHERE parent_id = 0 AND name = 'dev'
-          AND NOT EXISTS (
-              SELECT 1 FROM menus m3
-              WHERE m3.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev')
-                AND m3.name = 'api-docs'
-          )
-        "#,
-        )
-        .await;
-    // 子菜单：应用脚本编写
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT id, 'app-script-guide', 'app-script-guide', 'dev/app-script-guide/index', 'menu', '应用脚本编写', 'ep:notebook', 1, 'admin,user,reseller', 3, 1, strftime('%s','now'), strftime('%s','now')
-        FROM menus
-        WHERE parent_id = 0 AND name = 'dev'
-          AND NOT EXISTS (
-              SELECT 1 FROM menus m4
-              WHERE m4.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev')
-                AND m4.name = 'app-script-guide'
-          )
-        "#,
-        )
-        .await;
-    // role_menus 授权：admin / user / reseller ×（dev、api-tokens、api-docs、app-script-guide）
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO role_menus (role_id, menu_id)
-        SELECT r.id, m.id
-        FROM roles r
-        JOIN menus m
-          ON m.name IN ('dev', 'api-tokens', 'api-docs', 'app-script-guide')
-         AND (m.parent_id = 0 OR m.parent_id IN (SELECT id FROM menus WHERE parent_id = 0 AND name = 'dev'))
-        WHERE r.role_key IN ('admin', 'user', 'reseller')
-          AND NOT EXISTS (
-              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
-          )
-        "#,
-        )
-        .await;
-}
-
 // ── ssl_cert（SSL/TLS 证书管理）────────────────────────────
 
 async fn init_ssl_cert_table() {
@@ -724,166 +717,6 @@ async fn init_ssl_cert_table() {
     );
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-}
-
-/// 幂等补插「SSL/TLS」顶级菜单（位于应用商店上方）及「SSL 证书管理」子菜单，
-/// 并授权 admin / user。可安全重复执行：仅当菜单不存在时先把应用商店及其后的
-/// 顶级菜单排序后移，再插入 SSL/TLS（sort_order=6，位于应用商店之前）。
-async fn ensure_ssl_menus() {
-    let pool = get_db_pool().await;
-    // 首次插入时，将应用商店及其后顶级菜单（sort_order >= 6）整体后移
-    let _ = pool
-        .execute(
-            r#"
-        UPDATE menus SET sort_order = sort_order + 1
-        WHERE parent_id = 0 AND sort_order >= 6
-          AND NOT EXISTS (SELECT 1 FROM menus WHERE parent_id = 0 AND name = 'ssl-tls')
-        "#,
-        )
-        .await;
-    // 顶级目录：SSL/TLS
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT 0, 'ssl-tls', '/ssl-tls', 'Layout', '/ssl-tls/certs', 'dir', 'SSL/TLS', 'ep:lock', 1, 'admin,user', 6, 1, strftime('%s','now'), strftime('%s','now')
-        WHERE NOT EXISTS (SELECT 1 FROM menus WHERE parent_id = 0 AND name = 'ssl-tls')
-        "#,
-        )
-        .await;
-    // 子菜单：SSL证书管理
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT id, 'ssl-certs', 'certs', 'ssl-tls/certs/index', 'menu', 'SSL证书', 'ep:lock', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now')
-        FROM menus
-        WHERE parent_id = 0 AND name = 'ssl-tls'
-          AND NOT EXISTS (
-              SELECT 1 FROM menus m2
-              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'ssl-tls')
-                AND m2.name = 'ssl-certs'
-          )
-        "#,
-        )
-        .await;
-    // 兼容旧库：把已存在的「SSL 证书管理」标题统一改为「SSL证书」（幂等）
-    let _ = pool
-        .execute(
-            r#"
-        UPDATE menus SET title = 'SSL证书', updated_at = strftime('%s','now')
-        WHERE name = 'ssl-certs' AND title = 'SSL 证书管理'
-        "#,
-        )
-        .await;
-    // role_menus 授权：admin / user ×（ssl-tls、ssl-certs）
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO role_menus (role_id, menu_id)
-        SELECT r.id, m.id
-        FROM roles r
-        JOIN menus m
-          ON m.name IN ('ssl-tls', 'ssl-certs')
-         AND (m.parent_id = 0 OR m.parent_id IN (SELECT id FROM menus WHERE parent_id = 0 AND name = 'ssl-tls'))
-        WHERE r.role_key IN ('admin', 'user')
-          AND NOT EXISTS (
-              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
-          )
-        "#,
-        )
-        .await;
-}
-
-/// 幂等补插「审计日志」子菜单（位于「系统设置」目录下，仅 admin）。
-/// 可安全重复执行：已存在则跳过（新库/旧库均适用，无需重置数据库）。
-async fn ensure_audit_menu() {
-    let pool = get_db_pool().await;
-    // 子菜单：审计日志（紧跟 SSH 密钥之后，sort_order=5）
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT id, 'audit', 'audit', 'system/audit/index', 'menu', '审计日志', 'ep:tickets', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now')
-        FROM menus
-        WHERE parent_id = 0 AND name = 'system'
-          AND NOT EXISTS (
-              SELECT 1 FROM menus m2
-              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'system')
-                AND m2.name = 'audit'
-          )
-        "#,
-        )
-        .await;
-    // role_menus 授权：仅 admin × audit
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO role_menus (role_id, menu_id)
-        SELECT r.id, m.id
-        FROM roles r
-        JOIN menus m
-          ON m.name = 'audit'
-         AND m.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'system')
-        WHERE r.role_key = 'admin'
-          AND NOT EXISTS (
-              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
-          )
-        "#,
-        )
-        .await;
-}
-
-async fn ensure_installed_menu() {
-    let pool = get_db_pool().await;
-    // 将「脚本管理」后移（2 -> 3），给「已安装应用」腾出 sort_order=2
-    let _ = pool
-        .execute(
-            r#"
-        UPDATE menus SET sort_order = 3, updated_at = strftime('%s','now')
-        WHERE parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'appstore')
-          AND name = 'scripts' AND sort_order = 2
-          AND NOT EXISTS (
-              SELECT 1 FROM menus
-              WHERE parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'appstore')
-                AND name = 'installed'
-          )
-        "#,
-        )
-        .await;
-    // 子菜单：已安装应用
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO menus (parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-        SELECT id, 'installed', 'installed', 'appstore/installed', 'menu', '已安装应用', 'ep:box', 1, 'admin,user,reseller', 2, 1, strftime('%s','now'), strftime('%s','now')
-        FROM menus
-        WHERE parent_id = 0 AND name = 'appstore'
-          AND NOT EXISTS (
-              SELECT 1 FROM menus m2
-              WHERE m2.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'appstore')
-                AND m2.name = 'installed'
-          )
-        "#,
-        )
-        .await;
-    // role_menus 授权：admin / user / reseller × installed
-    let _ = pool
-        .execute(
-            r#"
-        INSERT INTO role_menus (role_id, menu_id)
-        SELECT r.id, m.id
-        FROM roles r
-        JOIN menus m
-          ON m.name = 'installed'
-         AND m.parent_id = (SELECT id FROM menus WHERE parent_id = 0 AND name = 'appstore')
-        WHERE r.role_key IN ('admin', 'user', 'reseller')
-          AND NOT EXISTS (
-              SELECT 1 FROM role_menus x WHERE x.role_id = r.id AND x.menu_id = m.id
-          )
-        "#,
-        )
-        .await;
 }
 
 // ── fpm_spec（PHP-FPM 规格模板库，仅 admin 维护）────────────────

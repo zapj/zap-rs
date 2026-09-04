@@ -35,19 +35,16 @@ fn require_admin(claims: &Claims) -> Result<(), ZapError> {
     }
 }
 
-/// 校验脚本路径：必须位于 custom/scripts/ 下；非管理员只能操作自己的目录。
-fn validate_script_path(claims: &Claims, path: &str) -> Result<(), ZapError> {
+/// 校验脚本路径：必须位于 custom/scripts/ 下（脚本管理为 admin 专属）。
+fn validate_script_path(path: &str) -> Result<(), ZapError> {
     if !path.starts_with("scripts/") {
         return Err(ZapError::New(
             -1,
             "只允许操作 scripts/ 下的脚本".to_string(),
         ));
     }
-    if !jwt::is_admin(claims) {
-        let prefix = format!("scripts/{}/", claims.sub);
-        if !path.starts_with(&prefix) {
-            return Err(ZapError::New(-1, "只能操作自己的脚本".to_string()));
-        }
+    if path.contains("..") {
+        return Err(ZapError::New(-1, "脚本路径不合法".to_string()));
     }
     Ok(())
 }
@@ -525,13 +522,10 @@ fn build_script_tree(dir: &std::path::Path, rel_base: &std::path::Path) -> Value
 }
 
 pub async fn scripts_tree(claims: ValidatedClaims) -> ZapJsonResult {
+    require_admin(&claims)?;
     // 路径统一相对 custom/（如 scripts/admin/backup.sh），与 script_read/write 契约一致
     let base = ast::appstore_dir().join("custom");
-    let root = if jwt::is_admin(&claims) {
-        base.join("scripts")
-    } else {
-        base.join("scripts").join(&claims.sub)
-    };
+    let root = base.join("scripts");
     let tree = tokio::task::spawn_blocking(move || {
         if root.is_dir() {
             build_script_tree(&root, &base)
@@ -555,7 +549,8 @@ pub async fn script_read(
     claims: ValidatedClaims,
     Query(q): Query<ScriptPathQuery>,
 ) -> ZapJsonResult {
-    validate_script_path(&claims, &q.path)?;
+    require_admin(&claims)?;
+    validate_script_path(&q.path)?;
     let resp = zapexec::call(Request::AppstoreScriptRead {
         path: q.path.clone(),
     })
@@ -579,7 +574,8 @@ pub async fn script_write(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<ScriptWritePayload>,
 ) -> ZapJsonResult {
-    validate_script_path(&claims, &payload.path)?;
+    require_admin(&claims)?;
+    validate_script_path(&payload.path)?;
     let resp = zapexec::call(Request::AppstoreScriptWrite {
         path: payload.path.clone(),
         content: payload.content.clone(),
@@ -611,7 +607,8 @@ pub async fn script_run(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<ScriptRunPayload>,
 ) -> ZapJsonResult {
-    validate_script_path(&claims, &payload.path)?;
+    require_admin(&claims)?;
+    validate_script_path(&payload.path)?;
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
     ast::register_run(&run_id, "script", &payload.path, &claims.sub, &log_path).await?;
@@ -651,13 +648,7 @@ pub async fn script_stop(
     claims: ValidatedClaims,
     Json(payload): Json<ScriptStopPayload>,
 ) -> ZapJsonResult {
-    // 非管理员只能停止自己发起的任务
-    if !jwt::is_admin(&claims)
-        && let Ok(Some(run)) = ast::get_run(&payload.run_id).await
-        && run.username != claims.sub
-    {
-        return Err(ZapError::New(-1, "只能停止自己发起的任务".to_string()));
-    }
+    require_admin(&claims)?;
     let resp = zapexec::call(Request::AppstoreScriptStop {
         run_id: payload.run_id.clone(),
     })
@@ -676,7 +667,8 @@ pub struct RunFilesQuery {
 }
 
 /// 列出一次运行的可编辑脚本快照文件树（runs/<run_id>/pkg/）。
-pub async fn run_files(_claims: ValidatedClaims, Query(q): Query<RunFilesQuery>) -> ZapJsonResult {
+pub async fn run_files(claims: ValidatedClaims, Query(q): Query<RunFilesQuery>) -> ZapJsonResult {
+    require_admin(&claims)?;
     let resp = zapexec::call(Request::AppstoreRunFiles {
         run_id: q.run_id.clone(),
     })
@@ -697,9 +689,10 @@ pub struct RunFileReadQuery {
 
 /// 读取运行快照内文件内容（编辑前查看）。
 pub async fn run_file_read(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
     Query(q): Query<RunFileReadQuery>,
 ) -> ZapJsonResult {
+    require_admin(&claims)?;
     let resp = zapexec::call(Request::AppstoreRunFileRead {
         run_id: q.run_id.clone(),
         path: q.path.clone(),

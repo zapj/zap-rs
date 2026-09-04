@@ -29,7 +29,7 @@
       </el-scrollbar>
       <div class="sidebar-tip">
         <el-icon><InfoFilled /></el-icon>
-        <span>自定义脚本位于 custom/scripts/，更新 Git 源时不会被覆盖</span>
+        <span>脚本位于 custom/scripts/（仅管理员可见），更新 Git 源时不会被覆盖，可被「计划任务」定时执行</span>
       </div>
     </div>
 
@@ -61,7 +61,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Folder, Document, InfoFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
@@ -132,7 +132,7 @@ async function openScript(path: string) {
 }
 
 async function handleNewScript() {
-  const username = userStore.name || 'user'
+  const username = userStore.name || 'admin'
   const defaultPath = `scripts/${username}/new-script.sh`
   try {
     const { value } = await ElMessageBox.prompt('请输入脚本路径（相对 custom/）', '新建脚本', {

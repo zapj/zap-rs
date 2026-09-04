@@ -98,6 +98,8 @@ async fn main() {
 
     // init job scheduler for system monitoring
     zap::job::init_system_jobs().await;
+    // init cron scheduler for 脚本/自动化 计划任务
+    zap::script_cron::start();
 
     let app = Router::new().merge(routers::routers()).layer((
         TraceLayer::new_for_http(),
