@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
 import { loadEnv, defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -6,17 +7,33 @@ import UnoCSS from 'unocss/vite'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
-import { viteMockServe } from 'vite-plugin-mock'
 // import { visualizer } from "rollup-plugin-visualizer";
 import Icons from 'unplugin-icons/vite'
 import IconsResolver from 'unplugin-icons/resolver'
+
+/**
+ * 读取后端 zapd 版本：解析 ../zapd/Cargo.toml 的 [package].version。
+ * 面板版本以后端为准（前端 web/package.json 的 version 仅代表前端产物，
+ * 前端展示用 `import.meta.env.VITE_APP_VERSION` 即后端版本）。
+ */
+function readZapdVersion(): string {
+  try {
+    const cargo = readFileSync(
+      fileURLToPath(new URL('../zapd/Cargo.toml', import.meta.url)),
+      'utf-8',
+    )
+    // 只匹配 [package] 段内的 version（依赖项里的 version 均不在行首）
+    return cargo.match(/^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m)?.[1] ?? ''
+  } catch {
+    return ''
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   console.log(mode)
   const env = loadEnv(mode, process.cwd())
   const useProxy = env.VITE_USE_PROXY === 'true'
-  const useMock = env.VITE_USE_MOCK === 'true'
 
   return {
     // 静态资源用相对路径：面板支持通过 zap.yaml 的 server.url_prefix
@@ -46,11 +63,6 @@ export default defineConfig(({ mode }) => {
             enabledCollections: ['ep'],
           }),
         ],
-      }),
-      viteMockServe({
-        mockPath: 'mock',
-        enable: useMock,
-        logger: true,
       }),
       // visualizer({
       //   gzipSize: true,
@@ -92,7 +104,9 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       "import.meta.env.VITE_BUILD_TIME": JSON.stringify(new Date().toISOString()),
-      "import.meta.env.VITE_APP_VERSION": JSON.stringify(process.env.npm_package_version),
+      // 版本以后端 zapd/Cargo.toml 为准；读不到时退回前端包版本
+      "import.meta.env.VITE_APP_VERSION": JSON.stringify(readZapdVersion() || process.env.npm_package_version),
+      "import.meta.env.VITE_WEB_VERSION": JSON.stringify(process.env.npm_package_version),
     },
    
   }
