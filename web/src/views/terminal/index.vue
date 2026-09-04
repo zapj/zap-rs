@@ -1133,8 +1133,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: stretch;
   height: 38px;
-  background: #252526;
-  border-bottom: 1px solid #1b1b1c;
+  background: #f5f6f7;
+  border-bottom: 1px solid #dcdfe6;
   overflow-x: auto;
   overflow-y: hidden;
   flex-shrink: 0;
@@ -1145,7 +1145,7 @@ onBeforeUnmount(() => {
 }
 
 .tabs-bar::-webkit-scrollbar-thumb {
-  background: #3c3c3c;
+  background: #c0c4cc;
   border-radius: 2px;
 }
 
@@ -1155,58 +1155,58 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 0 8px 0 14px;
-  font-size: 12px;
-  color: #9c9c9c;
+  padding: 0 10px 0 16px;
+  font-size: 13px;
+  color: #606266;
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
   flex-shrink: 0;
-  border-right: 1px solid #1e1e1e;
+  border-right: 1px solid #e4e7ed;
   transition: background 0.12s, color 0.12s;
 }
 
 .tab-item:hover {
-  background: #2d2d30;
-  color: #dcdcdc;
+  background: #eef1f5;
+  color: #303133;
 }
 
 .tab-item.active {
-  background: #1e1e1e;
-  color: #fff;
+  background: #fff;
+  color: #303133;
+  font-weight: 600;
 }
 
-/* 激活标签顶部色条（与编辑器风格一致） */
+/* 激活标签顶部色条（与整体蓝色主题一致） */
 .tab-item.active::before {
   content: '';
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
-  background: #007acc;
+  height: 3px;
+  background: #409eff;
 }
 
 /* 连接状态点：绿=已连接 黄脉冲=连接中 红=已断开 */
 .tab-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .tab-dot.connected {
-  background: #6cc644;
-  box-shadow: 0 0 4px rgba(108, 198, 68, 0.7);
+  background: #52c41a;
 }
 
 .tab-dot.connecting {
-  background: #e2c08d;
+  background: #e6a23c;
   animation: tab-dot-pulse 1s ease-in-out infinite;
 }
 
 .tab-dot.disconnected {
-  background: #da3633;
+  background: #f56c6c;
 }
 
 @keyframes tab-dot-pulse {
@@ -1224,21 +1224,21 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 4px;
-  color: #8f8f8f;
+  color: #909399;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
 
 .tab-item:hover .tab-close {
-  color: #c9c9c9;
+  color: #606266;
 }
 
 .tab-close:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  background: rgba(0, 0, 0, 0.08);
+  color: #303133;
 }
 
 .terminal-container {
