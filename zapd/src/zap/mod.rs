@@ -7,6 +7,7 @@ use thiserror::Error;
 
 pub mod appstore;
 pub mod audit;
+pub mod auto_update;
 pub mod certmgr;
 pub mod crypto;
 pub mod global;
@@ -17,6 +18,7 @@ pub mod script_cron;
 pub mod system_info;
 pub mod totp;
 pub mod types;
+pub mod updater;
 
 #[derive(Error, Debug)]
 pub enum ZapError {

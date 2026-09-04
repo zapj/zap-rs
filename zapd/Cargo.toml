@@ -54,6 +54,8 @@ clap = { version = "4.5.49", features = ["derive"] }
 zap-proto = { path = "../zap-proto" }
 x509-parser = "0.18.1"
 ureq = "2.12"
+tar = "0.4"
+flate2 = "1.0"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -36,6 +36,9 @@ pub async fn init_schema() {
     init_api_token_table().await;
     // SSL/TLS 证书管理表
     init_ssl_cert_table().await;
+    // 系统更新：自动更新配置表 + 「系统设置 → 系统更新」菜单（老库幂等补行）
+    init_update_config_table().await;
+    ensure_system_update_menu().await;
     // 菜单（menus/role_menus）为静态基础数据：SSL/TLS、应用商店（含已安装应用）、
     // 服务器状态、脚本/自动化（自定义脚本+计划任务）、系统设置（含审计日志）、
     // 服务器配置、开发 —— 均已直接 seed，无需运行时补插。
@@ -238,6 +241,8 @@ async fn init_menus_table() {
     VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (24, 2, 'audit', 'audit', 'system/audit/index', 'menu', '审计日志', 'ep:tickets', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (27, 2, 'system-update', 'update', 'system/update/index', 'menu', '系统更新', 'ep:refresh', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Server config dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -425,6 +430,8 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 26);
     -- 审计日志：仅 admin
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 24);
+    -- 系统更新：仅 admin
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 27);
     -- 脚本/自动化（自定义脚本 + 计划任务）：仅 admin
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 10);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 101);
@@ -828,6 +835,56 @@ async fn init_server_env_table() {
 }
 
 // ── helper ─────────────────────────────────────────────────
+
+/// 系统更新配置（单行表）：自动更新开关 / cron / 渠道 / 最近检查信息。
+async fn init_update_config_table() {
+    if table_exists("update_config").await {
+        return;
+    }
+    let sql = r#"
+    CREATE TABLE update_config (
+        id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+        auto INTEGER NOT NULL DEFAULT 0,
+        cron TEXT NOT NULL DEFAULT '0 3 * * *',
+        channel TEXT NOT NULL DEFAULT 'https://mirrors.zap.cn/zap/dist',
+        last_check_at INTEGER NOT NULL DEFAULT 0,
+        last_check_version TEXT NOT NULL DEFAULT '',
+        last_check_has_update INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO update_config (id, auto, cron, channel, updated_at)
+    VALUES (1, 0, '0 3 * * *', 'https://mirrors.zap.cn/zap/dist', strftime('%s','now'));
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+/// 「系统设置 → 系统更新」菜单（id=27）兜底：
+/// 新库由 init_menus_table 的 seed 直接写入；老库（menus 表已存在且无此菜单）
+/// 幂等补行并给 admin（role 1）授权。
+async fn ensure_system_update_menu() {
+    if !table_exists("menus").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let exists: Result<(i64,), sqlx::Error> = sqlx::query_as(
+        "SELECT id FROM menus WHERE name = 'system-update' OR id = 27 LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await;
+    if exists.is_ok() {
+        return;
+    }
+    let _ = sqlx::query(
+        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+         VALUES (27, 2, 'system-update', 'update', 'system/update/index', 'menu', '系统更新', 'ep:refresh', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'))",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (1, 27)")
+        .execute(pool)
+        .await;
+}
 
 async fn table_exists(table_name: &str) -> bool {
     let pool = get_db_pool().await;

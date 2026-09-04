@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ZAP 发布打包脚本：构建 zapd / zapctl / zapexec，打包并上传至 zap mirror
+# ZAP 发布打包脚本：构建 zapd / zapctl / zapexec / zapupgrade，打包并上传至 zap mirror
 set -euo pipefail
 
 # ── 终端颜色 ────────────────────────────────────────────────
@@ -53,10 +53,10 @@ rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 BIN_DIR="$CUR_DIR/target/$TARGET/release"
-for bin in zapd zapctl zapexec; do
+for bin in zapd zapctl zapexec zapupgrade; do
     cp -f "$BIN_DIR/$bin" "$DIST_DIR/" || die "复制 $bin 失败"
 done
-ok "二进制复制完成: zapd / zapctl / zapexec"
+ok "二进制复制完成: zapd / zapctl / zapexec / zapupgrade"
 
 # ── 同步内置 AppStore 源（独立 git 仓库 → 发行包）──────────
 # 内置源内容由独立仓库管理（默认与 zap-rs 同级的 zap-appstore），打包前 git pull 更新
@@ -92,6 +92,10 @@ ok "打包完成"
 # ── 上传 ────────────────────────────────────────────────────
 info "上传 ${ZAP_FILE_NAME} ..."
 zapfile upload zap/releases/ "$ZAP_FILE_NAME" || die "上传失败"
+# sha256 校验文件（zapd 升级下载时比对；不带换行避免残留）
+printf '%s' "$(sha256sum "$ZAP_FILE_NAME" | awk '{print $1}')" > "$ZAP_FILE_NAME.sha256"
+info "上传校验文件 ${ZAP_FILE_NAME}.sha256 ..."
+zapfile upload zap/releases/ "$ZAP_FILE_NAME.sha256" || die "上传校验文件失败"
 info "更新版本文件 latest.txt ..."
 zapfile put zap/releases/latest.txt "$VERSION" || die "更新版本文件失败"
 ok "上传完成"

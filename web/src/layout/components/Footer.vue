@@ -2,10 +2,24 @@
   <div class="footer">
     <span class="app-name">ZAP</span>
     <span class="sep">·</span>
-    <span class="version">v{{ APP_VERSION }}</span>
+    <span
+      class="version verlink"
+      :class="{ 'no-cursor': !canGoUpdate }"
+      :title="canGoUpdate ? '系统设置 → 系统更新' : ''"
+      @click="goUpdate"
+    >
+      v{{ APP_VERSION }}
+    </span>
     <template v-for="c in extraVersions" :key="c.label">
       <span class="sep">·</span>
-      <span class="extra">{{ c.label }} v{{ c.version }}</span>
+      <span
+        class="extra verlink"
+        :class="{ 'no-cursor': !canGoUpdate }"
+        :title="canGoUpdate ? '系统设置 → 系统更新' : ''"
+        @click="goUpdate"
+      >
+        {{ c.label }} v{{ c.version }}
+      </span>
     </template>
     <span v-if="formattedBuildTime" class="sep">·</span>
     <span v-if="formattedBuildTime" class="build">
@@ -17,6 +31,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 
 // 面板版本以后端 zapd 为准（构建时从 zapd/Cargo.toml 注入 VITE_APP_VERSION）
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || ''
@@ -25,6 +41,16 @@ const WEB_VERSION = import.meta.env.VITE_WEB_VERSION || ''
 const BUILD_TIME = import.meta.env.VITE_BUILD_TIME || ''
 
 const year = new Date().getFullYear()
+
+const router = useRouter()
+const userStore = useUserStore()
+
+/** 系统更新页仅 admin 可见：非管理员不提供跳转 */
+const canGoUpdate = computed(() => userStore.roles.includes('admin'))
+
+function goUpdate() {
+  if (canGoUpdate.value) router.push('/system/update')
+}
 
 /**
  * 与主版本（zapd）不一致的附加组件版本，以小字显示：
@@ -76,6 +102,19 @@ const formattedBuildTime = computed(() => {
 
 .sep {
   opacity: 0.6;
+}
+
+.verlink {
+  cursor: pointer;
+  transition: text-decoration 0.1s;
+}
+
+.verlink:hover {
+  text-decoration: underline;
+}
+
+.no-cursor {
+  cursor: default;
 }
 
 .copyright {

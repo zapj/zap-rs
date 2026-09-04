@@ -303,6 +303,19 @@ pub enum Request {
         /// fpm pool 规格 JSON 字符串；空 = 使用默认规格
         spec: String,
     },
+    /// 查询执行器自身信息（版本 / 安装目录），供系统更新页展示 zapexec 版本
+    #[serde(rename = "upgrade.info")]
+    UpgradeInfo,
+    /// 触发一次系统升级：在独立 systemd scope 中拉起 zapupgrade，
+    /// 由它在不依赖 zapd/zapexec 存活的前提下完成 校验/备份/替换/重启。
+    /// stage_dir：zapd 下载解包规整后的目录（须位于 {ZAP_PATH}/data/upgrade/stage/ 下）；
+    /// log_path：zapd 准备的日志文件（同数据区，upgrade/logs/ 下）。
+    #[serde(rename = "upgrade.run")]
+    UpgradeRun {
+        run_id: String,
+        stage_dir: String,
+        log_path: String,
+    },
 }
 
 /// `zapexec` -> `zapd` 的响应。
@@ -618,6 +631,27 @@ mod tests {
         let got = linux_username(&long);
         assert!(got.len() <= 24);
         assert!(got.chars().next().unwrap().is_ascii_alphabetic());
+    }
+
+    #[test]
+    fn upgrade_verbs_tagging() {
+        assert_eq!(
+            serde_json::to_string(&Request::UpgradeInfo).unwrap(),
+            r#"{"verb":"upgrade.info"}"#
+        );
+        let json = serde_json::to_string(&Request::UpgradeRun {
+            run_id: "r1".into(),
+            stage_dir: "/usr/local/zap/data/upgrade/stage/r1".into(),
+            log_path: "/usr/local/zap/data/upgrade/logs/run-r1.log".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"verb":"upgrade.run","run_id":"r1","stage_dir":"/usr/local/zap/data/upgrade/stage/r1","log_path":"/usr/local/zap/data/upgrade/logs/run-r1.log"}"#
+        );
+        // 白名单之外必须被拒绝（回归）
+        let err = serde_json::from_str::<Request>(r#"{"verb":"shell.exec","cmd":"id"}"#);
+        assert!(err.is_err());
     }
 
     #[test]

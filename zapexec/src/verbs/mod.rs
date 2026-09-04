@@ -9,6 +9,7 @@ mod site;
 mod ssh;
 mod ssh_key;
 mod time;
+mod upgrade;
 mod user;
 
 use std::path::PathBuf;
@@ -176,6 +177,12 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             home_dir,
             spec,
         } => php::pool_sync(php_instance, linux_user, home_dir, spec).await,
+        Request::UpgradeInfo => upgrade::info().await,
+        Request::UpgradeRun {
+            run_id,
+            stage_dir,
+            log_path,
+        } => upgrade::run(run_id, stage_dir, log_path).await,
     }
 }
 

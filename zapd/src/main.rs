@@ -126,6 +126,8 @@ async fn main() {
     zap::job::init_system_jobs().await;
     // init cron scheduler for 脚本/自动化 计划任务
     zap::script_cron::start();
+    // 自动更新（zapd/zapexec 系统升级）定时调度
+    zap::auto_update::start();
 
     let app = Router::new().merge(routers::routers()).layer((
         TraceLayer::new_for_http(),

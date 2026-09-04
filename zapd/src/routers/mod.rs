@@ -60,6 +60,7 @@ pub mod system_ip;
 pub mod system_job;
 pub mod system_menu;
 pub mod system_role;
+pub mod system_update;
 pub mod user;
 
 #[derive(RustEmbed)]
@@ -393,6 +394,12 @@ fn api_routers() -> Router {
         .route("/system/job/start", get(system_job::start_job))
         // Audit logs (admin only)
         .route("/system/audit/list", get(system_audit::audit_list))
+        // System update (系统设置 → 系统更新, admin only)
+        .route("/system/update/status", get(system_update::status_get))
+        .route("/system/update/config", post(system_update::config_save))
+        .route("/system/update/check", post(system_update::check))
+        .route("/system/update/apply", post(system_update::apply))
+        .route("/system/update/log/{run_id}", get(system_update::log))
         // File manager
         .route("/system/files/list", get(system_file::file_list))
         .route("/system/files/read", get(system_file::file_read))

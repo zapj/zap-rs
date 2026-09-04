@@ -101,8 +101,8 @@ fi
 if [ "$SKIP_BUILD" = true ]; then
   warn "跳过后端构建"
 else
-  info "构建后端 (cargo build ${CARGO_FLAGS[*]} --bin zapd --bin zapexec) ..."
-  cargo build "${CARGO_FLAGS[@]}" --bin zapd --bin zapexec || die "后端构建失败"
+  info "构建后端 (cargo build ${CARGO_FLAGS[*]} --bin zapd --bin zapexec --bin zapupgrade) ..."
+  cargo build "${CARGO_FLAGS[@]}" --bin zapd --bin zapexec --bin zapupgrade || die "后端构建失败"
   ok "后端构建完成 -> $BIN_DIR"
 fi
 
@@ -206,6 +206,7 @@ else
   info "  zapd    : https://127.0.0.1:2600 （默认 admin / 123456）"
 fi
 info "  zapexec : $EXEC_SOCKET （root 特权守护进程）"
+info "  zapupgrade: $BIN_DIR/zapupgrade （系统升级器，开发环境为手动重启模式）"
 info "  按 Ctrl+C 停止全部服务"
 echo ""
 

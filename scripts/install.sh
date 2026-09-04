@@ -29,7 +29,7 @@ esac
 info "目标版本: ${VERSION}   架构: ${ARCH}"
 
 # ── 解析 latest 版本号 ──────────────────────────────────────
-DOWNLOAD_ZAP_URL="https://mirrors.zap.cn/zap/dist"
+DOWNLOAD_ZAP_URL="https://mirrors.zap.cn/zap/releases"
 if [ "$VERSION" = "latest" ]; then
     info "查询最新版本..."
     if LATEST=$(wget -q -O - "${DOWNLOAD_ZAP_URL}/latest.txt?t=$(date +%s)") && [ -n "$LATEST" ]; then
@@ -118,14 +118,16 @@ if [ -d "$TARGET/zap" ]; then
     cp -Rf zap/zapctl "$TARGET/zap/"    || die "部署 zapctl 失败"
     cp -Rf zap/zapd "$TARGET/zap/"      || die "部署 zapd 失败"
     cp -Rf zap/zapexec "$TARGET/zap/"   || die "部署 zapexec 失败"
+    cp -Rf zap/zapupgrade "$TARGET/zap/" || die "部署 zapupgrade 失败"
     cp -Rf zap/scripts "$TARGET/zap/"   || true
 else
     info "部署程序到 ${TARGET}/zap ..."
     cp -Rf zap "$TARGET/"
-    chmod +x "$TARGET/zap/zapd" "$TARGET/zap/zapctl" "$TARGET/zap/zapexec"
+    chmod +x "$TARGET/zap/zapd" "$TARGET/zap/zapctl" "$TARGET/zap/zapexec" "$TARGET/zap/zapupgrade"
     ln -sf "$TARGET/zap/zapctl"   /usr/local/bin/zapctl
     ln -sf "$TARGET/zap/zapd"     /usr/local/bin/zapd
     ln -sf "$TARGET/zap/zapexec"  /usr/local/bin/zapexec
+    ln -sf "$TARGET/zap/zapupgrade" /usr/local/bin/zapupgrade
 fi
 # 幂等部署 AppStore（升级不覆盖 git/.git 与 custom/）
 deploy_appstore

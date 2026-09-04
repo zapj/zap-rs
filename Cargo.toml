@@ -1,3 +1,3 @@
 [workspace]
 resolver = "3"
-members = ["zapd","zapctl","zap-proto","zapexec"]
+members = ["zapd","zapctl","zap-proto","zapexec","zapupgrade"]

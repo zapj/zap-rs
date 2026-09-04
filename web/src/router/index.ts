@@ -109,6 +109,12 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         component: () => import('@/views/system/config/ssh-keys.vue'),
         meta: { title: 'SSH 密钥', icon: 'Key', affix: true },
       },
+      {
+        path: 'update',
+        name: 'SystemUpdate',
+        component: () => import('@/views/system/update/index.vue'),
+        meta: { title: '系统更新', icon: 'Refresh', affix: true },
+      },
     ],
   },
   // 文件管理（Layout 包裹 + 一级直链）
