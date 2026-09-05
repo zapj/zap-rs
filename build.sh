@@ -88,20 +88,18 @@ cp -Rf "$CUR_DIR/scripts" "$DIST_DIR/"
 #   appstore/repos/zap-appstore/          内置 AppStore 种子源
 #   appstore/repos.yaml、custom/README.md 安装脚本(install.sh)依赖的模板
 #   apps/README.md                        APPS_DIR 占位说明（apps 下其它为运行时安装实例，不打包）
-#   systemd/ tools/                       数据库等服务模板、运维脚本
+# 说明：systemd 服务模板、运维脚本、zap 共享工具与 conf 模板统一由 scripts/ 提供（第 85 行），
+#       不重复打进 data/；安装后 data/ 是运行时数据区（zap.db、apps、appstore、run/ 等）
 # 不打包：zap.db、run/、tmp/、apps/library、appstore 的 cache/logs/runs/tmp/custom/scripts
 DIST_DATA="$DIST_DIR/data"
-mkdir -p "$DIST_DATA/apps" "$DIST_DATA/systemd" "$DIST_DATA/tools"
+mkdir -p "$DIST_DATA/apps"
 mkdir -p "$DIST_DATA/appstore/repos" "$DIST_DATA/appstore/custom"
 cp -Rf "$CUR_DIR/data/appstore/repos/zap-appstore" "$DIST_DATA/appstore/repos/" 2>/dev/null || true
 cp -f "$CUR_DIR/data/appstore/repos.yaml" "$DIST_DATA/appstore/" 2>/dev/null || true
 cp -f "$CUR_DIR/data/appstore/custom/README.md" "$DIST_DATA/appstore/custom/" 2>/dev/null || true
 cp -f "$CUR_DIR/data/apps/README.md" "$DIST_DATA/apps/" 2>/dev/null || true
-cp -Rf "$CUR_DIR/data/systemd/." "$DIST_DATA/systemd/" 2>/dev/null || true
-cp -Rf "$CUR_DIR/data/tools/." "$DIST_DATA/tools/" 2>/dev/null || true
 
-mkdir -p "$DIST_DIR/conf"
-cp -f "$CUR_DIR/conf/zap.yaml" "$DIST_DIR/conf/" 2>/dev/null || warn "无 conf/zap.yaml 模板，跳过"
+# 不打包 conf/：zap.yaml 由安装文件(install.sh)创建，升级沿用已有配置，无需内置模板
 ok "资源复制完成"
 
 cd "$DIST_DIR" || die "无法进入 dist 目录"
