@@ -2,12 +2,12 @@
 //!
 //! 职责：管理 `zapd`（业务主进程）与 `zapexec`（root 特权守护进程）的
 //! systemd 服务（start / stop / restart / status / enable / disable / logs）；
-//! 运维 `zap.db`（db）、用户（user / passwd）、配置文件键值（config）。
+//! 备份（backup：zap 数据库/配置、用户数据）、用户（user / passwd）、配置文件键值（config）。
 //!
 //! 后续运维能力（如远程任务下发、一键健康检查等）在 [`Command`] 中追加子命令即可。
 
+mod backup;
 mod config;
-mod db;
 mod user;
 
 use std::collections::HashMap;
@@ -93,10 +93,10 @@ enum Command {
         #[arg(short = 'n', long, default_value_t = 50)]
         lines: u32,
     },
-    /// 访问 zap.db 数据库
-    Db {
+    /// 备份 / 还原 / 管理归档：zap（zap）、用户（user / users）、还原（restore）、列出（list）、清理（prune）
+    Backup {
         #[command(subcommand)]
-        cmd: db::DbCommand,
+        cmd: backup::BackupCommand,
     },
     /// 用户管理
     User {
@@ -165,7 +165,7 @@ fn main() {
             follow,
             lines,
         } => logs(service, follow, lines),
-        Command::Db { cmd } => db::dispatch(cmd, &db_path),
+        Command::Backup { cmd } => backup::dispatch(cmd, &db_path),
         Command::User { cmd } => user::dispatch(cmd, &db_path),
         Command::Passwd { username } => user::cmd_self_passwd(&db_path, &username),
         Command::Config { file, cmd } => {
