@@ -288,6 +288,17 @@ pub enum Request {
         /// Linux 账号名
         linux_user: String,
     },
+    /// 设置 Linux 系统账号的磁盘配额（root 特权，best-effort）。
+    /// quota_mb = 0 表示取消配额（不限）。
+    /// 自动适配 ext 系列（setquota）与 xfs（xfs_quota）；工具缺失或文件系统未启用
+    /// quota 时返回错误，调用方（zapd）仅记录告警，不阻断用户创建流程。
+    #[serde(rename = "user.quota_set")]
+    UserQuotaSet {
+        /// Linux 账号名（须通过 zap_proto::linux_username 派生，调用方已校验）
+        linux_user: String,
+        /// 配额（MB，0 = 不限）
+        quota_mb: i64,
+    },
     /// 按用户生成 PHP-FPM pool 配置并 reload（幂等）：
     /// 写入 {php 安装}/etc/php-fpm.d/{linux_user}.conf，
     /// listen unix:/var/run/php-fpm-{linux_user}-{php版本}.sock，worker 以 {linux_user} 运行，

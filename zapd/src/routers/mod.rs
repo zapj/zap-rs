@@ -44,6 +44,7 @@ pub mod auth;
 pub mod dev;
 pub mod fpm_spec;
 pub mod notice;
+pub mod package;
 pub mod site;
 pub mod ssh_keys;
 pub mod ssh_terminal;
@@ -235,6 +236,11 @@ fn api_routers() -> Router {
         .route("/system/user/delete", post(user::user_delete))
         .route("/system/user/resellers", get(user::reseller_list))
         .route("/system/user/home_sync", post(user::user_home_sync))
+        // 套餐（Packages）：创建客户时选择的资源套餐
+        .route("/system/package/list", get(package::package_list))
+        .route("/system/package/add", post(package::package_add))
+        .route("/system/package/update", post(package::package_update))
+        .route("/system/package/delete", post(package::package_delete))
         // Role management (admin only)
         .route("/system/role/list", get(system_role::role_list))
         .route("/system/role/add", post(system_role::role_add))

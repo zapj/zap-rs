@@ -72,6 +72,14 @@
             <span v-else class="spec-name">{{ fpmSpecLabel(row) }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="套餐" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.package_name" size="small" type="primary" effect="plain">
+              {{ row.package_name }}
+            </el-tag>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="isAdmin" label="归属" width="120">
           <template #default="{ row }">
             <el-tag v-if="row.owner_id === 0" size="small" type="info">系统</el-tag>
@@ -186,6 +194,23 @@
             style="margin-top: 8px"
           />
         </el-form-item>
+        <el-form-item label="套餐">
+          <el-select
+            v-model="form.package_id"
+            :loading="pkgLoading"
+            placeholder="不绑定套餐"
+            style="width: 100%"
+          >
+            <el-option label="不绑定套餐（不受套餐限制）" :value="0" />
+            <el-option
+              v-for="p in packageOptions"
+              :key="p.value"
+              :label="p.label"
+              :value="p.value"
+            />
+          </el-select>
+          <div class="form-tip">{{ packageTip() }}</div>
+        </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="form.status">
             <el-radio :value="1">启用</el-radio>
@@ -220,6 +245,7 @@ import {
 import { roleLabel, ROLE_OPTIONS } from '@/utils/role'
 import { useUserStore } from '@/stores/user'
 import { getFpmSpecs, type FpmSpecItem } from '@/api/serverEnv'
+import { getPackageList, type PackageItem } from '@/api/package'
 
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
@@ -364,6 +390,48 @@ function fpmSpecLabel(row: UserListItem): string {
   return '面板默认'
 }
 
+// ── 套餐（Packages）选择 ────────────────────────────────────
+
+/** 套餐列表（后端已按角色过滤：admin 全量；reseller 全局 + 自己名下） */
+const packages = ref<PackageItem[]>([])
+const pkgLoading = ref(false)
+
+async function loadPackages() {
+  pkgLoading.value = true
+  try {
+    const res = await getPackageList()
+    // 停用的套餐不参与下拉选择
+    packages.value = (res.data ?? []).filter((p) => p.status === 1)
+  } catch {
+    // 拦截器已弹窗
+  } finally {
+    pkgLoading.value = false
+  }
+}
+
+/** 套餐摘要：磁盘 / 站点 / SSH */
+function describePackage(p: PackageItem): string {
+  const parts = [
+    p.disk_quota_mb > 0 ? `磁盘 ${p.disk_quota_mb}MB` : '磁盘不限',
+    p.max_sites > 0 ? `${p.max_sites} 站点` : '站点不限',
+    p.allow_ssh ? '允许 SSH' : '禁用 SSH',
+  ]
+  if (p.max_bandwidth_mb > 0) parts.push(`流量 ${p.max_bandwidth_mb}MB`)
+  return parts.join(' · ')
+}
+
+const packageOptions = computed(() =>
+  packages.value.map((p) => ({ value: p.id, label: `${p.name}（${describePackage(p)}）` })),
+)
+
+/** 当前所选套餐的提示文案 */
+function packageTip(): string {
+  if (!form.package_id) return '不绑定套餐：该客户不受套餐限制（磁盘、站点数、SSH 均不拦截）。'
+  const p = packages.value.find((x) => x.id === form.package_id)
+  if (!p) return '所选套餐已不可用，请重新选择。'
+  return `继承：${describePackage(p)}${p.fpm_spec_ref ? ` · FPM ${p.fpm_spec_ref}` : ''}`
+}
+
 /** 校验自定义 FPM JSON（空 = 不允许，自定义模式必须填对象） */
 function fpmCustomValid(raw: string): boolean {
   const v = raw.trim()
@@ -409,6 +477,8 @@ interface FormData {
   status: number
   /** 用户 PHP-FPM pool 规格（JSON 字符串，空 = 面板默认） */
   fpm_pool: string
+  /** 套餐 id；0 = 不绑定套餐 */
+  package_id: number
 }
 
 const defaultForm = (): FormData => ({
@@ -420,6 +490,7 @@ const defaultForm = (): FormData => ({
   owner_id: 0,
   status: 1,
   fpm_pool: '',
+  package_id: 0,
 })
 
 const form = reactive<FormData>(defaultForm())
@@ -461,6 +532,7 @@ function handleEdit(row: UserListItem) {
     owner_id: row.owner_id ?? 0,
     status: row.status,
     fpm_pool: row.fpm_pool ?? '',
+    package_id: row.package_id ?? 0,
   })
   fpmMode.value = fpmEditInitial(row)
   fpmCustomJson.value =
@@ -513,6 +585,7 @@ async function submitForm() {
         payload.roles = form.roles
         payload.owner_id = form.owner_id || 0
       }
+      payload.package_id = form.package_id || 0
       if (fpmPayload.fpm_spec_ref !== undefined) {
         payload.fpm_spec_ref = fpmPayload.fpm_spec_ref
       } else if (fpmPayload.fpm_pool !== undefined) {
@@ -530,6 +603,7 @@ async function submitForm() {
         status: form.status,
       }
       if (isAdmin.value) payload.roles = form.roles
+      payload.package_id = form.package_id || 0
       if (fpmPayload.fpm_spec_ref !== undefined) {
         payload.fpm_spec_ref = fpmPayload.fpm_spec_ref
       }
@@ -597,6 +671,7 @@ onMounted(() => {
   loadList()
   loadResellers()
   loadSpecs()
+  loadPackages()
 })
 </script>
 

@@ -26,6 +26,8 @@ pub async fn init_schema() {
     // PHP-FPM 规格模板表 + user.fpm_spec_ref 列（老库幂等补列）
     init_fpm_spec_table().await;
     ensure_user_fpm_spec_ref_column().await;
+    // 套餐（Packages）表：创建客户时可选择的资源套餐
+    init_packages_table().await;
     // user.prefs 列（个人中心 → 偏好设置，老库幂等补列）
     ensure_user_prefs_column().await;
     // 站内信（通知中心）表
@@ -69,6 +71,7 @@ async fn init_system_user_table_schema() {
         roles TEXT,
         permissions TEXT,
         owner_id INTEGER DEFAULT 0,
+        package_id INTEGER NOT NULL DEFAULT 0,
         totp_secret TEXT NOT NULL DEFAULT '',
         totp_enabled INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER,
@@ -109,6 +112,38 @@ async fn init_system_user_table_schema() {
     .execute(get_db_pool().await)
     .await
     .unwrap();
+}
+
+// ── packages（套餐）────────────────────────────────────────
+
+/// 套餐（Packages）：创建客户时选用的资源套餐（对齐 cPanel/WHM 的 Packages）。
+/// - owner_id = 0：全局套餐（admin 维护，所有人可用）
+/// - owner_id != 0：reseller 自建套餐，仅创建者自己可用
+/// - 限制项：磁盘配额 / 最大站点数 / 月流量（仅记录）/ FPM 规格模板 / SSH 终端开关
+/// - 数值 0 表示「不限」
+async fn init_packages_table() {
+    if table_exists("packages").await {
+        return;
+    }
+    let sql = r#"
+    CREATE TABLE packages (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        name VARCHAR(64) UNIQUE NOT NULL,
+        remark TEXT NOT NULL DEFAULT '',
+        disk_quota_mb INTEGER NOT NULL DEFAULT 0,
+        max_sites INTEGER NOT NULL DEFAULT 0,
+        max_bandwidth_mb INTEGER NOT NULL DEFAULT 0,
+        fpm_spec_ref TEXT NOT NULL DEFAULT '',
+        allow_ssh INTEGER NOT NULL DEFAULT 0,
+        owner_id INTEGER NOT NULL DEFAULT 0,
+        status INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER,
+        updated_at INTEGER
+    );
+    INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, fpm_spec_ref, allow_ssh, owner_id, status, created_at, updated_at)
+    VALUES ('默认套餐', '不限磁盘、不限站点、允许 SSH 终端', 0, 0, 0, '', 1, 0, 1, strftime('%s','now'), strftime('%s','now'));
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
 }
 
 // ── monitor ────────────────────────────────────────────────
@@ -283,6 +318,8 @@ async fn init_menus_table() {
     VALUES (5, 0, 'reseller-users', '/reseller/users', 'Layout', '/reseller/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 5, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (51, 5, 'reseller-users-index', 'index', 'system/users/index', 'menu', '客户管理', 'ep:user-filled', 1, 'reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (52, 5, 'reseller-packages', 'packages', 'system/packages/index', 'menu', '套餐', 'ep:goods', 0, 'admin,reseller', 2, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- SSL/TLS（Layout + 子菜单，位于应用商店之前，admin/user）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -378,6 +415,9 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 4);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 5);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 51);
+    -- 套餐（Packages）：admin 与 reseller 均可使用
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 52);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 52);
     -- AppStore: admin / user / reseller 均可访问
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 6);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 61);

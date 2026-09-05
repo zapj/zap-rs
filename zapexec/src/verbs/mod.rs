@@ -171,6 +171,10 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             home_dir,
         } => user::system_init(&linux_user, &home_dir).await,
         Request::UserSystemRemove { linux_user } => user::system_remove(&linux_user).await,
+        Request::UserQuotaSet {
+            linux_user,
+            quota_mb,
+        } => user::quota_set(&linux_user, quota_mb).await,
         Request::PhpPoolSync {
             php_instance,
             linux_user,

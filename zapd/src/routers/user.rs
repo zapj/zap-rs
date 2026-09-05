@@ -31,6 +31,7 @@ struct UserInfo {
     roles: String,
     permissions: String,
     owner_id: i64,
+    package_id: i64,
     created_at: i64,
     updated_at: i64,
 }
@@ -48,6 +49,8 @@ pub struct CreateUserPayload {
     pub fpm_pool: Option<String>,
     /// PHP-FPM 规格引用：''=面板默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名
     pub fpm_spec_ref: Option<String>,
+    /// 套餐 id（0 / None = 不绑定套餐）
+    pub package_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +67,8 @@ pub struct UpdateUserPayload {
     /// PHP-FPM 规格引用：''=面板默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名；
     /// 提交引用（含面板默认）时后端会同步清空旧的自定义 fpm_pool
     pub fpm_spec_ref: Option<String>,
+    /// 套餐 id（0 = 解除套餐绑定）
+    pub package_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,6 +163,39 @@ pub async fn ensure_user_runtime(uid: i64) -> Result<(), String> {
         return Err(format!("初始化家目录失败: {}", resp.message));
     }
     Ok(())
+}
+
+/// 按用户当前套餐下发磁盘配额（best-effort：失败仅写日志，不阻断用户创建/编辑）。
+/// 未绑定套餐、套餐未提供配额字段或用户无 Linux 系统账号（www 统一模式）时跳过。
+pub async fn sync_package_quota(user_id: i64) {
+    let Some(pkg) = crate::routers::package::package_of_user(user_id).await else {
+        return;
+    };
+    let pool = db::get_db_pool().await;
+    let lu: Option<String> = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+    let Some(linux_user) = lu.filter(|s| !s.trim().is_empty()) else {
+        return;
+    };
+    let req = zap_proto::types::Request::UserQuotaSet {
+        linux_user: linux_user.clone(),
+        quota_mb: pkg.disk_quota_mb,
+    };
+    match crate::zapexec::call(req).await {
+        Ok(resp) if resp.code == 0 => info!(
+            "套餐「{}」磁盘配额已下发: {} = {} MB",
+            pkg.name, linux_user, pkg.disk_quota_mb
+        ),
+        Ok(resp) => warn!(
+            "下发磁盘配额失败({}): {}（配额未生效时可检查文件系统是否启用 quota）",
+            linux_user, resp.message
+        ),
+        Err(e) => warn!("下发磁盘配额失败({}): {}", linux_user, e),
+    }
 }
 
 /// Fetch the owner_id of a user. Returns -1 when the user does not exist.
@@ -302,7 +340,7 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
 
     let mut querybuilder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
-        "SELECT id,username,email,phone,nickname,home_dir,linux_user,fpm_pool,fpm_spec_ref,last_login_ip,last_login_time,status,roles,permissions,owner_id,created_at,updated_at FROM user",
+        "SELECT id,username,email,phone,nickname,home_dir,linux_user,fpm_pool,fpm_spec_ref,last_login_ip,last_login_time,status,roles,permissions,owner_id,package_id,created_at,updated_at FROM user",
     );
     if is_reseller && !is_admin {
         querybuilder
@@ -311,6 +349,12 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
     }
     querybuilder.push(" order by id desc");
     let users: Vec<UserInfo> = querybuilder.build_query_as().fetch_all(pool).await?;
+    // 套餐名映射（列表展示用；未绑定套餐时 id 为 0，查不到即空串）
+    let pkg_rows: Vec<(i64, String)> = sqlx::query_as("SELECT id, name FROM packages")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let pkg_names: std::collections::HashMap<i64, String> = pkg_rows.into_iter().collect();
 
     Ok(Json(json!({
         "code": 0,
@@ -332,6 +376,11 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
                 "roles": user.roles.split(',').collect::<Vec<&str>>(),
                 "permissions": user.permissions.split(',').collect::<Vec<&str>>(),
                 "owner_id": user.owner_id,
+                "package_id": user.package_id,
+                "package_name": pkg_names
+                    .get(&user.package_id)
+                    .cloned()
+                    .unwrap_or_default(),
                 "created_at": user.created_at,
                 "updated_at": user.updated_at,
             })
@@ -374,10 +423,27 @@ pub async fn user_add(
         .phone
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
+    // 套餐：校验可见性（admin 全部；reseller 仅全局与自己名下）
+    let package = match payload.package_id.filter(|v| *v > 0) {
+        Some(pid) => {
+            Some(crate::routers::package::load_for_actor(pid, is_admin, claims.id as i64).await?)
+        }
+        None => None,
+    };
+    let package_id = package.as_ref().map(|p| p.id).unwrap_or(0);
     // fpm 规格：fpm_pool（旧版自定义 JSON）与 fpm_spec_ref（模板/继承/默认）互斥。
     // 前端新流程只传 fpm_spec_ref；一旦显式指定引用，不再保留自定义 JSON（避免遮蔽模板）。
     let mut fpm_pool = normalize_fpm_spec(payload.fpm_pool)?.unwrap_or_default();
-    let fpm_spec_ref = payload.fpm_spec_ref.unwrap_or_default().trim().to_string();
+    let mut fpm_spec_ref = payload.fpm_spec_ref.unwrap_or_default().trim().to_string();
+    // 未显式选择模板时继承套餐绑定的 FPM 规格模板
+    if fpm_spec_ref.is_empty()
+        && let Some(p) = &package
+        && !p.fpm_spec_ref.trim().is_empty()
+    {
+        fpm_spec_ref = p.fpm_spec_ref.trim().to_string();
+        // 套餐模板可能由 admin 创建，reseller 使用时同样校验可见性
+        crate::routers::fpm_spec::validate_spec_ref(&fpm_spec_ref, is_admin, &claims.sub).await?;
+    }
     if !fpm_spec_ref.is_empty() {
         fpm_pool.clear();
     }
@@ -419,7 +485,7 @@ pub async fn user_add(
     let home_dir = format!("{home_root}/{lu}");
 
     let result = sqlx::query(
-        "INSERT INTO user (username, home_dir, linux_user, fpm_pool, fpm_spec_ref, password, email, phone, nickname, roles, permissions, owner_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        "INSERT INTO user (username, home_dir, linux_user, fpm_pool, fpm_spec_ref, password, email, phone, nickname, roles, permissions, owner_id, package_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
     )
     .bind(&payload.username)
     .bind(&home_dir)
@@ -433,6 +499,7 @@ pub async fn user_add(
     .bind(&roles)
     .bind("")
     .bind(owner_id)
+    .bind(package_id)
     .bind(now)
     .bind(now)
     .execute(pool)
@@ -458,6 +525,10 @@ pub async fn user_add(
             let new_id = r.last_insert_rowid();
             if let Err(e) = ensure_user_runtime(new_id).await {
                 warn!("初始化用户运行实体失败(id={}): {}", new_id, e);
+            }
+            // 套餐：下发磁盘配额（系统账号就绪后执行，best-effort）
+            if package.is_some() {
+                sync_package_quota(new_id).await;
             }
             Ok(Json(json!({
                 "code": 0,
@@ -535,6 +606,13 @@ pub async fn user_update(
             crate::routers::fpm_spec::validate_spec_ref(rv, false, &claims.sub).await?;
         }
     }
+    // 套餐：admin 全部可用；reseller 仅全局套餐与自己名下套餐
+    if let Some(pid) = payload.package_id
+        && pid > 0
+    {
+        crate::routers::package::load_for_actor(pid, jwt::is_admin(&claims), claims.id as i64)
+            .await?;
+    }
 
     // 更新他人时的归属/权限校验
     if !claims.pwd_is_default && payload.id != claims.id as i64 {
@@ -564,7 +642,8 @@ pub async fn user_update(
         || payload.status.is_some()
         || payload.password.is_some()
         || payload.fpm_pool.is_some()
-        || payload.fpm_spec_ref.is_some();
+        || payload.fpm_spec_ref.is_some()
+        || payload.package_id.is_some();
 
     if !has_any_field {
         return Err(ZapError::New(-1, "没有需要更新的字段".to_string()));
@@ -628,6 +707,11 @@ pub async fn user_update(
             .push("fpm_pool = ")
             .push_bind_unseparated(String::new());
     }
+    if let Some(pid) = payload.package_id {
+        separated
+            .push("package_id = ")
+            .push_bind_unseparated(pid.max(0));
+    }
     separated.push("updated_at = ").push_bind_unseparated(now);
 
     qb.push(" WHERE id = ").push_bind(payload.id);
@@ -655,6 +739,11 @@ pub async fn user_update(
         "",
     )
     .await;
+
+    // 套餐变更 → 重新下发磁盘配额（best-effort）
+    if payload.package_id.is_some() {
+        sync_package_quota(payload.id).await;
+    }
 
     // First-time password change (was still using the default password):
     // tell the frontend to log out and require re-login with the new password.

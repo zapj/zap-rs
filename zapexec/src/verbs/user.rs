@@ -344,3 +344,87 @@ fn migrate_home_inner(
         Some(json!({ "src_home": src, "dest_home": dest })),
     ))
 }
+
+// ── user.quota_set（磁盘配额，best-effort）───────────────────
+
+/// 设置 Linux 账号在其家目录所在文件系统上的块配额。
+/// quota_mb = 0 → 取消配额（不限）。自动适配 xfs 与 ext 系列。
+pub async fn quota_set(linux_user: &str, quota_mb: i64) -> Response {
+    let linux_user = linux_user.to_string();
+    tokio::task::spawn_blocking(move || quota_set_inner(&linux_user, quota_mb))
+        .await
+        .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+        .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+/// 执行 bash 并返回 stdout（trim）；失败时用 stderr/stdout 作为错误描述
+fn sh_out(script: &str) -> Result<String, String> {
+    let o = root_cmd("bash")
+        .args(["-c", script])
+        .output()
+        .map_err(|e| format!("执行命令失败: {e}"))?;
+    if o.status.success() {
+        Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
+    } else {
+        Err(cmd_err(&o, "命令执行失败"))
+    }
+}
+
+fn quota_set_inner(linux_user: &str, quota_mb: i64) -> Result<Response, String> {
+    if !linux_user_ok(linux_user) {
+        return Err(format!("非法的 Linux 账号名: {linux_user}"));
+    }
+    let uq = sh_quote(linux_user);
+    // 1) 账号家目录（passwd 第 6 字段）
+    let home = sh_out(&format!("getent passwd {uq} | cut -d: -f6"))?;
+    if !home.starts_with('/') || home == "/nonexistent" {
+        return Err(format!(
+            "账号 {linux_user} 没有有效家目录（{home}），无法设置磁盘配额"
+        ));
+    }
+    // 2) 家目录所在挂载点
+    let hq = sh_quote(&home);
+    let mount = sh_out(&format!("df -P {hq} | awk 'NR==2{{print $6}}'"))?;
+    if !mount.starts_with('/') {
+        return Err(format!("无法解析家目录 {home} 所在挂载点（df 输出异常）"));
+    }
+    // 3) 文件系统类型：xfs 走 xfs_quota，其余（ext2/3/4 等）走 setquota
+    let mq = sh_quote(&mount);
+    let fstype = sh_out(&format!("stat -f -c %T {mq} 2>/dev/null || true")).unwrap_or_default();
+    let is_xfs = fstype.eq_ignore_ascii_case("xfs");
+
+    if is_xfs {
+        if sh_out("command -v xfs_quota 2>/dev/null || true")?.is_empty() {
+            return Err("未找到 xfs_quota（请安装 quota 工具包），无法设置磁盘配额".to_string());
+        }
+        let limit = if quota_mb <= 0 {
+            "bsoft=0 bhard=0".to_string()
+        } else {
+            format!("bsoft={quota_mb}m bhard={quota_mb}m")
+        };
+        run_bash(&format!("xfs_quota -x -c 'limit {limit} {uq}' {mq}"))?;
+    } else {
+        if sh_out("command -v setquota 2>/dev/null || true")?.is_empty() {
+            return Err("未找到 setquota（请安装 quota 工具包），无法设置磁盘配额".to_string());
+        }
+        // setquota 以 1KB 块为单位：软限制 = 硬限制 = quota_mb * 1024
+        let kb = quota_mb.max(0) * 1024;
+        run_bash(&format!("setquota -u {uq} {kb} {kb} 0 0 {mq}"))?;
+    }
+
+    let desc = if quota_mb <= 0 {
+        "不限".to_string()
+    } else {
+        format!("{quota_mb} MB")
+    };
+    Ok(Response::ok(
+        format!("已设置 {linux_user} 磁盘配额：{desc}（挂载点 {mount}，类型 {fstype}）"),
+        Some(json!({
+            "linux_user": linux_user,
+            "quota_mb": quota_mb,
+            "home_dir": home,
+            "mount": mount,
+            "fstype": fstype,
+        })),
+    ))
+}

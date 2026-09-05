@@ -8,7 +8,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
-    response::IntoResponse,
+    response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
 use jsonwebtoken::{DecodingKey, Validation, decode};
@@ -429,7 +429,7 @@ pub async fn ws_terminal(
     ws: WebSocketUpgrade,
     Path(id): Path<i64>,
     Query(params): Query<std::collections::HashMap<String, String>>,
-) -> impl IntoResponse {
+) -> Response {
     // Validate token from query parameter (browser WebSocket doesn't support custom headers)
     let token = match params.get("token") {
         Some(t) => t.clone(),
@@ -441,10 +441,11 @@ pub async fn ws_terminal(
         }
     };
 
-    let secure_key = &config::get_config().read().unwrap().jwt.jwt_secure;
+    // 克隆密钥后立即释放锁：RwLockReadGuard 非 Send，跨 await 会导致 handler future 非 Send
+    let secure_key = config::get_config().read().unwrap().jwt.jwt_secure.clone();
     let claims = match decode::<Claims>(
         &token,
-        &DecodingKey::from_secret(secure_key.as_ref()),
+        &DecodingKey::from_secret(secure_key.as_bytes()),
         &Validation::default(),
     ) {
         Ok(d) => d.claims,
@@ -460,6 +461,18 @@ pub async fn ws_terminal(
         return axum::response::Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(axum::body::Body::from("演示账号仅支持浏览，不能使用终端"))
+            .unwrap();
+    }
+    // 套餐限制：已绑定套餐且未开启 SSH 终端时禁止使用（未绑定套餐不限制）
+    if let Some(pkg) = crate::routers::package::package_of_user(claims.id as i64).await
+        && pkg.allow_ssh != 1
+    {
+        return axum::response::Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(axum::body::Body::from(format!(
+                "当前套餐「{}」未开启 SSH 终端，请联系服务商变更套餐",
+                pkg.name
+            )))
             .unwrap();
     }
 

@@ -41,6 +41,10 @@ export interface UserListItem {
   roles: string[]
   permissions: string[]
   owner_id: number
+  /** 绑定的套餐 id；0 = 未绑定套餐 */
+  package_id: number
+  /** 套餐名（未绑定时为空串） */
+  package_name: string
   created_at: number
   updated_at: number
 }
@@ -83,6 +87,8 @@ export interface CreateUserPayload {
    * （与 fpm_pool 互斥，提交其一即可）
    */
   fpm_spec_ref?: string
+  /** 套餐 id；0 / 缺省 = 不绑定套餐（不继承套餐限制） */
+  package_id?: number
 }
 
 /** 新增用户（返回 id / 家目录 / Linux 账号） */
@@ -108,6 +114,8 @@ export interface UpdateUserPayload {
    * 与 fpm_pool 互斥，提交引用时后端会清空旧的自定义 JSON（reseller 仅限自己名下模板）
    */
   fpm_spec_ref?: string
+  /** 套餐 id；0 = 解除套餐绑定（变更后会重新下发磁盘配额） */
+  package_id?: number
 }
 
 /** 更新用户结果（首次改密成功后返回 must_relogin） */

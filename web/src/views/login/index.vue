@@ -145,7 +145,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
       label-position="top"
     >
       <div class="title-container">
-        <h3 class="title">ZAP Admin</h3>
+        <h3 class="title">ZAP</h3>
       </div>
 
       <el-form-item prop="username">

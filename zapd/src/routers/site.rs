@@ -638,6 +638,24 @@ pub async fn site_add(
     validate_site_fields(&name, &domains, &ips, &remark)?;
 
     let pool = db::get_db_pool().await;
+    // 套餐限制：最大站点数（0 = 不限），达到上限时硬拦截
+    if let Some(pkg) = crate::routers::package::package_of_user(owner).await
+        && pkg.max_sites > 0
+    {
+        let used: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM site WHERE user_id = ?")
+            .bind(owner)
+            .fetch_one(pool)
+            .await?;
+        if used.0 >= pkg.max_sites {
+            return Err(ZapError::New(
+                -1,
+                format!(
+                    "已达套餐「{}」的站点上限 {} 个（当前 {} 个），无法继续创建",
+                    pkg.name, pkg.max_sites, used.0
+                ),
+            ));
+        }
+    }
     let now = chrono::Local::now().timestamp();
 
     let mut tx = pool.begin().await?;
