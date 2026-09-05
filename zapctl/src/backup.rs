@@ -116,8 +116,7 @@ fn open_db(db_path: &str) -> Result<Connection, String> {
 fn make_staging(root: &Path, label: &str) -> Result<PathBuf, String> {
     let staging = root.join(format!(".staging-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging)
-        .map_err(|e| format!("创建临时目录失败: {e}"))?;
+    std::fs::create_dir_all(&staging).map_err(|e| format!("创建临时目录失败: {e}"))?;
     Ok(staging)
 }
 
@@ -125,8 +124,7 @@ fn make_staging(root: &Path, label: &str) -> Result<PathBuf, String> {
 fn make_workdir(label: &str) -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join(format!("zap-restore-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("创建临时目录失败: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
     Ok(dir)
 }
 
@@ -277,7 +275,10 @@ fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
     let entries = tar_list(archive)?;
     for e in &entries {
         let p = Path::new(e);
-        if p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if p.is_absolute()
+            || p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err(format!("归档包含不安全路径，已中止: {e}"));
         }
     }
@@ -351,14 +352,16 @@ fn fetch_user(
         };
         obj.insert(col.clone(), v);
     }
-    let home_dir = obj.get("home_dir").and_then(|v| v.as_str()).map(str::to_string);
+    let home_dir = obj
+        .get("home_dir")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     Ok(Some((obj, home_dir)))
 }
 
 fn write_user_json(dir: &Path, obj: &Map<String, Value>) -> Result<(), String> {
     let text = serde_json::to_string_pretty(obj).map_err(|e| format!("序列化用户数据失败: {e}"))?;
-    std::fs::write(dir.join("user.json"), text)
-        .map_err(|e| format!("写入 user.json 失败: {e}"))
+    std::fs::write(dir.join("user.json"), text).map_err(|e| format!("写入 user.json 失败: {e}"))
 }
 
 /// 将家目录复制到 `<dir>/home/`；返回是否实际包含文件。
@@ -447,8 +450,7 @@ fn backup_users(db_path: &str, output: Option<&str>) -> Result<(), String> {
 
     let staging = make_staging(&root, "users")?;
     let users_dir = staging.join("users");
-    std::fs::create_dir_all(&users_dir)
-        .map_err(|e| format!("创建临时目录失败: {e}"))?;
+    std::fs::create_dir_all(&users_dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
 
     for name in &names {
         let dir = users_dir.join(name);
@@ -499,11 +501,15 @@ fn is_known_series(series: &str) -> bool {
 /// 扫描备份目录中 zapctl 生成的归档。
 fn scan_archives(root: &Path) -> Result<Vec<ArchiveEntry>, String> {
     let mut out = Vec::new();
-    let rd = std::fs::read_dir(root)
-        .map_err(|e| format!("读取备份目录失败 {}: {e}", root.display()))?;
+    let rd =
+        std::fs::read_dir(root).map_err(|e| format!("读取备份目录失败 {}: {e}", root.display()))?;
     for ent in rd.flatten() {
         let path = ent.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+        let Some(name) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+        else {
             continue;
         };
         if !name.ends_with(".tar.gz") {
@@ -577,7 +583,12 @@ fn cmd_list(output: Option<&str>) -> Result<(), String> {
     let (h_size, h_time, h_file) = ("SIZE", "TIME", "FILE");
     println!("{:>10}  {:<19}  {}", h_size, h_time, h_file);
     for e in &entries {
-        println!("{:>10}  {:<19}  {}", human_size(e.size), e.display_time, e.name);
+        println!(
+            "{:>10}  {:<19}  {}",
+            human_size(e.size),
+            e.display_time,
+            e.name
+        );
     }
     Ok(())
 }
@@ -629,8 +640,7 @@ fn cmd_prune(output: Option<&str>, keep: u32) -> Result<(), String> {
         return Ok(());
     }
     for (series, p) in &removed {
-        std::fs::remove_file(p)
-            .map_err(|e| format!("删除 {} 失败: {e}", p.display()))?;
+        std::fs::remove_file(p).map_err(|e| format!("删除 {} 失败: {e}", p.display()))?;
         println!("  已删除 [{series}] {}", p.display());
     }
     ok(&format!("保留 {kept} 份，删除 {} 份", removed.len()));
@@ -741,8 +751,7 @@ fn do_zap_restore(db_path: &str, staging: &Path) -> Result<(), String> {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("创建目录失败 {}: {e}", parent.display()))?;
     }
-    std::fs::copy(staging.join(DB_FILE), db_path)
-        .map_err(|e| format!("还原数据库失败: {e}"))?;
+    std::fs::copy(staging.join(DB_FILE), db_path).map_err(|e| format!("还原数据库失败: {e}"))?;
 
     if staging.join(CONFIG_FILE).is_file() {
         let cfg = crate::config::config_path();
@@ -868,10 +877,7 @@ fn upsert_user(conn: &Connection, obj: &Map<String, Value>, username: &str) -> R
 
     if exists {
         warn(&format!("用户 {username} 已存在，将用归档数据覆盖其记录"));
-        let set_fields: Vec<&String> = fields
-            .iter()
-            .filter(|f| f.as_str() != "username")
-            .collect();
+        let set_fields: Vec<&String> = fields.iter().filter(|f| f.as_str() != "username").collect();
         if set_fields.is_empty() {
             ok(&format!("用户 {username} 无需更新"));
             return Ok(());
@@ -898,14 +904,15 @@ fn upsert_user(conn: &Connection, obj: &Map<String, Value>, username: &str) -> R
             .map(|f| json_to_sql(obj.get(f).unwrap_or(&Value::Null)))
             .collect();
         let sql = format!("INSERT INTO user ({col_sql}) VALUES ({placeholders})");
-        conn.execute(&sql, params_from_iter(values.iter())).map_err(|e| {
-            let hint = if e.to_string().contains("UNIQUE") {
-                "（用户名/邮箱/手机号与现有记录冲突）"
-            } else {
-                ""
-            };
-            format!("导入用户 {username} 失败{hint}: {e}")
-        })?;
+        conn.execute(&sql, params_from_iter(values.iter()))
+            .map_err(|e| {
+                let hint = if e.to_string().contains("UNIQUE") {
+                    "（用户名/邮箱/手机号与现有记录冲突）"
+                } else {
+                    ""
+                };
+                format!("导入用户 {username} 失败{hint}: {e}")
+            })?;
         ok(&format!("用户 {username} 记录已导入"));
     }
     Ok(())
@@ -925,7 +932,9 @@ fn restore_home_files(conn: &Connection, dir: &Path, username: &str) -> Result<(
         .ok()
         .flatten();
     let Some(home) = home.filter(|h| !h.trim().is_empty()) else {
-        warn(&format!("用户 {username} 无 home_dir 记录，跳过家目录文件还原"));
+        warn(&format!(
+            "用户 {username} 无 home_dir 记录，跳过家目录文件还原"
+        ));
         return Ok(());
     };
     if home == "/" {
@@ -935,8 +944,7 @@ fn restore_home_files(conn: &Connection, dir: &Path, username: &str) -> Result<(
     if target.is_file() {
         return Err(format!("home_dir 指向的不是目录: {home}"));
     }
-    std::fs::create_dir_all(&target)
-        .map_err(|e| format!("创建家目录失败 {home}: {e}"))?;
+    std::fs::create_dir_all(&target).map_err(|e| format!("创建家目录失败 {home}: {e}"))?;
     copy_dir_contents(&dir.join("home"), &target)?;
     ok(&format!("用户 {username} 家目录文件已还原到 {home}"));
     Ok(())
