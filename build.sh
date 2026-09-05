@@ -58,27 +58,48 @@ for bin in zapd zapctl zapexec zapupgrade; do
 done
 ok "二进制复制完成: zapd / zapctl / zapexec / zapupgrade"
 
-# ── 同步内置 AppStore 源（独立 git 仓库 → 发行包）──────────
-# 内置源内容由独立仓库管理（默认与 zap-rs 同级的 zap-appstore），打包前 git pull 更新
-APPSTORE_SEED_DIR="${APPSTORE_SEED_DIR:-$CUR_DIR/../zap-appstore}"
+# ── 内置 AppStore 源（git 仓库位于 data/appstore/repos/zap-appstore）──────
+# 源内容由独立 git 仓库管理并随构建机维护在此目录；打包前若有 .git 则 pull 到最新，
+# 无 .git（如 CI 检出仅含 gitlink 快照）则直接使用现有内容，缺失时发行包不含内置包。
 APPSTORE_BUILTIN="$CUR_DIR/data/appstore/repos/zap-appstore"
-if [ -d "$APPSTORE_SEED_DIR/.git" ]; then
-    info "同步内置 AppStore 源（$APPSTORE_SEED_DIR）..."
-    git -C "$APPSTORE_SEED_DIR" pull -q --ff-only 2>/dev/null \
-        || warn "内置源 git pull 失败，使用本地现有内容"
-    rm -rf "$APPSTORE_BUILTIN"
-    mkdir -p "$APPSTORE_BUILTIN"
-    for c in database application webserver library; do
-        [ -d "$APPSTORE_SEED_DIR/$c" ] && cp -Rf "$APPSTORE_SEED_DIR/$c" "$APPSTORE_BUILTIN/" || true
-    done
-    ok "内置 AppStore 源已同步"
+if [ -d "$APPSTORE_BUILTIN" ]; then
+    if [ -d "$APPSTORE_BUILTIN/.git" ]; then
+        info "更新内置 AppStore 源（$APPSTORE_BUILTIN）..."
+        # submodule / CI 检出默认 detached HEAD，先切回 main 分支再快进拉取
+        git -C "$APPSTORE_BUILTIN" checkout -q main 2>/dev/null \
+            || git -C "$APPSTORE_BUILTIN" checkout -q -B main origin/main 2>/dev/null \
+            || true
+        git -C "$APPSTORE_BUILTIN" pull -q --ff-only 2>/dev/null \
+            || warn "内置源 git pull 失败，使用本地现有内容"
+    else
+        warn "内置源非 git 仓库（$APPSTORE_BUILTIN），跳过 pull，直接打包现有内容"
+    fi
+    [ -d "$APPSTORE_BUILTIN/database" ] \
+        && ok "内置 AppStore 源就绪" \
+        || warn "内置源目录为空（$APPSTORE_BUILTIN），发行包将不含内置包，可在面板中添加源"
 else
-    warn "未找到内置 AppStore 源仓库（$APPSTORE_SEED_DIR），发行包将不含内置包，可在面板中添加源"
+    warn "未找到内置 AppStore 源（$APPSTORE_BUILTIN），发行包将不含内置包，可在面板中添加源"
 fi
 
-# 脚本、数据与配置模板（排除运行时生成的 TLS 私钥/证书）
+# 脚本、数据模板与配置（data/ 仅打包发行需要的内容，剔除运行时产物）
 cp -Rf "$CUR_DIR/scripts" "$DIST_DIR/"
-cp -Rf "$CUR_DIR/data" "$DIST_DIR/"
+
+# data/ 打包白名单：
+#   appstore/repos/zap-appstore/          内置 AppStore 种子源
+#   appstore/repos.yaml、custom/README.md 安装脚本(install.sh)依赖的模板
+#   apps/README.md                        APPS_DIR 占位说明（apps 下其它为运行时安装实例，不打包）
+#   systemd/ tools/                       数据库等服务模板、运维脚本
+# 不打包：zap.db、run/、tmp/、apps/library、appstore 的 cache/logs/runs/tmp/custom/scripts
+DIST_DATA="$DIST_DIR/data"
+mkdir -p "$DIST_DATA/apps" "$DIST_DATA/systemd" "$DIST_DATA/tools"
+mkdir -p "$DIST_DATA/appstore/repos" "$DIST_DATA/appstore/custom"
+cp -Rf "$CUR_DIR/data/appstore/repos/zap-appstore" "$DIST_DATA/appstore/repos/" 2>/dev/null || true
+cp -f "$CUR_DIR/data/appstore/repos.yaml" "$DIST_DATA/appstore/" 2>/dev/null || true
+cp -f "$CUR_DIR/data/appstore/custom/README.md" "$DIST_DATA/appstore/custom/" 2>/dev/null || true
+cp -f "$CUR_DIR/data/apps/README.md" "$DIST_DATA/apps/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/data/systemd/." "$DIST_DATA/systemd/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/data/tools/." "$DIST_DATA/tools/" 2>/dev/null || true
+
 mkdir -p "$DIST_DIR/conf"
 cp -f "$CUR_DIR/conf/zap.yaml" "$DIST_DIR/conf/" 2>/dev/null || warn "无 conf/zap.yaml 模板，跳过"
 ok "资源复制完成"
