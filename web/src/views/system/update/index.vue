@@ -19,17 +19,18 @@
         </div>
       </template>
 
-      <el-descriptions :column="3" border>
-        <el-descriptions-item label="面板 (zapd)">
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="Zap">
           <span class="ver-highlight">v{{ status.zapd_version || '-' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="执行器 (zapexec)">
-          <span class="ver-highlight">v{{ status.zapexec_version || '-' }}</span>
           <el-tooltip v-if="!status.zapexec_version" content="zapexec 未响应（RPC 不可达）">
             <el-icon class="warn-icon"><Warning /></el-icon>
           </el-tooltip>
+          <span
+            v-else-if="status.zapexec_version !== status.zapd_version"
+            class="ver-sub"
+          >执行器 zapexec v{{ status.zapexec_version }}</span>
         </el-descriptions-item>
-        <el-descriptions-item label="前端 (web)">
+        <el-descriptions-item label="Web">
           <span class="ver-highlight">v{{ WEB_VERSION || '-' }}</span>
         </el-descriptions-item>
       </el-descriptions>
@@ -65,7 +66,7 @@
           <span class="form-hint">标准 5 段 cron：分 时 日 月 周（支持 * / */n a-b a,b）</span>
         </el-form-item>
         <el-form-item label="更新渠道">
-          <el-input v-model="form.channel" class="w-480" placeholder="https://mirrors.zap.cn/zap/dist" />
+          <el-input v-model="form.channel" class="w-480" placeholder="https://mirrors.zap.cn/zap/releases" />
           <span class="form-hint">发行包与 latest.txt 所在目录（需以 http(s):// 开头）</span>
         </el-form-item>
         <el-form-item label="最近检查">
@@ -154,7 +155,7 @@ const status = reactive<UpdateStatusData>({
   config: {
     auto: false,
     cron: '0 3 * * *',
-    channel: 'https://mirrors.zap.cn/zap/dist',
+    channel: 'https://mirrors.zap.cn/zap/releases',
     last_check_at: 0,
     last_check_version: '',
     last_check_has_update: false,
@@ -197,7 +198,7 @@ function applyConfigFromServer() {
   const c = status.config
   form.auto = c.auto
   form.cron = c.cron || '0 3 * * *'
-  form.channel = c.channel || 'https://mirrors.zap.cn/zap/dist'
+  form.channel = c.channel || 'https://mirrors.zap.cn/zap/releases'
 }
 
 async function load() {
@@ -379,6 +380,11 @@ onUnmounted(() => {
   margin-left: 4px;
   color: var(--el-color-warning);
   vertical-align: -2px;
+}
+.ver-sub {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .mt {
   margin-top: 16px;

@@ -24,7 +24,7 @@ pub const UPGRADE_BINS: [&str; 4] = ["zapd", "zapexec", "zapctl", "zapupgrade"];
 /// appstore_runs 中系统升级运行的 action 标识。
 pub const ACTION_ZAP_UPDATE: &str = "zap_update";
 /// 默认更新渠道（与 build.sh 上传目录一致）。
-pub const DEFAULT_CHANNEL: &str = "https://mirrors.zap.cn/zap/dist";
+pub const DEFAULT_CHANNEL: &str = "https://mirrors.zap.cn/zap/releases";
 
 /// 自动更新配置（对应 update_config 单行表）。
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -846,7 +846,7 @@ async fn init_update_config_table() {
         id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
         auto INTEGER NOT NULL DEFAULT 0,
         cron TEXT NOT NULL DEFAULT '0 3 * * *',
-        channel TEXT NOT NULL DEFAULT 'https://mirrors.zap.cn/zap/dist',
+        channel TEXT NOT NULL DEFAULT 'https://mirrors.zap.cn/zap/releases',
         last_check_at INTEGER NOT NULL DEFAULT 0,
         last_check_version TEXT NOT NULL DEFAULT '',
         last_check_has_update INTEGER NOT NULL DEFAULT 0,
@@ -854,7 +854,7 @@ async fn init_update_config_table() {
         updated_at INTEGER NOT NULL DEFAULT 0
     );
     INSERT INTO update_config (id, auto, cron, channel, updated_at)
-    VALUES (1, 0, '0 3 * * *', 'https://mirrors.zap.cn/zap/dist', strftime('%s','now'));
+    VALUES (1, 0, '0 3 * * *', 'https://mirrors.zap.cn/zap/releases', strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
