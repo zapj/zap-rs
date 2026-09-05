@@ -21,10 +21,10 @@ fn parse_field(field: &str, min: u32, max: u32) -> Vec<u32> {
         if part == "*" {
             out.extend(min..=max);
         } else if let Some(step) = part.strip_prefix("*/") {
-            if let Ok(n) = step.parse::<u32>() {
-                if n > 0 {
-                    out.extend((min..=max).step_by(n as usize));
-                }
+            if let Ok(n) = step.parse::<u32>()
+                && n > 0
+            {
+                out.extend((min..=max).step_by(n as usize));
             }
         } else if let Some((a, b)) = part.split_once('-') {
             if let (Ok(s), Ok(e)) = (a.trim().parse::<u32>(), b.trim().parse::<u32>()) {
@@ -54,11 +54,11 @@ pub fn cron_matches(expr: &str, now: &chrono::DateTime<chrono::Local>) -> bool {
     if weeks.contains(&7) {
         weeks.push(0); // cron 7 等价周日 0
     }
-    mins.contains(&(now.minute() as u32))
-        && hours.contains(&(now.hour() as u32))
-        && days.contains(&(now.day() as u32))
-        && months.contains(&(now.month() as u32))
-        && weeks.contains(&(now.weekday().num_days_from_sunday() as u32))
+    mins.contains(&now.minute())
+        && hours.contains(&now.hour())
+        && days.contains(&now.day())
+        && months.contains(&now.month())
+        && weeks.contains(&now.weekday().num_days_from_sunday())
 }
 
 /// cron 表达式基础校验（段数与合法字符）。

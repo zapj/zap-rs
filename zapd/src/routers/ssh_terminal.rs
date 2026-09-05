@@ -528,10 +528,11 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
             loop {
                 match rx.next().await {
                     Some(Ok(Message::Text(t))) => {
-                        if let Ok(auth) = serde_json::from_str::<AuthMsg>(t.as_ref()) {
-                            if auth.kind == "auth" && !auth.password.is_empty() {
-                                break auth.password;
-                            }
+                        if let Ok(auth) = serde_json::from_str::<AuthMsg>(t.as_ref())
+                            && auth.kind == "auth"
+                            && !auth.password.is_empty()
+                        {
+                            break auth.password;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break String::new(),
@@ -697,13 +698,15 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
             Message::Text(t) => {
                 let txt = t.as_ref();
                 // resize 控制消息：前端 fit 后自动同步窗口尺寸
-                if let Ok(resize) = serde_json::from_str::<ResizeMsg>(txt) {
-                    if resize.kind == "resize" && resize.cols > 0 && resize.rows > 0 {
-                        if resize_tx.send((resize.cols, resize.rows)).await.is_err() {
-                            break;
-                        }
-                        continue;
+                if let Ok(resize) = serde_json::from_str::<ResizeMsg>(txt)
+                    && resize.kind == "resize"
+                    && resize.cols > 0
+                    && resize.rows > 0
+                {
+                    if resize_tx.send((resize.cols, resize.rows)).await.is_err() {
+                        break;
                     }
+                    continue;
                 }
                 // 其余文本一律作为终端输入
                 if ssh_write_tx.send(txt.as_bytes().to_vec()).await.is_err() {

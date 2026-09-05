@@ -6,7 +6,7 @@
 //! 端点：
 //! - GET  /system/config/basic   读取基础 / Mail / 联系信息
 //! - POST /system/config/basic   保存（支持按 Tab 部分提交，未传字段保持不变；
-//!                               Mail 密码留空表示不改动原密码）
+//!   Mail 密码留空表示不改动原密码）
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

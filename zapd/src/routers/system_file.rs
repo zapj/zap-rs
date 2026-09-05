@@ -96,6 +96,7 @@ async fn user_private_prefixes(claims: &Claims) -> (String, String) {
 /// - 普通用户：仅自己 home（`user.home_dir`，回退 `/home/{username}`）与
 ///   私有临时目录（`/tmp/zap-{username}`）。
 ///   彻底移除此前"所有人可读 /var/www、/var/log"的越权隐患。
+///
 /// home/tmp 前缀由调用方异步查询后传入。
 fn check_access(claims: &Claims, path: &Path, home: &str, tmp: &str) -> Result<(), ZapError> {
     if is_admin(claims) {

@@ -664,7 +664,7 @@ pub async fn user_update(
     }
     // 密码被修改（本人或管理员/经销商改密）→ 向目标用户发站内信（受其通知偏好控制）
     if payload.password.is_some() {
-        crate::zap::notify::password_changed(payload.id as i64, &claims.sub).await;
+        crate::zap::notify::password_changed(payload.id, &claims.sub).await;
     }
     Ok(Json(resp))
 }

@@ -325,11 +325,11 @@ fn systemctl(verb: &str, unit: &str) -> Result<(), String> {
 
 // ── 用户数据导出 ──────────────────────────────────────────────
 
+/// user 表记录 JSON 对象 + 家目录路径。
+type UserRow = (Map<String, Value>, Option<String>);
+
 /// 读取 user 表整行并序列化为 JSON 对象；返回 (记录, 家目录路径)。
-fn fetch_user(
-    conn: &Connection,
-    username: &str,
-) -> Result<Option<(Map<String, Value>, Option<String>)>, String> {
+fn fetch_user(conn: &Connection, username: &str) -> Result<Option<UserRow>, String> {
     let mut stmt = conn
         .prepare("SELECT * FROM user WHERE username = ?1")
         .map_err(|e| e.to_string())?;
