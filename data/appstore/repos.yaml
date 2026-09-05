@@ -4,6 +4,6 @@ repos:
   url: https://github.com/zapj/zap-appstore.git
   builtin: true
   enabled: true
-  version: b80fff0
-  commit: b80fff0a2abb40f3ed300ff31bfe30c83165c4e7
-  updated_at: 1788320029
+  version: 19bb7e1
+  commit: 19bb7e18ec2fade24446606ee0b431b66eb81bf2
+  updated_at: 1788610696

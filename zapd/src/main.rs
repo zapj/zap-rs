@@ -1,16 +1,11 @@
-use std::{env, time::Duration};
+use std::{env, sync::Arc, time::Duration};
 
 use axum::{Router, extract::Request};
 use clap::Parser;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use openssl::ssl::{AlpnError, Ssl, SslAcceptor, SslFiletype, SslMethod, select_next_proto};
 use tokio::net::TcpListener;
-use tokio_rustls::{
-    TlsAcceptor,
-    rustls::{
-        ServerConfig,
-        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
-    },
-};
+use tokio_openssl::SslStream;
 use tower_http::compression::CompressionLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
@@ -32,10 +27,6 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
-    // Install rustls crypto provider before any TLS operations
-    // (required by rustls 0.23+ when used through rcgen + tokio-rustls)
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let cli = Cli::parse();
     if cli.version {
         println!("zapd version {}", env!("CARGO_PKG_VERSION"));
@@ -172,16 +163,29 @@ async fn main() {
 async fn serve_tls_connection(
     stream: tokio::net::TcpStream,
     client_addr: std::net::SocketAddr,
-    tls_acceptor: TlsAcceptor,
+    acceptor: Arc<SslAcceptor>,
     app: Router,
 ) {
-    let stream = match tls_acceptor.accept(stream).await {
-        Ok(stream) => stream,
-        Err(_) => {
-            error!("Error during TLS handshake from {}", client_addr);
+    let ssl = match Ssl::new(acceptor.context()) {
+        Ok(ssl) => ssl,
+        Err(e) => {
+            error!("Failed to create TLS session for {}: {}", client_addr, e);
             return;
         }
     };
+    let mut stream = match SslStream::new(ssl, stream) {
+        Ok(stream) => stream,
+        Err(e) => {
+            error!("Failed to create TLS stream for {}: {}", client_addr, e);
+            return;
+        }
+    };
+
+    // Perform the server-side TLS handshake.
+    if let Err(e) = std::pin::Pin::new(&mut stream).accept().await {
+        error!("Error during TLS handshake from {}: {}", client_addr, e);
+        return;
+    }
 
     let stream = TokioIo::new(stream);
     let hyper_service =
@@ -246,19 +250,31 @@ async fn serve_plain_http(
     Ok(())
 }
 
-fn create_tls_acceptor(cert: &str, key: &str) -> TlsAcceptor {
-    let key = PrivateKeyDer::from_pem_file(key).unwrap();
-    let certs = CertificateDer::pem_file_iter(cert)
-        .unwrap()
-        .map(|cert| cert.unwrap())
-        .collect();
+/// Build an OpenSSL TLS acceptor from the PEM cert/key files.
+///
+/// ALPN 通告 h2 + http/1.1：浏览器/客户端协商 h2 时使用 HTTP/2，
+/// 否则回落到 HTTP/1.1（与 hyper_util auto 的前言探测配合）。
+fn create_tls_acceptor(cert: &str, key: &str) -> Arc<SslAcceptor> {
+    let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
+        .expect("failed to initialize TLS acceptor");
+    builder
+        .set_private_key_file(key, SslFiletype::PEM)
+        .expect("failed to load TLS private key");
+    builder
+        .set_certificate_chain_file(cert)
+        .expect("failed to load TLS certificate chain");
+    builder
+        .check_private_key()
+        .expect("TLS private key does not match the certificate");
 
-    let mut config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .expect("bad certificate/key");
+    // ALPN wire format: 每个协议名前缀长度字节，如 b"\x02h2\x08http/1.1"
+    let alpn: &[u8] = b"\x02h2\x08http/1.1";
+    builder
+        .set_alpn_protos(alpn)
+        .expect("failed to set ALPN protocols");
+    builder.set_alpn_select_callback(|_ssl, client_protocols| {
+        select_next_proto(alpn, client_protocols).ok_or(AlpnError::ALERT_FATAL)
+    });
 
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-
-    TlsAcceptor::from(std::sync::Arc::new(config))
+    Arc::new(builder.build())
 }
