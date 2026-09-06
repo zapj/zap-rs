@@ -2,14 +2,13 @@
 /demo
 /dist
 # Generated on first run — do not commit
-conf/zap.crt
-conf/zap.key
-conf/zap.yaml
+/conf
 
 # Runtime / dev artifacts — do not commit
 /data/run/
-data/zap.db*
+data/zap.db
 web/a.html
+data/tmp/*
 #data/appstore/repos/
 data/appstore/logs/*
 data/appstore/tmp/*
