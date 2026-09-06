@@ -86,6 +86,12 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
     meta: { title: '系统设置', icon: 'Setting', roles: ['admin'] },
     children: [
       {
+        path: 'zap-config',
+        name: 'ZapConfig',
+        component: () => import('@/views/system/config/zap.vue'),
+        meta: { title: 'Zap 设置', icon: 'Operation' },
+      },
+      {
         path: 'users',
         name: 'Users',
         component: () => import('@/views/system/users/index.vue'),

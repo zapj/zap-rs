@@ -344,31 +344,32 @@ pub async fn cert_delete(
 // 改用纯 Rust 的 `x509-parser`（基于 nom 的 DER 解析，无 C 代码、无 unsafe），
 // 可让这条链路完全处于 Rust 的内存安全保证之内；指纹用 RustCrypto 的 sha2 自行计算。
 
+/// 证书解析结果。`pub(crate)`：「Zap 设置」展示面板当前证书时复用同一套解析逻辑。
 #[derive(Debug, serde::Serialize)]
-struct ParsedCertInfo {
+pub(crate) struct ParsedCertInfo {
     /// cert：X.509 证书；csr：证书签名请求
-    kind: String,
-    domains: Vec<String>,
-    domains_str: String,
-    common_name: String,
-    subject: String,
-    issuer: String,
-    not_before: i64,
-    not_after: i64,
-    serial: String,
-    fingerprint: String,
-    key_type: String,
-    key_bits: u32,
+    pub(crate) kind: String,
+    pub(crate) domains: Vec<String>,
+    pub(crate) domains_str: String,
+    pub(crate) common_name: String,
+    pub(crate) subject: String,
+    pub(crate) issuer: String,
+    pub(crate) not_before: i64,
+    pub(crate) not_after: i64,
+    pub(crate) serial: String,
+    pub(crate) fingerprint: String,
+    pub(crate) key_type: String,
+    pub(crate) key_bits: u32,
     /// SAN 中解析出的域名数量（0 表示证书不含 SAN，域名取自 CN）
-    sans_count: usize,
+    pub(crate) sans_count: usize,
     /// PEM 中包含的证书数量（>1 说明粘贴的是含中间链的 fullchain）
-    cert_count: usize,
+    pub(crate) cert_count: usize,
     /// 与私钥的匹配结果（仅当同时提交了私钥时才有值）
     #[serde(skip_serializing_if = "Option::is_none")]
-    key_match: Option<bool>,
+    pub(crate) key_match: Option<bool>,
     /// 无法完成匹配校验的原因（如私钥格式错误 / 带密码）
     #[serde(skip_serializing_if = "Option::is_none")]
-    key_error: Option<String>,
+    pub(crate) key_error: Option<String>,
 }
 
 fn push_uniq(v: &mut Vec<String>, s: String) {
@@ -467,7 +468,7 @@ fn key_meta(spki: &x509_parser::x509::SubjectPublicKeyInfo<'_>) -> (String, u32)
     (name.to_string(), bits)
 }
 
-fn parse_certificate(pem: &str) -> Option<ParsedCertInfo> {
+pub(crate) fn parse_certificate(pem: &str) -> Option<ParsedCertInfo> {
     use x509_parser::prelude::*;
 
     let (der, cert_count) = first_cert_der(pem)?;
@@ -576,7 +577,7 @@ fn parse_pem_info(raw: &str) -> Option<ParsedCertInfo> {
 /// - `Ok(true)`：公钥一致，私钥与该证书匹配
 /// - `Ok(false)`：两者都能解析，但公钥不一致
 /// - `Err(msg)`：私钥 / 证书无法解析，无法完成校验
-fn key_matches(pem: &str, key_pem: &str) -> Result<bool, String> {
+pub(crate) fn key_matches(pem: &str, key_pem: &str) -> Result<bool, String> {
     use openssl::pkey::PKey;
     use openssl::x509::{X509, X509Req};
 

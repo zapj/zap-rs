@@ -62,6 +62,7 @@ pub mod system_menu;
 pub mod system_migrate;
 pub mod system_role;
 pub mod system_update;
+pub mod system_zap;
 pub mod user;
 
 #[derive(RustEmbed)]
@@ -316,6 +317,15 @@ fn api_routers() -> Router {
         .route(
             "/system/config/basic",
             get(system_basic::basic_get).post(system_basic::basic_save),
+        )
+        // Zap 设置（系统设置 → Zap 设置，admin only）：动态修改 zap.yaml 的 server.*
+        .route(
+            "/system/config/zap",
+            get(system_zap::zap_get).post(system_zap::zap_save),
+        )
+        .route(
+            "/system/config/zap/ssl/self-sign",
+            post(system_zap::ssl_self_sign),
         )
         .route("/system/config/services", get(system_config::list_services))
         .route(

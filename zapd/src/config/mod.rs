@@ -1,4 +1,5 @@
 use std::{
+    fs,
     fs::OpenOptions,
     io::Read,
     path::PathBuf,
@@ -149,21 +150,53 @@ fn needs_jwt_rotation(secret: &str) -> bool {
 }
 
 fn write_config_to_file(config: &ZapConfig) {
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(config_path());
-    match file {
-        Ok(f) => {
-            if let Err(e) = serde_yaml::to_writer(f, config) {
-                info!("failed to write config: {}", e);
-            }
-        }
-        Err(e) => {
-            info!("failed to open config file for writing: {}", e);
-        }
+    if let Err(e) = save_config(config) {
+        info!("failed to write config: {}", e);
     }
+}
+
+/// 写回 zap.yaml 时附带的字段说明。
+///
+/// YAML 序列化无法保留原文件里的注释，因此在文件头补一段说明，
+/// 保证运维手工打开配置时仍能看到各字段含义（尤其是 url_prefix）。
+const YAML_HEADER: &str = "\
+# Zap 面板主配置文件（zapd / zapctl 共用）
+#
+# server.address    监听地址：0.0.0.0 表示监听全部网卡，也可指定单个 IP
+# server.port       监听端口（修改后需重启 zapd 生效）
+# server.cert_file  面板 HTTPS 证书路径（相对路径基于 zapd 工作目录）
+# server.key_file   面板 HTTPS 私钥路径
+# server.url_prefix 统一 URL 前缀，如 zap → 页面 /zap/ 、接口 /zap/api/；留空表示不启用
+# jwt.jwt_expire    登录凭证有效期（秒）
+# jwt.jwt_secure    凭证签发密钥（首次启动自动生成，请勿外泄）
+#
+";
+
+/// 将配置写回 zap.yaml（会覆盖原文件，注释由上面的文件头统一说明）。
+pub fn save_config(config: &ZapConfig) -> Result<(), String> {
+    let mut out = String::from(YAML_HEADER);
+    out.push_str(&serde_yaml::to_string(config).map_err(|e| format!("配置序列化失败: {e}"))?);
+
+    let path = config_path();
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        return Err(format!("创建配置目录失败 {}: {e}", parent.display()));
+    }
+    fs::write(&path, out).map_err(|e| format!("写入配置失败 {}: {e}", path.display()))
+}
+
+/// 在写锁内修改运行时配置并持久化到 zap.yaml（「Zap 设置」页面保存使用）。
+///
+/// 注意：端口 / 绑定 IP / 证书 / URL 前缀在进程启动时就已生效，
+/// 改完只是落盘 + 更新内存值，真正生效仍需重启 zapd。
+pub fn mutate_config<F: FnOnce(&mut ZapConfig)>(f: F) -> Result<(), String> {
+    let mut guard = get_config()
+        .write()
+        .map_err(|e| format!("配置锁不可用: {e}"))?;
+    f(&mut guard);
+    save_config(&guard)
 }
 
 pub fn get_config() -> &'static RwLock<ZapConfig> {

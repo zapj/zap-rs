@@ -41,6 +41,8 @@ pub async fn init_schema() {
     // 系统更新：自动更新配置表 + 「系统设置 → 系统更新」菜单（老库幂等补行）
     init_update_config_table().await;
     ensure_system_update_menu().await;
+    // 「系统设置 → Zap 设置」菜单（id=28）：老库幂等补行
+    ensure_zap_config_menu().await;
     // 菜单（menus/role_menus）为静态基础数据：SSL/TLS、应用商店（含已安装应用）、
     // 服务器状态、脚本/自动化（自定义脚本+计划任务）、系统设置（含审计日志）、
     // 服务器配置、开发 —— 均已直接 seed，无需运行时补插。
@@ -267,17 +269,19 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (26, 2, 'basic-config', 'basic-config', 'system/config/basic', 'menu', '基础设置', 'ep:set-up', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (21, 2, 'user', 'user', 'system/users/index', 'menu', '用户管理', 'ep:user', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (28, 2, 'zap-config', 'zap-config', 'system/config/zap', 'menu', 'Zap 设置', 'ep:operation', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (22, 2, 'roles', 'roles', 'system/roles/index', 'menu', '角色管理', 'ep:view', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (21, 2, 'user', 'user', 'system/users/index', 'menu', '用户管理', 'ep:user', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (23, 2, 'menus', 'menus', 'system/menus/index', 'menu', '菜单管理', 'ep:menu', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (22, 2, 'roles', 'roles', 'system/roles/index', 'menu', '角色管理', 'ep:view', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (23, 2, 'menus', 'menus', 'system/menus/index', 'menu', '菜单管理', 'ep:menu', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (24, 2, 'audit', 'audit', 'system/audit/index', 'menu', '审计日志', 'ep:tickets', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'ep:key', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (27, 2, 'system-update', 'update', 'system/update/index', 'menu', '系统更新', 'ep:refresh', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (24, 2, 'audit', 'audit', 'system/audit/index', 'menu', '审计日志', 'ep:tickets', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (27, 2, 'system-update', 'update', 'system/update/index', 'menu', '系统更新', 'ep:refresh', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Server config dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -468,6 +472,8 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 62);
     -- 基础设置：仅 admin
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 26);
+    -- Zap 设置：仅 admin
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 28);
     -- 审计日志：仅 admin
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 24);
     -- 系统更新：仅 admin
@@ -921,6 +927,37 @@ async fn ensure_system_update_menu() {
     .execute(pool)
     .await;
     let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (1, 27)")
+        .execute(pool)
+        .await;
+}
+
+/// 「系统设置 → Zap 设置」菜单（id=28）兜底：
+/// 新库由 init_menus_table 的 seed 直接写入；老库幂等补行并给 admin（role 1）授权，
+/// 同时把「用户管理」及其后的同级菜单排序号整体 +1，保证它紧跟在「基础设置」之后。
+async fn ensure_zap_config_menu() {
+    if !table_exists("menus").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let exists: Result<(i64,), sqlx::Error> =
+        sqlx::query_as("SELECT id FROM menus WHERE name = 'zap-config' OR id = 28 LIMIT 1")
+            .fetch_one(pool)
+            .await;
+    if exists.is_ok() {
+        return;
+    }
+    let _ = sqlx::query(
+        "UPDATE menus SET sort_order = sort_order + 1 WHERE parent_id = 2 AND sort_order >= 2",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+         VALUES (28, 2, 'zap-config', 'zap-config', 'system/config/zap', 'menu', 'Zap 设置', 'ep:operation', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'))",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (1, 28)")
         .execute(pool)
         .await;
 }
