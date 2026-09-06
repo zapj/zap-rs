@@ -1,14 +1,21 @@
 [Unit]
-Description=zap free linux server control panel
+Description=Zap free linux server control panel (zapd)
+Documentation=https://zap.cn
+After=network-online.target zapexec.service
+Wants=network-online.target
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
-PIDFile=/var/run/zapd.pid
+Type=simple
 WorkingDirectory=/usr/local/zap
-ExecStart=/usr/local/zap/zapd master
+# Environment=ZAP_PATH=/usr/local/zap
+
+ExecStart=/usr/local/zap/zapd
 Restart=on-failure
 RestartSec=3s
+TimeoutStopSec=20
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target

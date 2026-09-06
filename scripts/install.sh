@@ -51,23 +51,74 @@ else
 fi
 
 # ── 创建运行用户 ───────────────────────────────────────────
-if id www >/dev/null 2>&1; then
-    ok "用户 www 已存在"
-else
-    info "创建用户 www"
-    adduser --shell /bin/false --no-create-home --disabled-password --disabled-login --group www || die "创建 www 用户失败"
-fi
+# 幂等创建：用户已存在则跳过；同名组已存在时改为加入现有组，
+# 避免 adduser 报 "The group `www' already exists" 中断安装。
+#
+# 工具选择：优先 useradd（shadow-utils，Debian / Ubuntu / RHEL / CentOS / Rocky
+# 等发行版均自带，参数一致）；只有 Debian 系才有的 adduser 作为回退。
+# 用法：create_user <用户名> <1=系统用户|0=普通用户>
+create_user() {
+    local user="$1" is_system="$2"
+    if id "$user" >/dev/null 2>&1; then
+        ok "用户 ${user} 已存在"
+        return 0
+    fi
 
-if id zapadm >/dev/null 2>&1; then
-    ok "用户 zapadm 已存在"
-else
-    info "创建用户 zapadm"
-    adduser --system --shell /bin/false --no-create-home --disabled-password --disabled-login --group zapadm || die "创建 zapadm 用户失败"
-fi
+    info "创建用户 ${user}"
+    local group_exists=0
+    if getent group "$user" >/dev/null 2>&1; then
+        group_exists=1
+    fi
 
-# ── 解压 ────────────────────────────────────────────────────
+    if command -v useradd >/dev/null 2>&1; then
+        local -a opts=(-s /bin/false -M)
+        [ "$is_system" = "1" ] && opts+=(-r)
+        if [ "$group_exists" = "1" ]; then
+            opts+=(-g "$user")
+        elif command -v groupadd >/dev/null 2>&1; then
+            # 先建同名主组（系统用户对应系统组），个别环境不支持 useradd -U 时也能用
+            local -a gopts=()
+            [ "$is_system" = "1" ] && gopts+=(-r)
+            groupadd "${gopts[@]}" "$user" 2>/dev/null || true
+            if getent group "$user" >/dev/null 2>&1; then
+                opts+=(-g "$user")
+            else
+                opts+=(-U)
+            fi
+        else
+            opts+=(-U)
+        fi
+        useradd "${opts[@]}" "$user" || die "创建 ${user} 用户失败"
+    elif command -v adduser >/dev/null 2>&1; then
+        local -a opts=(--shell /bin/false --no-create-home --disabled-password --disabled-login)
+        [ "$is_system" = "1" ] && opts+=(--system)
+        if [ "$group_exists" = "1" ]; then
+            opts+=(--ingroup "$user")
+        else
+            opts+=(--group)
+        fi
+        adduser "${opts[@]}" "$user" || die "创建 ${user} 用户失败"
+    else
+        die "未找到 useradd / adduser，无法创建 ${user} 用户"
+    fi
+    ok "用户 ${user} 创建完成"
+}
+
+# www：站点运行用户（普通用户）；zapadm：面板运维用户（系统用户）
+create_user www 0
+create_user zapadm 1
+
+# ── 解压（解压到临时目录，避免污染当前目录）──────────────────
 info "解压安装包..."
-tar zxf "$ZAP_FILENAME" || die "解压失败，安装包可能已损坏"
+WORK_DIR=$(mktemp -d /tmp/zap-install.XXXXXX) || die "无法创建临时目录"
+trap 'rm -rf "$WORK_DIR"' EXIT
+tar zxf "$ZAP_FILENAME" -C "$WORK_DIR" || die "解压失败，安装包可能已损坏"
+
+# 发行包布局兼容：当前包为平铺结构（zapd / zapctl / scripts / data 在包根），
+# 旧包多一层 zap/ 目录。统一解析出真实内容根，后续部署一律用 $SRC 取文件。
+SRC="$WORK_DIR"
+[ -f "$WORK_DIR/zap/zapd" ] && SRC="$WORK_DIR/zap"
+info "安装包内容目录: ${SRC}"
 
 # ── AppStore 官方仓库地址 ──────────────────────────────────
 # 官方包脚本存放于独立 git 仓库，便于单独升级；面板中可添加/更换其他源
@@ -75,21 +126,21 @@ APPSTORE_REPO_URL="${APPSTORE_REPO_URL:-https://github.com/zapj/zap-appstore.git
 
 # ── AppStore 目录部署（多 Git 源，幂等：不覆盖 repos/.git 与 custom/）──
 deploy_appstore() {
-    local DEST="$TARGET/zap/data/appstore"
+    local DEST="$ZAP_DIR/data/appstore"
     local BUILTIN="$DEST/repos/zap-appstore"
     mkdir -p "$DEST"/{repos,custom,cache,tmp,logs}
-    mkdir -p "$TARGET/zap/data/apps"
+    mkdir -p "$ZAP_DIR/data/apps"
 
     # 仅在缺失时复制模板/配置文件，避免覆盖用户修改
-    [ -f "$DEST/repos.yaml" ]       || cp -f zap/data/appstore/repos.yaml "$DEST/repos.yaml" 2>/dev/null || true
-    [ -f "$DEST/custom/README.md" ] || cp -f zap/data/appstore/custom/README.md "$DEST/custom/README.md" 2>/dev/null || true
+    [ -f "$DEST/repos.yaml" ]       || cp -f "$SRC/data/appstore/repos.yaml" "$DEST/repos.yaml" 2>/dev/null || true
+    [ -f "$DEST/custom/README.md" ] || cp -f "$SRC/data/appstore/custom/README.md" "$DEST/custom/README.md" 2>/dev/null || true
 
     # 种子官方包（内置源）：复制发行包内置包（构建时从独立 git 仓库同步）作为离线兜底；
     # 发行包无内置包时留空，交由下方 git clone 拉取（离线则面板中可重试更新）
     if [ ! -d "$BUILTIN/.git" ] && [ ! -d "$BUILTIN/database" ]; then
         mkdir -p "$BUILTIN"
         for c in database application webserver library; do
-            [ -d "zap/data/appstore/repos/zap-appstore/$c" ] && cp -Rf "zap/data/appstore/repos/zap-appstore/$c" "$BUILTIN/" 2>/dev/null || true
+            [ -d "$SRC/data/appstore/repos/zap-appstore/$c" ] && cp -Rf "$SRC/data/appstore/repos/zap-appstore/$c" "$BUILTIN/" 2>/dev/null || true
         done
     fi
 
@@ -113,22 +164,27 @@ deploy_appstore() {
 
 # ── 部署程序 ────────────────────────────────────────────────
 TARGET="/usr/local"
-if [ -d "$TARGET/zap" ]; then
+ZAP_DIR="$TARGET/zap"
+
+# 安装目录必须先显式创建：不能依赖 cp 隐式创建（包内布局变化或 /usr/local 缺失时
+# 会导致 /usr/local/zap 根本没建出来），同时避免"目录在但内容不全"被误判为升级。
+mkdir -p "$ZAP_DIR" "$ZAP_DIR/data" || die "无法创建安装目录 ${ZAP_DIR}"
+
+# 升级判定看二进制是否存在，而不是目录是否存在
+if [ -x "$ZAP_DIR/zapd" ]; then
     info "检测到已安装版本，执行升级..."
-    cp -Rf zap/zapctl "$TARGET/zap/"    || die "部署 zapctl 失败"
-    cp -Rf zap/zapd "$TARGET/zap/"      || die "部署 zapd 失败"
-    cp -Rf zap/zapexec "$TARGET/zap/"   || die "部署 zapexec 失败"
-    cp -Rf zap/zapupgrade "$TARGET/zap/" || die "部署 zapupgrade 失败"
-    cp -Rf zap/scripts "$TARGET/zap/"   || true
 else
-    info "部署程序到 ${TARGET}/zap ..."
-    cp -Rf zap "$TARGET/"
-    chmod +x "$TARGET/zap/zapd" "$TARGET/zap/zapctl" "$TARGET/zap/zapexec" "$TARGET/zap/zapupgrade"
-    ln -sf "$TARGET/zap/zapctl"   /usr/local/bin/zapctl
-    ln -sf "$TARGET/zap/zapd"     /usr/local/bin/zapd
-    ln -sf "$TARGET/zap/zapexec"  /usr/local/bin/zapexec
-    ln -sf "$TARGET/zap/zapupgrade" /usr/local/bin/zapupgrade
+    info "部署程序到 ${ZAP_DIR} ..."
 fi
+
+# 安装 / 升级共用同一段逻辑（幂等）：二进制 + 脚本 + 权限 + /usr/local/bin 软链
+for bin in zapd zapctl zapexec zapupgrade; do
+    [ -f "$SRC/$bin" ] || die "安装包缺少 ${bin}"
+    cp -f "$SRC/$bin" "$ZAP_DIR/$bin" || die "部署 ${bin} 失败"
+    chmod 0755 "$ZAP_DIR/$bin"
+    ln -sf "$ZAP_DIR/$bin" "/usr/local/bin/$bin"
+done
+cp -Rf "$SRC/scripts" "$ZAP_DIR/" 2>/dev/null || true
 # 幂等部署 AppStore（升级不覆盖 git/.git 与 custom/）
 deploy_appstore
 ok "程序部署完成"
@@ -160,22 +216,22 @@ fi
 chown root:zapadm /etc/zap/zap.yaml
 chmod 0660 /etc/zap/zap.yaml
 
-if [ ! -f /etc/zap/zap.crt ] || [ ! -f /etc/zap/zap.key ]; then
-    info "生成自签名 TLS 证书..."
-    if ! openssl req -x509 -newkey rsa:4096 -keyout /etc/zap/zap.key -out /etc/zap/zap.crt \
-        -days 3650 -nodes -subj "/CN=zap-local" \
-        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null; then
-        warn "openssl 不可用，证书将在 zapd 首次启动时生成"
-    fi
-fi
-chown root:zapadm /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
-chmod 0640 /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
+# if [ ! -f /etc/zap/zap.crt ] || [ ! -f /etc/zap/zap.key ]; then
+#     info "生成自签名 TLS 证书..."
+#     if ! openssl req -x509 -newkey rsa:4096 -keyout /etc/zap/zap.key -out /etc/zap/zap.crt \
+#         -days 3650 -nodes -subj "/CN=zap-local" \
+#         -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null; then
+#         warn "openssl 不可用，证书将在 zapd 首次启动时生成"
+#     fi
+# fi
+# chown root:zapadm /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
+# chmod 0640 /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
 ok "配置准备完成"
 
 # ── systemd 服务 ────────────────────────────────────────────
 info "安装 systemd 服务..."
-cp -Rf zap/scripts/systemd/zapd.service    /etc/systemd/system/ || die "安装 zapd.service 失败"
-cp -Rf zap/scripts/systemd/zapexec.service /etc/systemd/system/ || die "安装 zapexec.service 失败"
+cp -Rf "$SRC/scripts/systemd/zapd.service"    /etc/systemd/system/ || die "安装 zapd.service 失败"
+cp -Rf "$SRC/scripts/systemd/zapexec.service" /etc/systemd/system/ || die "安装 zapexec.service 失败"
 systemctl daemon-reload
 systemctl enable zapd.service zapexec.service >/dev/null 2>&1 || warn "服务 enable 失败"
 systemctl restart zapexec.service || warn "zapexec 启动失败"
@@ -183,8 +239,8 @@ systemctl restart zapd.service    || warn "zapd 启动失败"
 ok "systemd 服务已启用"
 
 # ── 清理临时文件 ────────────────────────────────────────────
+# 解压目录 $WORK_DIR 由 EXIT trap 自动清理
 rm -f "$ZAP_FILENAME"
-rm -rf zap
 
 # ── 完成总结 ────────────────────────────────────────────────
 echo ""
