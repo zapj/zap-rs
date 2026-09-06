@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>__SITE_NAME__ · 站点已创建</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :root {
+    --brand: #409eff;
+    --brand-soft: rgba(64, 158, 255, .12);
+    --text: #1f2d3d;
+    --muted: #6b7a8d;
+    --line: #e6ebf1;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(1100px 520px at 15% -10%, #2b6cb0 0%, transparent 55%),
+      radial-gradient(900px 480px at 105% 10%, #1d4ed8 0%, transparent 50%),
+      #0f172a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+    line-height: 1.6;
+  }
+  .card {
+    width: 100%;
+    max-width: 720px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 24px 60px rgba(8, 20, 40, .28);
+    padding: 40px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 8px;
+    border-radius: 999px;
+    background: var(--brand-soft);
+    color: var(--brand);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .3px;
+  }
+  .brand svg { display: block; }
+  h1 {
+    margin: 20px 0 8px;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -.3px;
+  }
+  .sub { margin: 0 0 24px; color: var(--muted); font-size: 15px; }
+  .meta {
+    margin: 0 0 24px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .meta .row {
+    display: flex;
+    gap: 12px;
+    padding: 11px 16px;
+    font-size: 14px;
+  }
+  .meta .row + .row { border-top: 1px solid var(--line); }
+  .meta dt {
+    flex: 0 0 104px;
+    margin: 0;
+    color: var(--muted);
+  }
+  .meta dd {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    word-break: break-all;
+  }
+  code {
+    font-family: "JetBrains Mono", Menlo, Consolas, "Courier New", monospace;
+    font-size: 13px;
+    background: #f4f6f9;
+    border-radius: 6px;
+    padding: 2px 6px;
+  }
+  .tips {
+    background: #f8fafc;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 20px;
+  }
+  .tips h2 { margin: 0 0 8px; font-size: 15px; }
+  .tips ol { margin: 0; padding-left: 20px; font-size: 14px; color: #41506a; }
+  .tips li + li { margin-top: 4px; }
+  footer {
+    margin-top: 24px;
+    font-size: 12px;
+    color: #97a3b4;
+    text-align: center;
+  }
+  @media (max-width: 560px) {
+    .card { padding: 26px 20px; border-radius: 12px; }
+    h1 { font-size: 22px; }
+    .meta .row { flex-direction: column; gap: 2px; }
+    .meta dt { flex: none; }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <span class="brand">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" fill="currentColor"/>
+      </svg>
+      Zap Panel
+    </span>
+
+    <h1>站点已创建</h1>
+    <p class="sub">
+      恭喜，Nginx 已成功为该站点提供访问。这是 Zap 面板自动生成的占位页面，
+      上传你的网站文件后即可替换。
+    </p>
+
+    <dl class="meta">
+      <div class="row"><dt>站点名称</dt><dd>__SITE_NAME__</dd></div>
+      <div class="row"><dt>绑定域名</dt><dd>__SITE_DOMAINS__</dd></div>
+      <div class="row"><dt>站点 ID</dt><dd>__SITE_ID__</dd></div>
+      <div class="row"><dt>文档根目录</dt><dd><code>__SITE_ROOT__</code></dd></div>
+      <div class="row"><dt>创建时间</dt><dd>__CREATED_AT__</dd></div>
+    </dl>
+
+    <section class="tips">
+      <h2>下一步</h2>
+      <ol>
+        <li>将网站文件（含 index.html / index.php）上传到上方「文档根目录」</li>
+        <li>需要 PHP？在面板站点设置中选择 PHP 实例并保存</li>
+        <li>需要 HTTPS？在「SSL/TLS」申请证书并开启强制跳转</li>
+      </ol>
+    </section>
+
+    <footer>Powered by Zap · Linux Server Control Panel</footer>
+  </main>
+</body>
+</html>

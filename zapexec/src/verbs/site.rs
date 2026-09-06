@@ -207,17 +207,63 @@ fn default_web_root(name: &str, site_id: i64) -> PathBuf {
         .join(format!("{}-{site_id}", sanitize_name(name)))
 }
 
-fn ensure_web_root(root: &Path) -> Result<(), String> {
+/// 站点骨架目录：`{ZAP_PATH}/scripts/zap/skel/`，其中的 index.html 为新站点的默认首页模板。
+/// 运维可直接修改该模板（支持 __SITE_NAME__ / __SITE_ID__ / __SITE_DOMAINS__ /
+/// __SITE_ROOT__ / __CREATED_AT__ 占位符），下次建站即生效。
+fn skel_file() -> PathBuf {
+    zap_path().join("scripts/zap/skel/index.html")
+}
+
+/// skel 模板缺失时的兜底页（保证离线/精简部署也能建站成功）
+fn fallback_index_html() -> String {
+    "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n\
+     <title>站点已创建</title>\n</head>\n<body>\n<h1>站点已创建</h1>\n\
+     <p>此页面由 Zap 面板自动生成，将站点文件放入本目录即可。</p>\n</body>\n</html>\n"
+        .to_string()
+}
+
+/// 用 skel 模板渲染站点默认首页（模板不存在时回退内置页面）
+fn render_index_html(site_id: i64, name: &str, domains: &[String], root: &Path) -> String {
+    let tpl = match std::fs::read_to_string(skel_file()) {
+        Ok(s) if !s.trim().is_empty() => s,
+        _ => return fallback_index_html(),
+    };
+    let created_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    apply_placeholders(&tpl, site_id, name, domains, root, &created_at)
+}
+
+/// 纯函数：替换 skel 模板中的占位符（单测覆盖）
+fn apply_placeholders(
+    tpl: &str,
+    site_id: i64,
+    name: &str,
+    domains: &[String],
+    root: &Path,
+    created_at: &str,
+) -> String {
+    let domains_text = if domains.is_empty() {
+        "未绑定域名".to_string()
+    } else {
+        domains.join("、")
+    };
+    tpl.replace("__SITE_NAME__", name)
+        .replace("__SITE_ID__", &site_id.to_string())
+        .replace("__SITE_DOMAINS__", &domains_text)
+        .replace("__SITE_ROOT__", &root.to_string_lossy())
+        .replace("__CREATED_AT__", created_at)
+}
+
+fn ensure_web_root(
+    root: &Path,
+    site_id: i64,
+    name: &str,
+    domains: &[String],
+) -> Result<(), String> {
     std::fs::create_dir_all(root).map_err(|e| format!("{e}"))?;
     let index = root.join("index.html");
     if !index.exists() {
-        std::fs::write(
-            &index,
-            "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n\
-             <title>站点已创建</title>\n</head>\n<body>\n<h1>站点已创建</h1>\n\
-             <p>此页面由 Zap 面板自动生成，将站点文件放入本目录即可。</p>\n</body>\n</html>\n",
-        )
-        .map_err(|e| format!("{e}"))?;
+        std::fs::write(&index, render_index_html(site_id, name, domains, root))
+            .map_err(|e| format!("{e}"))?;
     }
     Ok(())
 }
@@ -391,7 +437,7 @@ fn vhost_sync_inner(
         _ => default_web_root(name, site_id),
     };
     // create_dir_all 会递归创建归属用户家目录骨架（/home/{u}/www/...）
-    ensure_web_root(&root)?;
+    ensure_web_root(&root, site_id, name, domains)?;
     // 站点树属主/权限收敛：
     // - web tree：owner_user（独立系统用户模式）或 www；组恒为 www，目录 750 / 文件 640
     //   （nginx worker 以组 www 读静态文件，php-fpm 以 owner 身份读写）
@@ -518,6 +564,30 @@ fn reload_nginx(bin: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skel_placeholders_are_replaced() {
+        let tpl =
+            "N=__SITE_NAME__;I=__SITE_ID__;D=__SITE_DOMAINS__;R=__SITE_ROOT__;C=__CREATED_AT__";
+        let out = apply_placeholders(
+            tpl,
+            7,
+            "blog",
+            &["a.com".into(), "b.com".into()],
+            Path::new("/home/u/www/blog-7"),
+            "2026-09-06 10:00:00",
+        );
+        assert_eq!(
+            out,
+            "N=blog;I=7;D=a.com、b.com;R=/home/u/www/blog-7;C=2026-09-06 10:00:00"
+        );
+    }
+
+    #[test]
+    fn skel_placeholders_without_domain() {
+        let out = apply_placeholders("D=__SITE_DOMAINS__", 1, "x", &[], Path::new("/r"), "");
+        assert_eq!(out, "D=未绑定域名");
+    }
 
     #[test]
     fn render_static_vhost() {
