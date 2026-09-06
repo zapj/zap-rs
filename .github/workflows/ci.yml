@@ -16,6 +16,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # zapd 通过 rust-embed 内嵌 ../web/dist/，因此必须先构建前端产物，
+      # 再执行 fmt / clippy / build / test，否则 zapd 编译（含 clippy、测试）会失败。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Web install dependencies
+        run: npm ci || npm install
+        working-directory: web
+
+      - name: Web type check
+        run: npm run type-check
+        working-directory: web
+
+      - name: Web build (production)
+        run: npm run build:prod
+        working-directory: web
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -42,27 +62,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace
-
-  web:
-    name: Web (npm install / build)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci || npm install
-
-      - name: Type check
-        run: npm run type-check
-
-      - name: Build (production)
-        run: npm run build:prod
