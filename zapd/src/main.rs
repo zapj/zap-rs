@@ -25,6 +25,14 @@ struct Cli {
     version: bool,
 }
 
+/// 默认日志级别（可用环境变量 `RUST_LOG` 覆盖）：
+/// - debug 构建：保留详细日志（含 tower_http、axum rejection），便于本地联调
+/// - release 构建：只输出 info 及以上，避免线上 journal 被 debug 日志刷屏
+#[cfg(debug_assertions)]
+const DEFAULT_LOG: &str = "zapd=debug,tower_http=debug,axum::rejection=trace";
+#[cfg(not(debug_assertions))]
+const DEFAULT_LOG: &str = "zapd=info,tower_http=info";
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -35,13 +43,8 @@ async fn main() {
 
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                format!(
-                    "{}=debug,tower_http=debug,axum::rejection=trace",
-                    env!("CARGO_CRATE_NAME")
-                )
-                .into()
-            }),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| DEFAULT_LOG.into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

@@ -10,7 +10,8 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=/usr/local/zap
 # Environment=ZAP_PATH=/usr/local/zap
-
+User=zapadm          
+Group=zapadm
 ExecStart=/usr/local/zap/zapd
 Restart=on-failure
 RestartSec=3s

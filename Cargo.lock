@@ -4249,7 +4249,7 @@ dependencies = [
 
 [[package]]
 name = "zap-proto"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.2.16",
@@ -4263,7 +4263,7 @@ dependencies = [
 
 [[package]]
 name = "zapctl"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "bcrypt",
  "chrono",
@@ -4279,7 +4279,7 @@ dependencies = [
 
 [[package]]
 name = "zapd"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "acme-lib",
  "aes-gcm",
@@ -4335,7 +4335,7 @@ dependencies = [
 
 [[package]]
 name = "zapexec"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "chrono",
  "clap",
@@ -4351,7 +4351,7 @@ dependencies = [
 
 [[package]]
 name = "zapupgrade"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "clap",
 ]

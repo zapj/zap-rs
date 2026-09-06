@@ -35,12 +35,19 @@ enum Command {
     Client(client::ClientArgs),
 }
 
+/// 默认日志级别（可用环境变量 `RUST_LOG` 覆盖）：
+/// debug 构建保留详细日志，release 只输出 info 及以上。
+#[cfg(debug_assertions)]
+const DEFAULT_LOG: &str = "zapexec=debug";
+#[cfg(not(debug_assertions))]
+const DEFAULT_LOG: &str = "zapexec=info";
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "zapexec=debug".into()),
+                .unwrap_or_else(|_| DEFAULT_LOG.into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
