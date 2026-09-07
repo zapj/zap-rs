@@ -216,16 +216,61 @@ async fn site_in_scope(claims: &jwt::Claims, site_id: i64) -> Result<(), ZapErro
     }
 }
 
-/// 规范化域名数组：trim + 小写 + 去空 + 去重（保持顺序）
-fn norm_domains(raw: &[String]) -> Vec<String> {
+/// 单个域名归一化（判重与入库都以归一化结果为准，避免 `A.com` / `a.com.` / `http://a.com/x`
+/// 这类写法绕过唯一性检查）：
+/// - 去首尾空白、转小写
+/// - 允许粘贴整条 URL：去掉 scheme、端口与路径/查询串
+/// - 去掉结尾点（`a.com.` → `a.com`）
+/// - 国际化域名（中文等）转 punycode（`xn--`）
+/// - 保留泛域名写法 `*.example.com`
+fn normalize_domain(raw: &str) -> Result<String, String> {
+    let mut s = raw.trim().to_lowercase();
+    for p in ["https://", "http://", "//"] {
+        if let Some(rest) = s.strip_prefix(p) {
+            s = rest.to_string();
+            break;
+        }
+    }
+    if let Some(idx) = s.find(['/', '?', '#']) {
+        s = s[..idx].to_string();
+    }
+    // 域名里出现 ':' 只可能是 host:port（IPv6 形式的域名不支持）
+    if let Some(idx) = s.find(':') {
+        s = s[..idx].to_string();
+    }
+    s = s.trim_end_matches('.').to_string();
+    if s.is_empty() {
+        return Err("域名不能为空".to_string());
+    }
+    if !s.is_ascii() {
+        let (star, host) = match s.strip_prefix("*.") {
+            Some(h) => (true, h),
+            None => (false, s.as_str()),
+        };
+        let ascii = idna::domain_to_ascii(host).map_err(|_| {
+            format!(
+                "域名 {} 无法转换为 punycode（请检查是否含非法字符）",
+                raw.trim()
+            )
+        })?;
+        s = if star { format!("*.{ascii}") } else { ascii };
+    }
+    Ok(s)
+}
+
+/// 规范化域名数组：归一化 + 去空 + 去重（保持顺序）
+fn norm_domains(raw: &[String]) -> Result<Vec<String>, ZapError> {
     let mut out: Vec<String> = Vec::new();
     for d in raw {
-        let t = d.trim().to_lowercase();
+        if d.trim().is_empty() {
+            continue;
+        }
+        let t = normalize_domain(d).map_err(|e| ZapError::New(-1, e))?;
         if !t.is_empty() && !out.contains(&t) {
             out.push(t);
         }
     }
-    out
+    Ok(out)
 }
 
 /// 规范化 IP 数组：trim + 去空 + 去重（保持顺序）
@@ -240,11 +285,22 @@ fn norm_ips(raw: &[String]) -> Vec<String> {
     out
 }
 
+/// 域名合法性：支持泛域名 `*.a.com`；逐标签校验（长度、字符集、不能以 - 开头/结尾）
+/// 并禁止空标签（`a..com`、`.a.com`、`a.com.`）。
 fn valid_domain(d: &str) -> bool {
-    !d.is_empty()
-        && d.chars().count() <= 253
-        && d.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+    let host = d.strip_prefix("*.").unwrap_or(d);
+    if host.is_empty() || host.chars().count() > 253 || d.starts_with('.') {
+        return false;
+    }
+    host.split('.').all(|label| {
+        !label.is_empty()
+            && label.chars().count() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    })
 }
 
 /// 名称非必填：留空默认取第一个域名
@@ -338,24 +394,105 @@ async fn site_dirs_for(
     ))
 }
 
-/// 检查域名是否与其它站点重复（exclude_site 用于更新时排除自身）
+/// 判重用键：除自身外，`a.com` 与 `www.a.com` 互为冲突键（同站点内允许共存，
+/// 跨站点一律判冲突，避免 nginx 最长匹配带来的"看起来绑上了、实际不生效"）。
+fn domain_match_keys(d: &str) -> Vec<String> {
+    let mut keys = vec![d.to_string()];
+    if let Some(bare) = d.strip_prefix("www.") {
+        keys.push(bare.to_string());
+    } else if !d.starts_with("*.") {
+        keys.push(format!("www.{d}"));
+    }
+    keys
+}
+
+/// 泛域名 `*.suffix` 是否覆盖 `domain`（两个泛域名覆盖范围相交也算冲突）。
+fn wildcard_covers(suffix: &str, domain: &str) -> bool {
+    if let Some(other) = domain.strip_prefix("*.") {
+        other == suffix
+            || other.ends_with(&format!(".{suffix}"))
+            || suffix.ends_with(&format!(".{other}"))
+    } else {
+        domain == suffix || domain.ends_with(&format!(".{suffix}"))
+    }
+}
+
+/// LIKE 通配符转义（域名里可能出现 `_`，不转义会误判冲突）。
+fn like_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// 冲突提示：管理员看得到占用方站点（便于排查），普通用户只提示被占用，避免信息泄露。
+fn conflict_err(input: &str, hit: &str, site_id: i64, is_admin: bool) -> ZapError {
+    if is_admin {
+        ZapError::New(
+            -1,
+            format!("域名 {input} 与站点 id={site_id} 已绑定的 {hit} 冲突"),
+        )
+    } else {
+        ZapError::New(-1, format!("域名 {input} 已被占用，请更换或联系管理员"))
+    }
+}
+
+/// 严格模式域名冲突检查（多租户：跨用户同样判冲突）：
+/// 1. 完全相同
+/// 2. `a.com` ↔ `www.a.com`
+/// 3. 已存在的泛域名覆盖本次域名（如 `*.a.com` 覆盖 `b.a.com`）
+/// 4. 本次提交的是泛域名，且覆盖了别人的精确域名
+///
+/// `exclude_site` 用于更新时排除自身；`is_admin` 决定错误信息是否暴露占用方。
 async fn ensure_domains_unique(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     domains: &[String],
     exclude_site: i64,
+    is_admin: bool,
 ) -> Result<(), ZapError> {
+    // 泛域名数量通常很少，一次性取出后在内存里比对
+    let wildcards: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT site_id, domain FROM site_domain WHERE site_id != ? AND domain LIKE '*.%'",
+    )
+    .bind(exclude_site)
+    .fetch_all(&mut **tx)
+    .await?;
+
     for d in domains {
-        let exists: Option<(i64,)> =
-            sqlx::query_as("SELECT site_id FROM site_domain WHERE domain = ? AND site_id != ?")
-                .bind(d)
-                .bind(exclude_site)
-                .fetch_optional(&mut **tx)
-                .await?;
-        if let Some((sid,)) = exists {
-            return Err(ZapError::New(
-                -1,
-                format!("域名 {} 已被其它站点（id={}）绑定", d, sid),
-            ));
+        // 1) + 2) 精确匹配与 www 变体（走唯一索引）
+        for key in domain_match_keys(d) {
+            let exists: Option<(i64,)> =
+                sqlx::query_as("SELECT site_id FROM site_domain WHERE domain = ? AND site_id != ?")
+                    .bind(&key)
+                    .bind(exclude_site)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            if let Some((sid,)) = exists {
+                return Err(conflict_err(d, &key, sid, is_admin));
+            }
+        }
+        // 3) 被别人的泛域名覆盖
+        for (sid, w) in &wildcards {
+            if let Some(suffix) = w.strip_prefix("*.")
+                && wildcard_covers(suffix, d)
+            {
+                return Err(conflict_err(d, w, *sid, is_admin));
+            }
+        }
+        // 4) 本次是泛域名，覆盖了别人的精确域名
+        if let Some(suffix) = d.strip_prefix("*.") {
+            let like = format!("%.{}", like_escape(suffix));
+            let rows: Vec<(i64, String)> = sqlx::query_as(
+                "SELECT site_id, domain FROM site_domain WHERE site_id != ? \
+                 AND (domain = ? OR domain LIKE ? ESCAPE '\\')",
+            )
+            .bind(exclude_site)
+            .bind(suffix)
+            .bind(&like)
+            .fetch_all(&mut **tx)
+            .await?;
+            if let Some((sid, hit)) = rows.first() {
+                return Err(conflict_err(d, hit, *sid, is_admin));
+            }
         }
     }
     Ok(())
@@ -623,7 +760,7 @@ pub async fn site_add(
     };
     resolve_target_user(&claims, owner).await?;
 
-    let domains = norm_domains(&payload.domains);
+    let domains = norm_domains(&payload.domains)?;
     let ips = norm_ips(&payload.ips);
     let name = fallback_name(payload.name.as_deref().unwrap_or(""), &domains);
     let status = payload.status.unwrap_or(1).clamp(0, 1);
@@ -659,7 +796,7 @@ pub async fn site_add(
     let now = chrono::Local::now().timestamp();
 
     let mut tx = pool.begin().await?;
-    ensure_domains_unique(&mut tx, &domains, 0).await?;
+    ensure_domains_unique(&mut tx, &domains, 0, jwt::is_admin(&claims)).await?;
     let r = sqlx::query(
         "INSERT INTO site (user_id, name, php_instance, status, remark, created_at, updated_at) \
          VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -762,7 +899,7 @@ pub async fn site_update(
 
     // 域名 / IP：不传则保留原值，传入则整体覆盖
     let domains = if let Some(ds) = &payload.domains {
-        norm_domains(ds)
+        norm_domains(ds)?
     } else {
         sqlx::query_as::<_, (String,)>(
             "SELECT domain FROM site_domain WHERE site_id = ? ORDER BY id",
@@ -832,7 +969,7 @@ pub async fn site_update(
     }
     // 域名整体覆盖：先校验唯一性，再重建
     if payload.domains.is_some() {
-        ensure_domains_unique(&mut tx, &domains, payload.id).await?;
+        ensure_domains_unique(&mut tx, &domains, payload.id, jwt::is_admin(&claims)).await?;
         sqlx::query("DELETE FROM site_domain WHERE site_id = ?")
             .bind(payload.id)
             .execute(&mut *tx)
@@ -953,6 +1090,15 @@ pub async fn site_delete(
         iq = iq.bind(id);
     }
     iq.execute(&mut *tx).await?;
+
+    // 兜底：清理历史遗留的孤儿子表行（站点已不存在但域名/IP 仍残留），
+    // 否则这些域名会一直"幽灵占用"，多租户下表现为新用户绑定不上。
+    let _ = sqlx::query("DELETE FROM site_domain WHERE site_id NOT IN (SELECT id FROM site)")
+        .execute(&mut *tx)
+        .await;
+    let _ = sqlx::query("DELETE FROM site_ip WHERE site_id NOT IN (SELECT id FROM site)")
+        .execute(&mut *tx)
+        .await;
 
     tx.commit().await?;
 
@@ -1244,4 +1390,92 @@ async fn resolve_php_socket(php_instance: &str) -> Result<String, ZapError> {
             )
         })?;
     Ok(format!("/var/run/php-fpm-{ver}.sock"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_normalization_rules() {
+        // 粘贴整条 URL / 大写 / 结尾点 / 端口 都能归一化到同一结果
+        for raw in [
+            "A.com",
+            " a.com ",
+            "a.com.",
+            "http://a.com",
+            "https://A.com/path?x=1",
+            "http://a.com:8080/x",
+        ] {
+            assert_eq!(normalize_domain(raw).unwrap(), "a.com", "输入: {raw}");
+        }
+        // 泛域名保留写法
+        assert_eq!(normalize_domain("*.A.com").unwrap(), "*.a.com");
+        // 中文域名转 punycode
+        let puny = normalize_domain("中文.com").unwrap();
+        assert!(puny.starts_with("xn--"), "应转为 punycode: {puny}");
+        assert!(valid_domain(&puny));
+        // 空串与纯路径
+        assert!(normalize_domain("   ").is_err());
+        assert!(normalize_domain("http://").is_err());
+    }
+
+    #[test]
+    fn domain_validity_rules() {
+        assert!(valid_domain("a.com"));
+        assert!(valid_domain("www.a.com"));
+        assert!(valid_domain("*.a.com"));
+        assert!(valid_domain("my-site.example.com"));
+        // 非法：空标签 / 点开头结尾 / 连字符开头结尾 / 只有星号 / 非法字符
+        assert!(!valid_domain("a..com"));
+        assert!(!valid_domain(".a.com"));
+        assert!(!valid_domain("a.com."));
+        assert!(!valid_domain("-a.com"));
+        assert!(!valid_domain("a-.com"));
+        assert!(!valid_domain("*"));
+        assert!(!valid_domain("a b.com"));
+    }
+
+    #[test]
+    fn conflict_keys_and_wildcards() {
+        // a.com 与 www.a.com 互为冲突键
+        assert_eq!(
+            domain_match_keys("a.com"),
+            vec!["a.com".to_string(), "www.a.com".to_string()]
+        );
+        assert_eq!(
+            domain_match_keys("www.a.com"),
+            vec!["www.a.com".to_string(), "a.com".to_string()]
+        );
+
+        // 泛域名覆盖：*.a.com 覆盖 a.com / b.a.com / x.b.a.com，不覆盖 b.com
+        assert!(wildcard_covers("a.com", "a.com"));
+        assert!(wildcard_covers("a.com", "b.a.com"));
+        assert!(wildcard_covers("a.com", "x.b.a.com"));
+        assert!(!wildcard_covers("a.com", "b.com"));
+        assert!(!wildcard_covers("a.com", "ab.com"));
+        // 两个泛域名覆盖范围相交即冲突
+        assert!(wildcard_covers("a.com", "*.a.com"));
+        assert!(wildcard_covers("a.com", "*.b.a.com"));
+        assert!(!wildcard_covers("a.com", "*.b.com"));
+
+        // LIKE 转义：域名里的 _ 不应被当作通配符
+        assert_eq!(like_escape("a_b.com"), "a\\_b.com");
+    }
+
+    #[test]
+    fn conflict_message_hides_holder_for_normal_user() {
+        let admin = conflict_err("a.com", "www.a.com", 12, true);
+        let user = conflict_err("a.com", "www.a.com", 12, false);
+        let admin_msg = format!("{admin}");
+        let user_msg = format!("{user}");
+        assert!(
+            admin_msg.contains("id=12"),
+            "管理员应看到占用方: {admin_msg}"
+        );
+        assert!(
+            !user_msg.contains("id=12"),
+            "普通用户不应看到占用方: {user_msg}"
+        );
+    }
 }

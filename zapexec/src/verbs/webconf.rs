@@ -35,13 +35,13 @@
 use std::path::{Path, PathBuf};
 
 /// 面板托管的站点配置根（不属于任何具体 webserver 安装目录）。
-/// 环境变量 `ZAP_WEBSERVER_ROOT` 仅用于开发联调与单测，生产不要设置。
 const WEBSERVER_ROOT: &str = "/etc/zap/webservers";
 
+/// zapd 运行用户（数据区文件归属它；生效配置文件的属组也是它）。
+const ZAP_USER: &str = "zapadm";
+
 fn root() -> PathBuf {
-    std::env::var("ZAP_WEBSERVER_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(WEBSERVER_ROOT))
+    PathBuf::from(WEBSERVER_ROOT)
 }
 
 /// 面板数据区站点目录：`{ZAP_PATH}/data/sites/<site_id>`
@@ -50,9 +50,6 @@ fn site_data_dir(site_id: i64) -> PathBuf {
         .join("data/sites")
         .join(site_id.to_string())
 }
-
-/// zapd 运行用户（数据区文件归属它；生效配置文件的属组也是它）。
-const ZAP_USER: &str = "zapadm";
 
 pub(super) fn vhost_name(site_id: i64) -> String {
     format!("zap-site-{site_id}.conf")
@@ -66,26 +63,25 @@ pub(super) fn enabled_dir(kind: &str) -> PathBuf {
     root().join(kind).join("sites-enabled")
 }
 
-/// 创建 `<kind>` 的 sites-available / sites-enabled，并收敛为 root:zapadm 0750。
-pub(super) fn ensure_dirs(kind: &str) -> Result<(PathBuf, PathBuf), String> {
-    let adir = available_dir(kind);
-    let edir = enabled_dir(kind);
-    let root_dir = root();
-    let kind_dir = root_dir.join(kind);
-    std::fs::create_dir_all(&adir).map_err(|e| format!("创建 {} 失败: {e}", adir.display()))?;
-    std::fs::create_dir_all(&edir).map_err(|e| format!("创建 {} 失败: {e}", edir.display()))?;
-    for d in [&root_dir, &kind_dir, &adir, &edir] {
-        set_owner(d, 0o750, true);
-    }
-    Ok((adir, edir))
-}
-
 pub(super) fn available_path(kind: &str, site_id: i64) -> PathBuf {
     available_dir(kind).join(vhost_name(site_id))
 }
 
 pub(super) fn enabled_path(kind: &str, site_id: i64) -> PathBuf {
     enabled_dir(kind).join(vhost_name(site_id))
+}
+
+/// 创建 `<kind>` 的 sites-available / sites-enabled，并收敛为 root:zapadm 0750。
+fn ensure_dirs_in(base: &Path, kind: &str) -> Result<(PathBuf, PathBuf), String> {
+    let kind_dir = base.join(kind);
+    let adir = kind_dir.join("sites-available");
+    let edir = kind_dir.join("sites-enabled");
+    std::fs::create_dir_all(&adir).map_err(|e| format!("创建 {} 失败: {e}", adir.display()))?;
+    std::fs::create_dir_all(&edir).map_err(|e| format!("创建 {} 失败: {e}", edir.display()))?;
+    for d in [base, &kind_dir, &adir, &edir] {
+        set_owner(d, 0o750, true);
+    }
+    Ok((adir, edir))
 }
 
 /// 写入面板侧快照（渲染结果 + 入参 json），归属 zapadm:zapadm 0640。
@@ -96,9 +92,17 @@ pub(super) fn write_snapshot(
     content: &str,
     meta: &serde_json::Value,
 ) -> Result<PathBuf, String> {
-    let dir = site_data_dir(site_id);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建站点数据目录失败: {e}"))?;
-    set_owner(&dir, 0o750, false);
+    write_snapshot_in(&site_data_dir(site_id), kind, content, meta)
+}
+
+fn write_snapshot_in(
+    dir: &Path,
+    kind: &str,
+    content: &str,
+    meta: &serde_json::Value,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("创建站点数据目录失败: {e}"))?;
+    set_owner(dir, 0o750, false);
 
     let conf = dir.join(format!("{kind}.conf"));
     let tmp = dir.join(format!("{kind}.conf.tmp"));
@@ -114,9 +118,13 @@ pub(super) fn write_snapshot(
     Ok(conf)
 }
 
-/// 把已通过校验的版本留一份到 backup/（最多保留 10 份，按时间倒序）。
+/// 把已通过校验的版本留一份到 backup/（最多保留 10 份）。
 pub(super) fn backup_snapshot(site_id: i64, kind: &str, content: &str) {
-    let dir = site_data_dir(site_id).join("backup");
+    backup_snapshot_in(&site_data_dir(site_id), kind, content)
+}
+
+fn backup_snapshot_in(dir: &Path, kind: &str, content: &str) {
+    let dir = dir.join("backup");
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
@@ -157,7 +165,11 @@ fn prune_backup(dir: &Path, kind: &str, keep: usize) {
 
 /// 发布站点配置：写入 sites-available 并在 sites-enabled 建软链（原子替换）。
 pub(super) fn publish(kind: &str, site_id: i64, content: &str) -> Result<PathBuf, String> {
-    let (adir, edir) = ensure_dirs(kind)?;
+    publish_in(&root(), kind, site_id, content)
+}
+
+fn publish_in(base: &Path, kind: &str, site_id: i64, content: &str) -> Result<PathBuf, String> {
+    let (adir, edir) = ensure_dirs_in(base, kind)?;
     let avail = adir.join(vhost_name(site_id));
     let tmp = adir.join(format!("{}.tmp", vhost_name(site_id)));
 
@@ -179,7 +191,14 @@ pub(super) fn publish(kind: &str, site_id: i64, content: &str) -> Result<PathBuf
 
 /// 停用：仅移除 sites-enabled 软链，配置保留在 sites-available。
 pub(super) fn unpublish(kind: &str, site_id: i64) -> Result<bool, String> {
-    let link = enabled_path(kind, site_id);
+    unpublish_in(&root(), kind, site_id)
+}
+
+fn unpublish_in(base: &Path, kind: &str, site_id: i64) -> Result<bool, String> {
+    let link = base
+        .join(kind)
+        .join("sites-enabled")
+        .join(vhost_name(site_id));
     if !link.is_symlink() && !link.exists() {
         return Ok(false);
     }
@@ -189,8 +208,15 @@ pub(super) fn unpublish(kind: &str, site_id: i64) -> Result<bool, String> {
 
 /// 站点删除：available 与 enabled 一并清理。
 pub(super) fn purge(kind: &str, site_id: i64) -> Result<bool, String> {
-    let mut removed = unpublish(kind, site_id)?;
-    let avail = available_path(kind, site_id);
+    purge_in(&root(), kind, site_id)
+}
+
+fn purge_in(base: &Path, kind: &str, site_id: i64) -> Result<bool, String> {
+    let mut removed = unpublish_in(base, kind, site_id)?;
+    let avail = base
+        .join(kind)
+        .join("sites-available")
+        .join(vhost_name(site_id));
     if avail.exists() {
         std::fs::remove_file(&avail).map_err(|e| format!("移除站点配置失败: {e}"))?;
         removed = true;
@@ -201,11 +227,20 @@ pub(super) fn purge(kind: &str, site_id: i64) -> Result<bool, String> {
 /// 旧布局迁移：`<webserver prefix>/conf/sites-enabled/zap-site-<id>.conf`
 /// → `sites-available/`。跨设备时用复制 + 删除，成功返回 true。
 pub(super) fn migrate_legacy(legacy_dir: &Path, kind: &str, site_id: i64) -> Result<bool, String> {
+    migrate_legacy_in(&root(), legacy_dir, kind, site_id)
+}
+
+fn migrate_legacy_in(
+    base: &Path,
+    legacy_dir: &Path,
+    kind: &str,
+    site_id: i64,
+) -> Result<bool, String> {
     let old = legacy_dir.join(vhost_name(site_id));
     if !old.exists() {
         return Ok(false);
     }
-    let (adir, _) = ensure_dirs(kind)?;
+    let (adir, _) = ensure_dirs_in(base, kind)?;
     let avail = adir.join(vhost_name(site_id));
     if !avail.exists() {
         if std::fs::rename(&old, &avail).is_err() {
@@ -299,79 +334,77 @@ fn ids_of(name: &str) -> Option<(libc::uid_t, libc::gid_t)> {
 mod tests {
     use super::*;
 
-    /// 环境变量是进程级的，用例并发跑会互相干扰：用锁串行化。
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// 把目录根与 ZAP_PATH 指到临时目录，避免污染真实的 /etc/zap。
+    /// 临时工作区：直接把路径传给内部实现，避免改动进程级环境变量
+    /// （会与 appstore 等同样读取 ZAP_PATH 的用例并发冲突）。
     struct Tmp {
         dir: PathBuf,
-        _guard: std::sync::MutexGuard<'static, ()>,
     }
 
     impl Tmp {
         fn new(tag: &str) -> Self {
-            let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-            let dir =
-                std::env::temp_dir().join(format!("zap-webconf-{tag}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!(
+                "zap-webconf-{tag}-{}-{}",
+                std::process::id(),
+                chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            ));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
-            // SAFETY: 持锁期间独占修改环境变量，这些用例也不会再 spawn 线程
-            unsafe {
-                std::env::set_var("ZAP_WEBSERVER_ROOT", &dir);
-                std::env::set_var("ZAP_PATH", &dir);
-            }
-            Self { dir, _guard: guard }
+            Self { dir }
         }
     }
 
     impl Drop for Tmp {
         fn drop(&mut self) {
-            // SAFETY: 同上，持锁独占
-            unsafe {
-                std::env::remove_var("ZAP_WEBSERVER_ROOT");
-                std::env::remove_var("ZAP_PATH");
-            }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 
     #[test]
     fn publish_then_unpublish_keeps_available() {
-        let _t = Tmp::new("pub");
-        let avail = publish("nginx", 7, "server {}\n").unwrap();
+        let t = Tmp::new("pub");
+        let base = t.dir.join("webservers");
+        let avail = publish_in(&base, "nginx", 7, "server {}\n").unwrap();
         assert!(avail.ends_with("sites-available/zap-site-7.conf"));
         assert_eq!(std::fs::read_to_string(&avail).unwrap(), "server {}\n");
 
-        let link = enabled_path("nginx", 7);
+        let link = base.join("nginx/sites-enabled/zap-site-7.conf");
         assert!(link.is_symlink(), "启用目录应是软链");
         assert_eq!(std::fs::read_to_string(&link).unwrap(), "server {}\n");
 
-        assert!(unpublish("nginx", 7).unwrap());
+        assert!(unpublish_in(&base, "nginx", 7).unwrap());
         assert!(!link.is_symlink(), "停用后软链应移除");
         assert!(avail.exists(), "停用后配置应保留在 sites-available");
 
-        assert!(purge("nginx", 7).unwrap());
+        assert!(purge_in(&base, "nginx", 7).unwrap());
         assert!(!avail.exists());
     }
 
     #[test]
-    fn snapshot_written_into_panel_data_dir() {
-        let _t = Tmp::new("snap");
+    fn snapshot_and_backup_written_into_site_dir() {
+        let t = Tmp::new("snap");
+        let site_dir = t.dir.join("data/sites/9");
         let meta = serde_json::json!({ "site_id": 9, "domains": ["a.com"] });
-        let conf = write_snapshot(9, "nginx", "server {}\n", &meta).unwrap();
-        assert!(conf.ends_with("data/sites/9/nginx.conf"));
+        let conf = write_snapshot_in(&site_dir, "nginx", "server {}\n", &meta).unwrap();
+        assert!(conf.ends_with("nginx.conf"));
         assert_eq!(std::fs::read_to_string(&conf).unwrap(), "server {}\n");
-        assert!(conf.with_file_name("site.json").exists());
-        backup_snapshot(9, "nginx", "server {}\n");
-        assert!(site_data_dir(9).join("backup").exists());
+        assert!(site_dir.join("site.json").exists());
+
+        for i in 0..12 {
+            backup_snapshot_in(&site_dir, "nginx", &format!("server {{ v{i}; }}\n"));
+        }
+        let kept = std::fs::read_dir(site_dir.join("backup"))
+            .unwrap()
+            .flatten()
+            .count();
+        assert!(kept <= 10, "历史版本最多保留 10 份，实际 {kept}");
     }
 
     #[test]
     fn ensure_include_is_idempotent_and_rollbackable() {
-        let _t = Tmp::new("inc");
-        let conf = std::env::temp_dir().join(format!("nginx-{}.conf", std::process::id()));
+        let t = Tmp::new("inc");
+        let conf = t.dir.join("nginx.conf");
         std::fs::write(&conf, "http {\n    include mime.types;\n}\n").unwrap();
-        let edir = enabled_dir("nginx");
+        let edir = t.dir.join("webservers/nginx/sites-enabled");
 
         assert!(ensure_include(&conf, &edir, "nginx").unwrap());
         let text = std::fs::read_to_string(&conf).unwrap();
@@ -389,24 +422,22 @@ mod tests {
         assert!(
             !std::fs::read_to_string(&conf)
                 .unwrap()
-                .contains("zap/webservers")
+                .contains("sites-enabled")
         );
-        let _ = std::fs::remove_file(&conf);
-        let _ = std::fs::remove_file(backup_path(&conf));
     }
 
     #[test]
     fn migrate_legacy_moves_old_vhost_file() {
-        let _t = Tmp::new("mig");
-        let legacy = std::env::temp_dir().join(format!("legacy-{}", std::process::id()));
+        let t = Tmp::new("mig");
+        let base = t.dir.join("webservers");
+        let legacy = t.dir.join("legacy");
         std::fs::create_dir_all(&legacy).unwrap();
         let old = legacy.join("zap-site-3.conf");
         std::fs::write(&old, "legacy\n").unwrap();
 
-        assert!(migrate_legacy(&legacy, "nginx", 3).unwrap());
-        let avail = available_path("nginx", 3);
+        assert!(migrate_legacy_in(&base, &legacy, "nginx", 3).unwrap());
+        let avail = base.join("nginx/sites-available/zap-site-3.conf");
         assert_eq!(std::fs::read_to_string(&avail).unwrap(), "legacy\n");
         assert!(!old.exists(), "迁移后旧文件应删除");
-        let _ = std::fs::remove_dir_all(&legacy);
     }
 }
