@@ -33,14 +33,12 @@ pub async fn init_schema() {
     init_api_token_table().await;
     // SSL/TLS 证书管理表
     init_ssl_cert_table().await;
-    // 系统更新：自动更新配置表 + 「系统设置 → 系统更新」菜单（老库幂等补行）
+    // 系统更新：自动更新配置表
     init_update_config_table().await;
-    ensure_system_update_menu().await;
-    // 「系统设置 → Zap 设置」菜单（id=28）：老库幂等补行
-    ensure_zap_config_menu().await;
     // 菜单（menus/role_menus）为静态基础数据：SSL/TLS、应用商店（含已安装应用）、
-    // 服务器状态、脚本/自动化（自定义脚本+计划任务）、系统设置（含审计日志）、
-    // 服务器配置、开发 —— 均已直接 seed，无需运行时补插。
+    // 服务器状态、脚本/自动化（自定义脚本+计划任务）、系统设置（含审计日志、
+    // Zap 设置、系统更新）、服务器配置、开发 —— 均由 init_menus_table /
+    // init_role_menus_table 一次 seed，开发期直接 reset-db，不再做运行时补插。
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -811,63 +809,6 @@ async fn init_update_config_table() {
     VALUES (1, 0, '0 3 * * *', 'https://mirrors.zap.cn/zap/releases', strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-}
-
-/// 「系统设置 → 系统更新」菜单（id=27）兜底：
-/// 新库由 init_menus_table 的 seed 直接写入；老库（menus 表已存在且无此菜单）
-/// 幂等补行并给 admin（role 1）授权。
-async fn ensure_system_update_menu() {
-    if !table_exists("menus").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let exists: Result<(i64,), sqlx::Error> =
-        sqlx::query_as("SELECT id FROM menus WHERE name = 'system-update' OR id = 27 LIMIT 1")
-            .fetch_one(pool)
-            .await;
-    if exists.is_ok() {
-        return;
-    }
-    let _ = sqlx::query(
-        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-         VALUES (27, 2, 'system-update', 'update', 'system/update/index', 'menu', '系统更新', 'ep:refresh', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'))",
-    )
-    .execute(pool)
-    .await;
-    let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (1, 27)")
-        .execute(pool)
-        .await;
-}
-
-/// 「系统设置 → Zap 设置」菜单（id=28）兜底：
-/// 新库由 init_menus_table 的 seed 直接写入；老库幂等补行并给 admin（role 1）授权，
-/// 同时把「用户管理」及其后的同级菜单排序号整体 +1，保证它紧跟在「基础设置」之后。
-async fn ensure_zap_config_menu() {
-    if !table_exists("menus").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let exists: Result<(i64,), sqlx::Error> =
-        sqlx::query_as("SELECT id FROM menus WHERE name = 'zap-config' OR id = 28 LIMIT 1")
-            .fetch_one(pool)
-            .await;
-    if exists.is_ok() {
-        return;
-    }
-    let _ = sqlx::query(
-        "UPDATE menus SET sort_order = sort_order + 1 WHERE parent_id = 2 AND sort_order >= 2",
-    )
-    .execute(pool)
-    .await;
-    let _ = sqlx::query(
-        "INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-         VALUES (28, 2, 'zap-config', 'zap-config', 'system/config/zap', 'menu', 'Zap 设置', 'ep:operation', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'))",
-    )
-    .execute(pool)
-    .await;
-    let _ = sqlx::query("INSERT OR IGNORE INTO role_menus (role_id, menu_id) VALUES (1, 28)")
-        .execute(pool)
-        .await;
 }
 
 async fn table_exists(table_name: &str) -> bool {
