@@ -425,8 +425,8 @@ interface SiteForm {
   web_root_sub: string
   upstreams: UpstreamSpec[]
   locations: LocationSpec[]
-  /** SSL/TLS：绑定的证书库证书 id（0 = 不启用 HTTPS） */
-  ssl_cert_id: number
+  /** SSL/TLS：绑定的证书库证书 id（null = 未选择，不启用 HTTPS） */
+  ssl_cert_id: number | null
   /** 允许 HTTP 跳转到 HTTPS（仅绑定证书后生效） */
   force_https: boolean
 }
@@ -446,7 +446,7 @@ const blankForm = (): SiteForm => ({
   web_root_sub: '',
   upstreams: [],
   locations: [],
-  ssl_cert_id: 0,
+  ssl_cert_id: null,
   force_https: false,
 })
 const form = reactive<SiteForm>(blankForm())
@@ -825,7 +825,7 @@ function openEdit(row: SiteItem) {
   if (form.site_type === 'proxy' && !form.locations.length) {
     form.locations.push(blankLocation('/'))
   }
-  form.ssl_cert_id = row.ssl_cert_id || 0
+  form.ssl_cert_id = row.ssl_cert_id || null
   form.force_https = !!row.force_https
   editCertName.value = row.ssl_cert_name || ''
   loadPhpOptions()
@@ -1386,7 +1386,7 @@ onMounted(() => {
       class="site-form-dialog"
     >
       <el-form label-width="118px" class="site-form site-tabs-form">
-        <el-tabs v-model="activeTab" tab-position="left" class="site-tabs">
+        <el-tabs v-model="activeTab" type="border-card" class="site-tabs">
           <!-- 基础信息 -->
           <el-tab-pane label="基础信息" name="base">
             <el-form-item v-if="canManageAll" label="归属用户" required>
@@ -2188,17 +2188,6 @@ onMounted(() => {
 .site-tabs-form {
   max-height: none;
   overflow: visible;
-}
-.site-tabs :deep(.el-tabs__header) {
-  margin-right: 6px;
-}
-.site-tabs :deep(.el-tabs__item) {
-  height: 42px;
-  line-height: 42px;
-  text-align: left;
-  justify-content: flex-start;
-  padding: 0 18px 0 6px;
-  font-size: 13px;
 }
 .site-tabs :deep(.el-tabs__content) {
   min-height: 320px;
