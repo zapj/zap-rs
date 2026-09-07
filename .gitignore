@@ -17,3 +17,4 @@ data/appstore/cache/*
 data/appstore/custom/*
 data/apps/*/
 data/sites/*
+data/ssl/

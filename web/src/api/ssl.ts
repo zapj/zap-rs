@@ -5,6 +5,10 @@ export type SslCertType = 'upload' | 'self-signed' | 'letsencrypt' | 'letsencryp
 
 export interface SslCertItem {
   id: number
+  /** 证书归属用户 id（0 = 历史系统证书，仅管理员可见） */
+  user_id?: number
+  /** 归属用户登录名（系统证书 / 用户已删除时为空） */
+  owner_name?: string
   name: string
   domains: string
   cert_type: SslCertType
@@ -16,6 +20,12 @@ export interface SslCertItem {
   updated_at: number
 }
 
+export interface OwnerOption {
+  id: number
+  username: string
+  nickname: string
+}
+
 export interface SslCertDetail extends SslCertItem {
   cert_content: string
   key_content: string
@@ -25,6 +35,8 @@ export interface SslCertDetail extends SslCertItem {
 
 export interface SslCertUpsertData {
   id?: number
+  /** 归属用户：仅管理员 / 经销商创建、编辑时可指定（默认当前用户） */
+  user_id?: number
   name: string
   domains?: string
   cert_content?: string
@@ -84,7 +96,13 @@ export function deleteCert(id: number) {
   return http.post<ApiResponse>('/ssl/cert/delete', { id })
 }
 
-export function selfSignCert(data: { name: string; domains: string; days?: number; remark?: string }) {
+export function selfSignCert(data: {
+  name: string
+  domains: string
+  days?: number
+  remark?: string
+  user_id?: number
+}) {
   return http.post<ApiResponse>('/ssl/cert/self-sign', data)
 }
 
@@ -94,6 +112,7 @@ export function letsEncryptCert(data: {
   name?: string
   staging?: boolean
   remark?: string
+  user_id?: number
 }) {
   return http.post<ApiResponse>('/ssl/cert/letsencrypt', data)
 }

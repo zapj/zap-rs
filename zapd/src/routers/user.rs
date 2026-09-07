@@ -801,6 +801,25 @@ pub async fn user_delete(
         return Err(ZapError::New(-1, "用户不存在".to_string()));
     }
 
+    // 清理该用户的 SSL 证书：先解除站点 HTTPS 绑定引用，再删除证书，避免悬空
+    let cert_ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM ssl_cert WHERE user_id = ?")
+        .bind(payload.id)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    for cid in cert_ids {
+        let _ = sqlx::query(
+            "UPDATE site_profile SET ssl_cert_id = 0, force_https = 0 WHERE ssl_cert_id = ?",
+        )
+        .bind(cid)
+        .execute(pool)
+        .await;
+        let _ = sqlx::query("DELETE FROM ssl_cert WHERE id = ?")
+            .bind(cid)
+            .execute(pool)
+            .await;
+    }
+
     // 删除用户后清理运行实体（system 模式：清 pool + userdel）
     if was_system && let Some(lu) = linux_user {
         match crate::zapexec::call(zap_proto::types::Request::UserSystemRemove {

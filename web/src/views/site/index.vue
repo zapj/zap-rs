@@ -481,7 +481,7 @@ const stalePhpInstance = computed(() => {
   return v && !phpRunningSet.value.has(v) ? v : ''
 })
 
-// ── SSL/TLS：绑定证书库证书（证书在「SSL/TLS → 证书管理」中统一维护）─────────
+// ── SSL/TLS：绑定证书库证书（证书在「SSL/TLS → 证书管理」中统一维护，按归属用户隔离）──
 const certOptions = ref<SslCertItem[]>([])
 const certsLoading = ref(false)
 async function loadCerts() {
@@ -489,7 +489,7 @@ async function loadCerts() {
   try {
     const res = await getCertList()
     const list = ((res as any)?.data || []) as SslCertItem[]
-    // 只提供启用中的证书（停用证书无法再绑定，已绑定的会以 stale 形式提示）
+    // 仅保留启用中的证书（停用无法绑定）；归属过滤交给 visibleCertOptions（随站点归属联动）
     certOptions.value = list.filter((c) => c.status === 1)
   } catch {
     /* handled */
@@ -497,20 +497,29 @@ async function loadCerts() {
     certsLoading.value = false
   }
 }
-/** 当前选中且在启用列表中的证书 */
-const selectedCert = computed(
-  () => certOptions.value.find((c) => c.id === form.ssl_cert_id) || null
+/** 当前登录账号 id（证书按归属用户过滤用） */
+const myUserId = computed(() => userStore.userInfo.id)
+/** 站点归属用户：证书必须归属该用户才能在此站点绑定（与后端校验一致） */
+const certOwnerId = computed(() => form.user_id ?? myUserId.value)
+/** 当前归属用户可用（启用中）的证书 */
+const visibleCertOptions = computed(() =>
+  certOptions.value.filter((c) => c.user_id === certOwnerId.value)
 )
-/** 站点绑定 id 已不在可用列表（证书被删 / 停用），提交前需处理 */
+/** 当前选中且在可用列表中的证书 */
+const selectedCert = computed(
+  () => visibleCertOptions.value.find((c) => c.id === form.ssl_cert_id) || null
+)
+/** 站点绑定 id 已不在可用列表（证书被删 / 停用 / 不属于当前归属用户），提交前需处理 */
 const staleCertId = computed(() => {
   if (!form.ssl_cert_id) return 0
-  return certOptions.value.some((c) => c.id === form.ssl_cert_id) ? 0 : form.ssl_cert_id
+  return visibleCertOptions.value.some((c) => c.id === form.ssl_cert_id) ? 0 : form.ssl_cert_id
 })
 /** 编辑打开时绑定的证书显示名（证书被删时后端不返回名称，用于区分“删除/停用”） */
 const editCertName = ref('')
 const staleCertIdLabel = computed(() => {
-  if (editCertName.value) return `该证书已停用：${editCertName.value}（保存前请改选其他证书）`
-  return '绑定的证书已被删除（保存前请重新选择，或清空解除 HTTPS）'
+  if (editCertName.value)
+    return `站点绑定的证书不可用：${editCertName.value}（已停用或不归属本站点归属用户）`
+  return '站点绑定的证书不可用（已被删除 / 停用 / 归属不符）：请重新选择，或清空解除 HTTPS'
 })
 /** 证书覆盖域名清单（证书库按空格 / 逗号分隔） */
 function certDomainList(c: SslCertItem): string[] {
@@ -867,7 +876,7 @@ function validateForm(): string {
     }
   }
   if (staleCertId.value) {
-    return '站点绑定的 SSL 证书已不存在或已停用：请重新选择证书，或清空选择解除 HTTPS'
+    return '站点绑定的 SSL 证书不可用（已删除 / 停用 / 不属于当前归属用户）：请重新选择，或清空解除 HTTPS'
   }
   return ''
 }
@@ -1573,11 +1582,15 @@ onMounted(() => {
                 clearable
                 filterable
                 :loading="certsLoading"
-                placeholder="从「SSL/TLS → 证书管理」中选择证书（选择后启用 HTTPS）"
+                :placeholder="
+                  visibleCertOptions.length
+                    ? '从「SSL/TLS → 证书管理」中选择证书（选择后启用 HTTPS）'
+                    : '暂无可用证书：请先在「SSL/TLS → 证书管理」中创建归属本站点的证书'
+                "
                 style="width: 100%"
               >
                 <el-option
-                  v-for="c in certOptions"
+                  v-for="c in visibleCertOptions"
                   :key="c.id"
                   :value="c.id"
                   :label="`${c.name}（${certDomainList(c).join(' ') || '未记录域名'}）`"
@@ -1585,8 +1598,9 @@ onMounted(() => {
                 <el-option v-if="staleCertId" :value="staleCertId" :label="staleCertIdLabel" disabled />
               </el-select>
               <div class="form-tip">
-                证书在「SSL/TLS → 证书管理」中统一维护（上传 / 自签 / Let's Encrypt）。
-                绑定后本站点将监听 443 并提供 HTTPS；清空选择则解除绑定、回退为纯 HTTP。
+                证书在「SSL/TLS → 证书管理」中统一维护（上传 / 自签 / Let's Encrypt），按归属用户隔离：
+                本站只能绑定<strong>归属本站点归属用户</strong>的证书（管理员 / 经销商可先在证书管理中把证书
+                归属给该用户）。绑定后站点将监听 443 提供 HTTPS；清空选择则解除绑定、回退为纯 HTTP。
               </div>
             </el-form-item>
 

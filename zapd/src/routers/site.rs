@@ -217,7 +217,7 @@ fn require_manageable(claims: &jwt::Claims) -> Result<(), ZapError> {
 /// 归属对象可以是 admin / reseller / user 任一角色（即可以归属自己或其它运营账号），
 /// 但必须落在当前操作者的管理范围：
 /// admin → 任意上述账号；reseller → 自己 + 自己的客户；普通用户 → 只能是自己
-async fn resolve_target_user(claims: &jwt::Claims, target: i64) -> Result<(), ZapError> {
+pub(crate) async fn resolve_target_user(claims: &jwt::Claims, target: i64) -> Result<(), ZapError> {
     let pool = db::get_db_pool().await;
     let row: Option<(String, i64)> =
         sqlx::query_as("SELECT roles, owner_id FROM user WHERE id = ?")
@@ -779,15 +779,23 @@ async fn save_profile(
     Ok(())
 }
 
-/// 校验证书库绑定：证书必须存在且启用
-async fn ensure_cert_exists(cert_id: i64) -> Result<(), ZapError> {
+/// 校验证书库绑定：证书必须存在、启用，且归属与站点归属用户一致。
+/// 证书按用户隔离：跨归属绑定会让站点归属用户在「SSL/TLS」中看不到该证书，
+/// 因此严格限制证书归属 == 站点归属（管理员代管时先给客户建/转证书再绑定）。
+async fn ensure_cert_bindable(cert_id: i64, owner_user_id: i64) -> Result<(), ZapError> {
     let pool = db::get_db_pool().await;
-    let st: Option<i64> = sqlx::query_scalar("SELECT status FROM ssl_cert WHERE id = ?")
-        .bind(cert_id)
-        .fetch_optional(pool)
-        .await?;
+    let st: Option<(i64, i64)> =
+        sqlx::query_as("SELECT status, user_id FROM ssl_cert WHERE id = ?")
+            .bind(cert_id)
+            .fetch_optional(pool)
+            .await?;
     match st {
-        Some(1) => Ok(()),
+        Some((1, cuid)) if cuid == owner_user_id => Ok(()),
+        Some((1, _)) => Err(ZapError::New(
+            -1,
+            "所选 SSL 证书不属于本站点的归属用户：请先在「SSL/TLS → 证书管理」为该用户添加证书，\
+             或将现有证书「归属」改为该用户（系统证书 0 需先转归属）后再绑定".to_string(),
+        )),
         Some(_) => Err(ZapError::New(
             -1,
             "所选 SSL 证书已停用，请先在「SSL/TLS → 证书管理」中启用或换用其他证书".to_string(),
@@ -1593,11 +1601,11 @@ pub async fn site_add(
     }
     let now = chrono::Local::now().timestamp();
 
-    // SSL/TLS：主记录事务开始前先校验证书库绑定（证书必须存在且启用），避免半提交
+    // SSL/TLS：主记录事务开始前先校验证书库绑定（存在 + 启用 + 归属一致），避免半提交
     let ssl_cert_id = payload.ssl_cert_id.unwrap_or(0).max(0);
     let force_https = payload.force_https;
     if ssl_cert_id > 0 {
-        ensure_cert_exists(ssl_cert_id).await?;
+        ensure_cert_bindable(ssl_cert_id, owner).await?;
     }
 
     let mut tx = pool.begin().await?;
@@ -1741,9 +1749,6 @@ pub async fn site_update(
     // SSL 绑定：None = 保持现值；Some(0) = 解绑；Some(id) = 绑定证书库证书
     let eff_ssl_cert_id = payload.ssl_cert_id.unwrap_or(prof.6).max(0);
     let eff_force_https = payload.force_https.unwrap_or(prof.7);
-    if eff_ssl_cert_id > 0 {
-        ensure_cert_exists(eff_ssl_cert_id).await?;
-    }
 
     // 归属转移
     let new_owner = if let Some(nid) = payload.user_id {
@@ -1756,6 +1761,10 @@ pub async fn site_update(
     };
     if new_owner != uid {
         resolve_target_user(&claims, new_owner).await?;
+    }
+    // SSL 证书归属校验需在最终归属确定后进行（存在 + 启用 + 归属与站点一致）
+    if eff_ssl_cert_id > 0 {
+        ensure_cert_bindable(eff_ssl_cert_id, new_owner).await?;
     }
 
     // 域名 / IP：不传则保留原值，传入则整体覆盖

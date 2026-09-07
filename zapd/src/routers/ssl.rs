@@ -25,7 +25,8 @@ use tracing::{info, warn};
 
 use crate::{
     db,
-    zap::{ZapError, ZapJsonResult, audit, jwt::ValidatedClaims},
+    zap::{ZapError, ZapJsonResult, audit, jwt},
+    zap::jwt::ValidatedClaims,
 };
 
 // ── 行结构 ───────────────────────────────────────────────────
@@ -33,6 +34,10 @@ use crate::{
 #[derive(sqlx::FromRow, Debug, serde::Serialize)]
 struct CertListRow {
     id: i64,
+    /// 证书归属用户 id（0 = 历史系统证书，仅管理员可见 / 可转归属）
+    user_id: i64,
+    /// 归属用户登录名（系统证书或用户已删除时为空）
+    owner_name: String,
     name: String,
     domains: String,
     cert_type: String,
@@ -47,6 +52,7 @@ struct CertListRow {
 #[derive(sqlx::FromRow, Debug, serde::Serialize)]
 struct CertDetailRow {
     id: i64,
+    user_id: i64,
     name: String,
     domains: String,
     cert_type: String,
@@ -62,18 +68,80 @@ struct CertDetailRow {
     updated_at: i64,
 }
 
+// ── 归属 / 可见性 ────────────────────────────────────────────
+
+/// 证书按归属用户隔离，可见性与站点一致：
+/// admin → 全部（含 user_id=0 的系统证书）；reseller → 自己 + 名下客户；
+/// 普通用户 → 仅自己的证书。返回该证书的归属 user_id。
+async fn cert_in_scope(claims: &jwt::Claims, cert_id: i64) -> Result<i64, ZapError> {
+    let pool = db::get_db_pool().await;
+    let row: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM ssl_cert WHERE id = ?")
+        .bind(cert_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some((cuid,)) = row else {
+        return Err(ZapError::New(-1, "证书不存在".to_string()));
+    };
+    if jwt::is_admin(claims) || cuid == claims.id as i64 {
+        return Ok(cuid);
+    }
+    if jwt::is_reseller(claims) {
+        let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM user WHERE id = ? AND owner_id = ?")
+            .bind(cuid)
+            .bind(claims.id as i64)
+            .fetch_one(pool)
+            .await?;
+        if cnt > 0 {
+            return Ok(cuid);
+        }
+    }
+    Err(ZapError::New(
+        -1,
+        "无权访问该证书：证书归属其他用户（SSL 证书按归属用户隔离）".to_string(),
+    ))
+}
+
+/// 归属目标校验：admin → 任意；reseller → 自己或名下客户；普通用户 → 仅自己。
+/// 与站点归属共用同一套规则。
+async fn resolve_cert_owner(claims: &jwt::Claims, target: i64) -> Result<(), ZapError> {
+    if target <= 0 {
+        return Err(ZapError::New(-1, "证书归属用户不合法".to_string()));
+    }
+    crate::routers::site::resolve_target_user(claims, target).await
+}
+
 // ── 列表 / 详情 ──────────────────────────────────────────────
 
-pub async fn cert_list(_claims: ValidatedClaims) -> ZapJsonResult {
+pub async fn cert_list(claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
-    let rows: Vec<CertListRow> = sqlx::query_as(
-        "SELECT id, name, domains, cert_type, not_before, not_after, status, remark,
-                created_at, updated_at
-         FROM ssl_cert
-         ORDER BY id DESC",
-    )
-    .fetch_all(pool)
-    .await?;
+    let cols = "c.id, c.user_id, u.username AS owner_name, c.name, c.domains, c.cert_type, \
+                c.not_before, c.not_after, c.status, c.remark, c.created_at, c.updated_at";
+    let rows: Vec<CertListRow> = if jwt::is_admin(&claims) {
+        sqlx::query_as(&format!(
+            "SELECT {cols} FROM ssl_cert c LEFT JOIN user u ON u.id = c.user_id \
+             ORDER BY c.id DESC"
+        ))
+        .fetch_all(pool)
+        .await?
+    } else if jwt::is_reseller(&claims) {
+        sqlx::query_as(&format!(
+            "SELECT {cols} FROM ssl_cert c LEFT JOIN user u ON u.id = c.user_id \
+             WHERE c.user_id = ? OR c.user_id IN (SELECT id FROM user WHERE owner_id = ?) \
+             ORDER BY c.id DESC"
+        ))
+        .bind(claims.id as i64)
+        .bind(claims.id as i64)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as(&format!(
+            "SELECT {cols} FROM ssl_cert c LEFT JOIN user u ON u.id = c.user_id \
+             WHERE c.user_id = ? ORDER BY c.id DESC"
+        ))
+        .bind(claims.id as i64)
+        .fetch_all(pool)
+        .await?
+    };
     Ok(Json(json!({ "code": 0, "message": "OK", "data": rows })))
 }
 
@@ -84,9 +152,10 @@ pub struct CertDetailQuery {
 
 pub async fn cert_detail(
     Query(q): Query<CertDetailQuery>,
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
+    cert_in_scope(&claims, q.id).await?;
     let row: Option<CertDetailRow> = sqlx::query_as("SELECT * FROM ssl_cert WHERE id = ?")
         .bind(q.id)
         .fetch_optional(pool)
@@ -102,6 +171,10 @@ pub async fn cert_detail(
 #[derive(Debug, Deserialize)]
 pub struct CertAddPayload {
     pub name: String,
+    /// 证书归属用户 id：admin / reseller 可选（默认自己；reseller 仅能选自己或名下客户），
+    /// 普通用户强制归属自己
+    #[serde(default)]
+    pub user_id: Option<i64>,
     #[serde(default)]
     pub domains: String,
     #[serde(default)]
@@ -153,14 +226,24 @@ pub async fn cert_add(
         .map(|p| (p.not_before, p.not_after))
         .unwrap_or((0, 0));
 
+    // 归属用户：admin / reseller 可指定（resolve_cert_owner 校验范围）；普通用户强制归属自己
+    let owner_user = match payload.user_id {
+        Some(t) => {
+            resolve_cert_owner(&claims, t).await?;
+            t
+        }
+        None => claims.id as i64,
+    };
+
     let pool = db::get_db_pool().await;
     let now = chrono::Utc::now().timestamp();
     let r = sqlx::query(
         "INSERT INTO ssl_cert
-            (name, domains, cert_type, cert_content, key_content, ca_bundle, csr,
+            (user_id, name, domains, cert_type, cert_content, key_content, ca_bundle, csr,
              not_before, not_after, status, remark, created_at, updated_at)
-         VALUES (?, ?, 'upload', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+         VALUES (?, ?, ?, 'upload', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
     )
+    .bind(owner_user)
     .bind(&name)
     .bind(&domains)
     .bind(payload.cert_content.trim())
@@ -193,6 +276,10 @@ pub async fn cert_add(
 #[derive(Debug, Deserialize)]
 pub struct CertUpdatePayload {
     pub id: i64,
+    /// 归属转移（可选）：仅 admin / reseller 可用，目标须在其管理范围内；
+    /// 不传或与现归属相同则保持
+    #[serde(default)]
+    pub user_id: Option<i64>,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -217,6 +304,16 @@ pub async fn cert_update(
     Json(payload): Json<CertUpdatePayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
+    // 归属可见性校验：admin 全部 / reseller 名下客户 / 普通用户仅自己的证书
+    let cur_owner = cert_in_scope(&claims, payload.id).await?;
+    // 归属转移（可选）：仅当显式传入且与现归属不同时生效，目标范围同站点归属规则
+    let new_owner = match payload.user_id {
+        Some(t) if t != cur_owner => {
+            resolve_cert_owner(&claims, t).await?;
+            Some(t)
+        }
+        _ => None,
+    };
     let now = chrono::Utc::now().timestamp();
     let status = payload.status.unwrap_or(1);
 
@@ -272,6 +369,9 @@ pub async fn cert_update(
         sep.push("remark = ")
             .push_bind_unseparated(payload.remark.trim());
         sep.push("status = ").push_bind_unseparated(status);
+        if let Some(nu) = new_owner {
+            sep.push("user_id = ").push_bind_unseparated(nu);
+        }
         sep.push("updated_at = ").push_bind_unseparated(now);
     }
     if let Some(v) = payload.cert_content.as_deref() {
@@ -306,6 +406,31 @@ pub async fn cert_update(
     )
     .await;
 
+    // 归属转移联动：证书不再属于部分站点时，自动解除这些站点的 HTTPS 绑定并重新同步
+    if let Some(nu) = new_owner {
+        let bound: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT s.id, s.user_id FROM site s JOIN site_profile p ON p.site_id = s.id \
+             WHERE p.ssl_cert_id = ?",
+        )
+        .bind(payload.id)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+        for (sid, suid) in bound {
+            if suid != nu {
+                let _ = sqlx::query(
+                    "UPDATE site_profile SET ssl_cert_id = 0, force_https = 0 WHERE site_id = ?",
+                )
+                .bind(sid)
+                .execute(pool)
+                .await;
+                if let Err(e) = crate::routers::site::sync_one_site(sid).await {
+                    warn!("证书 {} 归属变更后自动解绑站点 {} 失败: {}", payload.id, sid, e);
+                }
+            }
+        }
+    }
+
     // 站点绑定联动：证书内容/状态可能已变更，重同步引用它的站点以刷新落盘证书与 vhost
     let sites: Vec<i64> =
         sqlx::query_scalar("SELECT site_id FROM site_profile WHERE ssl_cert_id = ?")
@@ -332,6 +457,8 @@ pub async fn cert_delete(
     Json(payload): Json<CertDeletePayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
+    // 归属可见性校验：admin 全部 / reseller 名下客户 / 普通用户仅自己的证书
+    cert_in_scope(&claims, payload.id).await?;
     // 被站点绑定的证书不允许删除：先到站点「SSL/TLS」中解绑
     let refs: Vec<i64> =
         sqlx::query_scalar("SELECT site_id FROM site_profile WHERE ssl_cert_id = ?")
@@ -692,6 +819,9 @@ pub async fn cert_parse(
 #[derive(Debug, Deserialize)]
 pub struct CertSelfSignPayload {
     pub name: String,
+    /// 证书归属用户 id：admin / reseller 可选（默认自己），普通用户强制自己
+    #[serde(default)]
+    pub user_id: Option<i64>,
     pub domains: String,
     #[serde(default = "default_sign_days")]
     pub days: i64,
@@ -768,15 +898,25 @@ pub async fn cert_self_sign(
     let days = payload.days.clamp(1, 3650);
     let (cert_pem, key_pem, csr_pem, not_before, not_after) = gen_self_signed(&domains, days)?;
 
+    // 归属用户：admin / reseller 可指定（resolve_cert_owner 校验范围）；普通用户强制自己
+    let owner_user = match payload.user_id {
+        Some(t) => {
+            resolve_cert_owner(&claims, t).await?;
+            t
+        }
+        None => claims.id as i64,
+    };
+
     let pool = db::get_db_pool().await;
     let now = chrono::Utc::now().timestamp();
     let domains_str = domains.join(", ");
     let r = sqlx::query(
         "INSERT INTO ssl_cert
-            (name, domains, cert_type, cert_content, key_content, ca_bundle, csr,
+            (user_id, name, domains, cert_type, cert_content, key_content, ca_bundle, csr,
              not_before, not_after, status, remark, created_at, updated_at)
-         VALUES (?, ?, 'self-signed', ?, ?, '', ?, ?, ?, 1, ?, ?, ?)",
+         VALUES (?, ?, ?, 'self-signed', ?, ?, '', ?, ?, ?, 1, ?, ?, ?)",
     )
+    .bind(owner_user)
     .bind(&name)
     .bind(&domains_str)
     .bind(&cert_pem)
@@ -809,6 +949,9 @@ pub async fn cert_self_sign(
 pub struct CertLetsEncryptPayload {
     pub email: String,
     pub domains: String,
+    /// 证书归属用户 id：admin / reseller 可选（默认自己），普通用户强制自己
+    #[serde(default)]
+    pub user_id: Option<i64>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -1015,13 +1158,22 @@ pub async fn cert_letsencrypt(
     } else {
         0
     };
+    // 归属用户：admin / reseller 可指定（resolve_cert_owner 校验范围）；普通用户强制自己
+    let owner_user = match payload.user_id {
+        Some(t) => {
+            resolve_cert_owner(&claims, t).await?;
+            t
+        }
+        None => claims.id as i64,
+    };
     let domains_str = domains.join(", ");
     let r = sqlx::query(
         "INSERT INTO ssl_cert
-            (name, domains, cert_type, cert_content, key_content, ca_bundle, csr,
+            (user_id, name, domains, cert_type, cert_content, key_content, ca_bundle, csr,
              not_after, status, remark, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, '', ?, ?, 1, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, 1, ?, ?, ?)",
     )
+    .bind(owner_user)
     .bind(&name)
     .bind(&domains_str)
     .bind(cert_type)

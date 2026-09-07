@@ -23,6 +23,10 @@
           手动添加时只需粘贴证书，<strong>域名与有效期会自动解析</strong>；<code>ca-bundle</code> 与 <code>csr</code>
           为选填项，默认折叠，点标题即可展开填写。
         </p>
+        <p style="margin: 0 0 4px">
+          证书按<strong>归属用户</strong>隔离：页面默认只展示当前账号自己的证书；管理员 / 经销商可为客户代建
+          （把归属选为该客户后，该客户站点的「SSL/TLS」即可选择此证书绑定）。
+        </p>
         <p style="margin: 0">
           安全提示：私钥属敏感信息，仅存储在服务器数据库中；请勿将本页面内容分享给无关人员。
         </p>
@@ -30,6 +34,12 @@
 
       <el-table :data="tableData" v-loading="loading" stripe style="margin-top: 14px">
         <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column v-if="canManageAll" label="归属" width="160">
+          <template #default="{ row }">
+            <el-tag v-if="!row.user_id" size="small" effect="plain" type="info">系统</el-tag>
+            <span v-else>{{ certOwnerText(row) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
         <el-table-column label="域名" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
@@ -84,6 +94,24 @@
       @closed="resetEdit"
     >
       <el-form :model="editForm" label-width="86px">
+        <el-form-item v-if="canManageAll" label="归属用户">
+          <el-select
+            v-model="editForm.user_id"
+            filterable
+            clearable
+            :loading="ownersLoading"
+            placeholder="归属的用户（可在其站点的 SSL/TLS 中绑定）"
+            style="width: 360px"
+          >
+            <el-option
+              v-for="o in ownerOptions"
+              :key="o.id"
+              :label="`${o.nickname || o.username} (${o.username})`"
+              :value="o.id"
+            />
+          </el-select>
+          <span class="form-hint">留空 = 当前登录账号自己</span>
+        </el-form-item>
         <el-row :gutter="14">
           <el-col :span="12">
             <el-form-item label="证书名称">
@@ -187,6 +215,9 @@
       <el-descriptions :column="2" border size="small" style="margin-bottom: 12px">
         <el-descriptions-item label="名称">{{ detail?.name }}</el-descriptions-item>
         <el-descriptions-item label="类型">{{ detail ? certTypeLabel(detail.cert_type) : '' }}</el-descriptions-item>
+        <el-descriptions-item v-if="canManageAll" label="归属">
+          {{ detail ? certOwnerText(detail) : '' }}
+        </el-descriptions-item>
         <el-descriptions-item label="域名" :span="2">{{ detail?.domains || '-' }}</el-descriptions-item>
         <el-descriptions-item label="有效期">
           {{ detail && detail.not_after ? fmtTime(detail.not_after) : '-' }}
@@ -222,6 +253,22 @@
           <el-input v-model="selfSignForm.domains" placeholder="localhost, 127.0.0.1, my.example.com" />
           <span class="form-hint">多个用逗号分隔，支持 IP</span>
         </el-form-item>
+        <el-form-item v-if="canManageAll" label="归属用户">
+          <el-select
+            v-model="selfSignForm.user_id"
+            filterable
+            :loading="ownersLoading"
+            placeholder="归属的用户"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="o in ownerOptions"
+              :key="o.id"
+              :label="`${o.nickname || o.username} (${o.username})`"
+              :value="o.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="有效天数">
           <el-input-number v-model="selfSignForm.days" :min="1" :max="3650" />
           <span class="form-hint">默认 365 天</span>
@@ -250,6 +297,22 @@
         <el-form-item label="证书名称">
           <el-input v-model="leForm.name" placeholder="可留空，默认使用主域名" maxlength="80" />
         </el-form-item>
+        <el-form-item v-if="canManageAll" label="归属用户">
+          <el-select
+            v-model="leForm.user_id"
+            filterable
+            :loading="ownersLoading"
+            placeholder="归属的用户"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="o in ownerOptions"
+              :key="o.id"
+              :label="`${o.nickname || o.username} (${o.username})`"
+              :value="o.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="测试环境">
           <el-switch v-model="leForm.staging" />
           <span class="form-hint">测试环境证书不受信任，用于验证流程</span>
@@ -267,7 +330,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   Plus,
   Key,
@@ -279,6 +342,8 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { http } from '@/utils/request'
+import { useUserStore } from '@/stores/user'
 import {
   getCertList,
   getCertDetail,
@@ -291,11 +356,44 @@ import {
   type SslCertItem,
   type SslCertDetail,
   type SslCertParseResult,
+  type OwnerOption,
 } from '@/api/ssl'
 
 const nowTs = ref(Math.floor(Date.now() / 1000))
 const loading = ref(false)
 const tableData = ref<SslCertItem[]>([])
+
+const userStore = useUserStore()
+// admin / reseller 可管理他人（能看到全部或名下证书并可指定归属）；普通用户只能看到自己的
+const canManageAll = computed(
+  () => userStore.roles.includes('admin') || userStore.roles.includes('reseller')
+)
+const myUserId = computed(() => userStore.userInfo.id)
+
+// 归属用户下拉（admin 全部 / reseller 名下客户），与站点归属一致
+const ownerOptions = ref<OwnerOption[]>([])
+const ownersLoading = ref(false)
+async function loadOwners() {
+  if (!canManageAll.value) return
+  ownersLoading.value = true
+  try {
+    const res = await http.get<{ code: number; data: OwnerOption[] }>('/site/users')
+    ownerOptions.value = res.data || []
+  } catch {
+    /* handled */
+  } finally {
+    ownersLoading.value = false
+  }
+}
+const ownerLabel = (id?: number) => {
+  const o = ownerOptions.value.find((x) => x.id === id)
+  return o ? `${o.nickname || o.username} (${o.username})` : ''
+}
+/** 列表/详情展示证书归属：0 = 历史系统证书 */
+const certOwnerText = (row: { user_id?: number; owner_name?: string }) => {
+  if (!row.user_id) return '系统'
+  return row.owner_name || ownerLabel(row.user_id) || `#${row.user_id}`
+}
 
 async function loadList() {
   loading.value = true
@@ -379,7 +477,7 @@ type EditForm = Pick<SslCertDetail, 'cert_content' | 'key_content' | 'ca_bundle'
 // ── 添加 / 编辑 ─────────────────────────────────────────────
 const editVisible = ref(false)
 const saving = ref(false)
-const editForm = reactive<EditForm & { id?: number }>({
+const editForm = reactive<EditForm & { id?: number; user_id?: number }>({
   name: '',
   domains: '',
   cert_content: '',
@@ -387,6 +485,7 @@ const editForm = reactive<EditForm & { id?: number }>({
   ca_bundle: '',
   csr: '',
   remark: '',
+  user_id: undefined,
 })
 
 /** 用户是否手工改过名称 / 域名：改过之后不再被自动解析覆盖 */
@@ -407,6 +506,7 @@ function resetEdit() {
   editForm.ca_bundle = ''
   editForm.csr = ''
   editForm.remark = ''
+  editForm.user_id = undefined
   nameManual.value = false
   domainsManual.value = false
   parseState.info = undefined
@@ -416,6 +516,7 @@ function resetEdit() {
 
 function openAdd() {
   resetEdit()
+  if (canManageAll.value) editForm.user_id = myUserId.value
   editVisible.value = true
 }
 
@@ -496,6 +597,11 @@ async function openEdit(row: SslCertItem | SslCertDetail | undefined) {
   editForm.ca_bundle = detail.ca_bundle
   editForm.csr = detail.csr
   editForm.remark = detail.remark
+  // 归属回填：历史系统证书（0）或归属用户已删除时不预设，便于改选
+  editForm.user_id =
+    canManageAll.value && ownerOptions.value.some((o) => o.id === detail.user_id)
+      ? detail.user_id
+      : undefined
   // 有内容的分组默认展开展示；选填项为空则保持折叠
   for (const g of pemGroups) {
     collapsed[g.key] = g.optional ? !String(editForm[g.key] ?? '').trim() : false
@@ -563,6 +669,7 @@ async function submitSave() {
       ca_bundle: String(editForm.ca_bundle || ''),
       csr: String(editForm.csr || ''),
       remark: String(editForm.remark || '').trim(),
+      ...(canManageAll.value ? { user_id: editForm.user_id || undefined } : {}),
     }
     if (editForm.id) {
       await updateCert({ id: editForm.id, ...data })
@@ -641,13 +748,20 @@ async function handleDelete(row: SslCertItem) {
 // ── 自签名 ──────────────────────────────────────────────────
 const selfSignVisible = ref(false)
 const selfSigning = ref(false)
-const selfSignForm = reactive({ name: '', domains: '', days: 365, remark: '' })
+const selfSignForm = reactive<{
+  name: string
+  domains: string
+  days: number
+  remark: string
+  user_id?: number
+}>({ name: '', domains: '', days: 365, remark: '', user_id: undefined })
 
 function openSelfSign() {
   selfSignForm.name = ''
   selfSignForm.domains = ''
   selfSignForm.days = 365
   selfSignForm.remark = ''
+  selfSignForm.user_id = canManageAll.value ? myUserId.value : undefined
   selfSignVisible.value = true
 }
 
@@ -667,6 +781,7 @@ async function submitSelfSign() {
       domains: selfSignForm.domains.trim(),
       days: selfSignForm.days || 365,
       remark: selfSignForm.remark.trim(),
+      ...(canManageAll.value ? { user_id: selfSignForm.user_id || undefined } : {}),
     })
     ElMessage.success('自签名证书已生成并保存')
     selfSignVisible.value = false
@@ -678,7 +793,14 @@ async function submitSelfSign() {
 // ── Let's Encrypt ───────────────────────────────────────────
 const leVisible = ref(false)
 const leBusy = ref(false)
-const leForm = reactive({ domains: '', email: '', name: '', staging: false, remark: '' })
+const leForm = reactive<{
+  domains: string
+  email: string
+  name: string
+  staging: boolean
+  remark: string
+  user_id?: number
+}>({ domains: '', email: '', name: '', staging: false, remark: '', user_id: undefined })
 
 function openLetsEncrypt() {
   leForm.domains = ''
@@ -686,6 +808,7 @@ function openLetsEncrypt() {
   leForm.name = ''
   leForm.staging = false
   leForm.remark = ''
+  leForm.user_id = canManageAll.value ? myUserId.value : undefined
   leVisible.value = true
 }
 
@@ -706,6 +829,7 @@ async function submitLetsEncrypt() {
       name: leForm.name.trim() || undefined,
       staging: leForm.staging,
       remark: leForm.remark.trim() || undefined,
+      ...(canManageAll.value ? { user_id: leForm.user_id || undefined } : {}),
     })
     ElMessage.success('证书申请成功并已保存')
     leVisible.value = false
@@ -720,6 +844,7 @@ function fmtTime(ts: number) {
 
 onMounted(() => {
   loadList()
+  loadOwners()
   setInterval(() => { nowTs.value = Math.floor(Date.now() / 1000) }, 30000)
 })
 

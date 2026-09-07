@@ -698,6 +698,16 @@ fn render_maintenance_vhost(site_id: i64, name: &str, domains: &[String], maint:
 /// 只告警不阻断站点本身的发布。
 fn ensure_default_vhost(conf_file: &Path, bin: &Path) {
     let edir = super::webconf::enabled_dir("nginx");
+    // 官方安装模板自带的默认站点(conf/sites-enabled/default.conf)占用了 80 default_server，
+    // 与面板默认站点(00-default.conf)冲突会让 nginx -t 报 duplicate default server 而反复回滚：
+    // 发布面板默认站点前先把官方默认站点停用（改名保留，.zap-disabled 不匹配 *.conf 即不再生效）
+    if let Ok(dir) = vhosts_dir(conf_file) {
+        let official = dir.join("default.conf");
+        let disabled = dir.join("default.conf.zap-disabled");
+        if official.exists() && !disabled.exists() {
+            let _ = std::fs::rename(&official, &disabled);
+        }
+    }
     let injected = match super::webconf::ensure_include(conf_file, &edir, "nginx") {
         Ok(v) => v,
         Err(e) => {

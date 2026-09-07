@@ -778,6 +778,8 @@ async fn init_ssl_cert_table() {
     let sql = r#"
     CREATE TABLE IF NOT EXISTS ssl_cert (
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        -- user_id：证书归属用户（0 = 历史系统证书，仅管理员可见，可在编辑中转为归属某用户）
+        user_id INTEGER NOT NULL DEFAULT 0,
         name TEXT NOT NULL DEFAULT '',
         domains TEXT NOT NULL DEFAULT '',
         cert_type TEXT NOT NULL DEFAULT 'upload',
@@ -792,8 +794,14 @@ async fn init_ssl_cert_table() {
         created_at INTEGER,
         updated_at INTEGER
     );
+    CREATE INDEX IF NOT EXISTS idx_ssl_cert_user ON ssl_cert(user_id);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
+    // 老库升级（幂等）：为存量 ssl_cert 表补充归属列；历史证书 user_id = 0（系统级）
+    let _ = get_db_pool()
+        .await
+        .execute("ALTER TABLE ssl_cert ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")
+        .await;
 }
 
 // ── fpm_spec（PHP-FPM 规格模板库，仅 admin 维护）────────────────
