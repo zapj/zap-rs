@@ -744,10 +744,24 @@ async fn init_site_profile_table() {
         locations TEXT NOT NULL DEFAULT '[]',
         ssl_cert_id INTEGER NOT NULL DEFAULT 0,
         force_https INTEGER NOT NULL DEFAULT 0,
+        -- TLS 高级设置（空串/缺省 = 面板默认：协议回退 TLSv1.2+TLSv1.3，密码套件不输出）
+        ssl_http2 INTEGER NOT NULL DEFAULT 1,
+        ssl_prefer_server_ciphers INTEGER NOT NULL DEFAULT 1,
+        ssl_protocols TEXT NOT NULL DEFAULT '',
+        ssl_ciphers TEXT NOT NULL DEFAULT '',
         updated_at INTEGER NOT NULL DEFAULT 0
     );
     "#;
     let _ = get_db_pool().await.execute(sql).await;
+    // 老库升级（幂等）：为存量 site_profile 补充 TLS 高级设置列；缺省行取默认值
+    for alter in [
+        "ALTER TABLE site_profile ADD COLUMN ssl_http2 INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE site_profile ADD COLUMN ssl_prefer_server_ciphers INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE site_profile ADD COLUMN ssl_protocols TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE site_profile ADD COLUMN ssl_ciphers TEXT NOT NULL DEFAULT ''",
+    ] {
+        let _ = get_db_pool().await.execute(alter).await;
+    }
 }
 
 // ── api_token（API Token 管理）──────────────────────────────

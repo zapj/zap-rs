@@ -392,6 +392,70 @@ fn render_location_body(l: &LocationSpec) -> String {
     b
 }
 
+/// TLS 高级设置（仅绑定证书时生效；值已在入参层做过字符白名单过滤）
+struct SslTlsCfg {
+    /// ssl_protocols 值；空 = 回退 TLSv1.2 TLSv1.3
+    protocols: String,
+    /// ssl_ciphers 值；空 = 不输出指令（跟随 nginx 内置默认）
+    ciphers: String,
+    /// 服务端优先选择密码套件（ssl_prefer_server_ciphers on）
+    prefer_server_ciphers: bool,
+    /// 启用 HTTP/2
+    http2: bool,
+    /// true = nginx ≥ 1.25.1（server 内写 `http2 on;`）；
+    /// false = 老版本（listen 443 ssl http2 内嵌）
+    http2_on_syntax: bool,
+}
+
+/// ssl_protocols 值白名单过滤：仅保留 TLSv1.1 / TLSv1.2 / TLSv1.3（按出现顺序、去重）。
+/// 返回空串表示没有合法项（调用方应回退默认 TLSv1.2 TLSv1.3）。
+fn sanitize_protocols(raw: &str) -> String {
+    const ALLOWED: [&str; 3] = ["TLSv1.1", "TLSv1.2", "TLSv1.3"];
+    let mut seen: Vec<&str> = Vec::new();
+    for tok in raw.split_whitespace() {
+        if ALLOWED.contains(&tok) && !seen.contains(&tok) {
+            seen.push(tok);
+        }
+    }
+    seen.join(" ")
+}
+
+/// ssl_ciphers 值过滤：仅保留 nginx 套件字符（字母/数字/:!+_- 与空格分隔），
+/// 剔除任何可用于截断注入指令的字符（; # \n 引号 花括号 斜杠等）。
+fn sanitize_ciphers(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '!' | '+' | '-' | '_' | '.' | ' '))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// nginx ≥ 1.25.1 起 `listen ... http2` 参数被移除，改为 server 内 `http2 on;`。
+/// 探测版本以决定指令写法；版本未知时按新语法（面板分发的 Nginx 均为新版本）。
+fn nginx_http2_on_syntax(bin: &std::path::Path) -> bool {
+    let Ok(out) = std::process::Command::new(bin).arg("-v").output() else {
+        return true;
+    };
+    let raw = if out.stderr.is_empty() {
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    } else {
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let Some(idx) = raw.rfind('/') else {
+        return true;
+    };
+    let ver: String = raw[idx + 1..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let nums: Vec<u32> = ver.split('.').filter_map(|p| p.parse().ok()).collect();
+    match nums.as_slice() {
+        [maj, min, ..] => (*maj, *min) >= (1, 25),
+        _ => true,
+    }
+}
+
 /// 完整 vhost 渲染（纯函数）：
 /// - site_type：php（默认，PHP/PHP+静态）/ static / proxy（反向代理，忽略 root/PHP）
 /// - 伪静态预设只影响默认 `location /`（php/static 类型）
@@ -411,6 +475,7 @@ fn render_vhost_full(
     locations: &[LocationSpec],
     ssl_files: Option<(&str, &str)>,
     force_https: bool,
+    ssl_tls: Option<&SslTlsCfg>,
 ) -> String {
     let s_type = norm_site_type(site_type);
     let comment = name.chars().filter(|c| !c.is_control()).collect::<String>();
@@ -526,10 +591,34 @@ fn render_vhost_full(
     }
 
     // SSL/TLS：绑定证书后才监听 443；允许 HTTP 跳转时 80 只保留 301
+    let http2_enabled = ssl_files.is_some() && ssl_tls.map(|c| c.http2).unwrap_or(false);
+    // nginx < 1.25.1 只能把 http2 内嵌到 listen 参数；新版本用独立 `http2 on;` 指令
+    let listen_443: &str = if http2_enabled && ssl_tls.is_some_and(|c| !c.http2_on_syntax) {
+        "    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n"
+    } else {
+        "    listen 443 ssl;\n    listen [::]:443 ssl;\n"
+    };
     let ssl_directives = ssl_files.map(|(cert, key)| {
-        format!(
-            "    ssl_certificate {cert};\n    ssl_certificate_key {key};\n    ssl_protocols TLSv1.2 TLSv1.3;\n"
-        )
+        let mut s = format!("    ssl_certificate {cert};\n    ssl_certificate_key {key};\n");
+        // 协议：显式设置取白名单交集；空/非法则回退面板默认 TLSv1.2 TLSv1.3
+        let protocols = ssl_tls
+            .map(|c| sanitize_protocols(&c.protocols))
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| "TLSv1.2 TLSv1.3".to_string());
+        s.push_str(&format!("    ssl_protocols {protocols};\n"));
+        if let Some(c) = ssl_tls {
+            let ciphers = sanitize_ciphers(&c.ciphers);
+            if !ciphers.is_empty() {
+                s.push_str(&format!("    ssl_ciphers {ciphers};\n"));
+            }
+            if c.prefer_server_ciphers {
+                s.push_str("    ssl_prefer_server_ciphers on;\n");
+            }
+            if c.http2 && c.http2_on_syntax {
+                s.push_str("    http2 on;\n");
+            }
+        }
+        s
     });
     match (&ssl_directives, force_https) {
         (Some(sd), true) => {
@@ -539,7 +628,7 @@ fn render_vhost_full(
             out.push_str("    return 301 https://$host$request_uri;\n");
             out.push_str("}\n\n");
             out.push_str("server {\n");
-            out.push_str("    listen 443 ssl;\n    listen [::]:443 ssl;\n");
+            out.push_str(listen_443);
             out.push_str(&format!("    server_name {server_name};\n"));
             out.push_str(sd);
             out.push_str(&core);
@@ -553,7 +642,7 @@ fn render_vhost_full(
             out.push_str("}\n");
             if let Some(sd) = &ssl_directives {
                 out.push_str("server {\n");
-                out.push_str("    listen 443 ssl;\n    listen [::]:443 ssl;\n");
+                out.push_str(listen_443);
                 out.push_str(&format!("    server_name {server_name};\n"));
                 out.push_str(sd);
                 out.push_str(&core);
@@ -1080,12 +1169,17 @@ pub async fn vhost_sync(
     ssl_fullchain: Option<String>,
     ssl_key: Option<String>,
     force_https: bool,
+    ssl_protocols: String,
+    ssl_ciphers: String,
+    ssl_prefer_server_ciphers: bool,
+    ssl_http2: bool,
 ) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
         vhost_sync_inner(
             site_id, &name, &domains, enabled, mode, php_socket, web_root, log_root, owner_user,
             site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations,
-            ssl_fullchain, ssl_key, force_https,
+            ssl_fullchain, ssl_key, force_https, ssl_protocols, ssl_ciphers,
+            ssl_prefer_server_ciphers, ssl_http2,
         )
     })
     .await
@@ -1158,6 +1252,10 @@ fn vhost_sync_inner(
     ssl_fullchain: Option<String>,
     ssl_key: Option<String>,
     force_https: bool,
+    ssl_protocols: String,
+    ssl_ciphers: String,
+    ssl_prefer_server_ciphers: bool,
+    ssl_http2: bool,
 ) -> Result<Response, String> {
     let state = run_mode(mode.as_deref(), enabled);
     let conf_file = match find_nginx_conf_file() {
@@ -1315,6 +1413,14 @@ fn vhost_sync_inner(
     };
     let ssl_refs: Option<(&str, &str)> =
         ssl_files.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
+    // TLS 高级设置：仅绑定证书时构造渲染配置（http2 指令写法取决于 nginx 版本）
+    let ssl_tls_cfg = ssl_files.as_ref().map(|_| SslTlsCfg {
+        protocols: ssl_protocols,
+        ciphers: ssl_ciphers,
+        prefer_server_ciphers: ssl_prefer_server_ciphers,
+        http2: ssl_http2,
+        http2_on_syntax: nginx_http2_on_syntax(&bin),
+    });
     let content = render_vhost_full(
         site_id,
         name,
@@ -1330,6 +1436,7 @@ fn vhost_sync_inner(
         &locations,
         ssl_refs,
         force_https,
+        ssl_tls_cfg.as_ref(),
     );
 
     // 面板侧快照（渲染源 / 入参 / 历史版本）：失败不影响发布，仅作排障与回滚副本
@@ -1546,6 +1653,7 @@ mod tests {
             &[],
             None,
             false,
+            None,
         )
     }
 
@@ -1665,6 +1773,7 @@ mod tests {
             &[],
             None,
             false,
+            None,
         );
         assert!(s.contains("root /home/u/www/s-1;"));
         assert!(s.contains("try_files $uri $uri/ =404;"));
@@ -1688,6 +1797,7 @@ mod tests {
             &[],
             None,
             false,
+            None,
         );
         assert!(
             s.contains("rewrite ^(.*)$ /index.php?s=$1 last;"),
@@ -1709,6 +1819,7 @@ mod tests {
             &[],
             None,
             false,
+            None,
         );
         assert!(s2.contains("try_files $uri $uri/ /index.php?$query_string;"));
         assert!(!s2.contains("rewrite"), "laravel 用 try_files 实现，不应出现 rewrite");
@@ -1762,6 +1873,7 @@ mod tests {
             &locs,
             None,
             false,
+            None,
         );
         assert!(s.contains("upstream backend {"), "应渲染 upstream 块");
         assert!(s.contains("server 127.0.0.1:9001;"));
@@ -1843,5 +1955,95 @@ mod tests {
         assert!(!path_under(base, Path::new("/home/u/www2/blog")), "同前缀不同目录应拒绝");
         assert!(!path_under(base, Path::new("/home/u/www/../etc")), ".. 应拒绝");
         assert!(!path_under(base, Path::new("/etc")), "站外路径应拒绝");
+    }
+
+    #[test]
+    fn sanitize_tls_values_filters_injection() {
+        // 协议：白名单交集 + 去重，非法 token（含注入片段）被剔除
+        assert_eq!(
+            sanitize_protocols("TLSv1.2 TLSv1.3 TLSv1.1 TLSv1.2"),
+            "TLSv1.2 TLSv1.3 TLSv1.1"
+        );
+        assert_eq!(sanitize_protocols("TLSv1"), "");
+        // 非白名单 token（TLSv1.2;、server_name）整体剔除，不能用于注入指令
+        assert_eq!(
+            sanitize_protocols("TLSv1.2;\n    server_name evil.com;"),
+            ""
+        );
+        // 套件：非法字符（; # 引号 换行 花括号 斜杠）被剔除，不残留截断字符
+        let r = sanitize_ciphers("ECDHE-RSA-AES128-GCM-SHA256:!aNULL;#x\n\"'{} /\\");
+        assert!(r.starts_with("ECDHE-RSA-AES128-GCM-SHA256:!aNULL"));
+        for bad in [';', '#', '"', '\n', '{', '}', '/', '\\'] {
+            assert!(!r.contains(bad), "套件过滤后不应包含 {bad:?}");
+        }
+        assert_eq!(sanitize_ciphers(""), "");
+    }
+
+    #[test]
+    fn render_ssl_emits_tls_advanced_directives() {
+        let cfg = SslTlsCfg {
+            protocols: "TLSv1.3 TLSv1.2".into(),
+            ciphers: "ECDHE-RSA-AES128-GCM-SHA256:!aNULL".into(),
+            prefer_server_ciphers: true,
+            http2: true,
+            http2_on_syntax: true, // nginx ≥ 1.25.1
+        };
+        let s = render_vhost_full(
+            9,
+            "ssl",
+            &["ssl.com".into()],
+            "/home/u/www/ssl-9",
+            None,
+            None,
+            None,
+            "php",
+            "none",
+            "",
+            &[],
+            &[],
+            Some(("/etc/zap/ssl/fullchain.pem", "/etc/zap/ssl/key.pem")),
+            false,
+            Some(&cfg),
+        );
+        assert!(s.contains("listen 443 ssl;"), "新版 nginx 用 http2 on 而非 listen 内嵌");
+        assert!(s.contains("http2 on;"));
+        assert!(s.contains("ssl_certificate /etc/zap/ssl/fullchain.pem;"));
+        assert!(s.contains("ssl_protocols TLSv1.3 TLSv1.2;"));
+        assert!(s.contains("ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:!aNULL;"));
+        assert!(s.contains("ssl_prefer_server_ciphers on;"));
+
+        // 老版 nginx（< 1.25.1）：http2 内嵌到 listen；空协议/套件回退或省略
+        let cfg2 = SslTlsCfg {
+            protocols: String::new(),
+            ciphers: String::new(),
+            prefer_server_ciphers: false,
+            http2: true,
+            http2_on_syntax: false,
+        };
+        let s2 = render_vhost_full(
+            10,
+            "legacy",
+            &["old.com".into()],
+            "/home/u/www/legacy-10",
+            None,
+            None,
+            None,
+            "static",
+            "none",
+            "",
+            &[],
+            &[],
+            Some(("/a/fullchain.pem", "/a/key.pem")),
+            false,
+            Some(&cfg2),
+        );
+        assert!(s2.contains("listen 443 ssl http2;"), "老版 nginx 应内嵌 http2 到 listen");
+        assert!(!s2.contains("http2 on;"), "老版 nginx 不支持 http2 on 指令");
+        assert!(
+            s2.contains("ssl_protocols TLSv1.2 TLSv1.3;"),
+            "协议缺省回退 TLSv1.2 TLSv1.3"
+        );
+        assert!(!s2.contains("ssl_ciphers"), "套件为空不输出 ssl_ciphers");
+        assert!(!s2.contains("ssl_prefer_server_ciphers"), "未开启不输出 prefer 指令");
     }
 }

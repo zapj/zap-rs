@@ -125,6 +125,21 @@ pub struct SiteAddPayload {
     /// 允许 HTTP 跳转到 HTTPS（仅绑定证书后生效）
     #[serde(default)]
     pub force_https: bool,
+    /// TLS 协议版本（空格分隔的 nginx ssl_protocols 值；空 = 面板默认 TLSv1.2 TLSv1.3）
+    #[serde(default)]
+    pub ssl_protocols: String,
+    /// SSL 密码套件（nginx ssl_ciphers 值；空 = 不输出指令，跟随执行端默认）
+    #[serde(default)]
+    pub ssl_ciphers: String,
+    /// 服务端密码套件优先（ssl_prefer_server_ciphers，仅影响 TLSv1.2）
+    #[serde(default = "default_true")]
+    pub ssl_prefer_server_ciphers: bool,
+    /// 启用 HTTP/2
+    #[serde(default = "default_true")]
+    pub ssl_http2: bool,
+}
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -177,6 +192,18 @@ pub struct SiteUpdatePayload {
     /// 允许 HTTP 跳转 HTTPS：None = 保持不变
     #[serde(default)]
     pub force_https: Option<bool>,
+    /// TLS 协议版本：None = 保持不变（空串 = 面板默认 TLSv1.2 TLSv1.3）
+    #[serde(default)]
+    pub ssl_protocols: Option<String>,
+    /// SSL 密码套件：None = 保持不变（空串 = 不输出指令，跟随执行端默认）
+    #[serde(default)]
+    pub ssl_ciphers: Option<String>,
+    /// 服务端密码套件优先：None = 保持不变
+    #[serde(default)]
+    pub ssl_prefer_server_ciphers: Option<bool>,
+    /// 启用 HTTP/2：None = 保持不变
+    #[serde(default)]
+    pub ssl_http2: Option<bool>,
 }
 
 /// 站点已有目录浏览入参
@@ -706,14 +733,29 @@ fn norm_pseudo(preset: &str, custom: &str, allow_custom: bool) -> Result<(), Zap
 }
 
 /// 站点扩展档案（与 site_profile 列一一对应；ssl_cert_id>0 = 绑定证书库证书启用 HTTPS）
-type ProfileRow = (String, String, String, bool, String, String, i64, bool);
+/// 8..11：TLS 高级设置（ssl_protocols / ssl_ciphers / ssl_prefer_server_ciphers / ssl_http2）
+type ProfileRow = (String, String, String, bool, String, String, i64, bool, String, String, bool, bool);
 
 /// 读取站点扩展档案；老站点（无档案行）返回默认值
 async fn load_profile(site_id: i64) -> ProfileRow {
     let pool = db::get_db_pool().await;
-    let row: Option<(String, String, String, i64, String, String, i64, i64)> = sqlx::query_as(
+    let row: Option<(
+        String,
+        String,
+        String,
+        i64,
+        String,
+        String,
+        i64,
+        i64,
+        String,
+        String,
+        i64,
+        i64,
+    )> = sqlx::query_as(
         "SELECT site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations, \
-                ssl_cert_id, force_https \
+                ssl_cert_id, force_https, ssl_protocols, ssl_ciphers, \
+                ssl_prefer_server_ciphers, ssl_http2 \
          FROM site_profile WHERE site_id = ?",
     )
     .bind(site_id)
@@ -721,19 +763,27 @@ async fn load_profile(site_id: i64) -> ProfileRow {
     .await
     .ok()
     .flatten();
-    row.map(|(t, p, pc, wc, u, l, ssl, fh)| (t, p, pc, wc != 0, u, l, ssl, fh != 0))
-        .unwrap_or_else(|| {
-            (
-                "php".into(),
-                "none".into(),
-                String::new(),
-                false,
-                "[]".into(),
-                "[]".into(),
-                0,
-                false,
-            )
-        })
+    row.map(|(t, p, pc, wc, u, l, ssl, fh, pr, ci, pp, h2)| {
+        (
+            t, p, pc, wc != 0, u, l, ssl, fh != 0, pr, ci, pp != 0, h2 != 0,
+        )
+    })
+    .unwrap_or_else(|| {
+        (
+            "php".into(),
+            "none".into(),
+            String::new(),
+            false,
+            "[]".into(),
+            "[]".into(),
+            0,
+            false,
+            String::new(),
+            String::new(),
+            true,
+            true,
+        )
+    })
 }
 
 /// 写回站点扩展档案（存在则整体覆盖）
@@ -748,6 +798,10 @@ async fn save_profile(
     locations: &[LocationSpec],
     ssl_cert_id: i64,
     force_https: bool,
+    ssl_protocols: &str,
+    ssl_ciphers: &str,
+    ssl_prefer_server_ciphers: bool,
+    ssl_http2: bool,
 ) -> Result<(), ZapError> {
     let pool = db::get_db_pool().await;
     let now = chrono::Local::now().timestamp();
@@ -755,13 +809,17 @@ async fn save_profile(
     let l = serde_json::to_string(locations).unwrap_or_else(|_| "[]".to_string());
     sqlx::query(
         "INSERT INTO site_profile (site_id, site_type, pseudo_static, pseudo_custom, \
-         web_root_custom, upstreams, locations, ssl_cert_id, force_https, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+         web_root_custom, upstreams, locations, ssl_cert_id, force_https, \
+         ssl_protocols, ssl_ciphers, ssl_prefer_server_ciphers, ssl_http2, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT(site_id) DO UPDATE SET \
            site_type = excluded.site_type, pseudo_static = excluded.pseudo_static, \
            pseudo_custom = excluded.pseudo_custom, web_root_custom = excluded.web_root_custom, \
            upstreams = excluded.upstreams, locations = excluded.locations, \
            ssl_cert_id = excluded.ssl_cert_id, force_https = excluded.force_https, \
+           ssl_protocols = excluded.ssl_protocols, ssl_ciphers = excluded.ssl_ciphers, \
+           ssl_prefer_server_ciphers = excluded.ssl_prefer_server_ciphers, \
+           ssl_http2 = excluded.ssl_http2, \
            updated_at = excluded.updated_at",
     )
     .bind(site_id)
@@ -773,6 +831,10 @@ async fn save_profile(
     .bind(&l)
     .bind(ssl_cert_id)
     .bind(if force_https { 1i64 } else { 0i64 })
+    .bind(ssl_protocols)
+    .bind(ssl_ciphers)
+    .bind(if ssl_prefer_server_ciphers { 1i64 } else { 0i64 })
+    .bind(if ssl_http2 { 1i64 } else { 0i64 })
     .bind(now)
     .execute(pool)
     .await?;
@@ -1221,20 +1283,34 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         for (sid, w, l) in dirq.fetch_all(pool).await? {
             dir_map.insert(sid, (w, l));
         }
-        // 站点扩展档案（类型 / 伪静态 / 自定义目录 / upstream / location / SSL 绑定）
+        // 站点扩展档案（类型 / 伪静态 / 自定义目录 / upstream / location / SSL 绑定 / TLS 高级）
         let psql2 = format!(
             "SELECT site_id, site_type, pseudo_static, pseudo_custom, web_root_custom, \
-             upstreams, locations, ssl_cert_id, force_https FROM site_profile WHERE site_id IN ({})",
+             upstreams, locations, ssl_cert_id, force_https, ssl_protocols, ssl_ciphers, \
+             ssl_prefer_server_ciphers, ssl_http2 \
+             FROM site_profile WHERE site_id IN ({})",
             ph
         );
-        let mut pq2 = sqlx::query_as::<_, (i64, String, String, String, i64, String, String, i64, i64)>(
-            &psql2,
-        );
+        let mut pq2 = sqlx::query_as::<_, (
+            i64,
+            String,
+            String,
+            String,
+            i64,
+            String,
+            String,
+            i64,
+            i64,
+            String,
+            String,
+            i64,
+            i64,
+        )>(&psql2);
         for id in &ids {
             pq2 = pq2.bind(id);
         }
-        for (sid, t, p, pc, wc, u, l, ssl, fh) in pq2.fetch_all(pool).await? {
-            pf_map.insert(sid, (t, p, pc, wc != 0, u, l, ssl, fh != 0));
+        for (sid, t, p, pc, wc, u, l, ssl, fh, pr, ci, pp, h2) in pq2.fetch_all(pool).await? {
+            pf_map.insert(sid, (t, p, pc, wc != 0, u, l, ssl, fh != 0, pr, ci, pp != 0, h2 != 0));
         }
         // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
         let mut owner_ids: Vec<i64> = rows.iter().map(|r| r.1).collect();
@@ -1343,6 +1419,10 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
                 "locations": pf_map.get(&r.0).map(|p| serde_json::from_str::<Value>(&p.5).unwrap_or_else(|_| json!([]))).unwrap_or_else(|| json!([])),
                 "ssl_cert_id": pf_map.get(&r.0).map(|p| p.6).unwrap_or(0),
                 "force_https": pf_map.get(&r.0).map(|p| p.7).unwrap_or(false),
+                "ssl_protocols": pf_map.get(&r.0).map(|p| p.8.clone()).unwrap_or_default(),
+                "ssl_ciphers": pf_map.get(&r.0).map(|p| p.9.clone()).unwrap_or_default(),
+                "ssl_prefer_server_ciphers": pf_map.get(&r.0).map(|p| p.10).unwrap_or(true),
+                "ssl_http2": pf_map.get(&r.0).map(|p| p.11).unwrap_or(true),
                 "ssl_cert_name": pf_map.get(&r.0).and_then(|p| ssl_name_map.get(&p.6)).cloned().unwrap_or_default(),
                 "remark": r.4,
                 "created_at": r.5,
@@ -1671,6 +1751,10 @@ pub async fn site_add(
         &payload.locations,
         ssl_cert_id,
         force_https,
+        payload.ssl_protocols.trim(),
+        payload.ssl_ciphers.trim(),
+        payload.ssl_prefer_server_ciphers,
+        payload.ssl_http2,
     )
     .await
     {
@@ -1749,6 +1833,11 @@ pub async fn site_update(
     // SSL 绑定：None = 保持现值；Some(0) = 解绑；Some(id) = 绑定证书库证书
     let eff_ssl_cert_id = payload.ssl_cert_id.unwrap_or(prof.6).max(0);
     let eff_force_https = payload.force_https.unwrap_or(prof.7);
+    // TLS 高级设置：None = 保持现值；空串 = 面板默认（协议 TLSv1.2+TLSv1.3 / 不输出套件）
+    let eff_ssl_protocols = payload.ssl_protocols.clone().unwrap_or_else(|| prof.8.clone());
+    let eff_ssl_ciphers = payload.ssl_ciphers.clone().unwrap_or_else(|| prof.9.clone());
+    let eff_ssl_prefer = payload.ssl_prefer_server_ciphers.unwrap_or(prof.10);
+    let eff_ssl_http2 = payload.ssl_http2.unwrap_or(prof.11);
 
     // 归属转移
     let new_owner = if let Some(nid) = payload.user_id {
@@ -1983,6 +2072,10 @@ pub async fn site_update(
         &eff_locations,
         eff_ssl_cert_id,
         eff_force_https,
+        &eff_ssl_protocols,
+        &eff_ssl_ciphers,
+        eff_ssl_prefer,
+        eff_ssl_http2,
     )
     .await
     {
@@ -2413,6 +2506,10 @@ async fn sync_one_site_inner(
         ssl_fullchain,
         ssl_key,
         force_https: prof.7,
+        ssl_protocols: prof.8,
+        ssl_ciphers: prof.9,
+        ssl_prefer_server_ciphers: prof.10,
+        ssl_http2: prof.11,
     })
     .await?;
 

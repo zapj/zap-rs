@@ -375,6 +375,19 @@ pub enum Request {
         /// 允许 HTTP 跳转到 HTTPS（仅 SSL 启用时生效：80 端口只保留 301 跳转）
         #[serde(default)]
         force_https: bool,
+        /// TLS 协议版本（空格分隔的 nginx ssl_protocols 值，如 "TLSv1.2 TLSv1.3"）；
+        /// 空串时由执行端回退为 TLSv1.2 TLSv1.3
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        ssl_protocols: String,
+        /// SSL 密码套件（nginx ssl_ciphers 值）；空串 = 不输出 ssl_ciphers 指令（跟随执行端默认）
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        ssl_ciphers: String,
+        /// 服务端密码套件优先（ssl_prefer_server_ciphers，仅影响 TLSv1.2）
+        #[serde(default)]
+        ssl_prefer_server_ciphers: bool,
+        /// 是否启用 HTTP/2（nginx ≥ 1.25.1 渲染 `http2 on;`，旧版回退 `listen 443 ssl http2`）
+        #[serde(default)]
+        ssl_http2: bool,
     },
     /// 列出目录下的子目录（root 特权）：供面板站点「选择已有站点目录」浏览。
     /// 仅返回目录名（不含点目录），路径必须为绝对路径且存在。

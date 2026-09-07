@@ -51,6 +51,14 @@ interface SiteItem {
   ssl_cert_name?: string
   /** 允许 HTTP 跳转到 HTTPS */
   force_https?: boolean
+  /** TLS 协议版本（空格分隔的 nginx ssl_protocols；缺省 = TLSv1.2 TLSv1.3） */
+  ssl_protocols?: string
+  /** SSL 密码套件（空 = 不指定，跟随系统默认） */
+  ssl_ciphers?: string
+  /** 服务端密码套件优先（ssl_prefer_server_ciphers） */
+  ssl_prefer_server_ciphers?: boolean
+  /** 启用 HTTP/2 */
+  ssl_http2?: boolean
 }
 
 // PHP 运行通道（按全局 vhost 模式 + 站点归属用户派生，仅用于展示）
@@ -429,6 +437,14 @@ interface SiteForm {
   ssl_cert_id: number | null
   /** 允许 HTTP 跳转到 HTTPS（仅绑定证书后生效） */
   force_https: boolean
+  /** TLS 协议版本（空格分隔的 nginx ssl_protocols；空 = 面板默认 TLSv1.2 TLSv1.3） */
+  ssl_protocols: string
+  /** SSL 密码套件（nginx ssl_ciphers；空 = 不输出，跟随系统默认） */
+  ssl_ciphers: string
+  /** 服务端密码套件优先（ssl_prefer_server_ciphers，仅影响 TLSv1.2） */
+  ssl_prefer_server_ciphers: boolean
+  /** 启用 HTTP/2 */
+  ssl_http2: boolean
 }
 const blankForm = (): SiteForm => ({
   id: 0,
@@ -448,8 +464,44 @@ const blankForm = (): SiteForm => ({
   locations: [],
   ssl_cert_id: null,
   force_https: false,
+  ssl_protocols: 'TLSv1.2 TLSv1.3',
+  ssl_ciphers: '',
+  ssl_prefer_server_ciphers: true,
+  ssl_http2: true,
 })
 const form = reactive<SiteForm>(blankForm())
+
+// TLS 密码套件预设（值即 nginx ssl_ciphers 内容；空串 = 不指定，跟随系统默认）
+const SSL_CIPHER_INTERMEDIATE =
+  'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384'
+const SSL_CIPHER_MODERN =
+  'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305'
+const TLS_CIPHER_PRESETS = [
+  { label: '跟随系统默认（不指定套件）', value: '' },
+  { label: '推荐：主流兼容（ECDHE + DHE）', value: SSL_CIPHER_INTERMEDIATE },
+  { label: '现代：仅 ECDHE（更严格高效）', value: SSL_CIPHER_MODERN },
+  { label: '自定义', value: '__custom__' },
+]
+// TLS 协议多选（DB 存空格分隔串，UI 用数组双向绑定）
+const tlsProtocolList = computed<string[]>({
+  get: () => form.ssl_protocols.split(/\s+/).filter(Boolean),
+  set: (v) => {
+    form.ssl_protocols = v.join(' ')
+  },
+})
+// 密码套件档位：值不在预设中视为「自定义」
+const cipherPreset = computed<string>({
+  get: () => {
+    if (form.ssl_ciphers === SSL_CIPHER_INTERMEDIATE) return SSL_CIPHER_INTERMEDIATE
+    if (form.ssl_ciphers === SSL_CIPHER_MODERN) return SSL_CIPHER_MODERN
+    if (!form.ssl_ciphers) return ''
+    return '__custom__'
+  },
+  set: (v) => {
+    if (v !== '__custom__') form.ssl_ciphers = v
+  },
+})
+const cipherIsCustom = computed(() => cipherPreset.value === '__custom__')
 // 「自动按域名命名目录」的上次生成值：输入框被手动改过后不再自动覆盖
 const lastAutoDir = ref('')
 // 编辑到文档根不在家目录内的旧站点时记录原路径，仅用于提示（避免误迁移文档根）
@@ -827,6 +879,10 @@ function openEdit(row: SiteItem) {
   }
   form.ssl_cert_id = row.ssl_cert_id || null
   form.force_https = !!row.force_https
+  form.ssl_protocols = row.ssl_protocols || 'TLSv1.2 TLSv1.3'
+  form.ssl_ciphers = row.ssl_ciphers || ''
+  form.ssl_prefer_server_ciphers = row.ssl_prefer_server_ciphers ?? true
+  form.ssl_http2 = row.ssl_http2 ?? true
   editCertName.value = row.ssl_cert_name || ''
   loadPhpOptions()
   loadCerts()
@@ -905,6 +961,10 @@ async function submitForm() {
     // SSL/TLS：绑定证书库证书（0 = 不启用）；HTTP→HTTPS 跳转仅在启用证书后提交
     ssl_cert_id: form.ssl_cert_id || 0,
     force_https: !!form.ssl_cert_id && !!form.force_https,
+    ssl_protocols: form.ssl_protocols.trim() || 'TLSv1.2 TLSv1.3',
+    ssl_ciphers: form.ssl_ciphers.trim(),
+    ssl_prefer_server_ciphers: form.ssl_prefer_server_ciphers,
+    ssl_http2: form.ssl_http2,
     // upstream / location：过滤空行并剥离仅本地 UI 使用的字段
     upstreams: form.upstreams
       .filter((u) => u.name.trim())
@@ -1640,6 +1700,65 @@ onMounted(() => {
                 请确认所选证书覆盖了本站全部域名，否则未覆盖域名无法正常访问。
               </div>
             </el-form-item>
+
+            <template v-if="selectedCert">
+              <el-divider content-position="left">TLS 高级设置</el-divider>
+
+              <el-form-item label="TLS 协议版本">
+                <el-checkbox-group v-model="tlsProtocolList">
+                  <el-checkbox value="TLSv1.3">TLSv1.3</el-checkbox>
+                  <el-checkbox value="TLSv1.2">TLSv1.2</el-checkbox>
+                  <el-checkbox value="TLSv1.1">TLSv1.1（不推荐）</el-checkbox>
+                </el-checkbox-group>
+                <div class="form-tip">
+                  默认 TLSv1.2 + TLSv1.3；全部取消 = 恢复面板默认（TLSv1.2 + TLSv1.3）。
+                  TLSv1.1 及以下已不再安全，仅在确需兼容老旧客户端时勾选。
+                </div>
+              </el-form-item>
+
+              <el-form-item label="HTTP/2">
+                <el-switch
+                  v-model="form.ssl_http2"
+                  inline-prompt
+                  active-text="开启"
+                  inactive-text="关闭"
+                />
+                <div class="form-tip">
+                  HTTP/2 多路复用可显著提升 HTTPS 站点加载性能；指令写法随 Nginx 版本自动适配。
+                </div>
+              </el-form-item>
+
+              <el-form-item label="服务端套件优先">
+                <el-switch
+                  v-model="form.ssl_prefer_server_ciphers"
+                  inline-prompt
+                  active-text="开启"
+                  inactive-text="关闭"
+                />
+                <div class="form-tip">
+                  ssl_prefer_server_ciphers on：优先采用服务端定义的密码套件顺序（仅影响 TLSv1.2 协商）。
+                </div>
+              </el-form-item>
+
+              <el-form-item label="SSL 密码套件">
+                <el-radio-group v-model="cipherPreset">
+                  <el-radio v-for="p in TLS_CIPHER_PRESETS" :key="p.value" :value="p.value">
+                    {{ p.label }}
+                  </el-radio>
+                </el-radio-group>
+                <el-input
+                  v-if="cipherIsCustom"
+                  v-model="form.ssl_ciphers"
+                  placeholder="openssl 套件名，冒号分隔，例如：ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"
+                  maxlength="600"
+                  style="margin-top: 8px"
+                />
+                <div class="form-tip">
+                  留空 = 不指定，跟随系统默认；自定义套件需与服务器 OpenSSL 兼容，保存时执行端会做
+                  nginx -t 校验，失败自动回滚，不会破坏现有站点。
+                </div>
+              </el-form-item>
+            </template>
           </el-tab-pane>
 
           <!-- 反代 / 高级 -->
