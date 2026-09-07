@@ -64,6 +64,19 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="站点能力" width="150" align="center">
+          <template #default="{ row }">
+            <el-tag
+              :type="row.allow_proxy ? 'success' : 'info'"
+              size="small"
+              effect="plain"
+              style="margin-right: 4px"
+            >反代</el-tag>
+            <el-tag :type="row.allow_custom_dir ? 'success' : 'info'" size="small" effect="plain">
+              自定目录
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="客户数" width="90" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.users_count > 0" size="small" effect="dark" type="primary">
@@ -186,6 +199,14 @@
           <el-switch v-model="form.allow_ssh" />
           <span class="form-hint">关闭后该套餐客户无法使用 SSH 终端</span>
         </el-form-item>
+        <el-form-item label="反向代理">
+          <el-switch v-model="form.allow_proxy" />
+          <span class="form-hint">开启后该套餐客户可创建 / 编辑反向代理站点（upstream / location）</span>
+        </el-form-item>
+        <el-form-item label="自定义目录">
+          <el-switch v-model="form.allow_custom_dir" />
+          <span class="form-hint">开启后该套餐客户可浏览并选择已有目录作为站点文档根</span>
+        </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="form.status">
             <el-radio :value="1">启用</el-radio>
@@ -233,6 +254,8 @@ const form = reactive({
   max_bandwidth_mb: 10240,
   fpm_spec_ref: '',
   allow_ssh: false,
+  allow_proxy: false,
+  allow_custom_dir: false,
   status: 1,
 })
 // 「不限」开关：true 时该限制项提交为 0
@@ -291,6 +314,8 @@ function resetForm() {
   form.max_bandwidth_mb = 10240
   form.fpm_spec_ref = ''
   form.allow_ssh = false
+  form.allow_proxy = false
+  form.allow_custom_dir = false
   form.status = 1
   unlimitedDisk.value = true
   unlimitedSites.value = true
@@ -319,6 +344,8 @@ function openEdit(row: PackageItem) {
   form.max_bandwidth_mb = row.max_bandwidth_mb > 0 ? row.max_bandwidth_mb : 10240
   form.fpm_spec_ref = row.fpm_spec_ref || ''
   form.allow_ssh = !!row.allow_ssh
+  form.allow_proxy = !!row.allow_proxy
+  form.allow_custom_dir = !!row.allow_custom_dir
   form.status = row.status
   dialogVisible.value = true
 }
@@ -339,6 +366,8 @@ async function submitForm() {
     max_bandwidth_mb: unlimitedBw.value ? 0 : form.max_bandwidth_mb,
     fpm_spec_ref: form.fpm_spec_ref,
     allow_ssh: form.allow_ssh,
+    allow_proxy: form.allow_proxy,
+    allow_custom_dir: form.allow_custom_dir,
     status: form.status,
   }
   saving.value = true

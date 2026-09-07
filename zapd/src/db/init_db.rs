@@ -31,6 +31,8 @@ pub async fn init_schema() {
     init_notice_message_table().await;
     // 全局运行环境状态表（scope=auto 自动探测快照 / scope=conf 面板默认配置）
     init_server_env_table().await;
+    // 老库升级：packages 补站点能力列，并把原「站点全局功能开关」平滑迁移为默认套餐字段
+    migrate_package_site_capabilities().await;
     // API Token 管理表
     init_api_token_table().await;
     // SSL/TLS 证书管理表
@@ -120,6 +122,7 @@ async fn init_system_user_table_schema() {
 /// - owner_id = 0：全局套餐（admin 维护，所有人可用）
 /// - owner_id != 0：reseller 自建套餐，仅创建者自己可用
 /// - 限制项：磁盘配额 / 最大站点数 / 月流量（仅记录）/ FPM 规格模板 / SSH 终端开关
+/// - 能力项：allow_proxy（普通用户可用反向代理）/ allow_custom_dir（普通用户可选已有目录）
 /// - 数值 0 表示「不限」
 async fn init_packages_table() {
     if table_exists("packages").await {
@@ -136,15 +139,52 @@ async fn init_packages_table() {
         max_bandwidth_mb INTEGER NOT NULL DEFAULT 0,
         fpm_spec_ref TEXT NOT NULL DEFAULT '',
         allow_ssh INTEGER NOT NULL DEFAULT 0,
+        allow_proxy INTEGER NOT NULL DEFAULT 0,
+        allow_custom_dir INTEGER NOT NULL DEFAULT 0,
         owner_id INTEGER NOT NULL DEFAULT 0,
         status INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER,
         updated_at INTEGER
     );
-    INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, fpm_spec_ref, allow_ssh, owner_id, status, created_at, updated_at)
-    VALUES ('默认套餐', '不限磁盘、不限站点、不限域名、允许 SSH 终端', 0, 0, 0, '', 1, 0, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, fpm_spec_ref, allow_ssh, allow_proxy, allow_custom_dir, owner_id, status, created_at, updated_at)
+    VALUES ('默认套餐', '不限磁盘、不限站点、不限域名、允许 SSH 终端（反向代理 / 自定义目录默认关闭，可在「编辑套餐」中开启）', 0, 0, 0, '', 1, 0, 0, 0, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
+}
+
+/// 老库升级（幂等）：packages 补 `allow_proxy` / `allow_custom_dir` 列；
+/// 并把旧版「站点全局功能开关」（server_env scope='conf' 的 site.user_proxy /
+/// site.user_custom_dir）平滑迁移为「默认套餐」的能力字段，随后清理旧配置键。
+/// 未绑定套餐的普通用户运行时回退到默认套餐，因此原有全局开关语义得到保留。
+async fn migrate_package_site_capabilities() {
+    let pool = get_db_pool().await;
+    // 列已存在时 SQLite 报 duplicate column name，忽略即可（幂等）
+    let _ = pool
+        .execute("ALTER TABLE packages ADD COLUMN allow_proxy INTEGER NOT NULL DEFAULT 0")
+        .await;
+    let _ = pool
+        .execute("ALTER TABLE packages ADD COLUMN allow_custom_dir INTEGER NOT NULL DEFAULT 0")
+        .await;
+    // 旧全局开关 = 对所有普通用户统一放行 → 迁移时同步给全部现有套餐，
+    // 使升级后既有客户能力不变；此后管理员可按套餐差异化调整。
+    let _ = pool
+        .execute(
+            "UPDATE packages SET allow_proxy = 1 WHERE \
+             (SELECT v FROM server_env WHERE scope = 'conf' AND k = 'site.user_proxy') = '1'",
+        )
+        .await;
+    let _ = pool
+        .execute(
+            "UPDATE packages SET allow_custom_dir = 1 WHERE \
+             (SELECT v FROM server_env WHERE scope = 'conf' AND k = 'site.user_custom_dir') = '1'",
+        )
+        .await;
+    let _ = pool
+        .execute(
+            "DELETE FROM server_env WHERE scope = 'conf' \
+             AND k IN ('site.user_proxy', 'site.user_custom_dir')",
+        )
+        .await;
 }
 
 // ── monitor ────────────────────────────────────────────────

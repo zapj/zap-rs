@@ -9,6 +9,8 @@
 //! - `max_bandwidth_mb`  月流量上限（MB，0 = 不限；面板暂无流量统计，仅记录与展示）
 //! - `fpm_spec_ref`      PHP-FPM 规格模板名（'' = 面板默认）
 //! - `allow_ssh`         是否允许使用 SSH 终端
+//! - `allow_proxy`       是否允许普通用户创建/编辑「反向代理」站点（upstream / location）
+//! - `allow_custom_dir`  是否允许普通用户选择「已有目录」作为站点文档根
 //!
 //! 归属：`owner_id = 0` 为全局套餐（admin 维护，所有人可用）；
 //! reseller 自建套餐 `owner_id` 为自己，仅本人可用。
@@ -44,6 +46,10 @@ pub struct PackageRow {
     pub max_bandwidth_mb: i64,
     pub fpm_spec_ref: String,
     pub allow_ssh: i32,
+    /// 允许普通用户使用反向代理（upstream / location）
+    pub allow_proxy: i32,
+    /// 允许普通用户选择「已有目录」作为站点文档根
+    pub allow_custom_dir: i32,
     pub owner_id: i64,
     pub status: i32,
     pub created_at: i64,
@@ -51,7 +57,8 @@ pub struct PackageRow {
 }
 
 const COLS: &str = "id, name, remark, disk_quota_mb, max_sites, max_domains, max_bandwidth_mb, \
-                    fpm_spec_ref, allow_ssh, owner_id, status, created_at, updated_at";
+                    fpm_spec_ref, allow_ssh, allow_proxy, allow_custom_dir, owner_id, status, \
+                    created_at, updated_at";
 
 fn validate_name(raw: &str) -> Result<String, ZapError> {
     let n = raw.trim();
@@ -106,6 +113,8 @@ fn row_json(r: &PackageRow, users_count: i64) -> Value {
         "max_bandwidth_mb": r.max_bandwidth_mb,
         "fpm_spec_ref": r.fpm_spec_ref,
         "allow_ssh": r.allow_ssh == 1,
+        "allow_proxy": r.allow_proxy == 1,
+        "allow_custom_dir": r.allow_custom_dir == 1,
         "owner_id": r.owner_id,
         "status": r.status,
         "users_count": users_count,
@@ -135,6 +144,30 @@ pub async fn package_of_user(user_id: i64) -> Option<PackageRow> {
     .await
     .ok()
     .flatten()
+}
+
+/// 全局默认套餐（owner_id = 0 中启用且 id 最小者；不存在时返回 None）。
+/// 未绑定套餐的普通用户回退到该套餐，用于能力判定。
+pub async fn default_package() -> Option<PackageRow> {
+    let pool = db::get_db_pool().await;
+    sqlx::query_as(&format!(
+        "SELECT {COLS} FROM packages WHERE owner_id = 0 AND status = 1 ORDER BY id ASC LIMIT 1"
+    ))
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
+/// 用户实际生效的套餐：绑定套餐（启用中）优先；
+/// 未绑定 / 套餐停用 / 套餐缺失则回退全局「默认套餐」。
+/// 用于站点反代、自定义目录等能力门禁的运行时校验（与 SSH 终端的
+/// 「未绑定不限制」不同：站点能力默认关闭，由默认套餐统一定义）。
+pub async fn effective_package_of(user_id: i64) -> Option<PackageRow> {
+    match package_of_user(user_id).await {
+        Some(pkg) => Some(pkg),
+        None => default_package().await,
+    }
 }
 
 /// 校验操作者是否有权使用该套餐，并返回套餐行（user add/update 时调用）。
@@ -196,6 +229,10 @@ pub struct PackageAddPayload {
     pub fpm_spec_ref: Option<String>,
     /// 是否允许 SSH 终端
     pub allow_ssh: Option<bool>,
+    /// 是否允许普通用户使用反向代理（upstream / location）
+    pub allow_proxy: Option<bool>,
+    /// 是否允许普通用户选择「已有目录」作为站点文档根
+    pub allow_custom_dir: Option<bool>,
     pub status: Option<i32>,
 }
 
@@ -222,6 +259,8 @@ pub async fn package_add(
             .await?;
     }
     let allow_ssh = i32::from(payload.allow_ssh.unwrap_or(false));
+    let allow_proxy = i32::from(payload.allow_proxy.unwrap_or(false));
+    let allow_custom_dir = i32::from(payload.allow_custom_dir.unwrap_or(false));
     let status = payload.status.unwrap_or(1).clamp(0, 1);
     // admin 建全局套餐；reseller 建自己名下套餐
     let owner_id: i64 = if is_admin { 0 } else { claims.id as i64 };
@@ -230,8 +269,8 @@ pub async fn package_add(
     let pool = db::get_db_pool().await;
     let result = sqlx::query(
         "INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_domains, max_bandwidth_mb, \
-         fpm_spec_ref, allow_ssh, owner_id, status, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         fpm_spec_ref, allow_ssh, allow_proxy, allow_custom_dir, owner_id, status, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&name)
     .bind(&remark)
@@ -241,6 +280,8 @@ pub async fn package_add(
     .bind(max_bandwidth_mb)
     .bind(&fpm_spec_ref)
     .bind(allow_ssh)
+    .bind(allow_proxy)
+    .bind(allow_custom_dir)
     .bind(owner_id)
     .bind(status)
     .bind(now)
@@ -280,6 +321,10 @@ pub struct PackageUpdatePayload {
     pub max_bandwidth_mb: Option<i64>,
     pub fpm_spec_ref: Option<String>,
     pub allow_ssh: Option<bool>,
+    /// 是否允许普通用户使用反向代理（upstream / location）
+    pub allow_proxy: Option<bool>,
+    /// 是否允许普通用户选择「已有目录」作为站点文档根
+    pub allow_custom_dir: Option<bool>,
     pub status: Option<i32>,
 }
 
@@ -374,6 +419,22 @@ pub async fn package_update(
     }
     if let Some(v) = payload.allow_ssh {
         sqlx::query("UPDATE packages SET allow_ssh = ?, updated_at = ? WHERE id = ?")
+            .bind(i32::from(v))
+            .bind(now)
+            .bind(payload.id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(v) = payload.allow_proxy {
+        sqlx::query("UPDATE packages SET allow_proxy = ?, updated_at = ? WHERE id = ?")
+            .bind(i32::from(v))
+            .bind(now)
+            .bind(payload.id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(v) = payload.allow_custom_dir {
+        sqlx::query("UPDATE packages SET allow_custom_dir = ?, updated_at = ? WHERE id = ?")
             .bind(i32::from(v))
             .bind(now)
             .bind(payload.id)

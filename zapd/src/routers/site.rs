@@ -159,17 +159,6 @@ pub struct SiteUpdatePayload {
     pub locations: Option<Vec<LocationSpec>>,
 }
 
-/// 站点功能开关保存入参（admin only）
-#[derive(Debug, Deserialize)]
-pub struct SiteFeaturePayload {
-    /// 是否允许普通用户（user 角色）使用反向代理 / 自定义 upstream / 自定义 location
-    #[serde(default)]
-    pub user_proxy: Option<bool>,
-    /// 是否允许普通用户选择「已有目录」作为站点目录
-    #[serde(default)]
-    pub user_custom_dir: Option<bool>,
-}
-
 /// 站点已有目录浏览入参
 #[derive(Debug, Deserialize)]
 pub struct SiteDirsPayload {
@@ -618,53 +607,22 @@ const SITE_TYPES: [&str; 3] = ["php", "static", "proxy"];
 /// 伪静态预设 key 白名单
 const PSEUDO_PRESETS: [&str; 6] =
     ["none", "thinkphp", "laravel", "wordpress", "codeigniter", "custom"];
-/// server_env(scope='conf') 功能开关键：普通用户是否可用反代 / 自定义目录
-const K_USER_PROXY: &str = "site.user_proxy";
-const K_USER_CUSTOM_DIR: &str = "site.user_custom_dir";
 
 fn is_operator(claims: &jwt::Claims) -> bool {
     jwt::is_admin(claims) || jwt::is_reseller(claims)
 }
 
-/// 读取 server_env(scope='conf') 布尔开关
-async fn conf_site_get(key: &str) -> bool {
-    let pool = db::get_db_pool().await;
-    let v: Option<String> =
-        sqlx::query_scalar("SELECT v FROM server_env WHERE scope = 'conf' AND k = ?")
-            .bind(key)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-    matches!(v.as_deref(), Some("1") | Some("true") | Some("yes"))
-}
-
-async fn conf_site_set(key: &str, val: &str, remark: &str) -> Result<(), ZapError> {
-    let pool = db::get_db_pool().await;
-    let now = chrono::Local::now().timestamp();
-    sqlx::query(
-        "INSERT INTO server_env (scope, k, v, remark, updated_at) VALUES ('conf', ?, ?, ?, ?) \
-         ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v, remark = excluded.remark, \
-         updated_at = excluded.updated_at",
-    )
-    .bind(key)
-    .bind(val)
-    .bind(remark)
-    .bind(now)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-/// 当前操作者可用的「高级功能」：admin / reseller 不受限，普通用户以全局开关为准
+/// 当前操作者可用的「站点高级功能」：
+/// - admin / reseller（operator）恒为全能力；
+/// - 普通用户以「绑定套餐」的能力为准（allow_proxy / allow_custom_dir）；
+///   未绑定 / 套餐停用时回退全局「默认套餐」；两者皆缺则关闭。
 async fn gates_for(claims: &jwt::Claims) -> (bool, bool) {
     if is_operator(claims) {
-        (true, true)
-    } else {
-        (
-            conf_site_get(K_USER_PROXY).await,
-            conf_site_get(K_USER_CUSTOM_DIR).await,
-        )
+        return (true, true);
+    }
+    match crate::routers::package::effective_package_of(claims.id as i64).await {
+        Some(pkg) => (pkg.allow_proxy == 1, pkg.allow_custom_dir == 1),
+        None => (false, false),
     }
 }
 
@@ -874,7 +832,7 @@ async fn validate_advanced_inputs(
         if t == "proxy" && !g_proxy {
             return Err(ZapError::New(
                 -1,
-                "反向代理功能未对当前账号开放，请联系管理员在「站点 → 功能开关」中开启".to_string(),
+                "反向代理功能未对当前账号开放，请联系管理员在「系统 → 套餐」中为你的套餐开启".to_string(),
             ));
         }
     }
@@ -882,13 +840,13 @@ async fn validate_advanced_inputs(
     if (!upstreams.is_empty() || !locations.is_empty()) && !g_proxy {
         return Err(ZapError::New(
             -1,
-            "自定义 upstream / location 未对当前账号开放，请联系管理员开启「允许普通用户使用反向代理」".to_string(),
+            "自定义 upstream / location 未对当前账号开放，请联系管理员在「系统 → 套餐」中开启「反向代理」".to_string(),
         ));
     }
     if web_root_custom && !g_custom {
         return Err(ZapError::New(
             -1,
-            "选择已有目录未对当前账号开放，请联系管理员开启「允许普通用户选择已有目录」".to_string(),
+            "选择已有目录未对当前账号开放，请联系管理员在「系统 → 套餐」中开启「自定义目录」".to_string(),
         ));
     }
     if t == "proxy" && locations.is_empty() {
@@ -1247,61 +1205,22 @@ pub async fn site_users(claims: ValidatedClaims) -> ZapJsonResult {
     })))
 }
 
-/// 站点功能开关读取：返回原始开关（供 admin 编辑）+ 当前操作者的实际能力
+/// 站点能力读取：返回当前操作者的实际能力（gates）与是否管理员。
+/// admin / reseller 恒为全能力；普通用户取决于其套餐
+/// （allow_proxy / allow_custom_dir，未绑定套餐时回退全局「默认套餐」）。
 pub async fn site_feature(claims: ValidatedClaims) -> ZapJsonResult {
     require_manageable(&claims)?;
-    let raw_proxy = conf_site_get(K_USER_PROXY).await;
-    let raw_custom = conf_site_get(K_USER_CUSTOM_DIR).await;
     let (g_proxy, g_custom) = gates_for(&claims).await;
     Ok(Json(json!({
         "code": 0,
         "message": "OK",
         "data": {
             "is_admin": jwt::is_admin(&claims),
-            "raw": {
-                "user_proxy": raw_proxy,
-                "user_custom_dir": raw_custom,
-            },
             "gates": {
                 "proxy": g_proxy,
                 "custom_dir": g_custom,
             },
         }
-    })))
-}
-
-/// 站点功能开关保存（admin only）：允许普通用户使用反向代理 / 自定义目录
-pub async fn site_feature_save(
-    claims: ValidatedClaims,
-    Extension(client_addr): Extension<SocketAddr>,
-    Json(payload): Json<SiteFeaturePayload>,
-) -> ZapJsonResult {
-    if !jwt::is_admin(&claims) {
-        return Err(ZapError::New(
-            -1,
-            "仅管理员可修改站点功能开关".to_string(),
-        ));
-    }
-    let mut detail = Vec::new();
-    if let Some(b) = payload.user_proxy {
-        conf_site_set(K_USER_PROXY, if b { "1" } else { "0" }, "站点功能开关：普通用户反向代理").await?;
-        detail.push(format!("user_proxy={}", b));
-    }
-    if let Some(b) = payload.user_custom_dir {
-        conf_site_set(K_USER_CUSTOM_DIR, if b { "1" } else { "0" }, "站点功能开关：普通用户自定义目录").await?;
-        detail.push(format!("user_custom_dir={}", b));
-    }
-    audit::log(
-        Some(&claims),
-        Some(client_addr.ip().to_string().as_str()),
-        "site_feature_save",
-        "site",
-        &detail.join(";"),
-    )
-    .await;
-    Ok(Json(json!({
-        "code": 0,
-        "message": "功能开关已保存"
     })))
 }
 

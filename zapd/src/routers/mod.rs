@@ -480,9 +480,8 @@ fn api_routers() -> Router {
         .route("/site/update", post(site::site_update))
         .route("/site/delete", post(site::site_delete))
         .route("/site/sync", post(site::site_sync))
-        // 站点功能开关（普通用户是否可用反代/自定义目录）+ 已有目录浏览
+        // 站点能力读取（普通用户能否用反代/自定义目录，依套餐而定）+ 已有目录浏览
         .route("/site/feature", get(site::site_feature))
-        .route("/site/feature", post(site::site_feature_save))
         .route("/site/dirs", post(site::site_dirs_browse))
         // 站点启停 / 维护三态切换（running / stopped / maintenance）
         .route("/site/state", post(site::site_state))

@@ -8,7 +8,6 @@ import {
   Refresh,
   RefreshRight,
   Search,
-  Setting,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
@@ -74,10 +73,8 @@ interface LocationSpec {
   ws: boolean
 }
 
-/** /site/feature 返回：原始开关 + 当前操作者实际能力 */
+/** /site/feature 返回：当前操作者的实际能力（依角色与套餐而定） */
 interface SiteFeature {
-  is_admin: boolean
-  raw: { user_proxy: boolean; user_custom_dir: boolean }
   gates: { proxy: boolean; custom_dir: boolean }
 }
 
@@ -313,14 +310,13 @@ const channelMap = computed<Record<number, ChannelInfo | null>>(() => {
 })
 const channelOf = (row: SiteItem): ChannelInfo | null => channelMap.value[row.id] ?? null
 
-// ── 功能开关（普通用户可用能力）──────────────────────────────
+// ── 站点能力（当前操作者可用反代 / 自定义目录，依角色与套餐而定）──
 const siteFeature = ref<SiteFeature | null>(null)
 // 默认：admin/reseller 恒为全能力；接口返回前按角色兜底
 const gates = computed(() => {
   if (siteFeature.value) return siteFeature.value.gates
   return { proxy: canManageAll.value, custom_dir: canManageAll.value }
 })
-const isAdmin = computed(() => canManageAll.value || !!siteFeature.value?.is_admin)
 /** 是否展示「反代 / 高级规则」区块 */
 const showProxyPanel = computed(() => gates.value.proxy || form.site_type === 'proxy')
 /** 是否可以切换「选择已有目录」 */
@@ -332,31 +328,6 @@ async function loadFeature() {
     siteFeature.value = res.data || null
   } catch {
     siteFeature.value = null
-  }
-}
-
-const featureVisible = ref(false)
-const featureSaving = ref(false)
-const featureForm = reactive({ user_proxy: false, user_custom_dir: false })
-function openFeature() {
-  featureForm.user_proxy = siteFeature.value?.raw.user_proxy ?? false
-  featureForm.user_custom_dir = siteFeature.value?.raw.user_custom_dir ?? false
-  featureVisible.value = true
-}
-async function submitFeature() {
-  featureSaving.value = true
-  try {
-    const res = await http.post<{ code: number; message: string }>('/site/feature', {
-      user_proxy: featureForm.user_proxy,
-      user_custom_dir: featureForm.user_custom_dir,
-    })
-    ElMessage.success(res.message)
-    featureVisible.value = false
-    loadFeature()
-  } catch {
-    /* handled */
-  } finally {
-    featureSaving.value = false
   }
 }
 
@@ -823,7 +794,6 @@ onMounted(() => {
           <el-button :icon="Refresh" circle @click="load" />
         </div>
         <div class="toolbar-right">
-          <el-button v-if="isAdmin" :icon="Setting" @click="openFeature">功能开关</el-button>
           <el-button
             :icon="RefreshRight"
             :loading="syncingAll"
@@ -1069,7 +1039,7 @@ onMounted(() => {
           <div class="form-tip">
             {{ siteTypeOptions.find((t) => t.value === form.site_type)?.desc }}
             <template v-if="form.site_type === 'proxy' && !gates.proxy">
-              （反向代理未对你开放，可联系管理员在「功能开关」中开启）
+              （反向代理未对你的账号开放，可联系管理员在「系统 → 套餐」中开启）
             </template>
           </div>
         </el-form-item>
@@ -1135,12 +1105,12 @@ onMounted(() => {
                 :key="o.value"
                 :value="o.value"
                 :label="o.label"
-                :disabled="o.value === 'custom' && !isAdmin"
+                :disabled="o.value === 'custom' && !canManageAll"
               />
             </el-select>
             <div class="form-tip">
               {{ pseudoMeta(form.pseudo_static).desc }}
-              <template v-if="form.pseudo_static === 'custom' && !isAdmin">
+              <template v-if="form.pseudo_static === 'custom' && !canManageAll">
                 自定义规则仅管理员可用
               </template>
             </div>
@@ -1169,8 +1139,8 @@ onMounted(() => {
                 <el-input v-model="form.web_root" placeholder="选择归属用户家目录下的已有目录" disabled />
                 <el-button :icon="FolderOpened" @click="openDirBrowser">浏览…</el-button>
               </div>
-              <div v-if="!gates.custom_dir && !isAdmin" class="form-tip">
-                自定义目录未对你开放，可联系管理员在「功能开关」中开启
+              <div v-if="!gates.custom_dir && !canManageAll" class="form-tip">
+                自定义目录未对你的账号开放，可联系管理员在「系统 → 套餐」中开启
               </div>
             </template>
           </el-form-item>
@@ -1299,29 +1269,6 @@ onMounted(() => {
       <template #footer>
         <el-button @click="dirDialog.visible = false">取消</el-button>
         <el-button type="primary" :disabled="!dirDialog.path" @click="dirPickCurrent">选择当前目录</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 站点功能开关（仅管理员） -->
-    <el-dialog v-model="featureVisible" title="站点功能开关" width="560px">
-      <div class="feature-row">
-        <div class="feature-info">
-          <div class="feature-name">普通用户反向代理</div>
-          <div class="feature-desc">开启后，普通用户可以创建 / 编辑「反向代理」类型站点（upstream 后端组与 location 反代规则）</div>
-        </div>
-        <el-switch v-model="featureForm.user_proxy" />
-      </div>
-      <el-divider />
-      <div class="feature-row">
-        <div class="feature-info">
-          <div class="feature-name">普通用户自定义目录</div>
-          <div class="feature-desc">开启后，普通用户可以浏览并选择归属用户家目录下已存在的目录作为站点文档根</div>
-        </div>
-        <el-switch v-model="featureForm.user_custom_dir" />
-      </div>
-      <template #footer>
-        <el-button @click="featureVisible = false">取消</el-button>
-        <el-button type="primary" :loading="featureSaving" @click="submitFeature">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -1540,25 +1487,5 @@ onMounted(() => {
 }
 .dir-item .el-icon {
   color: var(--el-color-warning);
-}
-.feature-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.feature-info {
-  flex: 1;
-}
-.feature-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-.feature-desc {
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--el-text-color-secondary);
 }
 </style>
