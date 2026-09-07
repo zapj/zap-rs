@@ -443,8 +443,9 @@ fn list_rules(b: Backend) -> Vec<Rule> {
 fn firewalld_apply(r: &Rule) -> Result<(), String> {
     if r.action == "accept" && r.source.is_empty() {
         let port = format!("{}/{}", r.port, r.proto);
-        if !cmd_ok("firewall-cmd", &["--permanent", "--add-port", &port]) {
-            return Err("firewall-cmd --add-port 执行失败".to_string());
+        let (ok, out) = run_capture("firewall-cmd", &["--permanent", "--add-port", &port]);
+        if !ok {
+            return Err(format!("firewall-cmd --add-port {port} 执行失败：{out}"));
         }
     } else {
         let verb = if r.action == "accept" {
@@ -461,44 +462,81 @@ fn firewalld_apply(r: &Rule) -> Result<(), String> {
             "rule family=\"ipv4\"{} port port=\"{}\" protocol=\"{}\" {}",
             src, r.port, r.proto, verb
         );
-        if !cmd_ok("firewall-cmd", &["--permanent", "--add-rich-rule", &rule]) {
-            return Err("firewall-cmd --add-rich-rule 执行失败".to_string());
+        let (ok, out) = run_capture("firewall-cmd", &["--permanent", "--add-rich-rule", &rule]);
+        if !ok {
+            return Err(format!("firewall-cmd --add-rich-rule 执行失败：{out}"));
         }
     }
-    if !cmd_ok("firewall-cmd", &["--reload"]) {
-        return Err("firewall-cmd --reload 执行失败".to_string());
+    let (ok, out) = run_capture("firewall-cmd", &["--reload"]);
+    if !ok {
+        return Err(format!("firewall-cmd --reload 执行失败：{out}"));
     }
     Ok(())
 }
 
-fn ufw_apply(r: &Rule) -> Result<(), String> {
+/// 构造 ufw 参数（纯函数，便于单测）：
+/// - 不限来源：`ufw allow|deny 80/tcp`（`ufw allow port 80 proto tcp` 是非法语法）
+/// - 指定来源：`ufw allow|deny from 1.2.3.4 to any port 80 proto tcp`
+/// - 可选备注：`... comment xxx`（空格替换为 _）
+fn ufw_args(r: &Rule, with_comment: bool) -> Vec<String> {
     let verb = if r.action == "accept" {
         "allow"
     } else {
         "deny"
     };
     let mut args: Vec<String> = vec![verb.to_string()];
-    if !r.source.is_empty() {
-        args.push("from".to_string());
-        args.push(r.source.clone());
-        args.push("to".to_string());
-        args.push("any".to_string());
+    if r.source.is_empty() {
+        args.push(format!("{}/{}", r.port, r.proto));
+    } else {
+        args.extend([
+            "from".to_string(),
+            r.source.clone(),
+            "to".to_string(),
+            "any".to_string(),
+            "port".to_string(),
+            r.port.to_string(),
+            "proto".to_string(),
+            r.proto.clone(),
+        ]);
     }
-    args.push("port".to_string());
-    args.push(r.port.to_string());
-    if !r.proto.is_empty() {
-        args.push("proto".to_string());
-        args.push(r.proto.clone());
-    }
-    if !r.comment.is_empty() {
+    if with_comment && !r.comment.is_empty() {
         args.push("comment".to_string());
         args.push(r.comment.replace(' ', "_"));
     }
-    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    if !cmd_ok("ufw", &refs) {
-        return Err(format!("ufw {} 执行失败", verb));
+    args
+}
+
+/// 执行命令并返回 (是否成功, stdout+stderr)，失败时把后端输出带回去便于排障。
+fn run_capture(program: &str, args: &[&str]) -> (bool, String) {
+    match root_cmd(program).args(args).output() {
+        Ok(o) => {
+            let mut text = String::from_utf8_lossy(&o.stderr).to_string();
+            text.push_str(&String::from_utf8_lossy(&o.stdout));
+            (o.status.success(), text.trim().to_string())
+        }
+        Err(e) => (false, e.to_string()),
     }
-    Ok(())
+}
+
+fn ufw_apply(r: &Rule) -> Result<(), String> {
+    // 先按带备注执行；部分 ufw 版本不接受 comment 时退化为不带备注重试
+    let with_comment = !r.comment.is_empty();
+    let args = ufw_args(r, with_comment);
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let (ok, out) = run_capture("ufw", &refs);
+    if ok {
+        return Ok(());
+    }
+    if with_comment {
+        let args = ufw_args(r, false);
+        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let (ok2, out2) = run_capture("ufw", &refs);
+        if ok2 {
+            return Ok(());
+        }
+        return Err(format!("ufw 执行失败（{}）：{}", args.join(" "), out2));
+    }
+    Err(format!("ufw 执行失败（{}）：{}", args.join(" "), out))
 }
 
 fn nft_apply(r: &Rule) -> Result<(), String> {
@@ -561,8 +599,9 @@ fn iptables_apply(r: &Rule) -> Result<(), String> {
     args.push("-j".to_string());
     args.push(target.to_string());
     let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    if !cmd_ok("iptables", &refs) {
-        return Err("iptables 执行失败".to_string());
+    let (ok, out) = run_capture("iptables", &refs);
+    if !ok {
+        return Err(format!("iptables 执行失败（{}）：{}", args.join(" "), out));
     }
     Ok(())
 }
@@ -839,6 +878,46 @@ mod tests {
         assert!(validate_rule_input(80, "tcp", "accept", "not-an-ip").is_err());
         // 来源里混入 shell 元字符必须被拒
         assert!(validate_rule_input(80, "tcp", "accept", "1.2.3.4; rm -rf /").is_err());
+    }
+
+    #[test]
+    fn ufw_argument_shapes() {
+        let base = Rule {
+            id: String::new(),
+            port: 80,
+            proto: "tcp".to_string(),
+            action: "accept".to_string(),
+            source: String::new(),
+            comment: String::new(),
+        };
+        // 不限来源：必须是 80/tcp，而不是 `port 80 proto tcp`
+        assert_eq!(ufw_args(&base, false), vec!["allow", "80/tcp"]);
+        // 指定来源
+        let src = Rule {
+            source: "1.2.3.4".to_string(),
+            ..base.clone()
+        };
+        assert_eq!(
+            ufw_args(&src, false),
+            vec![
+                "allow", "from", "1.2.3.4", "to", "any", "port", "80", "proto", "tcp"
+            ]
+        );
+        // 拒绝
+        let deny = Rule {
+            action: "drop".to_string(),
+            ..base.clone()
+        };
+        assert_eq!(ufw_args(&deny, false), vec!["deny", "80/tcp"]);
+        // 备注（空格替换为下划线）
+        let cmt = Rule {
+            comment: "web server".to_string(),
+            ..base.clone()
+        };
+        assert_eq!(
+            ufw_args(&cmt, true),
+            vec!["allow", "80/tcp", "comment", "web_server"]
+        );
     }
 
     #[test]
