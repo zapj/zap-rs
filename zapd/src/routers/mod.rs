@@ -61,6 +61,7 @@ pub mod system_ip;
 pub mod system_job;
 pub mod system_menu;
 pub mod system_migrate;
+pub mod system_nginx;
 pub mod system_role;
 pub mod system_update;
 pub mod system_zap;
@@ -322,6 +323,18 @@ fn api_routers() -> Router {
             "/system/config/ssh/install/log/{run_id}",
             get(system_config::ssh_install_log),
         )
+        // Nginx 服务配置（服务器配置 → Nginx 配置 / 服务器状态 → Nginx Server，admin only）
+        .route("/system/nginx/status", get(system_nginx::nginx_status))
+        .route("/system/nginx/config", get(system_nginx::nginx_conf_list))
+        .route(
+            "/system/nginx/config/content",
+            get(system_nginx::nginx_conf_read),
+        )
+        .route(
+            "/system/nginx/config/save",
+            post(system_nginx::nginx_conf_save),
+        )
+        .route("/system/nginx/control", post(system_nginx::nginx_control))
         // 数据迁移（服务器配置 → 数据迁移，admin only）
         .route(
             "/system/migrate/users",

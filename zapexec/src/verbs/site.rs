@@ -1553,7 +1553,7 @@ pub async fn vhost_remove(site_id: i64, name: String) -> Response {
     .unwrap_or_else(|e| Response::err(-1, e))
 }
 
-fn nginx_test(bin: &Path) -> Result<(), String> {
+pub(super) fn nginx_test(bin: &Path) -> Result<(), String> {
     let o = root_cmd("bash")
         .args(["-c"])
         .arg(format!(
@@ -1569,7 +1569,7 @@ fn nginx_test(bin: &Path) -> Result<(), String> {
     }
 }
 
-fn reload_nginx(bin: &Path) -> Result<(), String> {
+pub(super) fn reload_nginx(bin: &Path) -> Result<(), String> {
     let o = root_cmd("bash")
         .args(["-c"])
         .arg(format!(

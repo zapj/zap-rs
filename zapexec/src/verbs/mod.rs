@@ -4,6 +4,7 @@ mod file;
 mod firewall;
 mod fs;
 mod network;
+mod nginx;
 mod php;
 mod process;
 mod service;
@@ -221,6 +222,11 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             stage_dir,
             log_path,
         } => upgrade::run(run_id, stage_dir, log_path).await,
+        Request::NginxStatus => nginx::status().await,
+        Request::NginxConfList => nginx::conf_list().await,
+        Request::NginxConfRead { path } => nginx::conf_read(path).await,
+        Request::NginxConfSave { path, content } => nginx::conf_save(path, content).await,
+        Request::NginxControl { action } => nginx::control(&action).await,
     }
 }
 

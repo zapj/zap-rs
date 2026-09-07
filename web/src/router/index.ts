@@ -157,9 +157,15 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
   {
     path: '/server',
     component: Layout,
-    redirect: '/server/time',
+    redirect: '/server/nginx',
     meta: { title: '服务器配置', icon: 'ep:set-up', roles: ['admin'] },
     children: [
+      {
+        path: 'nginx',
+        name: 'ServerNginx',
+        component: () => import('@/views/server/nginx/index.vue'),
+        meta: { title: 'Nginx 配置', icon: 'ep:document', affix: true },
+      },
       {
         path: 'time',
         name: 'ServerTime',
@@ -210,48 +216,24 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
-  // 服务器状态
+  // 服务器状态（服务器信息 tabs + Nginx Server 独立子页）
   {
     path: '/server-status',
     component: Layout,
-    redirect: '/server-status/info',
+    redirect: '/server-status/index',
     meta: { title: '服务器状态', icon: 'ep:data-line', roles: ['admin'] },
     children: [
       {
-        path: 'info',
-        name: 'ServerStatusInfo',
-        component: () => import('@/views/server-status/info/index.vue'),
+        path: 'index',
+        name: 'ServerStatusIndex',
+        component: () => import('@/views/server-status/index.vue'),
         meta: { title: '服务器信息', icon: 'ep:info-filled', affix: true },
       },
       {
-        path: 'load',
-        name: 'ServerStatusLoad',
-        component: () => import('@/views/server-status/load/index.vue'),
-        meta: { title: '系统负载', icon: 'ep:odometer', affix: true },
-      },
-      {
-        path: 'network',
-        name: 'ServerStatusNetwork',
-        component: () => import('@/views/server-status/network/index.vue'),
-        meta: { title: '网络', icon: 'ep:share', affix: true },
-      },
-      {
-        path: 'memory',
-        name: 'ServerStatusMemory',
-        component: () => import('@/views/server-status/memory/index.vue'),
-        meta: { title: '内存', icon: 'ep:coin', affix: true },
-      },
-      {
-        path: 'cpu',
-        name: 'ServerStatusCpu',
-        component: () => import('@/views/server-status/cpu/index.vue'),
-        meta: { title: 'CPU', icon: 'ep:cpu', affix: true },
-      },
-      {
-        path: 'disk',
-        name: 'ServerStatusDisk',
-        component: () => import('@/views/server-status/disk/index.vue'),
-        meta: { title: '硬盘', icon: 'ep:box', affix: true },
+        path: 'nginx-server',
+        name: 'ServerStatusNginx',
+        component: () => import('@/views/server-status/nginx-server/index.vue'),
+        meta: { title: 'Nginx Server', icon: 'ep:monitor', affix: true },
       },
     ],
   },

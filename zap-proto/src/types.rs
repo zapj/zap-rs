@@ -511,6 +511,21 @@ pub enum Request {
         stage_dir: String,
         log_path: String,
     },
+    /// 探测 Nginx 运行状态：安装位置 / 版本 / 主配置 / 运行态（未安装时返回 installed=false）
+    #[serde(rename = "nginx.status")]
+    NginxStatus,
+    /// 列出可编辑的 Nginx 配置文件（主配置 + conf 目录白名单，*.conf）
+    #[serde(rename = "nginx.conf_list")]
+    NginxConfList,
+    /// 读取某个白名单内 Nginx 配置文件的内容
+    #[serde(rename = "nginx.conf_read")]
+    NginxConfRead { path: String },
+    /// 保存配置：备份 → 写入 → `nginx -t` 校验 → 失败回滚 → 运行中则重载
+    #[serde(rename = "nginx.conf_save")]
+    NginxConfSave { path: String, content: String },
+    /// Nginx 服务控制：start / stop / restart / reload（优先 systemd unit nginx）
+    #[serde(rename = "nginx.control")]
+    NginxControl { action: String },
 }
 
 /// `zapexec` -> `zapd` 的响应。
