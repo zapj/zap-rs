@@ -16,7 +16,7 @@ use crate::{
         jwt::{self, ValidatedClaims},
     },
 };
-use zap_proto::Request;
+use zap_proto::{LocationSpec, Request, UpstreamSpec};
 
 // ── SQL 行结构 ──────────────────────────────────────────────
 
@@ -94,6 +94,27 @@ pub struct SiteAddPayload {
     /// PHP 实例标识（appstore 已安装 PHP 应用的 instance，如 php74）；空表示未绑定
     #[serde(default)]
     pub php_instance: Option<String>,
+    /// 站点类型：php（默认，PHP/PHP+静态）/ static（纯静态）/ proxy（反向代理）
+    #[serde(default)]
+    pub site_type: String,
+    /// 伪静态预设：none / thinkphp / laravel / wordpress / codeigniter / custom
+    #[serde(default)]
+    pub pseudo_static: String,
+    /// 伪静态自定义规则（多行指令，仅 preset=custom 时使用；仅运营者可提交）
+    #[serde(default)]
+    pub pseudo_custom: String,
+    /// true = 站点目录使用归属用户家目录下已存在的自定义目录（需同时给 web_root）
+    #[serde(default)]
+    pub web_root_custom: bool,
+    /// 自定义站点目录绝对路径（web_root_custom=true 时必填）
+    #[serde(default)]
+    pub web_root: Option<String>,
+    /// 自定义 upstream 组
+    #[serde(default)]
+    pub upstreams: Vec<UpstreamSpec>,
+    /// 自定义 location（反代 / 跳转 / 拒绝 / 站内目录）
+    #[serde(default)]
+    pub locations: Vec<LocationSpec>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +139,46 @@ pub struct SiteUpdatePayload {
     /// None 表示 PHP 实例保持不变；Some(空串) 表示清除 PHP 实例
     #[serde(default)]
     pub php_instance: Option<String>,
+    /// 以下为站点扩展档案：None 表示保持不变（整体覆盖式提交时全量给出）
+    #[serde(default)]
+    pub site_type: Option<String>,
+    #[serde(default)]
+    pub pseudo_static: Option<String>,
+    #[serde(default)]
+    pub pseudo_custom: Option<String>,
+    /// Some(true)=切换为「选择已有目录」模式（需同时给 web_root）；
+    /// Some(false)=切回面板自动规划目录
+    #[serde(default)]
+    pub web_root_custom: Option<bool>,
+    /// 自定义站点目录绝对路径（web_root_custom=true 且首次指定时必填）
+    #[serde(default)]
+    pub web_root: Option<String>,
+    #[serde(default)]
+    pub upstreams: Option<Vec<UpstreamSpec>>,
+    #[serde(default)]
+    pub locations: Option<Vec<LocationSpec>>,
+}
+
+/// 站点功能开关保存入参（admin only）
+#[derive(Debug, Deserialize)]
+pub struct SiteFeaturePayload {
+    /// 是否允许普通用户（user 角色）使用反向代理 / 自定义 upstream / 自定义 location
+    #[serde(default)]
+    pub user_proxy: Option<bool>,
+    /// 是否允许普通用户选择「已有目录」作为站点目录
+    #[serde(default)]
+    pub user_custom_dir: Option<bool>,
+}
+
+/// 站点已有目录浏览入参
+#[derive(Debug, Deserialize)]
+pub struct SiteDirsPayload {
+    /// 归属用户 id（admin/reseller 可指定他人；普通用户忽略，恒为自己）
+    #[serde(default)]
+    pub user_id: Option<i64>,
+    /// 当前浏览的目录（不传 = 家目录根）；返回其下子目录
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -550,6 +611,357 @@ async fn ensure_domains_unique(
     Ok(())
 }
 
+// ── 站点扩展档案（site_profile）与功能开关 ───────────────────────
+
+/// 站点类型白名单（与 zapexec 保持一致）
+const SITE_TYPES: [&str; 3] = ["php", "static", "proxy"];
+/// 伪静态预设 key 白名单
+const PSEUDO_PRESETS: [&str; 6] =
+    ["none", "thinkphp", "laravel", "wordpress", "codeigniter", "custom"];
+/// server_env(scope='conf') 功能开关键：普通用户是否可用反代 / 自定义目录
+const K_USER_PROXY: &str = "site.user_proxy";
+const K_USER_CUSTOM_DIR: &str = "site.user_custom_dir";
+
+fn is_operator(claims: &jwt::Claims) -> bool {
+    jwt::is_admin(claims) || jwt::is_reseller(claims)
+}
+
+/// 读取 server_env(scope='conf') 布尔开关
+async fn conf_site_get(key: &str) -> bool {
+    let pool = db::get_db_pool().await;
+    let v: Option<String> =
+        sqlx::query_scalar("SELECT v FROM server_env WHERE scope = 'conf' AND k = ?")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    matches!(v.as_deref(), Some("1") | Some("true") | Some("yes"))
+}
+
+async fn conf_site_set(key: &str, val: &str, remark: &str) -> Result<(), ZapError> {
+    let pool = db::get_db_pool().await;
+    let now = chrono::Local::now().timestamp();
+    sqlx::query(
+        "INSERT INTO server_env (scope, k, v, remark, updated_at) VALUES ('conf', ?, ?, ?, ?) \
+         ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v, remark = excluded.remark, \
+         updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(val)
+    .bind(remark)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 当前操作者可用的「高级功能」：admin / reseller 不受限，普通用户以全局开关为准
+async fn gates_for(claims: &jwt::Claims) -> (bool, bool) {
+    if is_operator(claims) {
+        (true, true)
+    } else {
+        (
+            conf_site_get(K_USER_PROXY).await,
+            conf_site_get(K_USER_CUSTOM_DIR).await,
+        )
+    }
+}
+
+fn norm_site_type(t: &str) -> Result<&'static str, ZapError> {
+    let t = t.trim().to_lowercase();
+    if SITE_TYPES.contains(&t.as_str()) {
+        Ok(match t.as_str() {
+            "static" => "static",
+            "proxy" => "proxy",
+            _ => "php",
+        })
+    } else {
+        Err(ZapError::New(
+            -1,
+            format!("站点类型仅支持 php / static / proxy（收到：{t}）"),
+        ))
+    }
+}
+
+/// 伪静态预设配套校验：白名单 + custom 时的规则文本约束。
+/// 空 preset 视为「未改动」，此时不允许附带自定义规则文本。
+fn norm_pseudo(preset: &str, custom: &str, allow_custom: bool) -> Result<(), ZapError> {
+    let p = preset.trim().to_lowercase();
+    if p.is_empty() {
+        if !custom.trim().is_empty() {
+            return Err(ZapError::New(
+                -1,
+                "未选择伪静态预设，不能附带自定义规则文本".to_string(),
+            ));
+        }
+        return Ok(());
+    }
+    if !PSEUDO_PRESETS.contains(&p.as_str()) {
+        return Err(ZapError::New(-1, format!("伪静态预设不支持：{preset}")));
+    }
+    if p == "custom" {
+        if !allow_custom {
+            return Err(ZapError::New(
+                -1,
+                "自定义伪静态规则仅向管理员 / 代理商开放".to_string(),
+            ));
+        }
+        if custom.trim().is_empty() {
+            return Err(ZapError::New(
+                -1,
+                "请填写自定义伪静态规则（预设选 custom 时必填）".to_string(),
+            ));
+        }
+        if custom.contains('#') {
+            return Err(ZapError::New(
+                -1,
+                "自定义伪静态规则中不允许使用 # 注释".to_string(),
+            ));
+        }
+    } else if !custom.trim().is_empty() {
+        return Err(ZapError::New(
+            -1,
+            "预设不是 custom，不能附带自定义规则文本".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// 站点扩展档案（与 site_profile 列一一对应）
+type ProfileRow = (String, String, String, bool, String, String);
+
+/// 读取站点扩展档案；老站点（无档案行）返回默认值
+async fn load_profile(site_id: i64) -> ProfileRow {
+    let pool = db::get_db_pool().await;
+    let row: Option<(String, String, String, i64, String, String)> = sqlx::query_as(
+        "SELECT site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations \
+         FROM site_profile WHERE site_id = ?",
+    )
+    .bind(site_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    row.map(|(t, p, pc, wc, u, l)| (t, p, pc, wc != 0, u, l))
+        .unwrap_or_else(|| {
+            (
+                "php".into(),
+                "none".into(),
+                String::new(),
+                false,
+                "[]".into(),
+                "[]".into(),
+            )
+        })
+}
+
+/// 写回站点扩展档案（存在则整体覆盖）
+#[allow(clippy::too_many_arguments)]
+async fn save_profile(
+    site_id: i64,
+    site_type: &str,
+    pseudo_static: &str,
+    pseudo_custom: &str,
+    web_root_custom: bool,
+    upstreams: &[UpstreamSpec],
+    locations: &[LocationSpec],
+) -> Result<(), ZapError> {
+    let pool = db::get_db_pool().await;
+    let now = chrono::Local::now().timestamp();
+    let u = serde_json::to_string(upstreams).unwrap_or_else(|_| "[]".to_string());
+    let l = serde_json::to_string(locations).unwrap_or_else(|_| "[]".to_string());
+    sqlx::query(
+        "INSERT INTO site_profile (site_id, site_type, pseudo_static, pseudo_custom, \
+         web_root_custom, upstreams, locations, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+         ON CONFLICT(site_id) DO UPDATE SET \
+           site_type = excluded.site_type, pseudo_static = excluded.pseudo_static, \
+           pseudo_custom = excluded.pseudo_custom, web_root_custom = excluded.web_root_custom, \
+           upstreams = excluded.upstreams, locations = excluded.locations, \
+           updated_at = excluded.updated_at",
+    )
+    .bind(site_id)
+    .bind(site_type)
+    .bind(pseudo_static)
+    .bind(pseudo_custom)
+    .bind(if web_root_custom { 1i64 } else { 0i64 })
+    .bind(&u)
+    .bind(&l)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// JSON 文本 → 结构体列表（脏数据回退为空列表）
+fn parse_specs<T: serde::de::DeserializeOwned>(text: &str) -> Vec<T> {
+    serde_json::from_str(text).unwrap_or_default()
+}
+
+/// 归属用户家目录（空 = 尚未初始化）
+async fn home_dir_of(user_id: i64) -> Result<String, ZapError> {
+    let pool = db::get_db_pool().await;
+    let row: Option<(String,)> = sqlx::query_as("SELECT home_dir FROM user WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+    match row {
+        Some((h,)) => Ok(h.trim().to_string()),
+        None => Err(ZapError::New(-1, "归属用户不存在".to_string())),
+    }
+}
+
+/// 校验并确认「选择已有目录」：绝对路径、在归属用户家目录内、目录确实存在。
+/// 存在性交给 root 侧目录浏览 verb 验证（zapd 进程非 root，读不了别人的家目录）。
+async fn resolve_custom_web_root(owner: i64, raw: &str) -> Result<String, ZapError> {
+    let p = raw.trim().to_string();
+    if p.is_empty() {
+        return Err(ZapError::New(
+            -1,
+            "请指定自定义站点目录（已在服务器上创建）".to_string(),
+        ));
+    }
+    if !p.starts_with('/') {
+        return Err(ZapError::New(-1, "自定义站点目录必须是绝对路径".to_string()));
+    }
+    if p.split('/').any(|s| s == "..") {
+        return Err(ZapError::New(
+            -1,
+            "自定义站点目录不允许包含 ..".to_string(),
+        ));
+    }
+    let home = home_dir_of(owner).await?;
+    if home.is_empty() {
+        return Err(ZapError::New(
+            -1,
+            "该用户家目录尚未初始化：请先用「自动目录」创建并同步一次站点，再改用自定义目录".to_string(),
+        ));
+    }
+    if !(p == home || p.starts_with(&format!("{home}/"))) {
+        return Err(ZapError::New(
+            -1,
+            format!("自定义站点目录必须在归属用户家目录（{home}）下"),
+        ));
+    }
+    let resp = crate::zapexec::call(Request::FsBrowseDirs { base: p.clone() }).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(
+            -1,
+            format!("目录不可用（不存在 / 无权限 / 非目录）：{}", resp.message),
+        ));
+    }
+    Ok(p)
+}
+
+/// 轻量业务校验（站点类型 / 伪静态 / 功能开关门禁 / upstream/location 字段形态）。
+/// 更细的 nginx 语法与注入校验由 zapexec 同步时兜底执行。
+async fn validate_advanced_inputs(
+    claims: &jwt::Claims,
+    site_type: &str,
+    pseudo_static: &str,
+    pseudo_custom: &str,
+    web_root_custom: bool,
+    upstreams: &[UpstreamSpec],
+    locations: &[LocationSpec],
+) -> Result<(), ZapError> {
+    let op = is_operator(claims);
+    let (g_proxy, g_custom) = gates_for(claims).await;
+    let t = site_type.trim().to_lowercase();
+    // 未指定类型（增量编辑）跳过类型相关门禁
+    if !t.is_empty() {
+        norm_site_type(site_type)?;
+        if t == "proxy" && !g_proxy {
+            return Err(ZapError::New(
+                -1,
+                "反向代理功能未对当前账号开放，请联系管理员在「站点 → 功能开关」中开启".to_string(),
+            ));
+        }
+    }
+    norm_pseudo(pseudo_static, pseudo_custom, op)?;
+    if (!upstreams.is_empty() || !locations.is_empty()) && !g_proxy {
+        return Err(ZapError::New(
+            -1,
+            "自定义 upstream / location 未对当前账号开放，请联系管理员开启「允许普通用户使用反向代理」".to_string(),
+        ));
+    }
+    if web_root_custom && !g_custom {
+        return Err(ZapError::New(
+            -1,
+            "选择已有目录未对当前账号开放，请联系管理员开启「允许普通用户选择已有目录」".to_string(),
+        ));
+    }
+    if t == "proxy" && locations.is_empty() {
+        return Err(ZapError::New(
+            -1,
+            "反向代理站点至少需要配置一个 location（例如 location / 转发到后端）".to_string(),
+        ));
+    }
+    if locations.len() > 16 {
+        return Err(ZapError::New(-1, "自定义 location 最多 16 个".to_string()));
+    }
+    if upstreams.len() > 8 {
+        return Err(ZapError::New(-1, "upstream 组最多 8 个".to_string()));
+    }
+    let kinds = ["proxy", "redirect", "deny", "alias"];
+    let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for u in upstreams {
+        let n = u.name.trim();
+        if n.is_empty() || !n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(ZapError::New(
+                -1,
+                format!("upstream 名称非法：{}（仅字母/数字/_/-）", u.name),
+            ));
+        }
+        if !names.insert(n.to_string()) {
+            return Err(ZapError::New(-1, format!("upstream 名称重复：{n}")));
+        }
+    }
+    for l in locations {
+        let p = l.path.trim();
+        if !p.starts_with('/') {
+            return Err(ZapError::New(
+                -1,
+                format!("location 路径必须以 / 开头：{}", l.path),
+            ));
+        }
+        if !kinds.contains(&l.kind.trim().to_lowercase().as_str()) {
+            return Err(ZapError::New(
+                -1,
+                format!("location 类型不支持：{}", l.kind),
+            ));
+        }
+        let k = l.kind.trim().to_lowercase();
+        if l.target.len() > 400 || l.target.contains('{') || l.target.contains('}') {
+            return Err(ZapError::New(
+                -1,
+                format!("location「{}」的目标参数过长或含非法字符", l.path),
+            ));
+        }
+        match k.as_str() {
+            "deny" => {
+                if !matches!(l.code, 0 | 403 | 404 | 410 | 444) {
+                    return Err(ZapError::New(
+                        -1,
+                        format!("拒绝状态码仅支持 403/404/410/444（收到 {}）", l.code),
+                    ));
+                }
+            }
+            "redirect" => {
+                if !matches!(l.code, 0 | 301 | 302 | 303 | 307 | 308) {
+                    return Err(ZapError::New(
+                        -1,
+                        format!("跳转状态码仅支持 301/302/303/307/308（收到 {}）", l.code),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 // ── 处理器 ──────────────────────────────────────────────────
 
 /// 站点列表（按角色裁剪范围）+ 汇总统计
@@ -593,6 +1005,8 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     let mut ve_map: HashMap<i64, String> = HashMap::new();
     let mut vt_map: HashMap<i64, i64> = HashMap::new();
     let mut dir_map: HashMap<i64, (String, String)> = HashMap::new();
+    // 站点扩展档案（类型 / 伪静态 / 自定义目录 / upstream / location）
+    let mut pf_map: HashMap<i64, ProfileRow> = HashMap::new();
     // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
     let mut lu_map: HashMap<i64, String> = HashMap::new();
     if !ids.is_empty() {
@@ -646,6 +1060,19 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         }
         for (sid, w, l) in dirq.fetch_all(pool).await? {
             dir_map.insert(sid, (w, l));
+        }
+        // 站点扩展档案
+        let psql2 = format!(
+            "SELECT site_id, site_type, pseudo_static, pseudo_custom, web_root_custom, \
+             upstreams, locations FROM site_profile WHERE site_id IN ({})",
+            ph
+        );
+        let mut pq2 = sqlx::query_as::<_, (i64, String, String, String, i64, String, String)>(&psql2);
+        for id in &ids {
+            pq2 = pq2.bind(id);
+        }
+        for (sid, t, p, pc, wc, u, l) in pq2.fetch_all(pool).await? {
+            pf_map.insert(sid, (t, p, pc, wc != 0, u, l));
         }
         // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
         let mut owner_ids: Vec<i64> = rows.iter().map(|r| r.1).collect();
@@ -731,6 +1158,12 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
                 "vhost_synced_at": vt_map.get(&r.0).copied().unwrap_or(0),
                 "web_root": dir_map.get(&r.0).map(|d| d.0.clone()).unwrap_or_default(),
                 "log_root": dir_map.get(&r.0).map(|d| d.1.clone()).unwrap_or_default(),
+                "site_type": pf_map.get(&r.0).map(|p| p.0.clone()).unwrap_or_else(|| "php".into()),
+                "pseudo_static": pf_map.get(&r.0).map(|p| p.1.clone()).unwrap_or_else(|| "none".into()),
+                "pseudo_custom": pf_map.get(&r.0).map(|p| p.2.clone()).unwrap_or_default(),
+                "web_root_custom": pf_map.get(&r.0).map(|p| p.3).unwrap_or(false),
+                "upstreams": pf_map.get(&r.0).map(|p| serde_json::from_str::<Value>(&p.4).unwrap_or_else(|_| json!([]))).unwrap_or_else(|| json!([])),
+                "locations": pf_map.get(&r.0).map(|p| serde_json::from_str::<Value>(&p.5).unwrap_or_else(|_| json!([]))).unwrap_or_else(|| json!([])),
                 "remark": r.4,
                 "created_at": r.5,
                 "updated_at": r.6,
@@ -814,6 +1247,129 @@ pub async fn site_users(claims: ValidatedClaims) -> ZapJsonResult {
     })))
 }
 
+/// 站点功能开关读取：返回原始开关（供 admin 编辑）+ 当前操作者的实际能力
+pub async fn site_feature(claims: ValidatedClaims) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    let raw_proxy = conf_site_get(K_USER_PROXY).await;
+    let raw_custom = conf_site_get(K_USER_CUSTOM_DIR).await;
+    let (g_proxy, g_custom) = gates_for(&claims).await;
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": {
+            "is_admin": jwt::is_admin(&claims),
+            "raw": {
+                "user_proxy": raw_proxy,
+                "user_custom_dir": raw_custom,
+            },
+            "gates": {
+                "proxy": g_proxy,
+                "custom_dir": g_custom,
+            },
+        }
+    })))
+}
+
+/// 站点功能开关保存（admin only）：允许普通用户使用反向代理 / 自定义目录
+pub async fn site_feature_save(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<SiteFeaturePayload>,
+) -> ZapJsonResult {
+    if !jwt::is_admin(&claims) {
+        return Err(ZapError::New(
+            -1,
+            "仅管理员可修改站点功能开关".to_string(),
+        ));
+    }
+    let mut detail = Vec::new();
+    if let Some(b) = payload.user_proxy {
+        conf_site_set(K_USER_PROXY, if b { "1" } else { "0" }, "站点功能开关：普通用户反向代理").await?;
+        detail.push(format!("user_proxy={}", b));
+    }
+    if let Some(b) = payload.user_custom_dir {
+        conf_site_set(K_USER_CUSTOM_DIR, if b { "1" } else { "0" }, "站点功能开关：普通用户自定义目录").await?;
+        detail.push(format!("user_custom_dir={}", b));
+    }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "site_feature_save",
+        "site",
+        &detail.join(";"),
+    )
+    .await;
+    Ok(Json(json!({
+        "code": 0,
+        "message": "功能开关已保存"
+    })))
+}
+
+/// 站点已有目录浏览（供「选择已有目录」使用）：
+/// admin/reseller 可指定归属用户浏览；普通用户只能浏览自己的家目录
+pub async fn site_dirs_browse(
+    claims: ValidatedClaims,
+    Json(payload): Json<SiteDirsPayload>,
+) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    let op = is_operator(&claims);
+    let owner = match payload.user_id {
+        Some(uid) if op => {
+            resolve_target_user(&claims, uid).await?;
+            uid
+        }
+        Some(_) => {
+            return Err(ZapError::New(
+                -1,
+                "普通用户只能浏览自己家目录下的目录".to_string(),
+            ))
+        }
+        None => claims.id as i64,
+    };
+    let home = home_dir_of(owner).await?;
+    if home.is_empty() {
+        return Err(ZapError::New(
+            -1,
+            "该用户家目录尚未初始化：请先用「自动目录」创建并同步一次站点".to_string(),
+        ));
+    }
+    let base = match payload.path.as_deref() {
+        Some(p) => {
+            let p = p.trim();
+            if !p.starts_with('/') {
+                return Err(ZapError::New(-1, "目录路径必须是绝对路径".to_string()));
+            }
+            if p.split('/').any(|s| s == "..") {
+                return Err(ZapError::New(-1, "目录路径不允许包含 ..".to_string()));
+            }
+            if !(p == home || p.starts_with(&format!("{home}/"))) {
+                return Err(ZapError::New(
+                    -1,
+                    format!("只能浏览归属用户家目录（{home}）下的目录"),
+                ));
+            }
+            p.to_string()
+        }
+        None => home.clone(),
+    };
+    let resp = crate::zapexec::call(Request::FsBrowseDirs { base: base.clone() }).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(
+            resp.code,
+            format!("读取目录失败：{}", resp.message),
+        ));
+    }
+    let dirs = resp
+        .data
+        .and_then(|d| d.get("dirs").cloned())
+        .unwrap_or_else(|| json!([]));
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": { "home": home, "path": base, "dirs": dirs }
+    })))
+}
+
 /// 新增站点（普通用户归属自动为当前登录用户；admin/reseller 需显式指定客户）
 pub async fn site_add(
     claims: ValidatedClaims,
@@ -851,6 +1407,33 @@ pub async fn site_add(
             "PHP 实例标识不合法（最长 120 字符，仅允许字母/数字/./_/-/@）".to_string(),
         ));
     }
+    // 站点类型 / 伪静态 / 自定义目录 / upstream / location：白名单 + 功能开关门禁
+    let site_type = {
+        let t = payload.site_type.trim().to_lowercase();
+        norm_site_type(if t.is_empty() { "php" } else { &t })?
+    };
+    let pseudo_static = {
+        let p = payload.pseudo_static.trim().to_lowercase();
+        if p.is_empty() { "none".to_string() } else { p }
+    };
+    validate_advanced_inputs(
+        &claims,
+        &payload.site_type,
+        &pseudo_static,
+        &payload.pseudo_custom,
+        payload.web_root_custom,
+        &payload.upstreams,
+        &payload.locations,
+    )
+    .await?;
+    // 自定义已有目录：在开启事务前向 root 侧验证「存在且位于家目录内」（避免事务内做外部 IO）
+    let custom_web_root = if payload.web_root_custom {
+        Some(
+            resolve_custom_web_root(owner, payload.web_root.as_deref().unwrap_or("")).await?,
+        )
+    } else {
+        None
+    };
     let pool = db::get_db_pool().await;
     // 归属用户的套餐配额：站点数上限 + 单站点域名数上限（均为 0 时表示不限）
     let pkg = crate::routers::package::package_of_user(owner).await;
@@ -908,8 +1491,15 @@ pub async fn site_add(
             .execute(&mut *tx)
             .await?;
     }
-    // 站点文档根 / 日志目录：规划到归属用户家目录下（vhost 同步时由 zapexec 递归创建）
-    let (web_root, log_root) = site_dirs_for(owner, &name, id).await?;
+    // 站点文档根 / 日志目录：
+    // - 自动目录：规划到归属用户家目录下 {home}/www/{name}-{id}（vhost 同步时由 zapexec 递归创建）
+    // - 自定义目录：使用用户选择的归属家目录下已有目录（已在事务前验证过存在）
+    let (web_root, log_root) = if let Some(cw) = &custom_web_root {
+        let (_, lr) = site_dirs_for(owner, &name, id).await?;
+        (cw.clone(), lr)
+    } else {
+        site_dirs_for(owner, &name, id).await?
+    };
     if !web_root.is_empty() {
         sqlx::query("UPDATE site SET web_root = ?, log_root = ? WHERE id = ?")
             .bind(&web_root)
@@ -920,18 +1510,36 @@ pub async fn site_add(
     }
     tx.commit().await?;
 
+    // 站点扩展档案（类型 / 伪静态 / upstream / location / 自定义目录标记）
+    if let Err(e) = save_profile(
+        id,
+        site_type,
+        &pseudo_static,
+        &payload.pseudo_custom,
+        payload.web_root_custom,
+        &payload.upstreams,
+        &payload.locations,
+    )
+    .await
+    {
+        warn!("save site_profile failed (id={}): {}", id, e);
+    }
+
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
         "site_create",
         &format!("id={}", id),
         &format!(
-            "user_id={} name={} domains={} ips={} php_instance={}",
+            "user_id={} name={} domains={} ips={} php_instance={} site_type={} pseudo={} custom_dir={}",
             owner,
             name,
             domains.join(","),
             ips.join(","),
-            php_instance
+            php_instance,
+            site_type,
+            pseudo_static,
+            payload.web_root_custom
         ),
     )
     .await;
@@ -965,6 +1573,26 @@ pub async fn site_update(
     .await?;
     let Some((uid, old_name, mut status, mut remark, mut php_instance, old_web_root)) = row else {
         return Err(ZapError::New(-1, "站点不存在".to_string()));
+    };
+
+    // 站点扩展档案：未显式提交的字段沿用现值（老站点无档案则用默认值）
+    let prof = load_profile(payload.id).await;
+    let eff_type_raw = payload.site_type.clone().unwrap_or_else(|| prof.0.clone());
+    let eff_type = norm_site_type(&eff_type_raw)?;
+    // 空预设归一为 none（老档案/空提交不再显示空字符串）
+    let eff_pseudo = {
+        let v = payload.pseudo_static.clone().unwrap_or_else(|| prof.1.clone());
+        if v.trim().is_empty() { "none".to_string() } else { v }
+    };
+    let eff_pseudo_custom = payload.pseudo_custom.clone().unwrap_or_else(|| prof.2.clone());
+    let eff_custom = payload.web_root_custom.unwrap_or(prof.3);
+    let eff_upstreams: Vec<UpstreamSpec> = match &payload.upstreams {
+        Some(v) => v.clone(),
+        None => parse_specs(&prof.4),
+    };
+    let eff_locations: Vec<LocationSpec> = match &payload.locations {
+        Some(v) => v.clone(),
+        None => parse_specs(&prof.5),
     };
 
     // 归属转移
@@ -1060,6 +1688,36 @@ pub async fn site_update(
         .unwrap_or(0);
     validate_site_fields(&name, &domains, &ips, &remark, max_domains)?;
 
+    // 门禁只针对“本次显式变更”：存量反代 / 自定义目录站点被普通用户增量编辑时不会被误拦截
+    validate_advanced_inputs(
+        &claims,
+        payload.site_type.as_deref().unwrap_or(""),
+        payload.pseudo_static.as_deref().unwrap_or(""),
+        payload.pseudo_custom.as_deref().unwrap_or(""),
+        payload.web_root_custom.unwrap_or(false),
+        payload.upstreams.as_deref().unwrap_or_default(),
+        payload.locations.as_deref().unwrap_or_default(),
+    )
+    .await?;
+    // 自定义已有目录：归属/路径解析（root 侧验证，事务外执行）
+    let new_custom_root: Option<String> = if eff_custom {
+        let path = payload
+            .web_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| (!old_web_root.is_empty()).then_some(old_web_root.as_str()))
+            .ok_or_else(|| ZapError::New(-1, "自定义站点目录模式需要提供目录路径".to_string()))?;
+        Some(resolve_custom_web_root(new_owner, path).await?)
+    } else {
+        None
+    };
+    // 目录需要刷新：进入/退出自定义模式、切属主、改名、自定义路径变化
+    let dir_changed = eff_custom != prof.3
+        || new_owner != uid
+        || name != old_name
+        || (eff_custom && new_custom_root.as_deref() != Some(old_web_root.as_str()));
+
     let now = chrono::Local::now().timestamp();
     let mut tx = pool.begin().await?;
     let r = sqlx::query(
@@ -1108,18 +1766,39 @@ pub async fn site_update(
                 .await?;
         }
     }
-    // 新式站点（DB 已记录 web_root）跟随归属转移 / 改名刷新目录规划；
-    // 老站点（web_root 为空）保持默认 data/www 不迁移
-    if !old_web_root.is_empty() && (new_owner != uid || name != old_name) {
-        let (web_root, log_root) = site_dirs_for(new_owner, &name, payload.id).await?;
-        sqlx::query("UPDATE site SET web_root = ?, log_root = ? WHERE id = ?")
-            .bind(&web_root)
-            .bind(&log_root)
-            .bind(payload.id)
-            .execute(&mut *tx)
-            .await?;
+    // 站点目录跟随变更刷新（自定义已有目录 / 面板自动规划目录）
+    if dir_changed {
+        let (web_root, log_root) = if let Some(cw) = &new_custom_root {
+            let (_, lr) = site_dirs_for(new_owner, &name, payload.id).await?;
+            (cw.clone(), lr)
+        } else {
+            site_dirs_for(new_owner, &name, payload.id).await?
+        };
+        if !web_root.is_empty() {
+            sqlx::query("UPDATE site SET web_root = ?, log_root = ? WHERE id = ?")
+                .bind(&web_root)
+                .bind(&log_root)
+                .bind(payload.id)
+                .execute(&mut *tx)
+                .await?;
+        }
     }
     tx.commit().await?;
+
+    // 写回站点扩展档案（整体覆盖式提交，保证与 DB 现值一致）
+    if let Err(e) = save_profile(
+        payload.id,
+        eff_type,
+        &eff_pseudo,
+        &eff_pseudo_custom,
+        eff_custom,
+        &eff_upstreams,
+        &eff_locations,
+    )
+    .await
+    {
+        warn!("save site_profile failed (id={}): {}", payload.id, e);
+    }
 
     audit::log(
         Some(&claims),
@@ -1203,6 +1882,14 @@ pub async fn site_delete(
         iq = iq.bind(id);
     }
     iq.execute(&mut *tx).await?;
+
+    // 站点扩展档案（site_profile）随站点删除
+    let psql = format!("DELETE FROM site_profile WHERE site_id IN ({})", placeholders);
+    let mut pq = sqlx::query(&psql);
+    for id in &payload.ids {
+        pq = pq.bind(id);
+    }
+    pq.execute(&mut *tx).await?;
 
     // 兜底：清理历史遗留的孤儿子表行（站点已不存在但域名/IP 仍残留），
     // 否则这些域名会一直"幽灵占用"，多租户下表现为新用户绑定不上。
@@ -1404,6 +2091,11 @@ async fn sync_one_site_inner(
         }
     }
 
+    // 站点扩展档案（类型 / 伪静态 / 自定义目录 / upstream / location）
+    let prof = load_profile(id).await;
+    let s_type = norm_site_type(&prof.0).map(str::to_string).unwrap_or_else(|_| "php".to_string());
+    let is_proxy = s_type == "proxy";
+
     // 运行实体准备（幂等）：
     // - system 模式：确保归属用户有 Linux 账号 + 独立用户家目录，文件属主 = linux_user
     // - www 模式：确保归属用户家目录骨架（www:www），文件属主 = www
@@ -1430,7 +2122,8 @@ async fn sync_one_site_inner(
     // PHP 通道：
     // - system 模式：先为归属用户同步专属 pool，通道 = /var/run/php-fpm-{linux_user}-{ver}.sock
     // - www 模式：全局实例 socket（info.yaml 解析 / 命名推导）
-    let php_socket = if php_instance.is_empty() {
+    let php_socket = if is_proxy || php_instance.is_empty() {
+        // 反向代理站点不绑定 PHP（有 PHP 实例也忽略，避免为不用的 pool 做联动）
         None
     } else if mode == "system" {
         match &owner_user {
@@ -1483,6 +2176,12 @@ async fn sync_one_site_inner(
         web_root: web_root_opt,
         log_root: log_root_opt,
         owner_user,
+        site_type: prof.0,
+        pseudo_static: prof.1,
+        pseudo_custom: prof.2,
+        web_root_custom: prof.3,
+        upstreams: parse_specs(&prof.4),
+        locations: parse_specs(&prof.5),
     })
     .await?;
 

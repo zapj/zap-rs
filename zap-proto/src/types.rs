@@ -1,6 +1,34 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// 反代 upstream 定义：vhost 渲染为 nginx `upstream <name> { ... }` 块。
+/// `servers` 中每行一个上游（`server 127.0.0.1:9001 weight=2;` 等，分号可省略）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpstreamSpec {
+    /// 上游组名（字母/数字/下划线，渲染前会再校验）
+    pub name: String,
+    /// 上游地址列表，每行一个 `server` 参数（可带 weight / max_fails 等）
+    pub servers: String,
+}
+
+/// 自定义 location：反代（proxy）/ 跳转（redirect）/ 拒绝（deny）/ 站点内目录（alias）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LocationSpec {
+    /// location 匹配路径，必须以 `/` 开头（如 `/`、`/api`）；不支持正则前缀
+    pub path: String,
+    /// proxy | redirect | deny | alias
+    pub kind: String,
+    /// proxy：upstream 名 或 `http(s)://host[:port][/uri]`；
+    /// redirect：跳转目标 URL；deny：目标为空；alias：站点内静态目录
+    pub target: String,
+    /// redirect：跳转状态码（301/302，0 视为 301）；deny：拒绝状态码（403/404/410/444，0 视为 403）
+    #[serde(default)]
+    pub code: u16,
+    /// proxy 时是否启用 WebSocket 升级（proxy_http_version 1.1 + Upgrade 头）
+    #[serde(default)]
+    pub ws: bool,
+}
+
 /// `zapd` -> `zapexec` 的请求。只有白名单动词，刻意不提供任意 shell 执行。
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
@@ -249,7 +277,31 @@ pub enum Request {
         /// None（默认 www 运行模式）则归 www:www
         #[serde(default, skip_serializing_if = "Option::is_none")]
         owner_user: Option<String>,
+        /// 站点类型：php（PHP/PHP+静态，默认）/ static（纯静态）/ proxy（反向代理）。
+        /// proxy 类型忽略 web_root/php，按 locations 渲染反代规则。
+        #[serde(default)]
+        site_type: String,
+        /// 伪静态预设 key：none / thinkphp / laravel / codeigniter / wordpress / custom
+        #[serde(default)]
+        pseudo_static: String,
+        /// 伪静态自定义规则（多行 nginx 指令，pseudo_static=custom 时使用；仅 root/admin 可提交）
+        #[serde(default)]
+        pseudo_custom: String,
+        /// web_root 是否为用户在归属家目录下选择的「已有目录」：
+        /// true 时不自动创建目录、不写入默认 index.html
+        #[serde(default)]
+        web_root_custom: bool,
+        /// 自定义 upstream 组（渲染于 server 块之前）
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        upstreams: Vec<UpstreamSpec>,
+        /// 自定义 location（按提交顺序渲染，排在默认 location 之前）
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<LocationSpec>,
     },
+    /// 列出目录下的子目录（root 特权）：供面板站点「选择已有站点目录」浏览。
+    /// 仅返回目录名（不含点目录），路径必须为绝对路径且存在。
+    #[serde(rename = "fs.browse_dirs")]
+    FsBrowseDirs { base: String },
     /// 防火墙状态：探测后端（firewalld / ufw / nftables / iptables）并返回规则列表
     #[serde(rename = "firewall.status")]
     FirewallStatus {
@@ -586,9 +638,15 @@ mod tests {
                 web_root: None,
                 log_root: None,
                 owner_user: None,
+                site_type: "php".into(),
+                pseudo_static: "none".into(),
+                pseudo_custom: String::new(),
+                web_root_custom: false,
+                upstreams: vec![],
+                locations: vec![],
             })
             .unwrap(),
-            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com","b.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock"}"#
+            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com","b.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false}"#
         );
         assert_eq!(
             serde_json::to_string(&Request::SiteVhostRemove {
@@ -623,11 +681,17 @@ mod tests {
             web_root: Some("/home/zap/www/blog-1".into()),
             log_root: Some("/home/zap/logs/blog-1".into()),
             owner_user: Some("zap".into()),
+            site_type: "php".into(),
+            pseudo_static: "none".into(),
+            pseudo_custom: String::new(),
+            web_root_custom: false,
+            upstreams: vec![],
+            locations: vec![],
         };
         let json = serde_json::to_string(&req).unwrap();
         assert_eq!(
             json,
-            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/blog-1","owner_user":"zap"}"#
+            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/blog-1","owner_user":"zap","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false}"#
         );
         // 老版本 JSON（无 web_root/log_root）也能反序列化成功 → None
         let old: Request =

@@ -2,6 +2,7 @@ mod appstore;
 mod env;
 mod file;
 mod firewall;
+mod fs;
 mod network;
 mod php;
 mod process;
@@ -153,13 +154,21 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             web_root,
             log_root,
             owner_user,
+            site_type,
+            pseudo_static,
+            pseudo_custom,
+            web_root_custom,
+            upstreams,
+            locations,
         } => {
             site::vhost_sync(
                 site_id, name, domains, enabled, mode, php_socket, web_root, log_root, owner_user,
+                site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations,
             )
             .await
         }
         Request::SiteVhostRemove { site_id, name } => site::vhost_remove(site_id, name).await,
+        Request::FsBrowseDirs { base } => fs::browse_dirs(base).await,
         Request::FirewallStatus { panel_port } => firewall::status(panel_port).await,
         Request::FirewallRuleAdd {
             port,

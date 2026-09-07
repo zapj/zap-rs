@@ -21,6 +21,8 @@ pub async fn init_schema() {
     init_ip_pool_table().await;
     // 用户站点管理表（列定义见 init_site_table，开发期直接 reset-db，无需补列迁移）
     init_site_table().await;
+    // 站点扩展档案（类型/伪静态/upstream/location/自定义目录）；独立建表，老库无需补列迁移
+    init_site_profile_table().await;
     // PHP-FPM 规格模板表（user.fpm_spec_ref 已在 user 表中定义）
     init_fpm_spec_table().await;
     // 套餐（Packages）表：创建客户时可选择的资源套餐
@@ -687,6 +689,24 @@ async fn init_site_table() {
         ip TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX idx_site_ip_site_id ON site_ip(site_id);
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+}
+
+// ── site_profile（站点扩展档案，1:1 site.id）────────────────────
+
+async fn init_site_profile_table() {
+    let sql = r#"
+    CREATE TABLE IF NOT EXISTS site_profile (
+        site_id INTEGER NOT NULL PRIMARY KEY,
+        site_type TEXT NOT NULL DEFAULT 'php',
+        pseudo_static TEXT NOT NULL DEFAULT 'none',
+        pseudo_custom TEXT NOT NULL DEFAULT '',
+        web_root_custom INTEGER NOT NULL DEFAULT 0,
+        upstreams TEXT NOT NULL DEFAULT '[]',
+        locations TEXT NOT NULL DEFAULT '[]',
+        updated_at INTEGER NOT NULL DEFAULT 0
+    );
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
