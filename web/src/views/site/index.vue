@@ -14,6 +14,8 @@ import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import type { InstalledApp } from '@/api/appstore'
 import { getInstalledApps } from '@/api/appstore'
+import { getCertList } from '@/api/ssl'
+import type { SslCertItem } from '@/api/ssl'
 
 interface SiteItem {
   id: number
@@ -43,6 +45,12 @@ interface SiteItem {
   web_root_custom?: boolean
   upstreams?: UpstreamSpec[]
   locations?: LocationSpec[]
+  /** SSL/TLS：绑定的证书库证书 id（>0 = 已启用 HTTPS） */
+  ssl_cert_id?: number
+  /** 绑定证书的名称（证书被删时后端返回空，前端据此提示绑定已失效） */
+  ssl_cert_name?: string
+  /** 允许 HTTP 跳转到 HTTPS */
+  force_https?: boolean
 }
 
 // PHP 运行通道（按全局 vhost 模式 + 站点归属用户派生，仅用于展示）
@@ -58,24 +66,57 @@ interface OwnerOption {
   nickname: string
 }
 
+/** upstream 内单个 server 行（表单化） */
+interface UpstreamServer {
+  addr: string
+  weight: number
+  max_fails: number
+  fail_timeout: number
+  backup: boolean
+  down: boolean
+}
+
 /** 反代 upstream 组（与后端 site_profile.upstreams JSON 对应） */
 interface UpstreamSpec {
   name: string
-  servers: string
+  /** 负载策略：''（默认轮询）/ least_conn / ip_hash */
+  balance: string
+  /** server 行（表单化，至少需要一行非空 addr） */
+  servers_ext: UpstreamServer[]
 }
 
-/** 自定义 location（proxy / redirect / deny / alias） */
+/** 自定义请求头（proxy_set_header key value） */
+interface HeaderKV {
+  key: string
+  value: string
+}
+
+/** 自定义 location（proxy / redirect / deny / alias / raw） */
 interface LocationSpec {
   path: string
-  kind: 'proxy' | 'redirect' | 'deny' | 'alias'
+  kind: 'proxy' | 'redirect' | 'deny' | 'alias' | 'raw'
   target: string
   code: number
   ws: boolean
+  // ── 高级参数（serde default，兼容旧数据）──
+  raw: string
+  conn_timeout: number
+  read_timeout: number
+  send_timeout: number
+  headers: HeaderKV[]
+  proxy_redirect: string
+  /** 反代缓存：'' = 关闭 / zap_cache = 启用（内置共享缓存区） */
+  cache: string
+  cache_valid: string
+  no_buffering: boolean
+  /** 仅本地 UI 使用：高级参数展开（不入 payload） */
+  adv?: boolean
 }
 
-/** /site/feature 返回：当前操作者的实际能力（依角色与套餐而定） */
+/** /site/feature 返回：当前操作者的实际能力（依角色与套餐而定）；
+ *  custom_dir 已全量开放，后端仅保留字段以兼容旧版本 */
 interface SiteFeature {
-  gates: { proxy: boolean; custom_dir: boolean }
+  gates: { proxy: boolean; custom_dir?: boolean }
 }
 
 // 站点类型（与后端 php/static/proxy 一致）
@@ -113,9 +154,32 @@ const locKindOptions = [
   { value: 'redirect', label: '跳转 return' },
   { value: 'deny', label: '拒绝 deny' },
   { value: 'alias', label: '静态目录 alias' },
+  { value: 'raw', label: '自由指令 raw' },
 ] as const
 const redirectCodes = [301, 302, 303, 307, 308]
 const denyCodes = [403, 404, 410, 444]
+const balanceOptions = [
+  { value: '', label: '默认（轮询）' },
+  { value: 'least_conn', label: 'least_conn（最少连接）' },
+  { value: 'ip_hash', label: 'ip_hash（按来源 IP 粘滞）' },
+] as const
+
+// ── 常用应用反代模板（纯前端预填 proxy location）──
+interface ProxyPreset {
+  key: string
+  label: string
+  desc: string
+  port: number
+  ws: boolean
+}
+const proxyPresets: ProxyPreset[] = [
+  { key: 'node', label: 'Node.js 应用', desc: 'Express / Koa / Nest 等通用 Node HTTP 服务', port: 3000, ws: true },
+  { key: 'next', label: 'Next.js / Nuxt（Node SSR）', desc: 'next start / nuxt start', port: 3000, ws: true },
+  { key: 'vite', label: 'Vite 开发服务器', desc: 'vite dev（含 HMR WebSocket）', port: 5173, ws: true },
+  { key: 'java', label: 'Java Spring Boot', desc: 'java -jar 默认 8080', port: 8080, ws: false },
+  { key: 'python', label: 'Python uvicorn / gunicorn', desc: 'FastAPI / Django 等 ASGI/WSGI 服务', port: 8000, ws: false },
+  { key: 'go', label: 'Go / Gin 服务', desc: 'Go 编写的 HTTP 服务', port: 8080, ws: false },
+]
 
 const userStore = useUserStore()
 // admin 管理全部、reseller 管理所属客户 → 需要归属用户列/下拉；普通用户只看/归属自己
@@ -317,17 +381,15 @@ const channelMap = computed<Record<number, ChannelInfo | null>>(() => {
 })
 const channelOf = (row: SiteItem): ChannelInfo | null => channelMap.value[row.id] ?? null
 
-// ── 站点能力（当前操作者可用反代 / 自定义目录，依角色与套餐而定）──
+// ── 站点能力（当前操作者可用反代与否，依角色与套餐而定；自定义目录已全量开放）──
 const siteFeature = ref<SiteFeature | null>(null)
 // 默认：admin/reseller 恒为全能力；接口返回前按角色兜底
 const gates = computed(() => {
   if (siteFeature.value) return siteFeature.value.gates
-  return { proxy: canManageAll.value, custom_dir: canManageAll.value }
+  return { proxy: canManageAll.value }
 })
-/** 是否展示「反代 / 高级规则」区块 */
+/** 是否展示「反代 / 高级规则」能力（proxy 站点必须；php/static 站点可选叠加） */
 const showProxyPanel = computed(() => gates.value.proxy || form.site_type === 'proxy')
-/** 是否可以自定义站点目录（浏览选择已有目录 / 自动目录指定子路径） */
-const canPickDir = computed(() => gates.value.custom_dir || form.web_root_custom)
 
 async function loadFeature() {
   try {
@@ -338,8 +400,10 @@ async function loadFeature() {
   }
 }
 
-// ── 表单（添加 / 编辑共用，按站点类型动态分段）──────────────────
+// ── 表单（添加 / 编辑共用，弹窗内左侧 Tab 分段）────────────────
 const formVisible = ref(false)
+/** 弹窗左侧 Tab：base / domains / php / dir / advanced */
+const activeTab = ref('base')
 const formMode = ref<'add' | 'edit'>('add')
 const formLoading = ref(false)
 const isEdit = computed(() => formMode.value === 'edit')
@@ -357,10 +421,14 @@ interface SiteForm {
   pseudo_static: string
   pseudo_custom: string
   web_root_custom: boolean
-  /** 家目录前缀下的相对子路径（如 www/blog）；「已有目录」与「自动创建」共用该输入 */
+  /** 家目录前缀下的相对子路径（如 example.com）；「已有目录」与「自动创建」共用该输入 */
   web_root_sub: string
   upstreams: UpstreamSpec[]
   locations: LocationSpec[]
+  /** SSL/TLS：绑定的证书库证书 id（0 = 不启用 HTTPS） */
+  ssl_cert_id: number
+  /** 允许 HTTP 跳转到 HTTPS（仅绑定证书后生效） */
+  force_https: boolean
 }
 const blankForm = (): SiteForm => ({
   id: 0,
@@ -371,13 +439,15 @@ const blankForm = (): SiteForm => ({
   status: 1,
   remark: '',
   php_instance: '',
-  site_type: 'php',
+  site_type: 'static',
   pseudo_static: 'none',
   pseudo_custom: '',
   web_root_custom: false,
   web_root_sub: '',
   upstreams: [],
   locations: [],
+  ssl_cert_id: 0,
+  force_https: false,
 })
 const form = reactive<SiteForm>(blankForm())
 // 「自动按域名命名目录」的上次生成值：输入框被手动改过后不再自动覆盖
@@ -392,15 +462,15 @@ function dirNameFromDomain(d: string): string {
   const name = s.replace(/[^a-z0-9._~-]/g, '-').replace(/^-+|-+$/g, '')
   return name || d.trim().toLowerCase()
 }
-/** 输入第一个域名后，自动用域名生成站点目录名（仅新增站点、目录未被手动指定、且套餐允许自定义目录时） */
+/** 输入第一个域名后，自动用域名生成站点目录名（仅新增站点、目录未被手动指定时）：
+ *  直接用域名作为目录名（不再加 www/ 前缀），如 example.com */
 function maybeAutoDirByDomain() {
   if (formMode.value !== 'add') return
-  if (!canPickDir.value) return // 套餐未开放自定义目录：沿用面板默认规划，避免被后端门禁拦截
   if (form.web_root_custom) return
   const d = form.domains.find((x) => x.trim())
   if (!d) return
   if (form.web_root_sub.trim() && form.web_root_sub.trim() !== lastAutoDir.value) return
-  const rel = `www/${dirNameFromDomain(d)}`
+  const rel = dirNameFromDomain(d)
   form.web_root_sub = rel
   lastAutoDir.value = rel
 }
@@ -411,21 +481,127 @@ const stalePhpInstance = computed(() => {
   return v && !phpRunningSet.value.has(v) ? v : ''
 })
 
+// ── SSL/TLS：绑定证书库证书（证书在「SSL/TLS → 证书管理」中统一维护）─────────
+const certOptions = ref<SslCertItem[]>([])
+const certsLoading = ref(false)
+async function loadCerts() {
+  certsLoading.value = true
+  try {
+    const res = await getCertList()
+    const list = ((res as any)?.data || []) as SslCertItem[]
+    // 只提供启用中的证书（停用证书无法再绑定，已绑定的会以 stale 形式提示）
+    certOptions.value = list.filter((c) => c.status === 1)
+  } catch {
+    /* handled */
+  } finally {
+    certsLoading.value = false
+  }
+}
+/** 当前选中且在启用列表中的证书 */
+const selectedCert = computed(
+  () => certOptions.value.find((c) => c.id === form.ssl_cert_id) || null
+)
+/** 站点绑定 id 已不在可用列表（证书被删 / 停用），提交前需处理 */
+const staleCertId = computed(() => {
+  if (!form.ssl_cert_id) return 0
+  return certOptions.value.some((c) => c.id === form.ssl_cert_id) ? 0 : form.ssl_cert_id
+})
+/** 编辑打开时绑定的证书显示名（证书被删时后端不返回名称，用于区分“删除/停用”） */
+const editCertName = ref('')
+const staleCertIdLabel = computed(() => {
+  if (editCertName.value) return `该证书已停用：${editCertName.value}（保存前请改选其他证书）`
+  return '绑定的证书已被删除（保存前请重新选择，或清空解除 HTTPS）'
+})
+/** 证书覆盖域名清单（证书库按空格 / 逗号分隔） */
+function certDomainList(c: SslCertItem): string[] {
+  return (c.domains || '')
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+/** 站点域名中不在证书覆盖范围内的部分（用于提示避免证书告警） */
+const certMissDomains = computed(() => {
+  const c = selectedCert.value
+  if (!c) return []
+  const covered = new Set(certDomainList(c).map((d) => d.toLowerCase()))
+  return form.domains
+    .map((s) => s.trim())
+    .filter((s) => s)
+    .filter((d) => !covered.has(d.toLowerCase()))
+})
+const certExpired = (c: SslCertItem) => c.not_after > 0 && c.not_after * 1000 < Date.now()
+
+function blankServer(): UpstreamServer {
+  return { addr: '', weight: 0, max_fails: 0, fail_timeout: 0, backup: false, down: false }
+}
+function blankHeader(): HeaderKV {
+  return { key: '', value: '' }
+}
 function blankLocation(path = '/'): LocationSpec {
-  return { path, kind: 'proxy', target: '', code: 0, ws: false }
+  return {
+    path,
+    kind: 'proxy',
+    target: '',
+    code: 0,
+    ws: false,
+    raw: '',
+    conn_timeout: 0,
+    read_timeout: 0,
+    send_timeout: 0,
+    headers: [],
+    proxy_redirect: '',
+    cache: '',
+    cache_valid: '',
+    no_buffering: false,
+    adv: false,
+  }
 }
 function blankUpstream(): UpstreamSpec {
-  return { name: '', servers: '' }
+  return { name: '', balance: '', servers_ext: [blankServer()] }
 }
 function addLocationRow() {
-  form.locations.push(blankLocation('/api'))
+  const l = blankLocation(form.locations.length ? '/api' : '/')
+  form.locations.push(l)
 }
 function addUpstreamRow() {
   form.upstreams.push(blankUpstream())
 }
+/** 为指定 upstream 组追加一行 server（组内至少保留一行） */
+function addServerRow(u: UpstreamSpec) {
+  u.servers_ext.push(blankServer())
+}
 function removeAt<T>(arr: T[], i: number) {
   arr.splice(i, 1)
 }
+
+/** 应用反代模板：把「/」location 的目标与 WebSocket 预填为所选应用默认端口 */
+function applyProxyPreset(p: ProxyPreset | null) {
+  if (!p) return
+  const root = form.locations.find((l) => l.path.trim() === '/')
+  if (root) {
+    if (root.kind !== 'proxy') {
+      root.kind = 'proxy'
+      root.target = ''
+    }
+    root.target = `http://127.0.0.1:${p.port}`
+    root.ws = p.ws
+  } else {
+    const l = blankLocation('/')
+    l.target = `http://127.0.0.1:${p.port}`
+    l.ws = p.ws
+    form.locations.unshift(l)
+  }
+  // 若不存在反代用的 upstream 组，自动补一组（名字取自域名，可改）
+  if (!form.upstreams.length) {
+    const u = blankUpstream()
+    const dn = dirNameFromDomain(form.domains[0] || 'backend')
+    u.name = (dn || 'backend').replace(/[^a-zA-Z0-9_-]/g, '_')
+    u.servers_ext[0].addr = `127.0.0.1:${p.port}`
+    form.upstreams.push(u)
+  }
+  ElMessage.success(`已应用模板：${p.label}（http://127.0.0.1:${p.port}）`)
+}
+const proxyPresetModel = ref<string>('')
 
 /** location 类型切换：按类型给出友好默认值 */
 function onLocationKindChange(loc: LocationSpec) {
@@ -440,6 +616,11 @@ function onLocationKindChange(loc: LocationSpec) {
     if (!loc.target) loc.target = ''
   } else if (loc.kind === 'alias') {
     loc.code = 0
+  } else if (loc.kind === 'raw') {
+    loc.code = 0
+    loc.target = ''
+    loc.ws = false
+    if (!loc.raw) loc.raw = 'try_files $uri $uri/ =404;\n'
   }
 }
 
@@ -454,7 +635,6 @@ watch(
       form.web_root_sub = ''
       legacyDocRoot.value = ''
       if (!form.locations.length) form.locations.push(blankLocation('/'))
-      if (!form.upstreams.length) form.upstreams.push(blankUpstream())
     } else if (o === 'proxy') {
       // 离开反代：清理反代专属配置，站点目录回到自动
       form.upstreams = []
@@ -556,11 +736,15 @@ function openAdd() {
   Object.assign(form, blankForm())
   lastAutoDir.value = ''
   legacyDocRoot.value = ''
+  activeTab.value = 'base'
+  proxyPresetModel.value = ''
   if (canManageAll.value) {
     const me = ownerOptions.value.find((o) => o.id === userStore.userInfo.id)
     form.user_id = me ? me.id : ownerOptions.value[0]?.id ?? null
   }
+  editCertName.value = ''
   loadPhpOptions()
+  loadCerts()
   loadFeature()
   formVisible.value = true
 }
@@ -594,18 +778,49 @@ function openEdit(row: SiteItem) {
     }
   }
   lastAutoDir.value = form.web_root_sub
-  form.upstreams = (row.upstreams || []).map((u) => ({ name: u.name, servers: u.servers }))
+  activeTab.value = 'base'
+  proxyPresetModel.value = ''
+  // upstream：一律以表单化 servers_ext 行加载；无任何 server 行时补一个空行待填
+  form.upstreams = (row.upstreams || []).map((u) => ({
+    name: u.name || '',
+    balance: u.balance || '',
+    servers_ext:
+      u.servers_ext && u.servers_ext.length
+        ? u.servers_ext.map((s) => ({
+            addr: s.addr || '',
+            weight: s.weight || 0,
+            max_fails: s.max_fails || 0,
+            fail_timeout: s.fail_timeout || 0,
+            backup: !!s.backup,
+            down: !!s.down,
+          }))
+        : [blankServer()],
+  }))
   form.locations = (row.locations || []).map((l) => ({
-    path: l.path,
-    kind: l.kind,
-    target: l.target,
+    path: l.path || '',
+    kind: ((l.kind || 'proxy') as LocationSpec['kind']),
+    target: l.target || '',
     code: l.code || 0,
     ws: !!l.ws,
+    raw: l.raw || '',
+    conn_timeout: l.conn_timeout || 0,
+    read_timeout: l.read_timeout || 0,
+    send_timeout: l.send_timeout || 0,
+    headers: (l.headers || []).map((h) => ({ key: h.key || '', value: h.value || '' })),
+    proxy_redirect: l.proxy_redirect || '',
+    cache: l.cache || '',
+    cache_valid: l.cache_valid || '',
+    no_buffering: !!l.no_buffering,
+    adv: false,
   }))
   if (form.site_type === 'proxy' && !form.locations.length) {
     form.locations.push(blankLocation('/'))
   }
+  form.ssl_cert_id = row.ssl_cert_id || 0
+  form.force_https = !!row.force_https
+  editCertName.value = row.ssl_cert_name || ''
   loadPhpOptions()
+  loadCerts()
   loadFeature()
   formVisible.value = true
 }
@@ -623,12 +838,21 @@ function validateForm(): string {
       const p = l.path.trim()
       if (!p || !p.startsWith('/')) return `location 路径必须以 / 开头：${p || '(空)'}`
       if (l.kind === 'proxy' && !l.target.trim()) return `location ${p} 的反代目标为空`
+      if (l.kind === 'raw' && !l.raw.trim()) return `location ${p} 的自由指令体为空`
+      if (l.kind === 'raw' && (l.raw.includes('{') || l.raw.includes('}')))
+        return `location ${p} 的自由指令体不允许花括号（仅单层 location 内指令）`
+      if (l.headers.some((h) => h.key.trim() && !h.value.trim()))
+        return `location ${p} 存在只填了名称的自定义请求头`
     }
     const names = new Set<string>()
     for (const u of form.upstreams) {
       const n = u.name.trim()
-      if (n && names.has(n)) return `upstream 组名重复：${n}`
-      if (n) names.add(n)
+      if (!n) continue
+      if (names.has(n)) return `upstream 组名重复：${n}`
+      names.add(n)
+      if (!u.servers_ext.some((s) => s.addr.trim())) {
+        return `upstream 组 ${n} 至少需要一个 server 地址`
+      }
     }
   } else {
     const s = form.web_root_sub.trim()
@@ -641,6 +865,9 @@ function validateForm(): string {
       if (s.split('/').some((seg) => /[\u0000-\u001f\u007f]/.test(seg)))
         return '站点目录包含非法控制字符'
     }
+  }
+  if (staleCertId.value) {
+    return '站点绑定的 SSL 证书已不存在或已停用：请重新选择证书，或清空选择解除 HTTPS'
   }
   return ''
 }
@@ -666,14 +893,52 @@ async function submitForm() {
     web_root_custom: form.web_root_custom,
     web_root: form.web_root_custom ? formAbsDir() : '',
     web_root_sub: form.web_root_custom ? '' : form.web_root_sub.trim(),
-    upstreams: form.upstreams.map((u) => ({ name: u.name.trim(), servers: u.servers.trim() })),
-    locations: form.locations.map((l) => ({
-      path: l.path.trim(),
-      kind: l.kind,
-      target: l.kind === 'redirect' || l.kind === 'proxy' || l.kind === 'alias' ? l.target.trim() : '',
-      code: l.kind === 'redirect' || l.kind === 'deny' ? l.code : 0,
-      ws: l.kind === 'proxy' ? !!l.ws : false,
-    })),
+    // SSL/TLS：绑定证书库证书（0 = 不启用）；HTTP→HTTPS 跳转仅在启用证书后提交
+    ssl_cert_id: form.ssl_cert_id || 0,
+    force_https: !!form.ssl_cert_id && !!form.force_https,
+    // upstream / location：过滤空行并剥离仅本地 UI 使用的字段
+    upstreams: form.upstreams
+      .filter((u) => u.name.trim())
+      .map((u) => ({
+        name: u.name.trim(),
+        balance: u.balance || '',
+        servers_ext: u.servers_ext
+          .filter((s) => s.addr.trim())
+          .map((s) => ({
+            addr: s.addr.trim(),
+            weight: s.weight || 0,
+            max_fails: s.max_fails || 0,
+            fail_timeout: s.fail_timeout || 0,
+            backup: !!s.backup,
+            down: !!s.down,
+          })),
+      })),
+    locations: form.locations
+      .filter((l) => l.path.trim())
+      .map((l) => ({
+        path: l.path.trim(),
+        kind: l.kind,
+        target:
+          l.kind === 'redirect' || l.kind === 'proxy' || l.kind === 'alias'
+            ? l.target.trim()
+            : '',
+        code: l.kind === 'redirect' || l.kind === 'deny' ? l.code : 0,
+        ws: l.kind === 'proxy' ? !!l.ws : false,
+        raw: l.kind === 'raw' ? l.raw : '',
+        conn_timeout: l.kind === 'proxy' ? l.conn_timeout || 0 : 0,
+        read_timeout: l.kind === 'proxy' ? l.read_timeout || 0 : 0,
+        send_timeout: l.kind === 'proxy' ? l.send_timeout || 0 : 0,
+        headers:
+          l.kind === 'proxy'
+            ? l.headers
+                .filter((h) => h.key.trim())
+                .map((h) => ({ key: h.key.trim(), value: h.value.trim() }))
+            : [],
+        proxy_redirect: l.kind === 'proxy' ? (l.proxy_redirect || '').trim() : '',
+        cache: l.kind === 'proxy' && l.cache === 'zap_cache' ? 'zap_cache' : '',
+        cache_valid: l.kind === 'proxy' ? (l.cache_valid || '').trim() : '',
+        no_buffering: l.kind === 'proxy' ? !!l.no_buffering : false,
+      })),
   }
   if (canManageAll.value) payload.user_id = form.user_id
   if (isEdit.value) payload.id = form.id
@@ -792,6 +1057,7 @@ function handleSelectionChange(rows: SiteItem[]) {
 onMounted(() => {
   loadOwners()
   loadPhpOptions()
+  loadCerts()
   loadFeature()
   load()
 })
@@ -947,6 +1213,31 @@ onMounted(() => {
             <span v-else class="dim">-</span>
           </template>
         </el-table-column>
+        <el-table-column label="SSL/TLS" width="118" align="center">
+          <template #default="{ row }">
+            <template v-if="row.ssl_cert_id">
+              <el-tooltip
+                :content="
+                  row.ssl_cert_name
+                    ? row.force_https
+                      ? `证书 ${row.ssl_cert_name}，HTTP 自动跳转 HTTPS`
+                      : `证书 ${row.ssl_cert_name}，HTTP 与 HTTPS 均可访问`
+                    : '绑定的证书已被删除或停用，请编辑站点重新绑定'
+                "
+                placement="top"
+              >
+                <el-tag
+                  size="small"
+                  :type="row.ssl_cert_name ? (row.force_https ? 'success' : 'primary') : 'danger'"
+                  effect="plain"
+                >
+                  {{ row.ssl_cert_name ? (row.force_https ? 'HTTPS 跳转' : 'HTTPS') : '证书失效' }}
+                </el-tag>
+              </el-tooltip>
+            </template>
+            <span v-else class="dim">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="PHP 版本" min-width="170">
           <template #default="{ row }">
             <template v-if="row.php_instance">
@@ -1080,250 +1371,523 @@ onMounted(() => {
     <el-dialog
       v-model="formVisible"
       :title="isEdit ? '编辑站点' : '添加站点'"
-      width="800px"
-      top="4vh"
+      width="980px"
+      top="2vh"
       :close-on-click-modal="false"
+      class="site-form-dialog"
     >
-      <el-form label-width="112px" class="site-form">
-        <el-form-item v-if="canManageAll" label="归属用户" required>
-          <el-select
-            v-model="form.user_id"
-            placeholder="选择该站点归属的客户账号"
-            filterable
-            style="width: 100%"
-            :loading="ownersLoading"
-          >
-            <el-option
-              v-for="o in ownerOptions"
-              :key="o.id"
-              :label="`${o.nickname || o.username} (${o.username})`"
-              :value="o.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-else label="归属用户">
-          <el-input :model-value="currentUserName" disabled />
-          <div class="form-tip">站点归属于当前登录账号</div>
-        </el-form-item>
-
-        <el-form-item label="站点类型" required>
-          <el-radio-group v-model="form.site_type">
-            <el-radio
-              v-for="t in siteTypeOptions"
-              :key="t.value"
-              :value="t.value"
-              border
-              :disabled="t.value === 'proxy' && !showProxyPanel && form.site_type !== 'proxy'"
-            >
-              {{ t.label }}
-            </el-radio>
-          </el-radio-group>
-          <div class="form-tip">
-            {{ siteTypeOptions.find((t) => t.value === form.site_type)?.desc }}
-            <template v-if="form.site_type === 'proxy' && !gates.proxy">
-              （反向代理未对你的账号开放，可联系管理员在「系统 → 套餐」中开启）
-            </template>
-          </div>
-        </el-form-item>
-
-        <el-form-item label="站点名称">
-          <el-input v-model="form.name" placeholder="留空则默认使用第一个域名" maxlength="120" clearable />
-        </el-form-item>
-        <el-form-item label="域名">
-          <el-select
-            v-model="form.domains"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            :reserve-keyword="false"
-            placeholder="输入域名后回车添加，可绑定多个"
-            style="width: 100%"
-          >
-            <el-option v-for="d in form.domains" :key="d" :value="d" :label="d" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="绑定 IP">
-          <el-select
-            v-model="form.ips"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            :reserve-keyword="false"
-            placeholder="输入 IP 后回车添加，支持多个 IPv4 / IPv6"
-            style="width: 100%"
-          >
-            <el-option v-for="ip in form.ips" :key="ip" :value="ip" :label="ip" />
-          </el-select>
-        </el-form-item>
-
-        <template v-if="form.site_type === 'php'">
-          <el-form-item label="PHP 版本">
-            <el-select
-              v-model="form.php_instance"
-              clearable
-              filterable
-              placeholder="选择运行中的 PHP 实例（不选则不绑定 PHP）"
-              style="width: 100%"
-              :loading="phpLoading"
-            >
-              <el-option v-for="o in phpOptions" :key="o.instance" :value="o.instance" :label="o.label" />
-              <el-option
-                v-if="stalePhpInstance"
-                :value="stalePhpInstance"
-                :label="`${stalePhpInstance}（已停止，请改选其他运行中的版本）`"
-                disabled
-              />
-            </el-select>
-            <div v-if="!phpOptions.length && !stalePhpInstance" class="form-tip">
-              没有运行中的 PHP 实例：请先在「应用商店 → 已安装应用」中安装并启动 PHP 版本
-            </div>
-          </el-form-item>
-          <el-form-item label="伪静态">
-            <el-select v-model="form.pseudo_static" style="width: 100%">
-              <el-option
-                v-for="o in pseudoOptions"
-                :key="o.value"
-                :value="o.value"
-                :label="o.label"
-                :disabled="o.value === 'custom' && !canManageAll"
-              />
-            </el-select>
-            <div class="form-tip">
-              {{ pseudoMeta(form.pseudo_static).desc }}
-              <template v-if="form.pseudo_static === 'custom' && !canManageAll">
-                自定义规则仅管理员可用
-              </template>
-            </div>
-            <el-input
-              v-if="form.pseudo_static === 'custom'"
-              v-model="form.pseudo_custom"
-              type="textarea"
-              :rows="4"
-              class="pseudo-custom"
-              placeholder="例如：location / { try_files $uri $uri/ /index.php?s=$uri&$args; }"
-            />
-          </el-form-item>
-        </template>
-
-        <template v-if="form.site_type === 'php' || form.site_type === 'static'">
-          <el-form-item label="站点目录">
-            <div class="dir-picker">
-              <el-input
-                v-model="form.web_root_sub"
-                :disabled="!canPickDir"
-                clearable
-                :placeholder="
-                  !canPickDir
-                    ? '套餐未开放自定义站点目录，将使用自动规划目录'
-                    : form.web_root_custom
-                      ? '浏览选择家目录下已存在的目录'
-                      : 'www/目录名（输入域名后自动生成，可修改）'
-                "
+      <el-form label-width="118px" class="site-form site-tabs-form">
+        <el-tabs v-model="activeTab" tab-position="left" class="site-tabs">
+          <!-- 基础信息 -->
+          <el-tab-pane label="基础信息" name="base">
+            <el-form-item v-if="canManageAll" label="归属用户" required>
+              <el-select
+                v-model="form.user_id"
+                placeholder="选择该站点归属的客户账号"
+                filterable
+                style="width: 100%"
+                :loading="ownersLoading"
               >
-                <template #prepend>
-                  <span class="home-prefix">{{ autoHomePrefix }}/</span>
-                </template>
-                <template #append>
-                  <el-tooltip content="浏览并选择家目录下已存在的目录" placement="top">
-                    <el-button :icon="FolderOpened" :disabled="!canPickDir" @click="openDirBrowser" />
-                  </el-tooltip>
-                </template>
-              </el-input>
-            </div>
-            <div v-if="!canPickDir" class="form-tip">
-              自定义站点目录未对你的账号开放，可联系管理员在「系统 → 套餐」中开启
-            </div>
-            <div v-if="form.web_root_custom" class="form-tip">
-              将直接使用已选择的目录作为文档根（不写入默认 index.html、不修改目录权限）。
-              <a class="dir-mode-link" @click="switchToAutoDir">改回自动创建（目录不存在时自动新建）</a>
-            </div>
-            <div v-else class="form-tip">
-              目录位于归属用户家目录（{{ autoHomePrefix }}）下：输入第一个域名后会自动用域名生成目录名（如
-              www/example.com），可自行修改；目录不存在时创建站点会自动建好，不会覆盖已有文件。
-            </div>
-            <div v-if="legacyDocRoot" class="form-tip dir-legacy">
-              该站点当前文档根 {{ legacyDocRoot }} 不在家目录内：若不修改上方目录则保持不变；若填写新目录，
-              文档根将迁移到家目录下（旧目录内的文件不会自动搬移）。
-            </div>
-          </el-form-item>
-        </template>
+                <el-option
+                  v-for="o in ownerOptions"
+                  :key="o.id"
+                  :label="`${o.nickname || o.username} (${o.username})`"
+                  :value="o.id"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item v-else label="归属用户">
+              <el-input :model-value="currentUserName" disabled />
+              <div class="form-tip">站点归属于当前登录账号</div>
+            </el-form-item>
 
-        <template v-if="form.site_type === 'proxy'">
-          <el-form-item label="反代后端">
-            <div class="proxy-block">
-              <div class="proxy-label">Upstream 后端组（可选，渲染于 server 之前）</div>
-              <div v-if="form.upstreams.length" class="spec-list">
-                <div v-for="(u, i) in form.upstreams" :key="i" class="spec-row">
-                  <el-input v-model="u.name" placeholder="组名，如 backend_api" />
-                  <el-input
-                    v-model="u.servers"
-                    placeholder="每行一个 server，如 server 127.0.0.1:8080;"
-                    type="textarea"
-                    :rows="2"
-                  />
-                  <el-button link type="danger" :icon="Delete" @click="removeAt(form.upstreams, i)" />
+            <el-form-item label="站点类型" required>
+              <el-radio-group v-model="form.site_type">
+                <el-radio
+                  v-for="t in siteTypeOptions"
+                  :key="t.value"
+                  :value="t.value"
+                  border
+                  :disabled="t.value === 'proxy' && !showProxyPanel && form.site_type !== 'proxy'"
+                >
+                  {{ t.label }}
+                </el-radio>
+              </el-radio-group>
+              <div class="form-tip">
+                {{ siteTypeOptions.find((t) => t.value === form.site_type)?.desc }}
+                <template v-if="form.site_type === 'proxy' && !gates.proxy">
+                  （反向代理未对你的账号开放，可联系管理员在「系统 → 套餐」中开启）
+                </template>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="站点名称">
+              <el-input v-model="form.name" placeholder="留空则默认使用第一个域名" maxlength="120" clearable />
+            </el-form-item>
+
+            <el-form-item label="域名" required>
+              <el-select
+                v-model="form.domains"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                :reserve-keyword="false"
+                placeholder="输入域名后回车添加，可绑定多个"
+                style="width: 100%"
+              >
+                <el-option v-for="d in form.domains" :key="d" :value="d" :label="d" />
+              </el-select>
+              <div class="form-tip">第一个域名用于自动生成下方的站点目录名</div>
+            </el-form-item>
+
+            <el-form-item label="绑定 IP">
+              <el-select
+                v-model="form.ips"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                :reserve-keyword="false"
+                placeholder="输入 IP 后回车添加，支持多个 IPv4 / IPv6"
+                style="width: 100%"
+              >
+                <el-option v-for="ip in form.ips" :key="ip" :value="ip" :label="ip" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item
+              v-if="form.site_type === 'php' || form.site_type === 'static'"
+              label="站点目录"
+            >
+              <div class="dir-picker">
+                <el-input
+                  v-model="form.web_root_sub"
+                  clearable
+                  :placeholder="
+                    form.web_root_custom
+                      ? '浏览选择家目录下已存在的目录'
+                      : '目录名（输入域名后自动生成，可修改）'
+                  "
+                >
+                  <template #prepend>
+                    <span class="home-prefix">{{ autoHomePrefix }}/</span>
+                  </template>
+                  <template #append>
+                    <el-tooltip content="浏览并选择家目录下已存在的目录" placement="top">
+                      <el-button :icon="FolderOpened" @click="openDirBrowser" />
+                    </el-tooltip>
+                  </template>
+                </el-input>
+              </div>
+              <div v-if="form.web_root_custom" class="form-tip">
+                将直接使用已选择的目录作为文档根（不写入默认 index.html、不修改目录权限）。
+                <a class="dir-mode-link" @click="switchToAutoDir">改回自动创建（目录不存在时自动新建）</a>
+              </div>
+              <div v-else class="form-tip">
+                目录位于归属用户家目录（{{ autoHomePrefix }}）下：输入第一个域名后自动用
+                <b>域名本身</b> 作为目录名（如 example.com），可自行修改；目录不存在时创建站点会自动建好，
+                不会覆盖已有文件。
+              </div>
+              <div v-if="legacyDocRoot" class="form-tip dir-legacy">
+                该站点当前文档根 {{ legacyDocRoot }} 不在家目录内：若不修改上方目录则保持不变；若填写新目录，
+                文档根将迁移到家目录下（旧目录内的文件不会自动搬移）。
+              </div>
+            </el-form-item>
+
+            <el-form-item label="状态">
+              <el-radio-group v-model="form.status">
+                <el-radio :value="1">运行中</el-radio>
+                <el-radio :value="0">已停止</el-radio>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item label="备注">
+              <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="500" />
+            </el-form-item>
+          </el-tab-pane>
+
+          <!-- PHP 与伪静态 -->
+          <el-tab-pane v-if="form.site_type === 'php'" label="PHP 与伪静态" name="php">
+            <el-form-item label="PHP 版本">
+              <el-select
+                v-model="form.php_instance"
+                clearable
+                filterable
+                placeholder="选择运行中的 PHP 实例（不选则不绑定 PHP）"
+                style="width: 100%"
+                :loading="phpLoading"
+              >
+                <el-option v-for="o in phpOptions" :key="o.instance" :value="o.instance" :label="o.label" />
+                <el-option
+                  v-if="stalePhpInstance"
+                  :value="stalePhpInstance"
+                  :label="`${stalePhpInstance}（已停止，请改选其他运行中的版本）`"
+                  disabled
+                />
+              </el-select>
+              <div v-if="!phpOptions.length && !stalePhpInstance" class="form-tip">
+                没有运行中的 PHP 实例：请先在「应用商店 → 已安装应用」中安装并启动 PHP 版本
+              </div>
+            </el-form-item>
+            <el-form-item label="伪静态">
+              <el-select v-model="form.pseudo_static" style="width: 100%">
+                <el-option
+                  v-for="o in pseudoOptions"
+                  :key="o.value"
+                  :value="o.value"
+                  :label="o.label"
+                  :disabled="o.value === 'custom' && !canManageAll"
+                />
+              </el-select>
+              <div class="form-tip">
+                {{ pseudoMeta(form.pseudo_static).desc }}
+                <template v-if="form.pseudo_static === 'custom' && !canManageAll">
+                  自定义规则仅管理员可用
+                </template>
+              </div>
+              <el-input
+                v-if="form.pseudo_static === 'custom'"
+                v-model="form.pseudo_custom"
+                type="textarea"
+                :rows="4"
+                class="pseudo-custom"
+                placeholder="例如：location / { try_files $uri $uri/ /index.php?s=$uri&$args; }"
+              />
+            </el-form-item>
+          </el-tab-pane>
+
+          <!-- SSL/TLS -->
+          <el-tab-pane label="SSL / TLS" name="ssl">
+            <el-alert
+              v-if="staleCertId"
+              type="error"
+              :closable="false"
+              show-icon
+              title="站点绑定的证书已失效"
+              :description="staleCertIdLabel"
+              class="ssl-alert"
+            />
+            <el-form-item label="SSL 证书">
+              <el-select
+                v-model="form.ssl_cert_id"
+                clearable
+                filterable
+                :loading="certsLoading"
+                placeholder="从「SSL/TLS → 证书管理」中选择证书（选择后启用 HTTPS）"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="c in certOptions"
+                  :key="c.id"
+                  :value="c.id"
+                  :label="`${c.name}（${certDomainList(c).join(' ') || '未记录域名'}）`"
+                />
+                <el-option v-if="staleCertId" :value="staleCertId" :label="staleCertIdLabel" disabled />
+              </el-select>
+              <div class="form-tip">
+                证书在「SSL/TLS → 证书管理」中统一维护（上传 / 自签 / Let's Encrypt）。
+                绑定后本站点将监听 443 并提供 HTTPS；清空选择则解除绑定、回退为纯 HTTP。
+              </div>
+            </el-form-item>
+
+            <el-form-item v-if="selectedCert" label="证书信息">
+              <div class="ssl-cert-box">
+                <div class="ssl-cert-row">
+                  <span class="ssl-cert-key">证书名称</span>
+                  <span>{{ selectedCert.name }}</span>
+                </div>
+                <div class="ssl-cert-row">
+                  <span class="ssl-cert-key">覆盖域名</span>
+                  <span>{{ certDomainList(selectedCert).join('、') || '-' }}</span>
+                </div>
+                <div class="ssl-cert-row">
+                  <span class="ssl-cert-key">有效期</span>
+                  <span :class="{ 'ssl-cert-expired': certExpired(selectedCert) }">
+                    {{ fmtTime(selectedCert.not_before) }} ~ {{ fmtTime(selectedCert.not_after) }}
+                    {{ certExpired(selectedCert) ? '（已过期）' : '' }}
+                  </span>
                 </div>
               </div>
-              <el-button size="small" :icon="Plus" @click="addUpstreamRow">添加后端组</el-button>
+              <div v-if="certMissDomains.length" class="form-tip ssl-miss-tip">
+                以下域名不在该证书覆盖范围内，经 https 访问会出现证书告警：{{ certMissDomains.join('、') }}
+              </div>
+            </el-form-item>
 
-              <el-divider content-position="left">Location 规则（含默认 / 转发）</el-divider>
-              <div v-if="form.locations.length" class="loc-list">
-                <div v-for="(loc, i) in form.locations" :key="i" class="loc-row">
-                  <el-input v-model="loc.path" placeholder="路径，如 / 或 /api" class="loc-path" />
-                  <el-select v-model="loc.kind" class="loc-kind" @change="onLocationKindChange(loc)">
-                    <el-option v-for="k in locKindOptions" :key="k.value" :value="k.value" :label="k.label" />
-                  </el-select>
-                  <el-input
-                    v-if="loc.kind === 'proxy' || loc.kind === 'redirect' || loc.kind === 'alias'"
-                    v-model="loc.target"
-                    class="loc-target"
-                    :placeholder="
-                      loc.kind === 'redirect'
-                        ? '如 https://example.com/$request_uri'
-                        : loc.kind === 'alias'
-                          ? '绝对路径（可选，默认站点目录）'
-                          : '如 http://backend_api 或 http://127.0.0.1:8080'
-                    "
-                  />
-                  <el-select
-                    v-if="loc.kind === 'redirect' || loc.kind === 'deny'"
-                    v-model="loc.code"
-                    class="loc-code"
-                  >
-                    <el-option
-                      v-for="c in loc.kind === 'redirect' ? redirectCodes : denyCodes"
-                      :key="c"
-                      :value="c"
-                      :label="`${c}`"
+            <el-form-item label="允许 HTTP 跳转到 HTTPS">
+              <el-switch
+                v-model="form.force_https"
+                :disabled="!selectedCert"
+                inline-prompt
+                active-text="开启"
+                inactive-text="关闭"
+              />
+              <div class="form-tip">
+                开启后，访问 http://（80 端口）的请求将自动 301 跳转到 https://；
+                请确认所选证书覆盖了本站全部域名，否则未覆盖域名无法正常访问。
+              </div>
+            </el-form-item>
+          </el-tab-pane>
+
+          <!-- 反代 / 高级 -->
+          <el-tab-pane
+            label="反代 / 高级"
+            name="advanced"
+            :disabled="form.site_type !== 'proxy' && !showProxyPanel"
+          >
+            <template v-if="form.site_type === 'proxy'">
+              <el-form-item label="快速模板">
+                <el-select
+                  :model-value="proxyPresetModel"
+                  filterable
+                  clearable
+                  placeholder="选择常见应用，自动填好默认转发目标"
+                  style="width: 100%"
+                  @change="(v: string) => { applyProxyPreset(proxyPresets.find((p) => p.key === v) || null); proxyPresetModel = '' }"
+                >
+                  <el-option v-for="p in proxyPresets" :key="p.key" :value="p.key" :label="p.label">
+                    <span>{{ p.label }}</span>
+                    <span class="preset-desc">{{ p.desc }}</span>
+                  </el-option>
+                </el-select>
+                <div class="form-tip">
+                  模板将把 location / 转发到 http://127.0.0.1:端口 并自动补一个 backend 后端组（可再调整）
+                </div>
+              </el-form-item>
+
+              <el-form-item label="后端组">
+                <div class="proxy-block">
+                  <div class="proxy-label">
+                    Upstream 后端组（可选）：填好 <b>组名 + server</b> 后，location 目标可直接写组名；也可不用组、直接填
+                    http(s):// 地址
+                  </div>
+                  <div v-if="form.upstreams.length" class="up-list">
+                    <div v-for="(u, i) in form.upstreams" :key="i" class="up-card">
+                      <div class="up-head">
+                        <el-input v-model="u.name" placeholder="组名，如 backend_api" class="up-name" />
+                        <el-select v-model="u.balance" class="up-bal" placeholder="负载策略">
+                          <el-option v-for="b in balanceOptions" :key="b.value" :value="b.value" :label="b.label" />
+                        </el-select>
+                        <el-button link type="danger" :icon="Delete" @click="removeAt(form.upstreams, i)" />
+                      </div>
+                      <div v-for="(s, j) in u.servers_ext" :key="j" class="up-server">
+                          <el-input v-model="s.addr" placeholder="127.0.0.1:8080 或 ip:port" class="us-addr" />
+                          <el-tooltip content="权重（0 = 默认）" placement="top">
+                            <el-input-number
+                              v-model="s.weight"
+                              :min="0"
+                              :max="1000"
+                              controls-position="right"
+                              placeholder="权重"
+                              class="us-num"
+                            />
+                          </el-tooltip>
+                          <el-tooltip content="max_fails（0 = 默认）" placement="top">
+                            <el-input-number
+                              v-model="s.max_fails"
+                              :min="0"
+                              :max="100"
+                              controls-position="right"
+                              placeholder="失败上限"
+                              class="us-num"
+                            />
+                          </el-tooltip>
+                          <el-tooltip content="fail_timeout 秒（0 = 默认）" placement="top">
+                            <el-input-number
+                              v-model="s.fail_timeout"
+                              :min="0"
+                              :max="3600"
+                              controls-position="right"
+                              placeholder="超时"
+                              class="us-num"
+                            />
+                          </el-tooltip>
+                          <el-checkbox v-model="s.backup" title="备用节点（主节点不可用时启用）">backup</el-checkbox>
+                          <el-checkbox v-model="s.down" title="临时摘除，不参与转发">down</el-checkbox>
+                          <el-button
+                            link
+                            type="danger"
+                            :icon="Delete"
+                            @click="removeAt(u.servers_ext, j)"
+                          />
+                        </div>
+                        <el-button size="small" :icon="Plus" @click="addServerRow(u)">添加 server</el-button>
+                    </div>
+                  </div>
+                  <el-button size="small" :icon="Plus" @click="addUpstreamRow">添加后端组</el-button>
+                </div>
+              </el-form-item>
+            </template>
+
+            <template v-else-if="showProxyPanel">
+              <el-alert
+                type="info"
+                :closable="false"
+                show-icon
+                title="附加 location 规则（可选）"
+                description="PHP / 静态站点的默认规则之外，可在此叠加自定义 location（如拒绝某目录、转发某个 /api 前缀、站内 alias 等）。"
+              />
+            </template>
+
+            <el-form-item v-if="showProxyPanel" label="Location 规则">
+              <div class="proxy-block">
+                <div v-if="form.site_type === 'proxy'" class="form-tip" style="margin-bottom: 6px">
+                  反向代理站点至少需要一个 <code>location /</code> 作为默认转发（模板已自动生成）；nginx 按最长前缀匹配，
+                  规则自上而下建议从“具体路径”到“/”排列
+                </div>
+                <div v-if="form.locations.length" class="loc-list">
+                  <div v-for="(loc, i) in form.locations" :key="i" class="loc-card">
+                    <div class="loc-head">
+                      <el-input v-model="loc.path" placeholder="路径如 / 或 /api" class="loc-path" />
+                      <el-select
+                        v-model="loc.kind"
+                        class="loc-kind"
+                        @change="onLocationKindChange(loc)"
+                      >
+                        <el-option
+                          v-for="k in locKindOptions"
+                          :key="k.value"
+                          :value="k.value"
+                          :label="k.label"
+                        />
+                      </el-select>
+                      <el-input
+                        v-if="loc.kind === 'proxy' || loc.kind === 'redirect' || loc.kind === 'alias'"
+                        v-model="loc.target"
+                        class="loc-target"
+                        :placeholder="
+                          loc.kind === 'redirect'
+                            ? '如 https://example.com/$request_uri'
+                            : loc.kind === 'alias'
+                              ? '站点目录内绝对路径'
+                              : '如 http://backend_api 或 http://127.0.0.1:8080'
+                        "
+                      />
+                      <el-select
+                        v-if="loc.kind === 'redirect' || loc.kind === 'deny'"
+                        v-model="loc.code"
+                        class="loc-code"
+                      >
+                        <el-option
+                          v-for="c in loc.kind === 'redirect' ? redirectCodes : denyCodes"
+                          :key="c"
+                          :value="c"
+                          :label="`${c}`"
+                        />
+                      </el-select>
+                      <el-button link type="danger" :icon="Delete" @click="removeAt(form.locations, i)" />
+                    </div>
+                    <!-- raw 自由指令体 -->
+                    <el-input
+                      v-if="loc.kind === 'raw'"
+                      v-model="loc.raw"
+                      type="textarea"
+                      :rows="5"
+                      class="loc-raw"
+                      placeholder="粘贴该 location 内的完整 nginx 指令体（如 try_files / proxy_pass 等，逐行原样输出；禁止 include、# 注释与花括号）"
                     />
-                  </el-select>
-                  <el-switch
-                    v-if="loc.kind === 'proxy'"
-                    v-model="loc.ws"
-                    inline-prompt
-                    active-text="WS"
-                    inactive-text="HTTP"
-                    class="loc-ws"
-                  />
-                  <el-button link type="danger" :icon="Delete" @click="removeAt(form.locations, i)" />
+                    <!-- proxy 快捷开关行 -->
+                    <div v-if="loc.kind === 'proxy'" class="loc-flags">
+                      <el-switch
+                        v-model="loc.ws"
+                        inline-prompt
+                        active-text="WebSocket"
+                        inactive-text="HTTP"
+                      />
+                      <el-button
+                        link
+                        type="primary"
+                        size="small"
+                        @click="loc.adv = !loc.adv"
+                      >
+                        {{ loc.adv ? '收起高级参数 ▲' : '高级参数（头 / 超时 / 缓存等）▼' }}
+                      </el-button>
+                    </div>
+                    <!-- proxy 高级参数 -->
+                    <div v-if="loc.kind === 'proxy' && loc.adv" class="loc-adv">
+                      <div class="adv-row">
+                        <span class="adv-label">超时(秒)</span>
+                        <el-input-number
+                          v-model="loc.conn_timeout"
+                          :min="0"
+                          :max="86400"
+                          controls-position="right"
+                          placeholder="connect"
+                          class="adv-num"
+                        />
+                        <span class="adv-unit">连接</span>
+                        <el-input-number
+                          v-model="loc.read_timeout"
+                          :min="0"
+                          :max="86400"
+                          controls-position="right"
+                          placeholder="read"
+                          class="adv-num"
+                        />
+                        <span class="adv-unit">读取</span>
+                        <el-input-number
+                          v-model="loc.send_timeout"
+                          :min="0"
+                          :max="86400"
+                          controls-position="right"
+                          placeholder="send"
+                          class="adv-num"
+                        />
+                        <span class="adv-unit">发送（0 = 不设置）</span>
+                      </div>
+                      <div class="adv-row adv-col">
+                        <span class="adv-label">自定义请求头</span>
+                        <div v-for="(h, j) in loc.headers" :key="j" class="hdr-row">
+                          <el-input v-model="h.key" placeholder="如 X-Forwarded-Host" class="hdr-key" />
+                          <el-input v-model="h.value" placeholder="如 $host（支持 nginx 变量）" class="hdr-val" />
+                          <el-button link type="danger" :icon="Delete" @click="removeAt(loc.headers, j)" />
+                        </div>
+                        <el-button size="small" :icon="Plus" @click="loc.headers.push(blankHeader())">
+                          添加请求头
+                        </el-button>
+                        <div class="form-tip">默认已注入 Host / X-Real-IP / X-Forwarded-For / X-Forwarded-Proto</div>
+                      </div>
+                      <div class="adv-row">
+                        <span class="adv-label">proxy_redirect</span>
+                        <el-input
+                          v-model="loc.proxy_redirect"
+                          placeholder="off 或 替换规则（留空 = 不输出）"
+                          clearable
+                          class="adv-long"
+                        />
+                      </div>
+                      <div class="adv-row">
+                        <span class="adv-label">反代缓存</span>
+                        <el-switch
+                          :model-value="loc.cache === 'zap_cache'"
+                          @update:model-value="(v: boolean) => (loc.cache = v ? 'zap_cache' : '')"
+                        />
+                        <el-input
+                          v-if="loc.cache === 'zap_cache'"
+                          v-model="loc.cache_valid"
+                          placeholder="proxy_cache_valid，如 200 5m（空 = 默认 200 1m）"
+                          class="adv-long"
+                          style="margin-left: 8px"
+                        />
+                        <span class="form-tip" style="margin-left: 8px">使用内置共享缓存区 zap_cache</span>
+                      </div>
+                      <div class="adv-row">
+                        <span class="adv-label">流式</span>
+                        <el-switch v-model="loc.no_buffering" />
+                        <span class="form-tip" style="margin-left: 8px">proxy_buffering off（SSE / 流式输出）</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
+                <el-button size="small" :icon="Plus" @click="addLocationRow">添加 location</el-button>
               </div>
-              <el-button size="small" :icon="Plus" @click="addLocationRow">添加 location</el-button>
-            </div>
-          </el-form-item>
-        </template>
-
-        <el-form-item label="状态">
-          <el-radio-group v-model="form.status">
-            <el-radio :value="1">运行中</el-radio>
-            <el-radio :value="0">已停止</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="500" />
-        </el-form-item>
+            </el-form-item>
+            <el-empty
+              v-else
+              :image-size="70"
+              description="反向代理 / 高级 location 规则未对你的账号开放，可联系管理员在「系统 → 套餐」中开启"
+            />
+          </el-tab-pane>
+        </el-tabs>
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
@@ -1598,6 +2162,227 @@ onMounted(() => {
   color: var(--el-color-primary);
 }
 .dir-item .el-icon {
+  color: var(--el-color-warning);
+}
+
+/* ── 添加 / 编辑站点弹窗：左侧 Tab 分区 ─────────────────── */
+.site-form-dialog :deep(.el-dialog__body) {
+  max-height: calc(92vh - 130px);
+  overflow-y: auto;
+  padding-top: 4px;
+}
+.site-tabs-form {
+  max-height: none;
+  overflow: visible;
+}
+.site-tabs :deep(.el-tabs__header) {
+  margin-right: 6px;
+}
+.site-tabs :deep(.el-tabs__item) {
+  height: 42px;
+  line-height: 42px;
+  text-align: left;
+  justify-content: flex-start;
+  padding: 0 18px 0 6px;
+  font-size: 13px;
+}
+.site-tabs :deep(.el-tabs__content) {
+  min-height: 320px;
+}
+.site-tabs .el-form-item {
+  margin-bottom: 14px;
+}
+.preset-desc {
+  float: right;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 22px;
+  margin-left: 12px;
+}
+
+/* upstream 后端组卡片 */
+.up-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.up-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--el-fill-color-blank);
+}
+.up-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.up-name {
+  flex: 1;
+  min-width: 0;
+}
+.up-bal {
+  width: 220px;
+  flex-shrink: 0;
+}
+.up-server {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.us-addr {
+  flex: 1;
+  min-width: 0;
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+.us-num {
+  width: 110px;
+  flex-shrink: 0;
+}
+.up-card .el-checkbox {
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+/* location 规则卡片 */
+.loc-list {
+  width: 100%;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.loc-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--el-fill-color-blank);
+}
+.loc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.loc-path {
+  width: 140px;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+.loc-kind {
+  width: 132px;
+  flex-shrink: 0;
+}
+.loc-target {
+  flex: 1;
+  min-width: 0;
+}
+.loc-code {
+  width: 96px;
+  flex-shrink: 0;
+}
+.loc-raw {
+  margin-top: 8px;
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+.loc-flags {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+}
+.loc-adv {
+  margin-top: 10px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.adv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.adv-row.adv-col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.adv-label {
+  width: 104px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.adv-num {
+  width: 110px;
+}
+.adv-unit {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.adv-long {
+  flex: 1;
+  min-width: 200px;
+}
+.hdr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.hdr-key {
+  width: 240px;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+.hdr-val {
+  flex: 1;
+  min-width: 0;
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+.loc-card code,
+.up-card code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--el-fill-color-light);
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+/* SSL / TLS 页签 */
+.ssl-alert {
+  margin-bottom: 14px;
+}
+.ssl-cert-box {
+  width: 100%;
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.ssl-cert-row {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 24px;
+}
+.ssl-cert-key {
+  flex: none;
+  width: 80px;
+  color: var(--el-text-color-secondary);
+}
+.ssl-cert-row span:last-child {
+  word-break: break-all;
+}
+.ssl-cert-expired {
+  color: var(--el-color-danger);
+}
+.ssl-miss-tip {
   color: var(--el-color-warning);
 }
 </style>

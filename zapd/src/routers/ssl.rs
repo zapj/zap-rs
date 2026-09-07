@@ -21,7 +21,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use serde::Deserialize;
 use serde_json::json;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     db,
@@ -305,6 +305,19 @@ pub async fn cert_update(
         &format!("id={}", payload.id),
     )
     .await;
+
+    // 站点绑定联动：证书内容/状态可能已变更，重同步引用它的站点以刷新落盘证书与 vhost
+    let sites: Vec<i64> =
+        sqlx::query_scalar("SELECT site_id FROM site_profile WHERE ssl_cert_id = ?")
+            .bind(payload.id)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    for sid in sites {
+        if let Err(e) = crate::routers::site::sync_one_site(sid).await {
+            warn!("证书 {} 更新后重同步站点 {} 失败: {}", payload.id, sid, e);
+        }
+    }
     Ok(Json(json!({ "code": 0, "message": "OK" })))
 }
 
@@ -319,6 +332,21 @@ pub async fn cert_delete(
     Json(payload): Json<CertDeletePayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
+    // 被站点绑定的证书不允许删除：先到站点「SSL/TLS」中解绑
+    let refs: Vec<i64> =
+        sqlx::query_scalar("SELECT site_id FROM site_profile WHERE ssl_cert_id = ?")
+            .bind(payload.id)
+            .fetch_all(pool)
+            .await?;
+    if !refs.is_empty() {
+        return Err(ZapError::New(
+            -1,
+            format!(
+                "该证书正被 {} 个站点绑定，请先在站点「SSL/TLS」页中解绑后再删除",
+                refs.len()
+            ),
+        ));
+    }
     let r = sqlx::query("DELETE FROM ssl_cert WHERE id = ?")
         .bind(payload.id)
         .execute(pool)

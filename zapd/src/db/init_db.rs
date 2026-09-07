@@ -122,7 +122,8 @@ async fn init_system_user_table_schema() {
 /// - owner_id = 0：全局套餐（admin 维护，所有人可用）
 /// - owner_id != 0：reseller 自建套餐，仅创建者自己可用
 /// - 限制项：磁盘配额 / 最大站点数 / 月流量（仅记录）/ FPM 规格模板 / SSH 终端开关
-/// - 能力项：allow_proxy（普通用户可用反向代理）/ allow_custom_dir（普通用户可选已有目录）
+/// - 能力项：allow_proxy（普通用户可用反向代理）；「自定义目录」不再作为套餐能力，
+///   已对全部用户开放（home 目录内任意目录可选）
 /// - 数值 0 表示「不限」
 async fn init_packages_table() {
     if table_exists("packages").await {
@@ -140,30 +141,32 @@ async fn init_packages_table() {
         fpm_spec_ref TEXT NOT NULL DEFAULT '',
         allow_ssh INTEGER NOT NULL DEFAULT 0,
         allow_proxy INTEGER NOT NULL DEFAULT 0,
-        allow_custom_dir INTEGER NOT NULL DEFAULT 0,
         owner_id INTEGER NOT NULL DEFAULT 0,
         status INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER,
         updated_at INTEGER
     );
-    INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, fpm_spec_ref, allow_ssh, allow_proxy, allow_custom_dir, owner_id, status, created_at, updated_at)
-    VALUES ('默认套餐', '不限磁盘、不限站点、不限域名、允许 SSH 终端（反向代理 / 自定义目录默认关闭，可在「编辑套餐」中开启）', 0, 0, 0, '', 1, 0, 0, 0, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, fpm_spec_ref, allow_ssh, allow_proxy, owner_id, status, created_at, updated_at)
+    VALUES ('默认套餐', '不限磁盘、不限站点、不限域名、允许 SSH 终端（反向代理默认关闭，可在「编辑套餐」中开启；自定义目录已全量开放）', 0, 0, 0, '', 1, 0, 0, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
 
-/// 老库升级（幂等）：packages 补 `allow_proxy` / `allow_custom_dir` 列；
-/// 并把旧版「站点全局功能开关」（server_env scope='conf' 的 site.user_proxy /
-/// site.user_custom_dir）平滑迁移为「默认套餐」的能力字段，随后清理旧配置键。
-/// 未绑定套餐的普通用户运行时回退到默认套餐，因此原有全局开关语义得到保留。
+/// 老库升级（幂等）：
+/// 1. packages 补 `allow_proxy` 列（旧版无该列）；
+/// 2. 移除 `allow_custom_dir` 列 ——「自定义目录」能力已并入全量开放
+///   （SQLite < 3.35 不支持 DROP COLUMN，失败时保留列但业务代码不再读写，无碍）；
+/// 3. 旧版「站点全局功能开关」（server_env scope='conf' 的 site.user_proxy /
+///    site.user_custom_dir）迁移：allow_proxy 同步给全部现有套餐后清理旧配置键。
 async fn migrate_package_site_capabilities() {
     let pool = get_db_pool().await;
     // 列已存在时 SQLite 报 duplicate column name，忽略即可（幂等）
     let _ = pool
         .execute("ALTER TABLE packages ADD COLUMN allow_proxy INTEGER NOT NULL DEFAULT 0")
         .await;
+    // 移除已无业务意义的 allow_custom_dir 列
     let _ = pool
-        .execute("ALTER TABLE packages ADD COLUMN allow_custom_dir INTEGER NOT NULL DEFAULT 0")
+        .execute("ALTER TABLE packages DROP COLUMN allow_custom_dir")
         .await;
     // 旧全局开关 = 对所有普通用户统一放行 → 迁移时同步给全部现有套餐，
     // 使升级后既有客户能力不变；此后管理员可按套餐差异化调整。
@@ -171,12 +174,6 @@ async fn migrate_package_site_capabilities() {
         .execute(
             "UPDATE packages SET allow_proxy = 1 WHERE \
              (SELECT v FROM server_env WHERE scope = 'conf' AND k = 'site.user_proxy') = '1'",
-        )
-        .await;
-    let _ = pool
-        .execute(
-            "UPDATE packages SET allow_custom_dir = 1 WHERE \
-             (SELECT v FROM server_env WHERE scope = 'conf' AND k = 'site.user_custom_dir') = '1'",
         )
         .await;
     let _ = pool
@@ -745,6 +742,8 @@ async fn init_site_profile_table() {
         web_root_custom INTEGER NOT NULL DEFAULT 0,
         upstreams TEXT NOT NULL DEFAULT '[]',
         locations TEXT NOT NULL DEFAULT '[]',
+        ssl_cert_id INTEGER NOT NULL DEFAULT 0,
+        force_https INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL DEFAULT 0
     );
     "#;

@@ -119,6 +119,12 @@ pub struct SiteAddPayload {
     /// 自定义 location（反代 / 跳转 / 拒绝 / 站内目录）
     #[serde(default)]
     pub locations: Vec<LocationSpec>,
+    /// 绑定的证书库证书 id（0 = 不启用 HTTPS）
+    #[serde(default)]
+    pub ssl_cert_id: Option<i64>,
+    /// 允许 HTTP 跳转到 HTTPS（仅绑定证书后生效）
+    #[serde(default)]
+    pub force_https: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +171,12 @@ pub struct SiteUpdatePayload {
     pub upstreams: Option<Vec<UpstreamSpec>>,
     #[serde(default)]
     pub locations: Option<Vec<LocationSpec>>,
+    /// SSL 证书绑定：None = 保持不变；Some(0) = 解除绑定；Some(id) = 绑定证书库证书
+    #[serde(default)]
+    pub ssl_cert_id: Option<i64>,
+    /// 允许 HTTP 跳转 HTTPS：None = 保持不变
+    #[serde(default)]
+    pub force_https: Option<bool>,
 }
 
 /// 站点已有目录浏览入参
@@ -620,17 +632,16 @@ fn is_operator(claims: &jwt::Claims) -> bool {
     jwt::is_admin(claims) || jwt::is_reseller(claims)
 }
 
-/// 当前操作者可用的「站点高级功能」：
-/// - admin / reseller（operator）恒为全能力；
-/// - 普通用户以「绑定套餐」的能力为准（allow_proxy / allow_custom_dir）；
-///   未绑定 / 套餐停用时回退全局「默认套餐」；两者皆缺则关闭。
-async fn gates_for(claims: &jwt::Claims) -> (bool, bool) {
+/// 反向代理能力门禁（「自定义目录」已全量开放，不再受套餐限制）：
+/// - admin / reseller（operator）恒开放；
+/// - 普通用户以「绑定套餐」的 allow_proxy 为准；未绑定 / 套餐停用时回退全局「默认套餐」。
+async fn gates_for(claims: &jwt::Claims) -> bool {
     if is_operator(claims) {
-        return (true, true);
+        return true;
     }
     match crate::routers::package::effective_package_of(claims.id as i64).await {
-        Some(pkg) => (pkg.allow_proxy == 1, pkg.allow_custom_dir == 1),
-        None => (false, false),
+        Some(pkg) => pkg.allow_proxy == 1,
+        None => false,
     }
 }
 
@@ -694,14 +705,15 @@ fn norm_pseudo(preset: &str, custom: &str, allow_custom: bool) -> Result<(), Zap
     Ok(())
 }
 
-/// 站点扩展档案（与 site_profile 列一一对应）
-type ProfileRow = (String, String, String, bool, String, String);
+/// 站点扩展档案（与 site_profile 列一一对应；ssl_cert_id>0 = 绑定证书库证书启用 HTTPS）
+type ProfileRow = (String, String, String, bool, String, String, i64, bool);
 
 /// 读取站点扩展档案；老站点（无档案行）返回默认值
 async fn load_profile(site_id: i64) -> ProfileRow {
     let pool = db::get_db_pool().await;
-    let row: Option<(String, String, String, i64, String, String)> = sqlx::query_as(
-        "SELECT site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations \
+    let row: Option<(String, String, String, i64, String, String, i64, i64)> = sqlx::query_as(
+        "SELECT site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations, \
+                ssl_cert_id, force_https \
          FROM site_profile WHERE site_id = ?",
     )
     .bind(site_id)
@@ -709,7 +721,7 @@ async fn load_profile(site_id: i64) -> ProfileRow {
     .await
     .ok()
     .flatten();
-    row.map(|(t, p, pc, wc, u, l)| (t, p, pc, wc != 0, u, l))
+    row.map(|(t, p, pc, wc, u, l, ssl, fh)| (t, p, pc, wc != 0, u, l, ssl, fh != 0))
         .unwrap_or_else(|| {
             (
                 "php".into(),
@@ -718,6 +730,8 @@ async fn load_profile(site_id: i64) -> ProfileRow {
                 false,
                 "[]".into(),
                 "[]".into(),
+                0,
+                false,
             )
         })
 }
@@ -732,6 +746,8 @@ async fn save_profile(
     web_root_custom: bool,
     upstreams: &[UpstreamSpec],
     locations: &[LocationSpec],
+    ssl_cert_id: i64,
+    force_https: bool,
 ) -> Result<(), ZapError> {
     let pool = db::get_db_pool().await;
     let now = chrono::Local::now().timestamp();
@@ -739,12 +755,13 @@ async fn save_profile(
     let l = serde_json::to_string(locations).unwrap_or_else(|_| "[]".to_string());
     sqlx::query(
         "INSERT INTO site_profile (site_id, site_type, pseudo_static, pseudo_custom, \
-         web_root_custom, upstreams, locations, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+         web_root_custom, upstreams, locations, ssl_cert_id, force_https, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT(site_id) DO UPDATE SET \
            site_type = excluded.site_type, pseudo_static = excluded.pseudo_static, \
            pseudo_custom = excluded.pseudo_custom, web_root_custom = excluded.web_root_custom, \
            upstreams = excluded.upstreams, locations = excluded.locations, \
+           ssl_cert_id = excluded.ssl_cert_id, force_https = excluded.force_https, \
            updated_at = excluded.updated_at",
     )
     .bind(site_id)
@@ -754,10 +771,32 @@ async fn save_profile(
     .bind(if web_root_custom { 1i64 } else { 0i64 })
     .bind(&u)
     .bind(&l)
+    .bind(ssl_cert_id)
+    .bind(if force_https { 1i64 } else { 0i64 })
     .bind(now)
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// 校验证书库绑定：证书必须存在且启用
+async fn ensure_cert_exists(cert_id: i64) -> Result<(), ZapError> {
+    let pool = db::get_db_pool().await;
+    let st: Option<i64> = sqlx::query_scalar("SELECT status FROM ssl_cert WHERE id = ?")
+        .bind(cert_id)
+        .fetch_optional(pool)
+        .await?;
+    match st {
+        Some(1) => Ok(()),
+        Some(_) => Err(ZapError::New(
+            -1,
+            "所选 SSL 证书已停用，请先在「SSL/TLS → 证书管理」中启用或换用其他证书".to_string(),
+        )),
+        None => Err(ZapError::New(
+            -1,
+            "所选 SSL 证书不存在，请刷新后重新选择（证书可能已被删除）".to_string(),
+        )),
+    }
 }
 
 /// JSON 文本 → 结构体列表（脏数据回退为空列表）
@@ -894,14 +933,11 @@ async fn validate_advanced_inputs(
     site_type: &str,
     pseudo_static: &str,
     pseudo_custom: &str,
-    web_root_custom: bool,
-    // 本次是否显式修改了自动目录自定义子路径（同样受「自定义目录」套餐能力约束）
-    auto_sub_custom: bool,
     upstreams: &[UpstreamSpec],
     locations: &[LocationSpec],
 ) -> Result<(), ZapError> {
     let op = is_operator(claims);
-    let (g_proxy, g_custom) = gates_for(claims).await;
+    let g_proxy = gates_for(claims).await;
     let t = site_type.trim().to_lowercase();
     // 未指定类型（增量编辑）跳过类型相关门禁
     if !t.is_empty() {
@@ -920,12 +956,6 @@ async fn validate_advanced_inputs(
             "自定义 upstream / location 未对当前账号开放，请联系管理员在「系统 → 套餐」中开启「反向代理」".to_string(),
         ));
     }
-    if (web_root_custom || auto_sub_custom) && !g_custom {
-        return Err(ZapError::New(
-            -1,
-            "自定义站点目录（指定子路径 / 选择已有目录）未对当前账号开放，请联系管理员在「系统 → 套餐」中开启「自定义目录」".to_string(),
-        ));
-    }
     if t == "proxy" && locations.is_empty() {
         return Err(ZapError::New(
             -1,
@@ -938,7 +968,7 @@ async fn validate_advanced_inputs(
     if upstreams.len() > 8 {
         return Err(ZapError::New(-1, "upstream 组最多 8 个".to_string()));
     }
-    let kinds = ["proxy", "redirect", "deny", "alias"];
+    let kinds = ["proxy", "redirect", "deny", "alias", "raw"];
     let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for u in upstreams {
         let n = u.name.trim();
@@ -951,6 +981,37 @@ async fn validate_advanced_inputs(
         }
         if !names.insert(n.to_string()) {
             return Err(ZapError::New(-1, format!("upstream 名称重复：{n}")));
+        }
+        match u.balance.trim() {
+            "" | "least_conn" | "ip_hash" => {}
+            other => {
+                return Err(ZapError::New(
+                    -1,
+                    format!("upstream 负载策略不支持：{other}"),
+                ))
+            }
+        }
+        for s in &u.servers_ext {
+            let a = s.addr.trim();
+            if a.len() > 200
+                || (!a.is_empty()
+                    && !a
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '/' | '_' | '-' | '[' | ']' | '%')))
+            {
+                return Err(ZapError::New(
+                    -1,
+                    format!("upstream {n} 的 server 地址含非法字符：{a}"),
+                ));
+            }
+            if s.weight > 1000 || s.max_fails > 100 || s.fail_timeout > 3600 {
+                return Err(ZapError::New(
+                    -1,
+                    format!(
+                        "upstream {n} 的 server 参数超限（weight ≤ 1000 / max_fails ≤ 100 / fail_timeout ≤ 3600s）"
+                    ),
+                ));
+            }
         }
     }
     for l in locations {
@@ -974,6 +1035,45 @@ async fn validate_advanced_inputs(
                 format!("location「{}」的目标参数过长或含非法字符", l.path),
             ));
         }
+        // 高级参数形态（nginx 语法细节由执行端同步时兜底）
+        if l.conn_timeout > 86400 || l.read_timeout > 86400 || l.send_timeout > 86400 {
+            return Err(ZapError::New(-1, "代理超时最大 86400 秒".to_string()));
+        }
+        if l.headers.len() > 20 {
+            return Err(ZapError::New(-1, "每个 location 自定义请求头最多 20 个".to_string()));
+        }
+        for h in &l.headers {
+            if h.key.trim().len() > 64
+                || (!h.key.trim().is_empty()
+                    && !h
+                        .key
+                        .trim()
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-')))
+            {
+                return Err(ZapError::New(
+                    -1,
+                    "自定义请求头名称仅允许字母/数字/_/-".to_string(),
+                ));
+            }
+            if h.value.trim().len() > 500
+                || h.value
+                    .trim()
+                    .chars()
+                    .any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#'))
+            {
+                return Err(ZapError::New(
+                    -1,
+                    format!("请求头「{}」的值非法或超长", h.key),
+                ));
+            }
+        }
+        if !l.cache.trim().is_empty() && l.cache.trim() != "zap_cache" {
+            return Err(ZapError::New(
+                -1,
+                "缓存区仅支持内置的 zap_cache".to_string(),
+            ));
+        }
         match k.as_str() {
             "deny" => {
                 if !matches!(l.code, 0 | 403 | 404 | 410 | 444) {
@@ -988,6 +1088,23 @@ async fn validate_advanced_inputs(
                     return Err(ZapError::New(
                         -1,
                         format!("跳转状态码仅支持 301/302/303/307/308（收到 {}）", l.code),
+                    ));
+                }
+            }
+            "raw" => {
+                if l.raw.trim().is_empty() {
+                    return Err(ZapError::New(
+                        -1,
+                        format!("location「{}」类型为 raw 时指令体不能为空", l.path),
+                    ));
+                }
+                if l.raw.len() > 8000 {
+                    return Err(ZapError::New(-1, "raw 自由指令体过长（上限 8000 字符）".to_string()));
+                }
+                if l.raw.contains('{') || l.raw.contains('}') {
+                    return Err(ZapError::New(
+                        -1,
+                        "raw 自由指令体不允许花括号（仅支持单层 location 内指令）".to_string(),
                     ));
                 }
             }
@@ -1096,18 +1213,20 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         for (sid, w, l) in dirq.fetch_all(pool).await? {
             dir_map.insert(sid, (w, l));
         }
-        // 站点扩展档案
+        // 站点扩展档案（类型 / 伪静态 / 自定义目录 / upstream / location / SSL 绑定）
         let psql2 = format!(
             "SELECT site_id, site_type, pseudo_static, pseudo_custom, web_root_custom, \
-             upstreams, locations FROM site_profile WHERE site_id IN ({})",
+             upstreams, locations, ssl_cert_id, force_https FROM site_profile WHERE site_id IN ({})",
             ph
         );
-        let mut pq2 = sqlx::query_as::<_, (i64, String, String, String, i64, String, String)>(&psql2);
+        let mut pq2 = sqlx::query_as::<_, (i64, String, String, String, i64, String, String, i64, i64)>(
+            &psql2,
+        );
         for id in &ids {
             pq2 = pq2.bind(id);
         }
-        for (sid, t, p, pc, wc, u, l) in pq2.fetch_all(pool).await? {
-            pf_map.insert(sid, (t, p, pc, wc != 0, u, l));
+        for (sid, t, p, pc, wc, u, l, ssl, fh) in pq2.fetch_all(pool).await? {
+            pf_map.insert(sid, (t, p, pc, wc != 0, u, l, ssl, fh != 0));
         }
         // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
         let mut owner_ids: Vec<i64> = rows.iter().map(|r| r.1).collect();
@@ -1123,6 +1242,21 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
             for (uid, lu) in lq.fetch_all(pool).await? {
                 lu_map.insert(uid, lu);
             }
+        }
+    }
+
+    // 站点绑定证书的显示名（仅 SSL 启用的站点；证书被删后保持空名，前端可提示已失效）
+    let mut ssl_name_map: HashMap<i64, String> = HashMap::new();
+    let cert_ids: Vec<i64> = pf_map.values().map(|p| p.6).filter(|c| *c > 0).collect();
+    if !cert_ids.is_empty() {
+        let phc = cert_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let csql = format!("SELECT id, name FROM ssl_cert WHERE id IN ({})", phc);
+        let mut cq = sqlx::query_as::<_, (i64, String)>(&csql);
+        for cid in &cert_ids {
+            cq = cq.bind(cid);
+        }
+        for (cid, cname) in cq.fetch_all(pool).await? {
+            ssl_name_map.insert(cid, cname);
         }
     }
 
@@ -1199,6 +1333,9 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
                 "web_root_custom": pf_map.get(&r.0).map(|p| p.3).unwrap_or(false),
                 "upstreams": pf_map.get(&r.0).map(|p| serde_json::from_str::<Value>(&p.4).unwrap_or_else(|_| json!([]))).unwrap_or_else(|| json!([])),
                 "locations": pf_map.get(&r.0).map(|p| serde_json::from_str::<Value>(&p.5).unwrap_or_else(|_| json!([]))).unwrap_or_else(|| json!([])),
+                "ssl_cert_id": pf_map.get(&r.0).map(|p| p.6).unwrap_or(0),
+                "force_https": pf_map.get(&r.0).map(|p| p.7).unwrap_or(false),
+                "ssl_cert_name": pf_map.get(&r.0).and_then(|p| ssl_name_map.get(&p.6)).cloned().unwrap_or_default(),
                 "remark": r.4,
                 "created_at": r.5,
                 "updated_at": r.6,
@@ -1283,11 +1420,11 @@ pub async fn site_users(claims: ValidatedClaims) -> ZapJsonResult {
 }
 
 /// 站点能力读取：返回当前操作者的实际能力（gates）与是否管理员。
-/// admin / reseller 恒为全能力；普通用户取决于其套餐
-/// （allow_proxy / allow_custom_dir，未绑定套餐时回退全局「默认套餐」）。
+/// admin / reseller 恒为全能力；普通用户反向代理取决于其套餐的 allow_proxy
+/// （未绑定套餐时回退全局「默认套餐」）；自定义目录已全量开放。
 pub async fn site_feature(claims: ValidatedClaims) -> ZapJsonResult {
     require_manageable(&claims)?;
-    let (g_proxy, g_custom) = gates_for(&claims).await;
+    let g_proxy = gates_for(&claims).await;
     Ok(Json(json!({
         "code": 0,
         "message": "OK",
@@ -1295,7 +1432,8 @@ pub async fn site_feature(claims: ValidatedClaims) -> ZapJsonResult {
             "is_admin": jwt::is_admin(&claims),
             "gates": {
                 "proxy": g_proxy,
-                "custom_dir": g_custom,
+                // 自定义目录已全量开放（保留字段兼容旧前端）
+                "custom_dir": true,
             },
         }
     })))
@@ -1412,19 +1550,11 @@ pub async fn site_add(
         let p = payload.pseudo_static.trim().to_lowercase();
         if p.is_empty() { "none".to_string() } else { p }
     };
-    let auto_sub_active = !payload.web_root_custom
-        && payload
-            .web_root_sub
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|s| !s.is_empty());
     validate_advanced_inputs(
         &claims,
         &payload.site_type,
         &pseudo_static,
         &payload.pseudo_custom,
-        payload.web_root_custom,
-        auto_sub_active,
         &payload.upstreams,
         &payload.locations,
     )
@@ -1462,6 +1592,13 @@ pub async fn site_add(
         }
     }
     let now = chrono::Local::now().timestamp();
+
+    // SSL/TLS：主记录事务开始前先校验证书库绑定（证书必须存在且启用），避免半提交
+    let ssl_cert_id = payload.ssl_cert_id.unwrap_or(0).max(0);
+    let force_https = payload.force_https;
+    if ssl_cert_id > 0 {
+        ensure_cert_exists(ssl_cert_id).await?;
+    }
 
     let mut tx = pool.begin().await?;
     ensure_domains_unique(&mut tx, &domains, 0, jwt::is_admin(&claims)).await?;
@@ -1515,7 +1652,7 @@ pub async fn site_add(
     }
     tx.commit().await?;
 
-    // 站点扩展档案（类型 / 伪静态 / upstream / location / 自定义目录标记）
+    // 站点扩展档案（类型 / 伪静态 / upstream / location / 自定义目录标记 / SSL）
     if let Err(e) = save_profile(
         id,
         site_type,
@@ -1524,6 +1661,8 @@ pub async fn site_add(
         payload.web_root_custom,
         &payload.upstreams,
         &payload.locations,
+        ssl_cert_id,
+        force_https,
     )
     .await
     {
@@ -1536,7 +1675,7 @@ pub async fn site_add(
         "site_create",
         &format!("id={}", id),
         &format!(
-            "user_id={} name={} domains={} ips={} php_instance={} site_type={} pseudo={} custom_dir={}",
+            "user_id={} name={} domains={} ips={} php_instance={} site_type={} pseudo={} web_root_custom={}",
             owner,
             name,
             domains.join(","),
@@ -1599,6 +1738,12 @@ pub async fn site_update(
         Some(v) => v.clone(),
         None => parse_specs(&prof.5),
     };
+    // SSL 绑定：None = 保持现值；Some(0) = 解绑；Some(id) = 绑定证书库证书
+    let eff_ssl_cert_id = payload.ssl_cert_id.unwrap_or(prof.6).max(0);
+    let eff_force_https = payload.force_https.unwrap_or(prof.7);
+    if eff_ssl_cert_id > 0 {
+        ensure_cert_exists(eff_ssl_cert_id).await?;
+    }
 
     // 归属转移
     let new_owner = if let Some(nid) = payload.user_id {
@@ -1717,8 +1862,6 @@ pub async fn site_update(
         payload.site_type.as_deref().unwrap_or(""),
         payload.pseudo_static.as_deref().unwrap_or(""),
         payload.pseudo_custom.as_deref().unwrap_or(""),
-        payload.web_root_custom.unwrap_or(false),
-        auto_sub_active,
         payload.upstreams.as_deref().unwrap_or_default(),
         payload.locations.as_deref().unwrap_or_default(),
     )
@@ -1829,6 +1972,8 @@ pub async fn site_update(
         eff_custom,
         &eff_upstreams,
         &eff_locations,
+        eff_ssl_cert_id,
+        eff_force_https,
     )
     .await
     {
@@ -2201,6 +2346,45 @@ async fn sync_one_site_inner(
     } else {
         RUN_STOPPED
     });
+
+    // SSL/TLS：站点绑定证书库证书（prof.6 = cert id / prof.7 = force_https）。
+    // 证书缺失或材料不全时降级为不启用 HTTPS（记 warn），不阻塞站点 HTTP 服务。
+    let (ssl_fullchain, ssl_key) = if prof.6 > 0 {
+        let cert: Option<(String, String, String)> = sqlx::query_as(
+            "SELECT cert_content, key_content, ca_bundle FROM ssl_cert WHERE id = ?",
+        )
+        .bind(prof.6)
+        .fetch_optional(pool)
+        .await?;
+        match cert {
+            Some((leaf, key, ca)) if !leaf.trim().is_empty() && !key.trim().is_empty() => {
+                let mut chain = leaf.trim().to_string();
+                let ca = ca.trim();
+                if !ca.is_empty() {
+                    chain.push('\n');
+                    chain.push_str(ca);
+                }
+                (Some(chain), Some(key.trim().to_string()))
+            }
+            Some(_) => {
+                warn!(
+                    "site {} 绑定的证书 {} 缺少证书/私钥材料，本次同步跳过 HTTPS",
+                    id, prof.6
+                );
+                (None, None)
+            }
+            None => {
+                warn!(
+                    "site {} 绑定的证书 {} 不存在，本次同步跳过 HTTPS",
+                    id, prof.6
+                );
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
     let resp = crate::zapexec::call(Request::SiteVhostSync {
         site_id: id,
         name: name.clone(),
@@ -2217,6 +2401,9 @@ async fn sync_one_site_inner(
         web_root_custom: prof.3,
         upstreams: parse_specs(&prof.4),
         locations: parse_specs(&prof.5),
+        ssl_fullchain,
+        ssl_key,
+        force_https: prof.7,
     })
     .await?;
 

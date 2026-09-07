@@ -11,7 +11,8 @@ pub mod frame;
 pub mod types;
 
 pub use types::{
-    LocationSpec, Message, Request, Response, UpstreamSpec, linux_username, sanitize_site_name,
+    HeaderSpec, LocationSpec, Message, Request, Response, UpstreamServer, UpstreamSpec,
+    linux_username, sanitize_site_name,
 };
 
 /// `zapexec` 管理的 SSH 密钥目录（root 写入、`zapadm` 读取）。

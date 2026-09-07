@@ -160,10 +160,14 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             web_root_custom,
             upstreams,
             locations,
+            ssl_fullchain,
+            ssl_key,
+            force_https,
         } => {
             site::vhost_sync(
                 site_id, name, domains, enabled, mode, php_socket, web_root, log_root, owner_user,
                 site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations,
+                ssl_fullchain, ssl_key, force_https,
             )
             .await
         }

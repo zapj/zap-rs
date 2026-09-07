@@ -19,8 +19,6 @@ export interface PackageItem {
   allow_ssh: boolean
   /** 是否允许客户（普通用户）使用反向代理（upstream / location） */
   allow_proxy: boolean
-  /** 是否允许客户（普通用户）选择「已有目录」作为站点文档根 */
-  allow_custom_dir: boolean
   /** 归属：0 = 全局套餐（admin 维护）；其余为 reseller 自建 */
   owner_id: number
   /** 1 启用 / 0 停用 */
@@ -43,8 +41,6 @@ export interface PackagePayload {
   allow_ssh?: boolean
   /** 允许客户使用反向代理（upstream / location） */
   allow_proxy?: boolean
-  /** 允许客户选择「已有目录」作为站点文档根 */
-  allow_custom_dir?: boolean
   status?: number
 }
 

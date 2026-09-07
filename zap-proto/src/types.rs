@@ -2,24 +2,63 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// 反代 upstream 定义：vhost 渲染为 nginx `upstream <name> { ... }` 块。
-/// `servers` 中每行一个上游（`server 127.0.0.1:9001 weight=2;` 等，分号可省略）。
+/// server 行一律以 `servers_ext` 表单字段维护（开发期不兼容旧版文本 servers）。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UpstreamSpec {
     /// 上游组名（字母/数字/下划线，渲染前会再校验）
     pub name: String,
-    /// 上游地址列表，每行一个 `server` 参数（可带 weight / max_fails 等）
-    pub servers: String,
+    /// 表单化的 server 行
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub servers_ext: Vec<UpstreamServer>,
+    /// 负载均衡策略：空 = 默认（轮询）/ least_conn / ip_hash
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub balance: String,
 }
 
-/// 自定义 location：反代（proxy）/ 跳转（redirect）/ 拒绝（deny）/ 站点内目录（alias）。
+/// upstream 内单个 server 行（表单化，渲染为
+/// `server <addr> [weight=n] [max_fails=n] [fail_timeout=Ns] [backup] [down];`）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpstreamServer {
+    /// 上游地址：host:port / ip:port / http(s)://host[:port]
+    pub addr: String,
+    /// 权重（0 = 不设置，默认轮询权重 1）
+    #[serde(default)]
+    pub weight: u32,
+    /// 失败上限次数（0 = 不设置，默认 1）
+    #[serde(default)]
+    pub max_fails: u32,
+    /// 失败判定超时（秒，0 = 不设置）
+    #[serde(default)]
+    pub fail_timeout: u32,
+    /// 备用节点（仅在主节点不可用时启用）
+    #[serde(default)]
+    pub backup: bool,
+    /// 标记为停机（临时摘除，不参与转发）
+    #[serde(default)]
+    pub down: bool,
+}
+
+/// 自定义请求头（渲染为 `proxy_set_header <key> <value>;`）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HeaderSpec {
+    /// Header 名（字母/数字/_/-，可含 `$var`）
+    pub key: String,
+    /// Header 值（可含 nginx 变量，如 `$host`、`$remote_addr`）
+    pub value: String,
+}
+
+/// 自定义 location：反代（proxy）/ 跳转（redirect）/ 拒绝（deny）/
+/// 站点内目录（alias）/ 自由指令体（raw）。
+/// 新增字段均带默认值，旧 site_profile JSON 反序列化不受影响。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LocationSpec {
     /// location 匹配路径，必须以 `/` 开头（如 `/`、`/api`）；不支持正则前缀
     pub path: String,
-    /// proxy | redirect | deny | alias
+    /// proxy | redirect | deny | alias | raw
     pub kind: String,
     /// proxy：upstream 名 或 `http(s)://host[:port][/uri]`；
-    /// redirect：跳转目标 URL；deny：目标为空；alias：站点内静态目录
+    /// redirect：跳转目标 URL；deny：目标为空；alias：站点内静态目录；
+    /// raw：忽略，使用 `raw` 指令体
     pub target: String,
     /// redirect：跳转状态码（301/302，0 视为 301）；deny：拒绝状态码（403/404/410/444，0 视为 403）
     #[serde(default)]
@@ -27,6 +66,35 @@ pub struct LocationSpec {
     /// proxy 时是否启用 WebSocket 升级（proxy_http_version 1.1 + Upgrade 头）
     #[serde(default)]
     pub ws: bool,
+    // ── 高级参数（serde default，兼容旧数据）──
+    /// kind=raw 时直接渲染的 location 指令体（多行 nginx 指令，逐行原样输出）
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub raw: String,
+    /// proxy_connect_timeout（秒，0 = 不输出）
+    #[serde(default)]
+    pub conn_timeout: u32,
+    /// proxy_read_timeout（秒，0 = 不输出）
+    #[serde(default)]
+    pub read_timeout: u32,
+    /// proxy_send_timeout（秒，0 = 不输出）
+    #[serde(default)]
+    pub send_timeout: u32,
+    /// 追加的自定义请求头（proxy_set_header）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<HeaderSpec>,
+    /// proxy_redirect 指令（off / 替换规则；空 = 不输出）
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub proxy_redirect: String,
+    /// 反代缓存：填 `zap_cache` 启用（由执行端自动创建共享缓存区）；
+    /// 空 = 不缓存。仅固定白名单值。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cache: String,
+    /// proxy_cache_valid 规则（如 `200 5m`；空 = 不输出）
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cache_valid: String,
+    /// 关闭代理缓冲（proxy_buffering off，SSE / 流式输出场景）
+    #[serde(default)]
+    pub no_buffering: bool,
 }
 
 /// `zapd` -> `zapexec` 的请求。只有白名单动词，刻意不提供任意 shell 执行。
@@ -297,6 +365,16 @@ pub enum Request {
         /// 自定义 location（按提交顺序渲染，排在默认 location 之前）
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         locations: Vec<LocationSpec>,
+        /// SSL/TLS：站点绑定的证书库证书内容（fullchain = 叶子 + 中间链 PEM）。
+        /// Some 时由 zapexec 落盘并渲染 listen 443 ssl；None = 不启用 HTTPS。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ssl_fullchain: Option<String>,
+        /// SSL/TLS：证书私钥 PEM（与 ssl_fullchain 成对出现）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ssl_key: Option<String>,
+        /// 允许 HTTP 跳转到 HTTPS（仅 SSL 启用时生效：80 端口只保留 301 跳转）
+        #[serde(default)]
+        force_https: bool,
     },
     /// 列出目录下的子目录（root 特权）：供面板站点「选择已有站点目录」浏览。
     /// 仅返回目录名（不含点目录），路径必须为绝对路径且存在。
@@ -644,9 +722,12 @@ mod tests {
                 web_root_custom: false,
                 upstreams: vec![],
                 locations: vec![],
+                ssl_fullchain: None,
+                ssl_key: None,
+                force_https: false,
             })
             .unwrap(),
-            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com","b.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false}"#
+            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com","b.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false,"force_https":false}"#
         );
         assert_eq!(
             serde_json::to_string(&Request::SiteVhostRemove {
@@ -687,11 +768,14 @@ mod tests {
             web_root_custom: false,
             upstreams: vec![],
             locations: vec![],
+            ssl_fullchain: None,
+            ssl_key: None,
+            force_https: false,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert_eq!(
             json,
-            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/blog-1","owner_user":"zap","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false}"#
+            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/blog-1","owner_user":"zap","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false,"force_https":false}"#
         );
         // 老版本 JSON（无 web_root/log_root）也能反序列化成功 → None
         let old: Request =

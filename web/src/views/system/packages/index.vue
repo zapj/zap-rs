@@ -6,7 +6,7 @@
           <div>
             <div class="page-title">套餐</div>
             <div class="page-sub">
-              定义资源套餐（磁盘配额 / 站点数 / 单站点域名数 / 流量 / FPM 规格 / SSH），创建客户时选择并自动继承
+              定义资源套餐（磁盘配额 / 站点数 / 单站点域名数 / 流量 / FPM 规格 / SSH / 反向代理），创建客户时选择并自动继承；自定义目录已全量开放，不再受套餐限制
             </div>
           </div>
           <div class="head-right">
@@ -64,16 +64,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="站点能力" width="150" align="center">
+        <el-table-column label="反向代理" width="110" align="center">
           <template #default="{ row }">
-            <el-tag
-              :type="row.allow_proxy ? 'success' : 'info'"
-              size="small"
-              effect="plain"
-              style="margin-right: 4px"
-            >反代</el-tag>
-            <el-tag :type="row.allow_custom_dir ? 'success' : 'info'" size="small" effect="plain">
-              自定目录
+            <el-tag :type="row.allow_proxy ? 'success' : 'info'" size="small" effect="plain">
+              {{ row.allow_proxy ? '允许' : '禁止' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -203,10 +197,6 @@
           <el-switch v-model="form.allow_proxy" />
           <span class="form-hint">开启后该套餐客户可创建 / 编辑反向代理站点（upstream / location）</span>
         </el-form-item>
-        <el-form-item label="自定义目录">
-          <el-switch v-model="form.allow_custom_dir" />
-          <span class="form-hint">开启后该套餐客户可浏览并选择已有目录作为站点文档根</span>
-        </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="form.status">
             <el-radio :value="1">启用</el-radio>
@@ -255,7 +245,6 @@ const form = reactive({
   fpm_spec_ref: '',
   allow_ssh: false,
   allow_proxy: false,
-  allow_custom_dir: false,
   status: 1,
 })
 // 「不限」开关：true 时该限制项提交为 0
@@ -315,7 +304,6 @@ function resetForm() {
   form.fpm_spec_ref = ''
   form.allow_ssh = false
   form.allow_proxy = false
-  form.allow_custom_dir = false
   form.status = 1
   unlimitedDisk.value = true
   unlimitedSites.value = true
@@ -345,7 +333,6 @@ function openEdit(row: PackageItem) {
   form.fpm_spec_ref = row.fpm_spec_ref || ''
   form.allow_ssh = !!row.allow_ssh
   form.allow_proxy = !!row.allow_proxy
-  form.allow_custom_dir = !!row.allow_custom_dir
   form.status = row.status
   dialogVisible.value = true
 }
@@ -367,7 +354,6 @@ async function submitForm() {
     fpm_spec_ref: form.fpm_spec_ref,
     allow_ssh: form.allow_ssh,
     allow_proxy: form.allow_proxy,
-    allow_custom_dir: form.allow_custom_dir,
     status: form.status,
   }
   saving.value = true

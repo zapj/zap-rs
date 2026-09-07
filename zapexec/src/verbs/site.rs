@@ -323,6 +323,50 @@ fn render_location_body(l: &LocationSpec) -> String {
                        proxy_set_header Connection \"upgrade\";\n",
                 );
             }
+            // 追加自定义请求头（同名可覆盖默认头；nginx 后者覆盖前者）
+            for h in &l.headers {
+                let k = h.key.trim();
+                if k.is_empty() {
+                    continue;
+                }
+                b.push_str(&format!(
+                    "        proxy_set_header {k} {};\n",
+                    h.value.trim()
+                ));
+            }
+            // 超时（秒）
+            if l.conn_timeout > 0 {
+                b.push_str(&format!("        proxy_connect_timeout {}s;\n", l.conn_timeout));
+            }
+            if l.read_timeout > 0 {
+                b.push_str(&format!("        proxy_read_timeout {}s;\n", l.read_timeout));
+            }
+            if l.send_timeout > 0 {
+                b.push_str(&format!("        proxy_send_timeout {}s;\n", l.send_timeout));
+            }
+            // 跳转策略
+            if !l.proxy_redirect.trim().is_empty() {
+                b.push_str(&format!(
+                    "        proxy_redirect {};\n",
+                    l.proxy_redirect.trim()
+                ));
+            }
+            // 关闭缓冲（SSE / 流式输出）
+            if l.no_buffering {
+                b.push_str("        proxy_buffering off;\n");
+            }
+            // 反代缓存（共享缓存区由执行端在站点发布前幂等创建）
+            if !l.cache.trim().is_empty() {
+                b.push_str(&format!("        proxy_cache {};\n", l.cache.trim()));
+                if l.cache_valid.trim().is_empty() {
+                    b.push_str("        proxy_cache_valid 200 1m;\n");
+                } else {
+                    b.push_str(&format!(
+                        "        proxy_cache_valid {};\n",
+                        l.cache_valid.trim()
+                    ));
+                }
+            }
         }
         "redirect" => {
             let code = if l.code == 0 { 301 } else { l.code };
@@ -334,6 +378,14 @@ fn render_location_body(l: &LocationSpec) -> String {
         }
         "alias" => {
             b.push_str(&format!("        alias {};\n", l.target.trim()));
+        }
+        // raw：高级自由指令体（每行原样输出，同步前已校验，禁止 include / 块嵌套）
+        "raw" => {
+            for line in l.raw.lines() {
+                b.push_str("        ");
+                b.push_str(line);
+                b.push('\n');
+            }
         }
         _ => {}
     }
@@ -357,6 +409,8 @@ fn render_vhost_full(
     pseudo_custom: &str,
     upstreams: &[UpstreamSpec],
     locations: &[LocationSpec],
+    ssl_files: Option<(&str, &str)>,
+    force_https: bool,
 ) -> String {
     let s_type = norm_site_type(site_type);
     let comment = name.chars().filter(|c| !c.is_control()).collect::<String>();
@@ -383,58 +437,79 @@ fn render_vhost_full(
             continue;
         }
         out.push_str(&format!("upstream {uname} {{\n"));
-        for line in u.servers.lines() {
-            let l = line.trim().trim_end_matches(';');
-            if l.is_empty() {
+        // 负载均衡策略（默认轮询无需输出）
+        match u.balance.trim() {
+            "least_conn" => out.push_str("    least_conn;\n"),
+            "ip_hash" => out.push_str("    ip_hash;\n"),
+            _ => {}
+        }
+        for s in &u.servers_ext {
+            let addr = s.addr.trim();
+            if addr.is_empty() {
                 continue;
             }
-            out.push_str(&format!("    server {l};\n"));
+            let mut line = format!("    server {addr}");
+            if s.weight > 0 {
+                line.push_str(&format!(" weight={}", s.weight));
+            }
+            if s.max_fails > 0 {
+                line.push_str(&format!(" max_fails={}", s.max_fails));
+            }
+            if s.fail_timeout > 0 {
+                line.push_str(&format!(" fail_timeout={}s", s.fail_timeout));
+            }
+            if s.backup {
+                line.push_str(" backup");
+            }
+            if s.down {
+                line.push_str(" down");
+            }
+            out.push_str(&line);
+            out.push_str(";\n");
         }
         out.push_str("}\n\n");
     }
-    out.push_str("server {\n");
-    out.push_str("    listen 80;\n");
-    out.push_str("    listen [::]:80;\n");
-    out.push_str(&format!("    server_name {server_name};\n"));
+    // 端口内容体（root / 日志 / 伪静态 / PHP / location），80 与 443 共用一份
+    let mut core = String::new();
     if s_type != "proxy" {
-        out.push_str(&format!("    root {root};\n"));
+        core.push_str(&format!("    root {root};\n"));
         if let Some(p) = access_log {
-            out.push_str(&format!("    access_log {p};\n"));
+            core.push_str(&format!("    access_log {p};\n"));
         }
         if let Some(p) = error_log {
-            out.push_str(&format!("    error_log {p};\n"));
+            core.push_str(&format!("    error_log {p};\n"));
         }
         if php_socket.is_some() {
-            out.push_str("    index index.php index.html;\n");
+            core.push_str("    index index.php index.html;\n");
         } else {
-            out.push_str("    index index.html;\n");
+            core.push_str("    index index.html;\n");
         }
         // 默认 location /：伪静态预设覆盖默认 try_files
-        out.push_str("\n    location / {\n");
+        core.push_str("\n    location / {\n");
         match pseudo_location_body(pseudo_static, pseudo_custom) {
             Some(body) => {
                 for line in body.lines() {
-                    out.push_str("        ");
-                    out.push_str(line);
-                    out.push('\n');
+                    core.push_str("        ");
+                    core.push_str(line);
+                    core.push('\n');
                 }
             }
-            None => out.push_str("        try_files $uri $uri/ =404;\n"),
+            None => core.push_str("        try_files $uri $uri/ =404;\n"),
         }
-        out.push_str("    }\n");
+        core.push_str("    }\n");
         if let Some(sock) = php_socket {
-            out.push_str("\n    # PHP 实例联动\n");
-            out.push_str("    location ~ \\.php$ {\n");
-            out.push_str(&format!("        fastcgi_pass {sock};\n"));
-            out.push_str("        fastcgi_index index.php;\n        include fastcgi_params;\n");
-            out.push_str(
+            core.push_str("\n    # PHP 实例联动\n");
+            core.push_str("    location ~ \\.php$ {\n");
+            core.push_str(&format!("        fastcgi_pass {sock};\n"));
+            core.push_str("        fastcgi_index index.php;\n        include fastcgi_params;\n");
+            core.push_str(
                 "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    }\n",
             );
         }
     } else if let Some(p) = access_log {
-        out.push_str(&format!("    access_log {p};\n"));
+        core.push_str(&format!("    access_log {p};\n"));
         if let Some(pl) = error_log {
-            out.push_str(&format!("    error_log {pl};\n"));
+            core.push_str(&format!("    error_log {pl};\n"));
         }
     }
     // 自定义 locations（proxy 必须提供，php/static 用于扩展覆盖）
@@ -447,9 +522,45 @@ fn render_vhost_full(
         if body.is_empty() {
             continue;
         }
-        out.push_str(&format!("\n    location {path} {{\n{body}    }}\n"));
+        core.push_str(&format!("\n    location {path} {{\n{body}    }}\n"));
     }
-    out.push_str("}\n");
+
+    // SSL/TLS：绑定证书后才监听 443；允许 HTTP 跳转时 80 只保留 301
+    let ssl_directives = ssl_files.map(|(cert, key)| {
+        format!(
+            "    ssl_certificate {cert};\n    ssl_certificate_key {key};\n    ssl_protocols TLSv1.2 TLSv1.3;\n"
+        )
+    });
+    match (&ssl_directives, force_https) {
+        (Some(sd), true) => {
+            out.push_str("server {\n");
+            out.push_str("    listen 80;\n    listen [::]:80;\n");
+            out.push_str(&format!("    server_name {server_name};\n"));
+            out.push_str("    return 301 https://$host$request_uri;\n");
+            out.push_str("}\n\n");
+            out.push_str("server {\n");
+            out.push_str("    listen 443 ssl;\n    listen [::]:443 ssl;\n");
+            out.push_str(&format!("    server_name {server_name};\n"));
+            out.push_str(sd);
+            out.push_str(&core);
+            out.push_str("}\n");
+        }
+        _ => {
+            out.push_str("server {\n");
+            out.push_str("    listen 80;\n    listen [::]:80;\n");
+            out.push_str(&format!("    server_name {server_name};\n"));
+            out.push_str(&core);
+            out.push_str("}\n");
+            if let Some(sd) = &ssl_directives {
+                out.push_str("server {\n");
+                out.push_str("    listen 443 ssl;\n    listen [::]:443 ssl;\n");
+                out.push_str(&format!("    server_name {server_name};\n"));
+                out.push_str(sd);
+                out.push_str(&core);
+                out.push_str("}\n");
+            }
+        }
+    }
     out
 }
 
@@ -464,9 +575,53 @@ fn render_default_vhost() -> String {
         "    listen [::]:80 default_server;\n",
         "    server_name _;\n",
         "    return 444;\n",
+        "}\n",
+        // 443 默认 server：拒绝握手，未匹配域名不落到任意站点的 443 上（防串站）
+        "server {\n",
+        "    listen 443 ssl default_server;\n",
+        "    listen [::]:443 ssl default_server;\n",
+        "    server_name _;\n",
+        "    ssl_reject_handshake on;\n",
         "}\n"
     )
     .to_string()
+}
+
+// ── 站点 SSL 证书文件（{ZAP_PATH}/data/ssl/site_{id}/）────────────────
+
+fn site_ssl_dir(site_id: i64) -> PathBuf {
+    zap_path().join("data/ssl").join(format!("site_{site_id}"))
+}
+
+/// 落盘站点 SSL 证书（fullchain / key）。目录 0755、文件 0644，
+/// 保证任意运行身份的 nginx worker 均可读取。返回 (fullchain, key) 绝对路径。
+fn write_site_ssl_files(
+    site_id: i64,
+    fullchain: &str,
+    key: &str,
+) -> Result<(String, String), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = site_ssl_dir(site_id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建站点 SSL 目录失败: {e}"))?;
+    let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+    let full = dir.join("fullchain.pem");
+    let key_f = dir.join("key.pem");
+    std::fs::write(&full, fullchain).map_err(|e| format!("写入证书文件失败: {e}"))?;
+    std::fs::write(&key_f, key).map_err(|e| format!("写入证书私钥文件失败: {e}"))?;
+    let _ = std::fs::set_permissions(&full, std::fs::Permissions::from_mode(0o644));
+    let _ = std::fs::set_permissions(&key_f, std::fs::Permissions::from_mode(0o644));
+    Ok((
+        full.to_string_lossy().to_string(),
+        key_f.to_string_lossy().to_string(),
+    ))
+}
+
+/// 移除站点 SSL 证书文件（解绑 / 站点删除时调用）
+fn remove_site_ssl_files(site_id: i64) {
+    let dir = site_ssl_dir(site_id);
+    if dir.exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// 维护页目录：`{ZAP_PATH}/data/www/_zap`（面板自管，不占用站点目录）
@@ -642,7 +797,7 @@ fn validate_vhost_cfg(
             ));
         }
     }
-    // upstream 组：名称唯一合法、server 地址逐行白名单
+    // upstream 组：名称唯一合法、负载策略白名单、server 行表单/文本校验
     let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for u in upstreams {
         let n = u.name.trim();
@@ -659,20 +814,32 @@ fn validate_vhost_cfg(
         if !names.insert(n.to_string()) {
             return Err(format!("upstream 名称重复：{n}"));
         }
+        match u.balance.trim() {
+            "" | "least_conn" | "ip_hash" => {}
+            other => return Err(format!("upstream 负载策略不支持：{other}")),
+        }
         let mut cnt = 0;
-        for line in u.servers.lines() {
-            let l = line.trim().trim_end_matches(';');
-            if l.is_empty() {
+        if u.servers_ext.len() > 16 {
+            return Err(format!("upstream {n} 的 server 数量超过上限（16）"));
+        }
+        for s in &u.servers_ext {
+            let a = s.addr.trim();
+            if a.is_empty() {
                 continue;
             }
             cnt += 1;
-            if l.len() > 200
-                || !l.chars().all(|c| {
+            if a.len() > 200
+                || !a.chars().all(|c| {
                     c.is_ascii_alphanumeric()
-                        || matches!(c, '.' | ':' | '/' | '_' | '-' | '[' | ']' | '%' | ' ' | '=')
+                        || matches!(c, '.' | ':' | '/' | '_' | '-' | '[' | ']' | '%')
                 })
             {
-                return Err(format!("upstream {n} 的 server 地址含非法字符：{l}"));
+                return Err(format!("upstream {n} 的 server 地址含非法字符：{a}"));
+            }
+            if s.weight > 1000 || s.max_fails > 100 || s.fail_timeout > 3600 {
+                return Err(format!(
+                    "upstream {n} 的 server 参数超限（weight ≤ 1000 / max_fails ≤ 100 / fail_timeout ≤ 3600s）"
+                ));
             }
         }
         if cnt == 0 {
@@ -724,6 +891,60 @@ fn validate_vhost_cfg(
                         "proxy_pass 目标 {t} 不是已配置的 upstream 组，也不是 http(s):// 地址"
                     ));
                 }
+                // 超时上限
+                if l.conn_timeout > 86400 || l.read_timeout > 86400 || l.send_timeout > 86400 {
+                    return Err("代理超时最大 86400 秒".to_string());
+                }
+                // 自定义请求头
+                for (idx, h) in l.headers.iter().enumerate() {
+                    let k = h.key.trim();
+                    if k.is_empty()
+                        || k.len() > 64
+                        || !k
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+                    {
+                        return Err(format!(
+                            "第 {} 个自定义请求头名称非法（仅字母/数字/_/-）：{}",
+                            idx + 1,
+                            h.key
+                        ));
+                    }
+                    let v = h.value.trim();
+                    if v.is_empty()
+                        || v.len() > 500
+                        || v.chars()
+                            .any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#'))
+                    {
+                        return Err(format!(
+                            "第 {} 个自定义请求头（{}）的值非法或超长",
+                            idx + 1,
+                            k
+                        ));
+                    }
+                }
+                // proxy_redirect
+                let pr = l.proxy_redirect.trim();
+                if !pr.is_empty()
+                    && (pr.len() > 400
+                        || pr.chars()
+                            .any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#')))
+                {
+                    return Err("proxy_redirect 规则非法或超长".to_string());
+                }
+                // 反代缓存（zone 固定白名单，由执行端幂等创建共享缓存区）
+                let cz = l.cache.trim();
+                if !cz.is_empty() && cz != "zap_cache" {
+                    return Err("缓存区仅支持内置的 zap_cache".to_string());
+                }
+                if !l.cache_valid.trim().is_empty()
+                    && (l.cache_valid.len() > 200
+                        || l.cache_valid
+                            .chars()
+                            .any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#')))
+                {
+                    return Err("proxy_cache_valid 规则非法或超长".to_string());
+                }
             }
             "redirect" => {
                 if !matches!(l.code, 0 | 301 | 302 | 303 | 307 | 308) {
@@ -757,6 +978,34 @@ fn validate_vhost_cfg(
                 let tp = Path::new(t);
                 if !t.starts_with('/') || !path_under(r, tp) {
                     return Err(format!("alias 目标必须位于站点目录内：{t}"));
+                }
+            }
+            // raw：高级自由指令体（逐行渲染在 location 块内，防越界）
+            "raw" => {
+                let r = &l.raw;
+                if r.trim().is_empty() {
+                    return Err("raw 自由指令体不能为空".to_string());
+                }
+                if r.len() > 8000 {
+                    return Err("raw 自由指令体过长（上限 8000 字符）".to_string());
+                }
+                for line in r.lines() {
+                    let s = line.trim();
+                    if s.is_empty() {
+                        continue;
+                    }
+                    if s.starts_with('#') {
+                        return Err("raw 自由指令体中不允许使用 # 注释".to_string());
+                    }
+                    if s == "include" || s.starts_with("include ") || s.starts_with("include\t") {
+                        return Err("raw 自由指令体中不允许 include".to_string());
+                    }
+                    if s.starts_with("server") || s.starts_with("location ") || s.starts_with("upstream") {
+                        return Err("raw 自由指令体不允许嵌套 server / location / upstream 块".to_string());
+                    }
+                    if s.contains('{') || s.contains('}') {
+                        return Err("raw 自由指令体不允许出现花括号（仅支持单层 location 内指令）".to_string());
+                    }
                 }
             }
             _ => return Err(format!("location 类型不支持：{}", l.kind)),
@@ -818,11 +1067,15 @@ pub async fn vhost_sync(
     web_root_custom: bool,
     upstreams: Vec<UpstreamSpec>,
     locations: Vec<LocationSpec>,
+    ssl_fullchain: Option<String>,
+    ssl_key: Option<String>,
+    force_https: bool,
 ) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
         vhost_sync_inner(
             site_id, &name, &domains, enabled, mode, php_socket, web_root, log_root, owner_user,
             site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations,
+            ssl_fullchain, ssl_key, force_https,
         )
     })
     .await
@@ -847,6 +1100,35 @@ fn run_mode(mode: Option<&str>, enabled: bool) -> &str {
 }
 
 #[allow(clippy::too_many_arguments)] // 同 vhost_sync，同步所需配置字段固定
+/// 站点配置是否需要反代共享缓存区（任意 proxy location 启用了 zap_cache）
+fn needs_cache_zone(locations: &[LocationSpec]) -> bool {
+    locations
+        .iter()
+        .any(|l| l.kind.trim().eq_ignore_ascii_case("proxy") && !l.cache.trim().is_empty())
+}
+
+/// 幂等准备反代共享缓存区：
+/// - 磁盘缓存目录（{ZAP_PATH}/data/cache/nginx-zap_cache）存在且属主 www:www（nginx worker 写）；
+/// - 向 nginx include 目录发布固定名 zone 定义文件（include 位于 http 上下文，zone 随之生效）。
+/// zone 文件独立于站点 vhost、可被多个站点复用；无站点引用时残留亦无害。
+fn ensure_cache_zone(_edir: &std::path::Path) -> Result<(), String> {
+    let cache_root = zap_path().join("data/cache/nginx-zap_cache");
+    if !cache_root.exists() {
+        std::fs::create_dir_all(&cache_root)
+            .map_err(|e| format!("创建反代缓存目录失败: {e}"))?;
+        let _ = std::process::Command::new("chown")
+            .args(["-R", "www:www"])
+            .arg(&cache_root)
+            .status();
+    }
+    let content = format!(
+        "# Generated by Zap Panel — 反代共享缓存区（zap_cache）— DO NOT EDIT\n\
+         proxy_cache_path {} levels=1:2 keys_zone=zap_cache:32m max_size=1g inactive=60m use_temp_path=off;\n",
+        cache_root.to_string_lossy()
+    );
+    super::webconf::publish_named("nginx", "00-zap-cache.conf", &content).map(|_| ())
+}
+
 fn vhost_sync_inner(
     site_id: i64,
     name: &str,
@@ -863,6 +1145,9 @@ fn vhost_sync_inner(
     web_root_custom: bool,
     upstreams: Vec<UpstreamSpec>,
     locations: Vec<LocationSpec>,
+    ssl_fullchain: Option<String>,
+    ssl_key: Option<String>,
+    force_https: bool,
 ) -> Result<Response, String> {
     let state = run_mode(mode.as_deref(), enabled);
     let conf_file = match find_nginx_conf_file() {
@@ -1007,6 +1292,19 @@ fn vhost_sync_inner(
         .as_deref()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
+    // SSL/TLS：绑定证书（fullchain + key 齐备）时落盘证书文件供 nginx 引用；
+    // 未启用或材料缺失时清理历史文件，防止旧证书残留。
+    let ssl_files: Option<(String, String)> = match (ssl_fullchain.as_deref(), ssl_key.as_deref()) {
+        (Some(fc), Some(k)) if !fc.trim().is_empty() && !k.trim().is_empty() => {
+            Some(write_site_ssl_files(site_id, fc, k)?)
+        }
+        _ => {
+            remove_site_ssl_files(site_id);
+            None
+        }
+    };
+    let ssl_refs: Option<(&str, &str)> =
+        ssl_files.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
     let content = render_vhost_full(
         site_id,
         name,
@@ -1020,6 +1318,8 @@ fn vhost_sync_inner(
         &pseudo_custom,
         &upstreams,
         &locations,
+        ssl_refs,
+        force_https,
     );
 
     // 面板侧快照（渲染源 / 入参 / 历史版本）：失败不影响发布，仅作排障与回滚副本
@@ -1037,6 +1337,8 @@ fn vhost_sync_inner(
         "upstreams": upstreams,
         "locations": locations,
         "enabled": enabled,
+        "ssl_enabled": ssl_files.is_some(),
+        "force_https": force_https,
     });
     if let Err(e) = super::webconf::write_snapshot(site_id, "nginx", &content, &meta) {
         tracing::warn!("写入站点配置快照失败（不影响发布）: {e}");
@@ -1044,6 +1346,17 @@ fn vhost_sync_inner(
 
     // 主配置幂等注入 include（指向新的 sites-enabled）；返回 true 表示本次改了主配置
     let injected = super::webconf::ensure_include(&conf_file, &edir, "nginx")?;
+
+    // 反代缓存：任一 proxy location 启用 zap_cache 时，先幂等发布共享缓存区
+    // （nginx -t 需要 zone 已存在；失败时恢复 include 再中止）
+    if needs_cache_zone(&locations) {
+        if let Err(e) = ensure_cache_zone(&edir) {
+            if injected {
+                super::webconf::restore_include(&conf_file);
+            }
+            return Err(e);
+        }
+    }
 
     // 发布前保留上一版内容，便于校验失败时回滚
     let previous = std::fs::read_to_string(&avail).ok();
@@ -1104,7 +1417,10 @@ pub async fn vhost_remove(site_id: i64, name: String) -> Response {
                 let _ = std::fs::remove_file(&legacy);
             }
         }
-        if !super::webconf::purge("nginx", site_id)? {
+        let purged = super::webconf::purge("nginx", site_id)?;
+        // 清理站点 SSL 证书文件（绑定已随 vhost 一并删除）
+        remove_site_ssl_files(site_id);
+        if !purged {
             return Ok(Response::ok("vhost 不存在，无需清理", None));
         }
         if nginx_running() {
@@ -1160,6 +1476,16 @@ fn reload_nginx(bin: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zap_proto::UpstreamServer;
+
+    /// 便捷构造一个表单化 server 行（默认参数）
+    fn sv(addr: &str, weight: u32) -> UpstreamServer {
+        UpstreamServer {
+            addr: addr.into(),
+            weight,
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn skel_placeholders_are_replaced() {
@@ -1208,6 +1534,8 @@ mod tests {
             "",
             &[],
             &[],
+            None,
+            false,
         )
     }
 
@@ -1325,6 +1653,8 @@ mod tests {
             "",
             &[],
             &[],
+            None,
+            false,
         );
         assert!(s.contains("root /home/u/www/s-1;"));
         assert!(s.contains("try_files $uri $uri/ =404;"));
@@ -1346,6 +1676,8 @@ mod tests {
             "",
             &[],
             &[],
+            None,
+            false,
         );
         assert!(
             s.contains("rewrite ^(.*)$ /index.php?s=$1 last;"),
@@ -1365,6 +1697,8 @@ mod tests {
             "",
             &[],
             &[],
+            None,
+            false,
         );
         assert!(s2.contains("try_files $uri $uri/ /index.php?$query_string;"));
         assert!(!s2.contains("rewrite"), "laravel 用 try_files 实现，不应出现 rewrite");
@@ -1374,7 +1708,8 @@ mod tests {
     fn render_proxy_with_upstream_and_locations() {
         let ups = vec![UpstreamSpec {
             name: "backend".into(),
-            servers: "127.0.0.1:9001\n127.0.0.1:9002 weight=2".into(),
+            servers_ext: vec![sv("127.0.0.1:9001", 0), sv("127.0.0.1:9002", 2)],
+            ..Default::default()
         }];
         let locs = vec![
             LocationSpec {
@@ -1383,6 +1718,7 @@ mod tests {
                 target: "backend".into(),
                 code: 0,
                 ws: true,
+                ..Default::default()
             },
             LocationSpec {
                 path: "/admin".into(),
@@ -1390,6 +1726,7 @@ mod tests {
                 target: String::new(),
                 code: 403,
                 ws: false,
+                ..Default::default()
             },
             LocationSpec {
                 path: "/static".into(),
@@ -1397,6 +1734,7 @@ mod tests {
                 target: "/home/u/www/p-3/static".into(),
                 code: 0,
                 ws: false,
+                ..Default::default()
             },
         ];
         let s = render_vhost_full(
@@ -1412,6 +1750,8 @@ mod tests {
             "",
             &ups,
             &locs,
+            None,
+            false,
         );
         assert!(s.contains("upstream backend {"), "应渲染 upstream 块");
         assert!(s.contains("server 127.0.0.1:9001;"));
@@ -1429,7 +1769,11 @@ mod tests {
 
     #[test]
     fn validate_cfg_proxy_requires_root_location() {
-        let ups = vec![UpstreamSpec { name: "b".into(), servers: "127.0.0.1:9000".into() }];
+        let ups = vec![UpstreamSpec {
+            name: "b".into(),
+            servers_ext: vec![sv("127.0.0.1:9000", 0)],
+            ..Default::default()
+        }];
         // proxy 但没有 location / → 拒绝
         let locs = vec![LocationSpec {
             path: "/api".into(),
@@ -1437,6 +1781,7 @@ mod tests {
             target: "b".into(),
             code: 0,
             ws: false,
+            ..Default::default()
         }];
         let e = validate_vhost_cfg("proxy", "none", "", false, None, &ups, &locs);
         assert!(e.is_err());
@@ -1444,8 +1789,8 @@ mod tests {
 
         // 合法：带 location /
         let locs2 = vec![
-            LocationSpec { path: "/".into(), kind: "proxy".into(), target: "b".into(), code: 0, ws: false },
-            LocationSpec { path: "/api".into(), kind: "proxy".into(), target: "b".into(), code: 0, ws: false },
+            LocationSpec { path: "/".into(), kind: "proxy".into(), target: "b".into(), code: 0, ws: false, ..Default::default() },
+            LocationSpec { path: "/api".into(), kind: "proxy".into(), target: "b".into(), code: 0, ws: false, ..Default::default() },
         ];
         assert!(validate_vhost_cfg("proxy", "none", "", false, None, &ups, &locs2).is_ok());
     }
@@ -1457,21 +1802,25 @@ mod tests {
         // 未知站点类型
         assert!(validate_vhost_cfg("hack", "none", "", false, Some(&tmp), &[], &[]).is_err());
         // proxy_pass 指向不存在的 upstream 组
-        let ups = vec![UpstreamSpec { name: "ok".into(), servers: "127.0.0.1:1".into() }];
-        let locs = vec![LocationSpec { path: "/".into(), kind: "proxy".into(), target: "missing".into(), code: 0, ws: false }];
+        let ups = vec![UpstreamSpec {
+            name: "ok".into(),
+            servers_ext: vec![sv("127.0.0.1:1", 0)],
+            ..Default::default()
+        }];
+        let locs = vec![LocationSpec { path: "/".into(), kind: "proxy".into(), target: "missing".into(), code: 0, ws: false, ..Default::default() }];
         assert!(validate_vhost_cfg("proxy", "none", "", false, None, &ups, &locs).is_err());
         // proxy_pass 注入分号/花括号
-        let locs2 = vec![LocationSpec { path: "/".into(), kind: "proxy".into(), target: "ok; #x".into(), code: 0, ws: false }];
+        let locs2 = vec![LocationSpec { path: "/".into(), kind: "proxy".into(), target: "ok; #x".into(), code: 0, ws: false, ..Default::default() }];
         assert!(validate_vhost_cfg("proxy", "none", "", false, None, &ups, &locs2).is_err());
         // alias 越出站点目录
-        let locs3 = vec![LocationSpec { path: "/x".into(), kind: "alias".into(), target: "/etc".into(), code: 0, ws: false }];
+        let locs3 = vec![LocationSpec { path: "/x".into(), kind: "alias".into(), target: "/etc".into(), code: 0, ws: false, ..Default::default() }];
         assert!(validate_vhost_cfg("php", "none", "", false, Some(&tmp), &[], &locs3).is_err());
         // 自定义伪静态花括号不配对
         assert!(validate_vhost_cfg("php", "custom", "if (x) { rewrite ^ y last;", false, Some(&tmp), &[], &[]).is_err());
         // 自定义伪静态禁止 location
         assert!(validate_vhost_cfg("php", "custom", "location /x {}", false, Some(&tmp), &[], &[]).is_err());
         // deny 状态码白名单
-        let locs4 = vec![LocationSpec { path: "/".into(), kind: "deny".into(), target: String::new(), code: 500, ws: false }];
+        let locs4 = vec![LocationSpec { path: "/".into(), kind: "deny".into(), target: String::new(), code: 500, ws: false, ..Default::default() }];
         assert!(validate_vhost_cfg("php", "none", "", false, Some(&tmp), &[], &locs4).is_err());
         let _ = std::fs::remove_dir_all(&tmp);
     }
