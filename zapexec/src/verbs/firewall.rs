@@ -88,45 +88,49 @@ fn service_enabled(name: &str) -> bool {
     cmd_ok("systemctl", &["is-enabled", "--quiet", name])
 }
 
-/// 探测可用的防火墙后端：正在运行的优先，其次按优先级取已安装的。
-fn detect() -> Backend {
-    // 1) 正在运行的优先（避免写到没启用的后端上）
+/// 探测结果：`running` = 该后端确实在过滤流量；`installed` = 只是装了命令，并未生效
+fn detect_kind() -> (Backend, &'static str) {
+    // 1) 真正在生效的优先（避免写到没启用的后端上）
     for b in [
         Backend::Firewalld,
         Backend::Ufw,
         Backend::Nftables,
         Backend::Iptables,
     ] {
-        if let Some(svc) = b.service()
-            && service_active(svc)
-        {
-            return b;
+        if backend_active(b) {
+            return (b, "running");
         }
     }
-    // 2) 都没运行：按优先级取已安装的命令
+    // 2) 都没生效：按 firewalld > ufw > iptables > nftables 取已安装的命令。
+    //    iptables 排在 nftables 之前：多数发行版默认走 iptables / iptables-nft，
+    //    而我们对 nftables 只写自建的 inet zap_fw 表，若系统本身没用 nft 则规则形同虚设。
     if has_cmd("firewall-cmd") {
-        return Backend::Firewalld;
+        return (Backend::Firewalld, "installed");
     }
     if has_cmd("ufw") {
-        return Backend::Ufw;
-    }
-    if has_cmd("nft") {
-        return Backend::Nftables;
+        return (Backend::Ufw, "installed");
     }
     if has_cmd("iptables") {
-        return Backend::Iptables;
+        return (Backend::Iptables, "installed");
+    }
+    if has_cmd("nft") {
+        return (Backend::Nftables, "installed");
     }
     // 3) 未来：FreeBSD
     if cfg!(target_os = "freebsd") {
         return if has_cmd("pfctl") {
-            Backend::Pf
+            (Backend::Pf, "installed")
         } else if has_cmd("ipfw") {
-            Backend::Ipfw
+            (Backend::Ipfw, "installed")
         } else {
-            Backend::Unsupported
+            (Backend::Unsupported, "none")
         };
     }
-    Backend::Unsupported
+    (Backend::Unsupported, "none")
+}
+
+fn detect() -> Backend {
+    detect_kind().0
 }
 
 // ── 统一规则结构 ────────────────────────────────────────────
@@ -359,6 +363,71 @@ fn iptables_rules() -> Vec<Rule> {
     out
 }
 
+/// nft 规则集是否真的有内容。
+/// 注意：`nft list ruleset` 在空规则集时也返回 0（输出为空），
+/// 只看退出码会把「装了 nft 但没用」误判成 nftables 生效（WSL 上尤其常见）。
+fn nft_has_ruleset() -> bool {
+    !cmd_out("nft", &["list", "ruleset"]).trim().is_empty()
+}
+
+/// iptables 是否存在真实规则（`-P` 只是链默认策略，不算规则）。
+fn iptables_has_rules() -> bool {
+    cmd_out("iptables", &["-S"])
+        .lines()
+        .any(|l| l.trim_start().starts_with("-A") || l.trim_start().starts_with("-I"))
+}
+
+/// WSL：使用共享内核，iptables / nft 规则可能不生效或仅当前会话有效，需要显式提示。
+fn is_wsl() -> bool {
+    std::fs::read_to_string("/proc/version")
+        .map(|s| {
+            let s = s.to_lowercase();
+            s.contains("microsoft") || s.contains("wsl")
+        })
+        .unwrap_or(false)
+}
+
+/// 后端是否真正在生效。
+/// 注意不能只看 systemd：ufw.service 在 Debian/Ubuntu 上是
+/// `Type=oneshot + RemainAfterExit`，ufw 实际关闭时 systemd 仍显示 active，
+/// 必须以各后端自己的查询命令为准。
+fn backend_active(b: Backend) -> bool {
+    match b {
+        Backend::Firewalld => cmd_out("firewall-cmd", &["--state"]).trim() == "running",
+        Backend::Ufw => cmd_out("ufw", &["status"]).contains("Status: active"),
+        Backend::Nftables => service_active("nftables") || nft_has_ruleset(),
+        // iptables 没有守护进程：存在真实规则才算生效（命令可用 ≠ 在过滤流量）
+        Backend::Iptables => service_active("iptables") || iptables_has_rules(),
+        Backend::Pf => cmd_ok("pfctl", &["-sr"]),
+        Backend::Ipfw => cmd_ok("ipfw", &["list"]),
+        Backend::Unsupported => false,
+    }
+}
+
+/// 后端是否开机自启。ufw 额外参考 /etc/ufw/ufw.conf 的 ENABLED=yes。
+fn backend_enabled(b: Backend) -> bool {
+    match b {
+        Backend::Firewalld => service_enabled("firewalld"),
+        Backend::Ufw => service_enabled("ufw") || ufw_conf_enabled(),
+        Backend::Nftables => service_enabled("nftables"),
+        Backend::Iptables => service_enabled("iptables") || service_enabled("netfilter-persistent"),
+        Backend::Pf | Backend::Ipfw => true, // FreeBSD 通过 rc.conf 管理
+        Backend::Unsupported => false,
+    }
+}
+
+/// /etc/ufw/ufw.conf 中 ENABLED=yes
+fn ufw_conf_enabled() -> bool {
+    std::fs::read_to_string("/etc/ufw/ufw.conf")
+        .map(|s| {
+            s.lines().any(|l| {
+                let l = l.trim().to_lowercase();
+                l.starts_with("enabled=") && l.contains("yes")
+            })
+        })
+        .unwrap_or(false)
+}
+
 fn list_rules(b: Backend) -> Vec<Rule> {
     match b {
         Backend::Firewalld => firewalld_rules(),
@@ -563,14 +632,35 @@ fn delete_rule(b: Backend, id: &str) -> Result<(), String> {
     }
 }
 
+/// 启停 / 开机自启。ufw 走自己的 `ufw enable|disable`，
+/// 其余后端走 systemd（否则会出现 systemd 显示 active 而 ufw 实际关闭的错位）。
 fn toggle_service(b: Backend, action: &str) -> Result<(), String> {
-    let Some(svc) = b.service() else {
-        return Err(format!("后端 {} 无对应服务可{}", b.name(), action));
-    };
-    if !cmd_ok("systemctl", &[action, svc]) {
-        return Err(format!("systemctl {action} {svc} 执行失败"));
+    match (b, action) {
+        (Backend::Ufw, "start") => {
+            if cmd_ok("ufw", &["--force", "enable"]) {
+                Ok(())
+            } else {
+                Err("ufw enable 执行失败".to_string())
+            }
+        }
+        (Backend::Ufw, "stop") => {
+            if cmd_ok("ufw", &["disable"]) {
+                Ok(())
+            } else {
+                Err("ufw disable 执行失败".to_string())
+            }
+        }
+        _ => {
+            let Some(svc) = b.service() else {
+                return Err(format!("后端 {} 无对应服务可{}", b.name(), action));
+            };
+            if cmd_ok("systemctl", &[action, svc]) {
+                Ok(())
+            } else {
+                Err(format!("systemctl {action} {svc} 执行失败"))
+            }
+        }
     }
-    Ok(())
 }
 
 // ── 对外的纯函数（便于单测） ────────────────────────────────
@@ -620,22 +710,24 @@ fn validate_source(source: &str) -> Result<(), String> {
 // ── handlers ────────────────────────────────────────────────
 
 pub async fn status(panel_port: u16) -> Response {
-    let b = detect();
+    let (b, via) = detect_kind();
+    let wsl = is_wsl();
     if b == Backend::Unsupported {
         return Response::ok(
             "未检测到受支持的防火墙（firewalld / ufw / nftables / iptables）",
             Some(json!({
                 "backend": "none",
+                "detected": "none",
                 "active": false,
                 "enabled": false,
+                "wsl": wsl,
                 "panel_port": panel_port,
                 "rules": [],
             })),
         );
     }
-    let svc = b.service();
-    let active = svc.is_some_and(service_active);
-    let enabled = svc.is_some_and(service_enabled);
+    let active = backend_active(b);
+    let enabled = backend_enabled(b);
     let rules: Vec<Value> = list_rules(b)
         .iter()
         .map(|r| rule_json(r, hits_panel_port(r.port, panel_port)))
@@ -644,8 +736,11 @@ pub async fn status(panel_port: u16) -> Response {
         "OK",
         Some(json!({
             "backend": b.name(),
+            // running=确实在过滤流量；installed=只装了命令、当前并未生效
+            "detected": via,
             "active": active,
             "enabled": enabled,
+            "wsl": wsl,
             "panel_port": panel_port,
             "rules": rules,
         })),

@@ -17,10 +17,22 @@
         style="margin-bottom: 16px"
       />
 
+      <el-alert
+        v-if="status.wsl"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="检测到 WSL 环境：使用共享内核，iptables / nftables 规则可能不生效或仅当前会话有效，请以实际宿主机防火墙为准。"
+        style="margin-bottom: 12px"
+      />
+
       <el-descriptions :column="3" border size="small" style="max-width: 760px">
         <el-descriptions-item label="后端">
           <el-tag v-if="status.backend === 'none'" size="small" type="info">未检测到</el-tag>
           <el-tag v-else size="small" type="primary">{{ status.backend }}</el-tag>
+          <span v-if="status.detected === 'installed'" class="dim" style="margin-left: 6px">
+            （仅检测到命令，当前未生效）
+          </span>
         </el-descriptions-item>
         <el-descriptions-item label="运行状态">
           <el-tag size="small" :type="status.active ? 'success' : 'info'">
@@ -162,8 +174,10 @@ const deletingId = ref('')
 
 const status = reactive<FirewallStatus>({
   backend: 'none',
+  detected: 'none',
   active: false,
   enabled: false,
+  wsl: false,
   panel_port: 0,
   rules: [],
 })
@@ -182,6 +196,8 @@ async function load() {
     const res = await getFirewallStatus()
     const d = res.data || {}
     status.backend = d.backend || 'none'
+    status.detected = d.detected || 'none'
+    status.wsl = !!d.wsl
     status.active = !!d.active
     status.enabled = !!d.enabled
     status.panel_port = d.panel_port || 0

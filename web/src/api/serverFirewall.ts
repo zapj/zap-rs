@@ -26,8 +26,12 @@ export interface FirewallRule {
 
 export interface FirewallStatus {
   backend: FirewallBackend
+  /** running=确实在过滤流量；installed=只装了命令、当前并未生效；none=未检测到 */
+  detected: 'running' | 'installed' | 'none'
   active: boolean
   enabled: boolean
+  /** WSL 环境：共享内核，规则可能不生效 */
+  wsl: boolean
   panel_port: number
   rules: FirewallRule[]
 }
