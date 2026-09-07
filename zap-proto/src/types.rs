@@ -526,6 +526,34 @@ pub enum Request {
     /// Nginx 服务控制：start / stop / restart / reload（优先 systemd unit nginx）
     #[serde(rename = "nginx.control")]
     NginxControl { action: String },
+    /// 通用服务配置·状态探测（服务配置页：php / mysql / mariadb / docker，未安装时 installed=false）
+    #[serde(rename = "service_conf.status")]
+    ServiceConfStatus { service: String },
+    /// 通用服务配置·列出可编辑配置文件（主配置 + 配置目录白名单）
+    #[serde(rename = "service_conf.list")]
+    ServiceConfList { service: String },
+    /// 通用服务配置·读取指定配置文件内容（Query: path）
+    #[serde(rename = "service_conf.read")]
+    ServiceConfRead { service: String, path: String },
+    /// 通用服务配置·保存配置文件（备份 → 原子写入；可选校验由各服务定义决定）
+    #[serde(rename = "service_conf.save")]
+    ServiceConfSave {
+        service: String,
+        path: String,
+        content: String,
+    },
+    /// 通用服务配置·读取关键项表单（字段定义 + 当前值，写入主配置）
+    #[serde(rename = "service_conf.keys")]
+    ServiceConfKeys { service: String },
+    /// 通用服务配置·保存关键项（写入主配置文件托管区 / JSON 合并）
+    #[serde(rename = "service_conf.keys_save")]
+    ServiceConfKeysSave {
+        service: String,
+        keys: std::collections::BTreeMap<String, String>,
+    },
+    /// 通用服务配置·服务控制 start / stop / restart / reload
+    #[serde(rename = "service_conf.control")]
+    ServiceConfControl { service: String, action: String },
 }
 
 /// `zapexec` -> `zapd` 的响应。

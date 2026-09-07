@@ -299,7 +299,7 @@ async fn init_menus_table() {
 
     -- System dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统设置', 'ep:setting', 1, 'admin', 11, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统设置', 'ep:setting', 1, 'admin', 12, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- System children
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -319,11 +319,24 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (27, 2, 'system-update', 'update', 'system/update/index', 'menu', '系统更新', 'ep:refresh', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
 
-    -- Server config dir（服务器配置，运维区整体紧随应用商店；Nginx 配置为首个子页）
+    -- Server config dir（服务器配置，紧随服务配置之后；运维项）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (7, 0, 'server', '/server', 'Layout', '/server/nginx', 'dir', '服务器配置', 'ep:set-up', 1, 'admin', 9, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (7, 0, 'server', '/server', 'Layout', '/server/time', 'dir', '服务器配置', 'ep:set-up', 1, 'admin', 10, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- Service config dir（服务配置：运行服务（应用商店安装）的配置页，位于服务器配置上方）
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (13, 0, 'services', '/services', 'Layout', '/services/nginx', 'dir', '服务配置', 'ep:service', 1, 'admin', 9, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (88, 7, 'server-nginx', 'nginx', 'server/nginx/index', 'menu', 'Nginx 配置', 'ep:document', 1, 'admin', 0, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (131, 13, 'service-nginx', 'nginx', 'services/nginx/index', 'menu', 'Nginx 配置', 'ep:document', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (132, 13, 'service-php', 'php', 'services/php/index', 'menu', 'PHP 配置', 'ep:coin', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (133, 13, 'service-mysql', 'mysql', 'services/mysql/index', 'menu', 'MySQL 数据库', 'ep:data-analysis', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (134, 13, 'service-mariadb', 'mariadb', 'services/mariadb/index', 'menu', 'MariaDB 配置', 'ep:data-board', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (135, 13, 'service-docker', 'docker', 'services/docker/index', 'menu', 'Docker 服务', 'ep:box', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
+
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (71, 7, 'server-time', 'time', 'server/time/index', 'menu', '服务器时间', 'ep:clock', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -389,7 +402,7 @@ async fn init_menus_table() {
 
     -- 脚本/自动化（Layout + 子菜单，仅 admin，位于服务器配置之后）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (10, 0, 'automation', '/automation', 'Layout', '/automation/scripts', 'dir', '脚本/自动化', 'ep:timer', 1, 'admin', 10, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (10, 0, 'automation', '/automation', 'Layout', '/automation/scripts', 'dir', '脚本/自动化', 'ep:timer', 1, 'admin', 11, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (101, 10, 'appstore-scripts', 'scripts', 'automation/scripts/index', 'menu', '自定义脚本', 'ep:document', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -397,7 +410,7 @@ async fn init_menus_table() {
 
     -- Dev（Layout + 子菜单，位于最下方，admin/user/reseller）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (12, 0, 'dev', '/dev', 'Layout', '/dev/api-tokens', 'dir', '开发', 'ep:tools', 1, 'admin,user,reseller', 12, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (12, 0, 'dev', '/dev', 'Layout', '/dev/api-tokens', 'dir', '开发', 'ep:tools', 1, 'admin,user,reseller', 13, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (121, 12, 'api-tokens', 'api-tokens', 'dev/api-tokens/index', 'menu', 'API Tokens', 'ep:key', 1, 'admin,user,reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -471,9 +484,8 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 8);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 81);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 87);
-    -- Server config: admin 专属（含 Nginx 配置 88）
+    -- Server config: admin 专属（Nginx 配置已移入服务配置）
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 7);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 88);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 71);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 72);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 73);
@@ -496,6 +508,13 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 111);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 11);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 111);
+    -- 服务配置（Nginx/PHP/MySQL/MariaDB/Docker）：仅 admin
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 13);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 131);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 132);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 133);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 134);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 135);
     -- 已安装应用：admin / user / reseller
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 62);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 62);

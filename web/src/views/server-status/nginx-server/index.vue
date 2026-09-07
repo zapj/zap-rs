@@ -98,7 +98,7 @@
           <el-button type="danger" plain :disabled="!running || acting" :loading="acting === 'stop'" @click="control('stop')">
             停止
           </el-button>
-          <span class="ctrl-tip">配置变更请前往「服务器配置 → Nginx 配置」保存（保存时会自动校验并重载）。</span>
+          <span class="ctrl-tip">配置变更请前往「服务配置 → Nginx 配置」保存（保存时会自动校验并重载）。</span>
         </div>
       </el-card>
     </template>

@@ -153,19 +153,52 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
+  // 服务配置（各运行服务的配置：应用商店安装后可用；未安装时页面引导）
+  {
+    path: '/services',
+    component: Layout,
+    redirect: '/services/nginx',
+    meta: { title: '服务配置', icon: 'ep:service', roles: ['admin'] },
+    children: [
+      {
+        path: 'nginx',
+        name: 'ServiceNginx',
+        component: () => import('@/views/services/nginx/index.vue'),
+        meta: { title: 'Nginx 配置', icon: 'ep:document', affix: true },
+      },
+      {
+        path: 'php',
+        name: 'ServicePhp',
+        component: () => import('@/views/services/php/index.vue'),
+        meta: { title: 'PHP 配置', icon: 'ep:coin', affix: true },
+      },
+      {
+        path: 'mysql',
+        name: 'ServiceMysql',
+        component: () => import('@/views/services/mysql/index.vue'),
+        meta: { title: 'MySQL 数据库', icon: 'ep:data-analysis', affix: true },
+      },
+      {
+        path: 'mariadb',
+        name: 'ServiceMariadb',
+        component: () => import('@/views/services/mariadb/index.vue'),
+        meta: { title: 'MariaDB 配置', icon: 'ep:data-board', affix: true },
+      },
+      {
+        path: 'docker',
+        name: 'ServiceDocker',
+        component: () => import('@/views/services/docker/index.vue'),
+        meta: { title: 'Docker 服务', icon: 'ep:box', affix: true },
+      },
+    ],
+  },
   // 服务器配置
   {
     path: '/server',
     component: Layout,
-    redirect: '/server/nginx',
+    redirect: '/server/time',
     meta: { title: '服务器配置', icon: 'ep:set-up', roles: ['admin'] },
     children: [
-      {
-        path: 'nginx',
-        name: 'ServerNginx',
-        component: () => import('@/views/server/nginx/index.vue'),
-        meta: { title: 'Nginx 配置', icon: 'ep:document', affix: true },
-      },
       {
         path: 'time',
         name: 'ServerTime',

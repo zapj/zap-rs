@@ -8,6 +8,7 @@ mod nginx;
 mod php;
 mod process;
 mod service;
+mod service_conf;
 mod site;
 mod ssh;
 mod ssh_key;
@@ -227,6 +228,21 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::NginxConfRead { path } => nginx::conf_read(path).await,
         Request::NginxConfSave { path, content } => nginx::conf_save(path, content).await,
         Request::NginxControl { action } => nginx::control(&action).await,
+        Request::ServiceConfStatus { service } => service_conf::status(&service).await,
+        Request::ServiceConfList { service } => service_conf::conf_list(&service).await,
+        Request::ServiceConfRead { service, path } => service_conf::conf_read(&service, path).await,
+        Request::ServiceConfSave {
+            service,
+            path,
+            content,
+        } => service_conf::conf_save(&service, path, content).await,
+        Request::ServiceConfKeys { service } => service_conf::keys_get(&service).await,
+        Request::ServiceConfKeysSave { service, keys } => {
+            service_conf::keys_save(&service, keys).await
+        }
+        Request::ServiceConfControl { service, action } => {
+            service_conf::control(&service, &action).await
+        }
     }
 }
 

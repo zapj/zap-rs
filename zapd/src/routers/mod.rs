@@ -63,6 +63,7 @@ pub mod system_menu;
 pub mod system_migrate;
 pub mod system_nginx;
 pub mod system_role;
+pub mod system_service_conf;
 pub mod system_update;
 pub mod system_zap;
 pub mod user;
@@ -335,6 +336,35 @@ fn api_routers() -> Router {
             post(system_nginx::nginx_conf_save),
         )
         .route("/system/nginx/control", post(system_nginx::nginx_control))
+        // 通用服务配置（服务配置：php / mysql / mariadb / docker，admin only）
+        .route(
+            "/system/service-conf/status",
+            get(system_service_conf::status),
+        )
+        .route(
+            "/system/service-conf/list",
+            get(system_service_conf::conf_list),
+        )
+        .route(
+            "/system/service-conf/read",
+            get(system_service_conf::conf_read),
+        )
+        .route(
+            "/system/service-conf/save",
+            post(system_service_conf::conf_save),
+        )
+        .route(
+            "/system/service-conf/keys",
+            get(system_service_conf::keys_get),
+        )
+        .route(
+            "/system/service-conf/keys/save",
+            post(system_service_conf::keys_save),
+        )
+        .route(
+            "/system/service-conf/control",
+            post(system_service_conf::control),
+        )
         // 数据迁移（服务器配置 → 数据迁移，admin only）
         .route(
             "/system/migrate/users",
