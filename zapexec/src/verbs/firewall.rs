@@ -91,11 +91,13 @@ fn service_enabled(name: &str) -> bool {
 /// 探测结果：`running` = 该后端确实在过滤流量；`installed` = 只是装了命令，并未生效
 fn detect_kind() -> (Backend, &'static str) {
     // 1) 真正在生效的优先（避免写到没启用的后端上）
+    //    顺序与兜底一致：nftables 排在 iptables 之后 —— 多数发行版实际通过
+    //    iptables / iptables-nft 管理规则，iptables 命令才是用户认可的入口。
     for b in [
         Backend::Firewalld,
         Backend::Ufw,
-        Backend::Nftables,
         Backend::Iptables,
+        Backend::Nftables,
     ] {
         if backend_active(b) {
             return (b, "running");
@@ -363,11 +365,24 @@ fn iptables_rules() -> Vec<Rule> {
     out
 }
 
-/// nft 规则集是否真的有内容。
+/// nft 规则集是否真的有内容（仅用于展示与排障，不作为后端判定依据）。
 /// 注意：`nft list ruleset` 在空规则集时也返回 0（输出为空），
 /// 只看退出码会把「装了 nft 但没用」误判成 nftables 生效（WSL 上尤其常见）。
 fn nft_has_ruleset() -> bool {
     !cmd_out("nft", &["list", "ruleset"]).trim().is_empty()
+}
+
+/// 状态接口里回传的诊断信息：帮助判断"为什么选了这个后端"。
+fn diag() -> Value {
+    json!({
+        "nft_ruleset": nft_has_ruleset(),
+        "nftables_service_active": service_active("nftables"),
+        "nftables_service_enabled": service_enabled("nftables"),
+        "iptables_rules": iptables_has_rules(),
+        "firewalld_running": cmd_out("firewall-cmd", &["--state"]).trim() == "running",
+        "ufw_active": cmd_out("ufw", &["status"]).contains("Status: active"),
+        "systemd": cmd_ok("systemctl", &["is-system-running", "--quiet"]),
+    })
 }
 
 /// iptables 是否存在真实规则（`-P` 只是链默认策略，不算规则）。
@@ -391,13 +406,23 @@ fn is_wsl() -> bool {
 /// 注意不能只看 systemd：ufw.service 在 Debian/Ubuntu 上是
 /// `Type=oneshot + RemainAfterExit`，ufw 实际关闭时 systemd 仍显示 active，
 /// 必须以各后端自己的查询命令为准。
+/// nftables 是否真正在管理防火墙，需同时满足三个条件：
+///
+/// 1. 服务 active 且 enabled（开机自启）——它是 oneshot 加载型服务，
+///    单纯 `active`（RemainAfterExit）不代表在管防火墙；
+/// 2. 规则集里确实有规则（空规则集 = 装了没用，WSL / 桌面发行版很常见）；
+/// 3. `nft list ruleset` 有内容本身也不能作数（iptables-nft、Docker、libvirt 都会写表）。
+fn nftables_in_control() -> bool {
+    service_active("nftables") && service_enabled("nftables") && nft_has_ruleset()
+}
+
 fn backend_active(b: Backend) -> bool {
     match b {
         Backend::Firewalld => cmd_out("firewall-cmd", &["--state"]).trim() == "running",
         Backend::Ufw => cmd_out("ufw", &["status"]).contains("Status: active"),
-        Backend::Nftables => service_active("nftables") || nft_has_ruleset(),
+        Backend::Nftables => nftables_in_control(),
         // iptables 没有守护进程：存在真实规则才算生效（命令可用 ≠ 在过滤流量）
-        Backend::Iptables => service_active("iptables") || iptables_has_rules(),
+        Backend::Iptables => iptables_has_rules(),
         Backend::Pf => cmd_ok("pfctl", &["-sr"]),
         Backend::Ipfw => cmd_ok("ipfw", &["list"]),
         Backend::Unsupported => false,
@@ -780,6 +805,7 @@ pub async fn status(panel_port: u16) -> Response {
             "active": active,
             "enabled": enabled,
             "wsl": wsl,
+            "diag": diag(),
             "panel_port": panel_port,
             "rules": rules,
         })),
