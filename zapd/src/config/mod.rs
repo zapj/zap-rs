@@ -1,7 +1,5 @@
 use std::{
     fs,
-    fs::OpenOptions,
-    io::Read,
     path::PathBuf,
     sync::{OnceLock, RwLock},
 };
@@ -205,14 +203,12 @@ pub fn get_config() -> &'static RwLock<ZapConfig> {
         let mut default_conf = new();
         let mut needs_write = false;
 
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(config_path());
-        match file {
-            Ok(mut f) => {
-                let mut buffer = String::new();
-                let _ = f.read_to_string(&mut buffer);
+        // 只读方式读取：运行用户（如 zapadm）对 zap.yaml 可能只有读权限，
+        // 若按 read+write 打开，打不开就会静默退回默认配置，
+        // 表现为"配置改了没生效"（端口 / 证书路径 / url_prefix 全部走默认值）。
+        let path = config_path();
+        match fs::read_to_string(&path) {
+            Ok(buffer) => {
                 match serde_yaml::from_str::<ZapConfig>(&buffer) {
                     Ok(cnf) => {
                         default_conf.server.address = cnf.server.address;
@@ -235,16 +231,16 @@ pub fn get_config() -> &'static RwLock<ZapConfig> {
                         default_conf.jwt.jwt_expire = cnf.jwt.jwt_expire;
                         default_conf.db = cnf.db;
                     }
-                    Err(_) => {
-                        info!("failed to parse zap.yaml, using defaults");
+                    Err(e) => {
+                        info!("failed to parse {} ({}), using defaults", path.display(), e);
                         // Generate random JWT secret for fresh config
                         default_conf.jwt.jwt_secure = generate_random_hex(32);
                         needs_write = true;
                     }
                 }
             }
-            Err(_) => {
-                info!("zap.yaml not found, creating with generated secrets");
+            Err(e) => {
+                info!("unable to read {} ({}), using defaults", path.display(), e);
                 // Generate random JWT secret for new installation
                 default_conf.jwt.jwt_secure = generate_random_hex(32);
                 needs_write = true;

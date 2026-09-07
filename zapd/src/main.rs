@@ -77,11 +77,15 @@ async fn main() {
     let url_prefix = config::url_prefix();
 
     // Ensure TLS certificates exist (generate self-signed if missing)
+    // 面板只提供 HTTPS（HTTP 请求一律 301 跳转），没有证书就无法建立 TLS acceptor，
+    // 因此这里直接以明确错误退出，而不是带着坏证书继续跑成崩溃重启循环。
     if !zap::certmgr::ensure_certs(&cert_file, &key_file) {
-        warn!(
-            "TLS certificates not available at {} / {}. HTTPS will not work.",
+        error!(
+            "面板 HTTPS 证书不可用（{} / {}）：请确认 zapd 运行用户（zapd.service 的 User=）\
+             对证书文件所在目录有写权限，或手工放置证书后重启 zapd",
             cert_file, key_file
         );
+        std::process::exit(1);
     }
 
     let tls_acceptor = create_tls_acceptor(&cert_file, &key_file);
