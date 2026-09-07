@@ -23,6 +23,7 @@ pub async fn init_schema() {
     init_site_table().await;
     ensure_site_php_column().await;
     ensure_site_vhost_column().await;
+    ensure_site_run_state_column().await;
     // PHP-FPM 规格模板表 + user.fpm_spec_ref 列（老库幂等补列）
     init_fpm_spec_table().await;
     ensure_user_fpm_spec_ref_column().await;
@@ -732,6 +733,39 @@ async fn ensure_site_vhost_column() {
     let _ = sqlx::query("ALTER TABLE site ADD COLUMN vhost_state TEXT NOT NULL DEFAULT 'pending'")
         .execute(pool)
         .await;
+}
+
+/// 站点运行状态列 `run_state`（running / stopped / maintenance）。
+/// 老库补列后按现有 status 迁移：status=0 → stopped，其余 running。
+async fn ensure_site_run_state_column() {
+    if !table_exists("site").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let rows = sqlx::query("PRAGMA table_info(site)")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let has = rows.iter().any(|r| {
+        r.try_get::<String, _>("name")
+            .map(|n| n == "run_state")
+            .unwrap_or(false)
+    });
+    if !has {
+        let _ =
+            sqlx::query("ALTER TABLE site ADD COLUMN run_state TEXT NOT NULL DEFAULT 'running'")
+                .execute(pool)
+                .await;
+    }
+    // status 与 run_state 的兼容映射（老数据只有 status）
+    let _ = sqlx::query("UPDATE site SET run_state = 'stopped' WHERE status = 0")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query(
+        "UPDATE site SET run_state = 'running' WHERE status != 0 AND run_state NOT IN ('running','stopped','maintenance')",
+    )
+    .execute(pool)
+    .await;
 }
 
 // ── api_token（API Token 管理）──────────────────────────────

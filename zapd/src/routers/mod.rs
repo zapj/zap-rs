@@ -462,6 +462,8 @@ fn api_routers() -> Router {
         .route("/site/update", post(site::site_update))
         .route("/site/delete", post(site::site_delete))
         .route("/site/sync", post(site::site_sync))
+        // 站点启停 / 维护三态切换（running / stopped / maintenance）
+        .route("/site/state", post(site::site_state))
         .route("/site/sync_all", post(site::site_sync_all))
         // SSL/TLS：证书管理（手动导入 / 自签名 / Let's Encrypt）
         .route("/ssl/cert/list", get(ssl::cert_list))

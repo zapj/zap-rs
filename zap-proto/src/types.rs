@@ -225,7 +225,13 @@ pub enum Request {
         /// 站点域名列表（server_name，多个以空格分隔）
         domains: Vec<String>,
         /// true 生成 vhost；false 移除 vhost（站点停用）
+        /// 与 `mode` 同时存在时以 `mode` 为准（兼容老版本 zapd）
         enabled: bool,
+        /// 站点运行状态：`running`（正常发布）/`stopped`（只撤下 sites-enabled 软链，
+        /// 配置留在 sites-available 可秒级恢复）/`maintenance`（发布 503 维护页）。
+        /// None 时按 `enabled` 回退为 running 或 stopped（兼容老版本 zapd）。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
         /// PHP-FPM 通道（如 unix:/var/run/php-fpm-8.3.sock 或 127.0.0.1:9000）；
         /// None 表示纯静态站点，不生成 PHP location
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -540,6 +546,7 @@ mod tests {
                 name: "blog".into(),
                 domains: vec!["a.com".into(), "b.com".into()],
                 enabled: true,
+                mode: None,
                 php_socket: Some("unix:/var/run/php-fpm-8.3.sock".into()),
                 web_root: None,
                 log_root: None,
@@ -576,6 +583,7 @@ mod tests {
             name: "blog".into(),
             domains: vec!["a.com".into()],
             enabled: true,
+            mode: None,
             php_socket: None,
             web_root: Some("/home/zap/www/blog-1".into()),
             log_root: Some("/home/zap/logs/blog-1".into()),

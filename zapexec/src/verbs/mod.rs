@@ -147,13 +147,14 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             name,
             domains,
             enabled,
+            mode,
             php_socket,
             web_root,
             log_root,
             owner_user,
         } => {
             site::vhost_sync(
-                site_id, name, domains, enabled, php_socket, web_root, log_root, owner_user,
+                site_id, name, domains, enabled, mode, php_socket, web_root, log_root, owner_user,
             )
             .await
         }

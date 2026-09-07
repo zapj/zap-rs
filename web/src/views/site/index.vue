@@ -16,6 +16,8 @@ interface SiteItem {
   domains: string[]
   ips: string[]
   status: number
+  /** 运行状态：running / stopped / maintenance */
+  run_state: string
   remark: string
   php_instance: string
   vhost_state: string
@@ -124,6 +126,15 @@ async function loadOwners() {
 const keyword = ref('')
 const filterStatus = ref<number | ''>('')
 const filterOwner = ref<number | ''>('')
+
+/** 运行状态：兼容老数据（库里还没有 run_state 时按 status 推导） */
+const runState = (row: SiteItem): 'running' | 'stopped' | 'maintenance' => {
+  const s = (row.run_state || '').toLowerCase()
+  if (s === 'maintenance') return 'maintenance'
+  if (s === 'stopped') return 'stopped'
+  if (s === 'running') return 'running'
+  return row.status === 1 ? 'running' : 'stopped'
+}
 
 const ownerLabel = (id: number) => {
   const o = ownerOptions.value.find((it) => it.id === id)
@@ -345,6 +356,8 @@ async function submitEdit() {
 
 // ── vhost 同步：按站点档案（域名/状态/PHP 实例）渲染 Nginx 配置并 reload ──
 const syncingId = ref(0)
+// 正在切换运行状态的站点 id（启停/维护按钮的 loading）
+const stateLoadingId = ref(0)
 const syncingAll = ref(false)
 
 // 全部站点按当前 vhost 模式再同步（切换「www / system」模式后的批量入口）
@@ -390,18 +403,26 @@ async function syncSite(id: number): Promise<boolean> {
   }
 }
 
-// ── 行内快捷：状态开关（只更新状态，域名/IP 保持不变，并同步 vhost）─────
-async function toggleStatus(row: SiteItem) {
+// ── 三态启停：running / stopped / maintenance（一次调用完成落库 + vhost 同步）──
+async function setRunState(row: SiteItem, state: 'running' | 'stopped' | 'maintenance') {
+  stateLoadingId.value = row.id
   try {
-    const res = await http.post<{ code: number; message: string }>('/site/update', {
+    const res = await http.post<{ code: number; message: string }>('/site/state', {
       id: row.id,
-      status: row.status ? 1 : 0,
+      state,
     })
-    ElMessage.success(res.message)
-    await syncSite(row.id) // 运行/停止 → 生成/移除 vhost
+    ElMessage.success(res.message || '已更新站点状态')
+    load()
   } catch {
-    load() // 回滚行内开关展示
+    load() // 回滚行内展示
+  } finally {
+    stateLoadingId.value = 0
   }
+}
+
+// 行内开关：运行 ↔ 停止（维护态时开关显示为停止，切到运行即结束维护）
+function toggleStatus(row: SiteItem, on: boolean) {
+  setRunState(row, on ? 'running' : 'stopped')
 }
 
 // ── 删除 ───────────────────────────────────────────────────
@@ -613,15 +634,25 @@ onMounted(() => {
             <el-tag v-else size="small" type="info" effect="plain">未同步</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column label="状态" width="180">
           <template #default="{ row }">
             <el-switch
-              :model-value="row.status === 1"
+              :model-value="runState(row) === 'running'"
+              :loading="stateLoadingId === row.id"
               inline-prompt
               active-text="运行"
               inactive-text="停止"
-              @change="(v: boolean) => { row.status = v ? 1 : 0; toggleStatus(row) }"
+              @change="(v: boolean) => toggleStatus(row, v)"
             />
+            <el-tag
+              v-if="runState(row) === 'maintenance'"
+              size="small"
+              type="warning"
+              effect="plain"
+              style="margin-left: 6px"
+            >
+              维护中
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip>
@@ -639,6 +670,14 @@ onMounted(() => {
               :disabled="syncingId !== 0 && syncingId !== row.id"
               @click="syncSite(row.id)"
             >同步</el-button>
+            <el-button
+              link
+              type="warning"
+              :loading="stateLoadingId === row.id"
+              @click="setRunState(row, runState(row) === 'maintenance' ? 'running' : 'maintenance')"
+            >
+              {{ runState(row) === 'maintenance' ? '结束维护' : '维护' }}
+            </el-button>
             <el-button link type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" :icon="Delete" @click="removeRows([row])">删除</el-button>
           </template>

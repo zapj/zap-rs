@@ -165,19 +165,29 @@ fn prune_backup(dir: &Path, kind: &str, keep: usize) {
 
 /// 发布站点配置：写入 sites-available 并在 sites-enabled 建软链（原子替换）。
 pub(super) fn publish(kind: &str, site_id: i64, content: &str) -> Result<PathBuf, String> {
-    publish_in(&root(), kind, site_id, content)
+    publish_named(kind, &vhost_name(site_id), content)
 }
 
-fn publish_in(base: &Path, kind: &str, site_id: i64, content: &str) -> Result<PathBuf, String> {
+/// 按指定文件名发布（面板托管的默认站点等非站点配置也走这里）。
+pub(super) fn publish_named(kind: &str, file_name: &str, content: &str) -> Result<PathBuf, String> {
+    publish_named_in(&root(), kind, file_name, content)
+}
+
+fn publish_named_in(
+    base: &Path,
+    kind: &str,
+    file_name: &str,
+    content: &str,
+) -> Result<PathBuf, String> {
     let (adir, edir) = ensure_dirs_in(base, kind)?;
-    let avail = adir.join(vhost_name(site_id));
-    let tmp = adir.join(format!("{}.tmp", vhost_name(site_id)));
+    let avail = adir.join(file_name);
+    let tmp = adir.join(format!("{file_name}.tmp"));
 
     std::fs::write(&tmp, content).map_err(|e| format!("写入站点配置失败: {e}"))?;
     set_owner(&tmp, 0o640, true);
     std::fs::rename(&tmp, &avail).map_err(|e| format!("发布站点配置失败: {e}"))?;
 
-    let link = edir.join(vhost_name(site_id));
+    let link = edir.join(file_name);
     if !link.is_symlink() && link.exists() {
         // 历史遗留的实体文件（非软链）：删除后重建软链，保证启用/停用语义一致
         let _ = std::fs::remove_file(&link);
@@ -208,20 +218,31 @@ fn unpublish_in(base: &Path, kind: &str, site_id: i64) -> Result<bool, String> {
 
 /// 站点删除：available 与 enabled 一并清理。
 pub(super) fn purge(kind: &str, site_id: i64) -> Result<bool, String> {
-    purge_in(&root(), kind, site_id)
+    purge_named(kind, &vhost_name(site_id))
 }
 
-fn purge_in(base: &Path, kind: &str, site_id: i64) -> Result<bool, String> {
-    let mut removed = unpublish_in(base, kind, site_id)?;
-    let avail = base
-        .join(kind)
-        .join("sites-available")
-        .join(vhost_name(site_id));
+/// 按指定文件名彻底移除（available + enabled）。
+pub(super) fn purge_named(kind: &str, file_name: &str) -> Result<bool, String> {
+    purge_named_in(&root(), kind, file_name)
+}
+
+fn purge_named_in(base: &Path, kind: &str, file_name: &str) -> Result<bool, String> {
+    let mut removed = remove_link(base, kind, file_name)?;
+    let avail = base.join(kind).join("sites-available").join(file_name);
     if avail.exists() {
         std::fs::remove_file(&avail).map_err(|e| format!("移除站点配置失败: {e}"))?;
         removed = true;
     }
     Ok(removed)
+}
+
+fn remove_link(base: &Path, kind: &str, file_name: &str) -> Result<bool, String> {
+    let link = base.join(kind).join("sites-enabled").join(file_name);
+    if !link.is_symlink() && !link.exists() {
+        return Ok(false);
+    }
+    std::fs::remove_file(&link).map_err(|e| format!("移除站点启用软链失败: {e}"))?;
+    Ok(true)
 }
 
 /// 旧布局迁移：`<webserver prefix>/conf/sites-enabled/zap-site-<id>.conf`
@@ -363,7 +384,7 @@ mod tests {
     fn publish_then_unpublish_keeps_available() {
         let t = Tmp::new("pub");
         let base = t.dir.join("webservers");
-        let avail = publish_in(&base, "nginx", 7, "server {}\n").unwrap();
+        let avail = publish_named_in(&base, "nginx", "zap-site-7.conf", "server {}\n").unwrap();
         assert!(avail.ends_with("sites-available/zap-site-7.conf"));
         assert_eq!(std::fs::read_to_string(&avail).unwrap(), "server {}\n");
 
@@ -375,7 +396,7 @@ mod tests {
         assert!(!link.is_symlink(), "停用后软链应移除");
         assert!(avail.exists(), "停用后配置应保留在 sites-available");
 
-        assert!(purge_in(&base, "nginx", 7).unwrap());
+        assert!(purge_named_in(&base, "nginx", "zap-site-7.conf").unwrap());
         assert!(!avail.exists());
     }
 

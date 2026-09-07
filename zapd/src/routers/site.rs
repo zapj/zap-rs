@@ -51,6 +51,7 @@ type SyncOneRow = (
     String,
     String,
     String,
+    String,
     Option<i64>,
     Option<String>,
     Option<String>,
@@ -109,6 +110,9 @@ pub struct SiteUpdatePayload {
     pub ips: Option<Vec<String>>,
     #[serde(default)]
     pub status: Option<i32>,
+    /// 运行状态：running / stopped / maintenance；与 status 同时传时以此为准
+    #[serde(default)]
+    pub run_state: Option<String>,
     #[serde(default)]
     pub remark: Option<String>,
     /// None 表示 PHP 实例保持不变；Some(空串) 表示清除 PHP 实例
@@ -424,6 +428,26 @@ fn like_escape(s: &str) -> String {
         .replace('_', "\\_")
 }
 
+/// 站点运行状态（三态）：running / stopped / maintenance
+pub const RUN_RUNNING: &str = "running";
+pub const RUN_STOPPED: &str = "stopped";
+pub const RUN_MAINTENANCE: &str = "maintenance";
+
+/// 归一化运行状态：非法值返回 None（调用方据此报错）
+fn normalize_run_state(s: &str) -> Option<&'static str> {
+    match s.trim().to_lowercase().as_str() {
+        "running" | "start" => Some(RUN_RUNNING),
+        "stopped" | "stop" => Some(RUN_STOPPED),
+        "maintenance" | "maintain" => Some(RUN_MAINTENANCE),
+        _ => None,
+    }
+}
+
+/// run_state → 兼容用的 status（running/maintenance 视为启用，stopped 为停用）
+fn run_state_to_status(state: &str) -> i32 {
+    if state == RUN_STOPPED { 0 } else { 1 }
+}
+
 /// 冲突提示：管理员看得到占用方站点（便于排查），普通用户只提示被占用，避免信息泄露。
 fn conflict_err(input: &str, hit: &str, site_id: i64, is_admin: bool) -> ZapError {
     if is_admin {
@@ -537,6 +561,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     let mut domain_map: HashMap<i64, Vec<String>> = HashMap::new();
     let mut ip_map: HashMap<i64, Vec<String>> = HashMap::new();
     let mut vh_map: HashMap<i64, String> = HashMap::new();
+    let mut rs_map: HashMap<i64, String> = HashMap::new();
     let mut dir_map: HashMap<i64, (String, String)> = HashMap::new();
     // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
     let mut lu_map: HashMap<i64, String> = HashMap::new();
@@ -566,15 +591,16 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         }
         // vhost 同步状态（独立 map，不进入主行 tuple）
         let vsql = format!(
-            "SELECT id, vhost_state FROM site WHERE id IN ({}) ORDER BY id",
+            "SELECT id, vhost_state, run_state FROM site WHERE id IN ({}) ORDER BY id",
             ph
         );
-        let mut vq = sqlx::query_as::<_, (i64, String)>(&vsql);
+        let mut vq = sqlx::query_as::<_, (i64, String, String)>(&vsql);
         for id in &ids {
             vq = vq.bind(id);
         }
-        for (sid, state) in vq.fetch_all(pool).await? {
+        for (sid, state, run) in vq.fetch_all(pool).await? {
             vh_map.insert(sid, state);
+            rs_map.insert(sid, run);
         }
         // 站点文档根 / 日志目录（独立 map，不进入主行 tuple）
         let dirsql = format!(
@@ -656,6 +682,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
                 "domains": r.9,
                 "ips": r.10,
                 "status": r.3,
+                "run_state": rs_map.get(&r.0).cloned().unwrap_or_else(|| if r.3 == 1 { RUN_RUNNING.to_string() } else { RUN_STOPPED.to_string() }),
                 "vhost_state": vh_map.get(&r.0).cloned().unwrap_or_else(|| "pending".into()),
                 "web_root": dir_map.get(&r.0).map(|d| d.0.clone()).unwrap_or_default(),
                 "log_root": dir_map.get(&r.0).map(|d| d.1.clone()).unwrap_or_default(),
@@ -764,6 +791,12 @@ pub async fn site_add(
     let ips = norm_ips(&payload.ips);
     let name = fallback_name(payload.name.as_deref().unwrap_or(""), &domains);
     let status = payload.status.unwrap_or(1).clamp(0, 1);
+    // 新建站点默认 running；显式传 status=0 时按 stopped 建（保持老行为）
+    let run_state = if status == 0 {
+        RUN_STOPPED
+    } else {
+        RUN_RUNNING
+    };
     let remark = payload.remark.unwrap_or_default().trim().to_string();
     let php_instance = payload.php_instance.unwrap_or_default().trim().to_string();
     if !valid_php_instance(&php_instance) {
@@ -798,13 +831,14 @@ pub async fn site_add(
     let mut tx = pool.begin().await?;
     ensure_domains_unique(&mut tx, &domains, 0, jwt::is_admin(&claims)).await?;
     let r = sqlx::query(
-        "INSERT INTO site (user_id, name, php_instance, status, remark, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO site (user_id, name, php_instance, status, run_state, remark, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(owner)
     .bind(&name)
     .bind(&php_instance)
     .bind(status)
+    .bind(run_state)
     .bind(&remark)
     .bind(now)
     .bind(now)
@@ -930,8 +964,32 @@ pub async fn site_update(
         }
         None => old_name.clone(),
     };
+    // 运行状态：优先用 run_state；只传 status 时按兼容规则映射（0→stopped，1→running）
+    let mut run_state = match &payload.run_state {
+        Some(rs) => normalize_run_state(rs)
+            .ok_or_else(|| {
+                ZapError::New(
+                    -1,
+                    "运行状态仅支持 running / stopped / maintenance".to_string(),
+                )
+            })?
+            .to_string(),
+        None => sqlx::query_scalar::<_, String>("SELECT run_state FROM site WHERE id = ?")
+            .bind(payload.id)
+            .fetch_optional(pool)
+            .await?
+            .filter(|s| normalize_run_state(s).is_some())
+            .unwrap_or_else(|| RUN_RUNNING.to_string()),
+    };
     if let Some(s) = payload.status {
         status = s.clamp(0, 1);
+        if payload.run_state.is_none() {
+            run_state = if status == 0 {
+                RUN_STOPPED.to_string()
+            } else {
+                RUN_RUNNING.to_string()
+            };
+        }
     }
     if let Some(rk) = &payload.remark {
         remark = rk.trim().to_string();
@@ -951,13 +1009,14 @@ pub async fn site_update(
     let now = chrono::Local::now().timestamp();
     let mut tx = pool.begin().await?;
     let r = sqlx::query(
-        "UPDATE site SET user_id = ?, name = ?, php_instance = ?, status = ?, remark = ?, updated_at = ? \
-         WHERE id = ?",
+        "UPDATE site SET user_id = ?, name = ?, php_instance = ?, status = ?, run_state = ?, \
+         remark = ?, updated_at = ? WHERE id = ?",
     )
     .bind(new_owner)
     .bind(&name)
     .bind(&php_instance)
     .bind(status)
+    .bind(run_state)
     .bind(&remark)
     .bind(now)
     .bind(payload.id)
@@ -1123,6 +1182,59 @@ pub struct SiteSyncPayload {
     pub id: i64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SiteStatePayload {
+    pub id: i64,
+    /// running（启动）/ stopped（停止）/ maintenance（维护页）
+    pub state: String,
+}
+
+/// 站点启停 / 维护三态切换：更新状态 → 同步 vhost（停止撤软链、维护发维护页）→ 审计
+pub async fn site_state(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<SiteStatePayload>,
+) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    site_in_scope(&claims, payload.id).await?;
+
+    let state = normalize_run_state(&payload.state).ok_or_else(|| {
+        ZapError::New(
+            -1,
+            "运行状态仅支持 running / stopped / maintenance".to_string(),
+        )
+    })?;
+
+    let pool = db::get_db_pool().await;
+    let status = run_state_to_status(state);
+    let now = chrono::Local::now().timestamp();
+    let r = sqlx::query(
+        "UPDATE site SET run_state = ?, status = ?, vhost_state = 'pending', updated_at = ? WHERE id = ?",
+    )
+    .bind(state)
+    .bind(status)
+    .bind(now)
+    .bind(payload.id)
+    .execute(pool)
+    .await?;
+    if r.rows_affected() == 0 {
+        return Err(ZapError::New(-1, "站点不存在".to_string()));
+    }
+
+    let (msg, data, name, _) = sync_one_site(payload.id).await?;
+
+    let _ = audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "site_state",
+        &format!("id={}", payload.id),
+        &format!("name={} state={} {}", name, state, msg),
+    )
+    .await;
+
+    Ok(Json(json!({ "code": 0, "message": msg, "data": data })))
+}
+
 /// 将站点档案同步为 Nginx vhost：按域名/状态/PHP 实例渲染 conf → nginx -t → reload
 pub async fn site_sync(
     claims: ValidatedClaims,
@@ -1155,7 +1267,7 @@ pub(crate) async fn sync_one_site(
 
     // 站点 + 归属用户（LEFT JOIN：站点可能无主 / 用户已删）
     let row: Option<SyncOneRow> = sqlx::query_as(
-        "SELECT s.name, s.status, s.php_instance, s.web_root, s.log_root,
+        "SELECT s.name, s.status, s.php_instance, s.web_root, s.log_root, s.run_state,
                 u.id, u.home_dir, u.linux_user, u.fpm_pool, u.fpm_spec_ref, u.owner_id
          FROM site s LEFT JOIN user u ON u.id = s.user_id
          WHERE s.id = ?",
@@ -1169,6 +1281,7 @@ pub(crate) async fn sync_one_site(
         php_instance,
         web_root,
         log_root,
+        run_state,
         uid,
         uhome,
         _ulu,
@@ -1256,11 +1369,17 @@ pub(crate) async fn sync_one_site(
 
     let web_root_opt = (!web_root.trim().is_empty()).then_some(web_root);
     let log_root_opt = (!log_root.trim().is_empty()).then_some(log_root);
+    let run_state = normalize_run_state(&run_state).unwrap_or(if status == 1 {
+        RUN_RUNNING
+    } else {
+        RUN_STOPPED
+    });
     let resp = crate::zapexec::call(Request::SiteVhostSync {
         site_id: id,
         name: name.clone(),
         domains,
         enabled: status == 1,
+        mode: Some(run_state.to_string()),
         php_socket,
         web_root: web_root_opt,
         log_root: log_root_opt,
@@ -1282,7 +1401,10 @@ pub(crate) async fn sync_one_site(
         ));
     }
 
-    info!("site sync core: id={} status={}", id, status);
+    info!(
+        "site sync core: id={} status={} run_state={}",
+        id, status, run_state
+    );
     Ok((resp.message, resp.data, name, status))
 }
 
@@ -1461,6 +1583,18 @@ mod tests {
 
         // LIKE 转义：域名里的 _ 不应被当作通配符
         assert_eq!(like_escape("a_b.com"), "a\\_b.com");
+    }
+
+    #[test]
+    fn run_state_normalization_and_status_mapping() {
+        assert_eq!(normalize_run_state("running").unwrap(), "running");
+        assert_eq!(normalize_run_state(" STOP ").unwrap(), "stopped");
+        assert_eq!(normalize_run_state("Maintenance").unwrap(), "maintenance");
+        assert!(normalize_run_state("paused").is_none(), "非法状态应被拒绝");
+
+        assert_eq!(run_state_to_status("running"), 1);
+        assert_eq!(run_state_to_status("maintenance"), 1);
+        assert_eq!(run_state_to_status("stopped"), 0);
     }
 
     #[test]
