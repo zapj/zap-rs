@@ -11,6 +11,7 @@ mod ssh_key;
 mod time;
 mod upgrade;
 mod user;
+mod webconf;
 
 use std::path::PathBuf;
 

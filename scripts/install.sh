@@ -232,6 +232,22 @@ chmod 0660 /etc/zap/zap.yaml
 # chown root:zapadm /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
 # chmod 0640 /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
 
+# ── 站点配置目录（由 zapexec/root 写入，zapd 只读）──────────
+# 与 webserver 安装位置（/usr/local/apps/...）解耦：
+#   sites-available 存放实际配置，sites-enabled 用软链启用/停用站点。
+#   nginx.conf / httpd.conf 首次同步时由 zapexec 幂等注入 include。
+mkdir -p /etc/zap/webservers/nginx/sites-available /etc/zap/webservers/nginx/sites-enabled \
+         /etc/zap/webservers/apache/sites-available /etc/zap/webservers/apache/sites-enabled
+chown root:zapadm /etc/zap/webservers \
+    /etc/zap/webservers/nginx /etc/zap/webservers/nginx/sites-available \
+    /etc/zap/webservers/nginx/sites-enabled \
+    /etc/zap/webservers/apache /etc/zap/webservers/apache/sites-available \
+    /etc/zap/webservers/apache/sites-enabled
+chmod 0750 /etc/zap/webservers /etc/zap/webservers/nginx /etc/zap/webservers/apache \
+    /etc/zap/webservers/nginx/sites-available /etc/zap/webservers/nginx/sites-enabled \
+    /etc/zap/webservers/apache/sites-available /etc/zap/webservers/apache/sites-enabled
+ok "站点配置目录已就绪（/etc/zap/webservers）"
+
 # ── 运行时目录权限（zapd 以 zapadm 运行）────────────────────
 # 面板数据区：zap.db（sqlite 还会写 -wal/-shm）、AppStore、升级包目录都必须可写；
 # 证书改为 zapd 首次启动自行生成，故安装脚本只负责把目录/文件归属准备好。

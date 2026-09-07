@@ -17,7 +17,7 @@ use zap_proto::Response;
 
 use super::root_cmd;
 
-fn zap_path() -> PathBuf {
+pub(super) fn zap_path() -> PathBuf {
     std::env::var("ZAP_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/usr/local/zap"))
@@ -412,17 +412,27 @@ fn vhost_sync_inner(
         }
     };
     let bin = nginx_bin(&conf_file);
-    let vdir = vhosts_dir(&conf_file)?;
-    let vhost_file = vdir.join(format!("zap-site-{site_id}.conf"));
+    // 生效配置统一放 /etc/zap/webservers/nginx/{sites-available,sites-enabled}；
+    // 旧位置（<nginx prefix>/conf/sites-enabled）仅用于一次性迁移。
+    let legacy_dir = vhosts_dir(&conf_file).ok();
+    let edir = super::webconf::enabled_dir("nginx");
+    let avail = super::webconf::available_path("nginx", site_id);
+
+    if let Some(dir) = &legacy_dir {
+        super::webconf::migrate_legacy(dir, "nginx", site_id)?;
+    }
 
     if !enabled {
-        if vhost_file.exists() {
-            std::fs::remove_file(&vhost_file).map_err(|e| format!("移除 vhost 失败: {e}"))?;
+        if super::webconf::unpublish("nginx", site_id)? {
             if nginx_running() {
                 reload_nginx(&bin)?;
             }
+            return Ok(Response::ok(
+                "站点已停用（配置保留在 sites-available，可随时恢复）",
+                None,
+            ));
         }
-        return Ok(Response::ok("站点已停用，vhost 已移除", None));
+        return Ok(Response::ok("站点已停用", None));
     }
 
     // 文档根：优先采用面板入库的 web_root（位于归属用户家目录下）；
@@ -474,18 +484,56 @@ fn vhost_sync_inner(
         error_log.as_deref(),
     );
 
-    std::fs::create_dir_all(&vdir).map_err(|e| format!("创建 vhost 目录失败: {e}"))?;
-    std::fs::write(&vhost_file, &content).map_err(|e| format!("写入 vhost 失败: {e}"))?;
+    // 面板侧快照（渲染源 / 入参 / 历史版本）：失败不影响发布，仅作排障与回滚副本
+    let meta = json!({
+        "site_id": site_id,
+        "name": name,
+        "domains": domains,
+        "web_root": root.to_string_lossy(),
+        "log_root": log_root,
+        "owner_user": owner_user,
+        "php_socket": php_socket,
+        "enabled": enabled,
+    });
+    if let Err(e) = super::webconf::write_snapshot(site_id, "nginx", &content, &meta) {
+        tracing::warn!("写入站点配置快照失败（不影响发布）: {e}");
+    }
 
-    // 校验：失败回滚删除文件，绝不带着坏配置 reload
+    // 主配置幂等注入 include（指向新的 sites-enabled）；返回 true 表示本次改了主配置
+    let injected = super::webconf::ensure_include(&conf_file, &edir, "nginx")?;
+
+    // 发布前保留上一版内容，便于校验失败时回滚
+    let previous = std::fs::read_to_string(&avail).ok();
+    if let Err(e) = super::webconf::publish("nginx", site_id, &content) {
+        if injected {
+            super::webconf::restore_include(&conf_file);
+        }
+        return Err(e);
+    }
+
+    // 校验：失败即回滚（恢复上一版或撤下本次发布），绝不带着坏配置 reload
     if let Err(e) = nginx_test(&bin) {
-        let _ = std::fs::remove_file(&vhost_file);
+        match previous {
+            Some(prev) => {
+                super::webconf::backup_snapshot(site_id, "nginx", &content);
+                let _ = std::fs::write(&avail, prev);
+            }
+            None => {
+                let _ = super::webconf::purge("nginx", site_id);
+            }
+        }
+        if injected {
+            super::webconf::restore_include(&conf_file);
+        }
         return Err(format!("nginx -t 校验失败，已回滚本次配置：\n{e}"));
     }
+    // 通过校验：留一份历史版本用于回滚
+    super::webconf::backup_snapshot(site_id, "nginx", &content);
 
     let data = json!({
         "site_id": site_id,
-        "vhost": vhost_file.to_string_lossy().to_string(),
+        "available": avail.to_string_lossy().to_string(),
+        "enabled": super::webconf::enabled_path("nginx", site_id).to_string_lossy().to_string(),
         "root": root.to_string_lossy().to_string(),
     });
     if nginx_running() {
@@ -505,12 +553,16 @@ pub async fn vhost_remove(site_id: i64, name: String) -> Response {
             return Ok(Response::ok("Nginx 未安装，无需清理", None));
         };
         let bin = nginx_bin(&conf_file);
-        let vdir = vhosts_dir(&conf_file)?;
-        let vhost_file = vdir.join(format!("zap-site-{site_id}.conf"));
-        if !vhost_file.exists() {
+        // 旧布局遗留文件一并清理
+        if let Ok(vdir) = vhosts_dir(&conf_file) {
+            let legacy = vdir.join(super::webconf::vhost_name(site_id));
+            if legacy.exists() {
+                let _ = std::fs::remove_file(&legacy);
+            }
+        }
+        if !super::webconf::purge("nginx", site_id)? {
             return Ok(Response::ok("vhost 不存在，无需清理", None));
         }
-        std::fs::remove_file(&vhost_file).map_err(|e| format!("移除 vhost 失败: {e}"))?;
         if nginx_running() {
             reload_nginx(&bin)?;
         }
