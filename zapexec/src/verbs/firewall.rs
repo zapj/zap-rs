@@ -1,0 +1,755 @@
+//! 防火墙管理（root 执行，白名单动词，不执行任何来自面板的任意命令）。
+//!
+//! 多系统抽象：对外只有「状态 / 放行 / 拒绝 / 删除 / 启停」五种语义，
+//! 内部按后端翻译成具体命令。当前实现 Linux 四种后端：
+//!
+//! ```text
+//! firewalld  firewall-cmd [--permanent] --add-port / --add-rich-rule
+//! ufw        ufw allow|deny ... comment / ufw --force delete <num>
+//! nftables   nft（面板自管 inet zap_fw 表，避免改动系统既有规则集）
+//! iptables   iptables -I/-D INPUT（按行号）
+//! ```
+//!
+//! 后续 FreeBSD 只需在 `Backend` 增加 `Pf` / `Ipfw` 并在各操作里加分支，
+//! 路由层（zapd）与前端无需改动。
+//!
+//! 后端选择：正在运行的优先；都没运行时按 firewalld > ufw > nftables > iptables
+//! 取已安装的那个，避免把规则写到没启用的后端上。
+
+use serde_json::{Value, json};
+
+use super::root_cmd;
+use zap_proto::Response;
+
+// ── 后端探测 ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Backend {
+    Firewalld,
+    Ufw,
+    Nftables,
+    Iptables,
+    /// 后续扩展：FreeBSD pf / ipfw
+    Pf,
+    Ipfw,
+    Unsupported,
+}
+
+impl Backend {
+    fn name(self) -> &'static str {
+        match self {
+            Backend::Firewalld => "firewalld",
+            Backend::Ufw => "ufw",
+            Backend::Nftables => "nftables",
+            Backend::Iptables => "iptables",
+            Backend::Pf => "pf",
+            Backend::Ipfw => "ipfw",
+            Backend::Unsupported => "none",
+        }
+    }
+
+    /// 对应 systemd 服务名（ufw 也是 systemd 单元；iptables/nft 无服务时返回空）
+    fn service(self) -> Option<&'static str> {
+        match self {
+            Backend::Firewalld => Some("firewalld"),
+            Backend::Ufw => Some("ufw"),
+            Backend::Nftables => Some("nftables"),
+            Backend::Iptables => Some("iptables"),
+            _ => None,
+        }
+    }
+}
+
+fn cmd_ok(program: &str, args: &[&str]) -> bool {
+    root_cmd(program)
+        .args(args)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn cmd_out(program: &str, args: &[&str]) -> String {
+    root_cmd(program)
+        .args(args)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default()
+}
+
+fn has_cmd(name: &str) -> bool {
+    cmd_ok("which", &[name])
+}
+
+fn service_active(name: &str) -> bool {
+    cmd_ok("systemctl", &["is-active", "--quiet", name])
+}
+
+fn service_enabled(name: &str) -> bool {
+    cmd_ok("systemctl", &["is-enabled", "--quiet", name])
+}
+
+/// 探测可用的防火墙后端：正在运行的优先，其次按优先级取已安装的。
+fn detect() -> Backend {
+    // 1) 正在运行的优先（避免写到没启用的后端上）
+    for b in [
+        Backend::Firewalld,
+        Backend::Ufw,
+        Backend::Nftables,
+        Backend::Iptables,
+    ] {
+        if let Some(svc) = b.service()
+            && service_active(svc)
+        {
+            return b;
+        }
+    }
+    // 2) 都没运行：按优先级取已安装的命令
+    if has_cmd("firewall-cmd") {
+        return Backend::Firewalld;
+    }
+    if has_cmd("ufw") {
+        return Backend::Ufw;
+    }
+    if has_cmd("nft") {
+        return Backend::Nftables;
+    }
+    if has_cmd("iptables") {
+        return Backend::Iptables;
+    }
+    // 3) 未来：FreeBSD
+    if cfg!(target_os = "freebsd") {
+        return if has_cmd("pfctl") {
+            Backend::Pf
+        } else if has_cmd("ipfw") {
+            Backend::Ipfw
+        } else {
+            Backend::Unsupported
+        };
+    }
+    Backend::Unsupported
+}
+
+// ── 统一规则结构 ────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+struct Rule {
+    /// 各后端自解释的删除标识（firewalld=port:80/tcp 或 rich:<rule>；ufw=序号；
+    /// nftables=handle；iptables=行号）
+    id: String,
+    port: u16,
+    proto: String,
+    action: String,
+    source: String,
+    comment: String,
+}
+
+fn rule_json(r: &Rule, protected: bool) -> Value {
+    json!({
+        "id": r.id,
+        "port": r.port,
+        "proto": r.proto,
+        "action": r.action,
+        "source": r.source,
+        "comment": r.comment,
+        "protected": protected,
+    })
+}
+
+// ── 各后端实现 ──────────────────────────────────────────────
+
+fn firewalld_rules() -> Vec<Rule> {
+    let mut out = Vec::new();
+    for tok in cmd_out("firewall-cmd", &["--list-ports"]).split_whitespace() {
+        let t = tok.trim().to_string();
+        if let Some((p, proto)) = t.split_once('/') {
+            out.push(Rule {
+                id: format!("port:{t}"),
+                port: p.parse().unwrap_or(0),
+                proto: proto.to_string(),
+                action: "accept".to_string(),
+                source: String::new(),
+                comment: String::new(),
+            });
+        }
+    }
+    for line in cmd_out("firewall-cmd", &["--list-rich-rules"]).lines() {
+        let raw = line.trim().trim_matches('\'').to_string();
+        if raw.is_empty() {
+            continue;
+        }
+        let port = raw
+            .split("port port=\"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let proto = raw
+            .split("protocol=\"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .unwrap_or("tcp")
+            .to_string();
+        let source = raw
+            .split("source address=\"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .unwrap_or("")
+            .to_string();
+        let action = if raw.contains("reject") || raw.contains("drop") {
+            "drop"
+        } else {
+            "accept"
+        }
+        .to_string();
+        out.push(Rule {
+            id: format!("rich:{raw}"),
+            port,
+            proto,
+            action,
+            source,
+            comment: String::new(),
+        });
+    }
+    out
+}
+
+fn ufw_rules() -> Vec<Rule> {
+    // 形如：[ 1] 80/tcp                     ALLOW IN    Anywhere
+    let mut out = Vec::new();
+    for line in cmd_out("ufw", &["status", "numbered"]).lines() {
+        let l = line.trim();
+        let Some(rest) = l.strip_prefix('[') else {
+            continue;
+        };
+        let Some((num, body)) = rest.split_once(']') else {
+            continue;
+        };
+        let num = num.trim().to_string();
+        if num.is_empty() {
+            continue;
+        }
+        let body = body.trim();
+        let action = if body.contains("DENY") || body.contains("REJECT") {
+            "drop"
+        } else {
+            "accept"
+        }
+        .to_string();
+        // 第一个字段通常是 80/tcp 或 80
+        let first = body.split_whitespace().next().unwrap_or("");
+        let (port, proto) = match first.split_once('/') {
+            Some((p, pr)) => (p.parse().unwrap_or(0), pr.to_string()),
+            None => (first.parse().unwrap_or(0), "tcp".to_string()),
+        };
+        let source = body
+            .split(" from ")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .unwrap_or("")
+            .to_string();
+        let source = if source == "Anywhere" {
+            String::new()
+        } else {
+            source
+        };
+        out.push(Rule {
+            id: num,
+            port,
+            proto,
+            action,
+            source,
+            comment: String::new(),
+        });
+    }
+    out
+}
+
+fn nft_rules() -> Vec<Rule> {
+    // 面板自管链：inet zap_fw input（不存在时视为空）
+    let mut out = Vec::new();
+    for line in cmd_out("nft", &["-a", "list", "chain", "inet", "zap_fw", "input"]).lines() {
+        let l = line.trim();
+        if !l.contains("dport") {
+            continue;
+        }
+        let handle = l
+            .split("# handle ")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .unwrap_or("")
+            .to_string();
+        let port = l
+            .split("dport ")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let proto = if l.contains("udp dport") {
+            "udp"
+        } else {
+            "tcp"
+        }
+        .to_string();
+        let action = if l.contains("accept") {
+            "accept"
+        } else {
+            "drop"
+        }
+        .to_string();
+        let source = l
+            .split("saddr ")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .unwrap_or("")
+            .to_string();
+        out.push(Rule {
+            id: handle,
+            port,
+            proto,
+            action,
+            source,
+            comment: String::new(),
+        });
+    }
+    out
+}
+
+fn iptables_rules() -> Vec<Rule> {
+    // 只看 INPUT 链里带 dport 的规则，取行号作为删除 id
+    let mut out = Vec::new();
+    for line in cmd_out("iptables", &["-L", "INPUT", "-n", "--line-numbers"]).lines() {
+        let l = line.trim();
+        if !l.contains("dpt:") {
+            continue;
+        }
+        let mut it = l.split_whitespace();
+        let num = it.next().unwrap_or("").to_string();
+        if !num.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let action = it.next().unwrap_or("").to_lowercase();
+        let action = if action.contains("accept") {
+            "accept"
+        } else {
+            "drop"
+        }
+        .to_string();
+        let proto = if l.contains(" udp ") { "udp" } else { "tcp" }.to_string();
+        let port = l
+            .split("dpt:")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let source = it.next().unwrap_or("0.0.0.0/0").to_string();
+        let source = if source == "0.0.0.0/0" {
+            String::new()
+        } else {
+            source
+        };
+        out.push(Rule {
+            id: num,
+            port,
+            proto,
+            action,
+            source,
+            comment: String::new(),
+        });
+    }
+    out
+}
+
+fn list_rules(b: Backend) -> Vec<Rule> {
+    match b {
+        Backend::Firewalld => firewalld_rules(),
+        Backend::Ufw => ufw_rules(),
+        Backend::Nftables => nft_rules(),
+        Backend::Iptables => iptables_rules(),
+        _ => Vec::new(),
+    }
+}
+
+// ── 动作 ────────────────────────────────────────────────────
+
+fn firewalld_apply(r: &Rule) -> Result<(), String> {
+    if r.action == "accept" && r.source.is_empty() {
+        let port = format!("{}/{}", r.port, r.proto);
+        if !cmd_ok("firewall-cmd", &["--permanent", "--add-port", &port]) {
+            return Err("firewall-cmd --add-port 执行失败".to_string());
+        }
+    } else {
+        let verb = if r.action == "accept" {
+            "accept"
+        } else {
+            "reject"
+        };
+        let src = if r.source.is_empty() {
+            String::new()
+        } else {
+            format!(" source address=\"{}\"", r.source)
+        };
+        let rule = format!(
+            "rule family=\"ipv4\"{} port port=\"{}\" protocol=\"{}\" {}",
+            src, r.port, r.proto, verb
+        );
+        if !cmd_ok("firewall-cmd", &["--permanent", "--add-rich-rule", &rule]) {
+            return Err("firewall-cmd --add-rich-rule 执行失败".to_string());
+        }
+    }
+    if !cmd_ok("firewall-cmd", &["--reload"]) {
+        return Err("firewall-cmd --reload 执行失败".to_string());
+    }
+    Ok(())
+}
+
+fn ufw_apply(r: &Rule) -> Result<(), String> {
+    let verb = if r.action == "accept" {
+        "allow"
+    } else {
+        "deny"
+    };
+    let mut args: Vec<String> = vec![verb.to_string()];
+    if !r.source.is_empty() {
+        args.push("from".to_string());
+        args.push(r.source.clone());
+        args.push("to".to_string());
+        args.push("any".to_string());
+    }
+    args.push("port".to_string());
+    args.push(r.port.to_string());
+    if !r.proto.is_empty() {
+        args.push("proto".to_string());
+        args.push(r.proto.clone());
+    }
+    if !r.comment.is_empty() {
+        args.push("comment".to_string());
+        args.push(r.comment.replace(' ', "_"));
+    }
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    if !cmd_ok("ufw", &refs) {
+        return Err(format!("ufw {} 执行失败", verb));
+    }
+    Ok(())
+}
+
+fn nft_apply(r: &Rule) -> Result<(), String> {
+    // 面板自管表/链，避免污染系统既有规则集
+    let _ = root_cmd("nft")
+        .args(["add", "table", "inet", "zap_fw"])
+        .output();
+    let _ = root_cmd("nft")
+        .args([
+            "add",
+            "chain",
+            "inet",
+            "zap_fw",
+            "input",
+            "{ type filter hook input priority 0 ; }",
+        ])
+        .output();
+    let action = if r.action == "accept" {
+        "accept"
+    } else {
+        "drop"
+    };
+    let mut expr = String::new();
+    if !r.source.is_empty() {
+        expr.push_str(&format!("ip saddr {} ", r.source));
+    }
+    expr.push_str(&format!("{} dport {} {}", r.proto, r.port, action));
+    let out = root_cmd("nft")
+        .args(["add", "rule", "inet", "zap_fw", "input", &expr])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => Err(format!(
+            "nft 执行失败: {}",
+            String::from_utf8_lossy(&o.stderr)
+        )),
+        Err(e) => Err(format!("nft 执行失败: {e}")),
+    }
+}
+
+fn iptables_apply(r: &Rule) -> Result<(), String> {
+    let target = if r.action == "accept" {
+        "ACCEPT"
+    } else {
+        "DROP"
+    };
+    let mut args: Vec<String> = vec![
+        "-I".to_string(),
+        "INPUT".to_string(),
+        "1".to_string(),
+        "-p".to_string(),
+        r.proto.clone(),
+        "--dport".to_string(),
+        r.port.to_string(),
+    ];
+    if !r.source.is_empty() {
+        args.push("-s".to_string());
+        args.push(r.source.clone());
+    }
+    args.push("-j".to_string());
+    args.push(target.to_string());
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    if !cmd_ok("iptables", &refs) {
+        return Err("iptables 执行失败".to_string());
+    }
+    Ok(())
+}
+
+fn apply_rule(b: Backend, r: &Rule) -> Result<(), String> {
+    match b {
+        Backend::Firewalld => firewalld_apply(r),
+        Backend::Ufw => ufw_apply(r),
+        Backend::Nftables => nft_apply(r),
+        Backend::Iptables => iptables_apply(r),
+        _ => Err(format!(
+            "当前系统（{}）暂不支持该操作",
+            std::env::consts::OS
+        )),
+    }
+}
+
+fn delete_rule(b: Backend, id: &str) -> Result<(), String> {
+    match b {
+        Backend::Firewalld => {
+            let ok = if let Some(port) = id.strip_prefix("port:") {
+                cmd_ok("firewall-cmd", &["--permanent", "--remove-port", port])
+            } else if let Some(rule) = id.strip_prefix("rich:") {
+                cmd_ok("firewall-cmd", &["--permanent", "--remove-rich-rule", rule])
+            } else {
+                false
+            };
+            if !ok {
+                return Err("firewall-cmd 删除规则失败".to_string());
+            }
+            if !cmd_ok("firewall-cmd", &["--reload"]) {
+                return Err("firewall-cmd --reload 执行失败".to_string());
+            }
+            Ok(())
+        }
+        Backend::Ufw => {
+            if cmd_ok("ufw", &["--force", "delete", id]) {
+                Ok(())
+            } else {
+                Err("ufw 删除规则失败".to_string())
+            }
+        }
+        Backend::Nftables => {
+            let out = root_cmd("nft")
+                .args(["delete", "rule", "inet", "zap_fw", "input", "handle", id])
+                .output();
+            match out {
+                Ok(o) if o.status.success() => Ok(()),
+                Ok(o) => Err(format!(
+                    "nft 删除失败: {}",
+                    String::from_utf8_lossy(&o.stderr)
+                )),
+                Err(e) => Err(format!("nft 删除失败: {e}")),
+            }
+        }
+        Backend::Iptables => {
+            if cmd_ok("iptables", &["-D", "INPUT", id]) {
+                Ok(())
+            } else {
+                Err("iptables 删除规则失败".to_string())
+            }
+        }
+        _ => Err(format!(
+            "当前系统（{}）暂不支持该操作",
+            std::env::consts::OS
+        )),
+    }
+}
+
+fn toggle_service(b: Backend, action: &str) -> Result<(), String> {
+    let Some(svc) = b.service() else {
+        return Err(format!("后端 {} 无对应服务可{}", b.name(), action));
+    };
+    if !cmd_ok("systemctl", &[action, svc]) {
+        return Err(format!("systemctl {action} {svc} 执行失败"));
+    }
+    Ok(())
+}
+
+// ── 对外的纯函数（便于单测） ────────────────────────────────
+
+/// 规则是否命中面板自身端口（受保护，不允许拒绝/删除导致把自己锁在外面）
+pub(super) fn hits_panel_port(rule_port: u16, panel_port: u16) -> bool {
+    panel_port > 0 && rule_port == panel_port
+}
+
+fn validate_rule_input(port: u16, proto: &str, action: &str, source: &str) -> Result<(), String> {
+    if port == 0 {
+        return Err("端口必须在 1 - 65535 之间".to_string());
+    }
+    if !matches!(proto, "tcp" | "udp") {
+        return Err("协议仅支持 tcp / udp".to_string());
+    }
+    if !matches!(action, "accept" | "drop") {
+        return Err("动作仅支持 accept / drop".to_string());
+    }
+    validate_source(source)?;
+    Ok(())
+}
+
+/// 来源校验：空串（不限）或单个 IPv4/IPv6 地址 / CIDR
+fn validate_source(source: &str) -> Result<(), String> {
+    let s = source.trim();
+    if s.is_empty() {
+        return Ok(());
+    }
+    if s.chars()
+        .any(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '/')))
+    {
+        return Err("来源地址不合法（支持 IP 或 CIDR）".to_string());
+    }
+    let addr = s.split('/').next().unwrap_or("");
+    if addr.parse::<std::net::IpAddr>().is_err() {
+        return Err("来源地址不合法（支持 IP 或 CIDR）".to_string());
+    }
+    if let Some((_, mask)) = s.split_once('/')
+        && mask.parse::<u8>().is_err()
+    {
+        return Err("来源地址掩码不合法".to_string());
+    }
+    Ok(())
+}
+
+// ── handlers ────────────────────────────────────────────────
+
+pub async fn status(panel_port: u16) -> Response {
+    let b = detect();
+    if b == Backend::Unsupported {
+        return Response::ok(
+            "未检测到受支持的防火墙（firewalld / ufw / nftables / iptables）",
+            Some(json!({
+                "backend": "none",
+                "active": false,
+                "enabled": false,
+                "panel_port": panel_port,
+                "rules": [],
+            })),
+        );
+    }
+    let svc = b.service();
+    let active = svc.is_some_and(service_active);
+    let enabled = svc.is_some_and(service_enabled);
+    let rules: Vec<Value> = list_rules(b)
+        .iter()
+        .map(|r| rule_json(r, hits_panel_port(r.port, panel_port)))
+        .collect();
+    Response::ok(
+        "OK",
+        Some(json!({
+            "backend": b.name(),
+            "active": active,
+            "enabled": enabled,
+            "panel_port": panel_port,
+            "rules": rules,
+        })),
+    )
+}
+
+pub async fn rule_add(
+    port: u16,
+    proto: String,
+    action: String,
+    source: String,
+    comment: String,
+    panel_port: u16,
+) -> Response {
+    let proto = proto.trim().to_lowercase();
+    let action = action.trim().to_lowercase();
+    let source = source.trim().to_string();
+    if let Err(e) = validate_rule_input(port, &proto, &action, &source) {
+        return Response::err(-1, e);
+    }
+    // 自杀保护：不允许对面板端口下 drop 规则
+    if action != "accept" && hits_panel_port(port, panel_port) {
+        return Response::err(
+            -1,
+            format!("端口 {port} 是面板监听端口，拒绝在此端口上添加 drop/reject 规则"),
+        );
+    }
+    let rule = Rule {
+        id: String::new(),
+        port,
+        proto,
+        action,
+        source,
+        comment: comment.trim().to_string(),
+    };
+    match apply_rule(detect(), &rule) {
+        Ok(()) => Response::ok("规则已添加", None),
+        Err(e) => Response::err(-1, e),
+    }
+}
+
+pub async fn rule_delete(id: String, panel_port: u16) -> Response {
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        return Response::err(-1, "缺少规则 id".to_string());
+    }
+    let b = detect();
+    // 自杀保护：不允许删除面板端口的放行规则
+    let blocked = list_rules(b)
+        .iter()
+        .any(|r| r.id == id && r.action == "accept" && hits_panel_port(r.port, panel_port));
+    if blocked {
+        return Response::err(
+            -1,
+            format!("端口 {panel_port} 是面板监听端口，已阻止删除该放行规则"),
+        );
+    }
+    match delete_rule(b, &id) {
+        Ok(()) => Response::ok("规则已删除", None),
+        Err(e) => Response::err(-1, e),
+    }
+}
+
+pub async fn toggle(action: String) -> Response {
+    let action = action.trim().to_lowercase();
+    if !matches!(action.as_str(), "start" | "stop" | "enable" | "disable") {
+        return Response::err(-1, "动作仅支持 start / stop / enable / disable".to_string());
+    }
+    let b = detect();
+    match toggle_service(b, &action) {
+        Ok(()) => Response::ok(format!("防火墙已{action}"), None),
+        Err(e) => Response::err(-1, e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_port_protection() {
+        assert!(hits_panel_port(2600, 2600));
+        assert!(!hits_panel_port(80, 2600));
+        // 未配置面板端口时不保护任何规则
+        assert!(!hits_panel_port(2600, 0));
+    }
+
+    #[test]
+    fn rule_input_validation() {
+        assert!(validate_rule_input(80, "tcp", "accept", "").is_ok());
+        assert!(validate_rule_input(80, "tcp", "accept", "1.2.3.4").is_ok());
+        assert!(validate_rule_input(80, "tcp", "accept", "10.0.0.0/8").is_ok());
+        assert!(validate_rule_input(0, "tcp", "accept", "").is_err());
+        assert!(validate_rule_input(80, "sctp", "accept", "").is_err());
+        assert!(validate_rule_input(80, "tcp", "reject", "").is_err());
+        assert!(validate_rule_input(80, "tcp", "accept", "not-an-ip").is_err());
+        // 来源里混入 shell 元字符必须被拒
+        assert!(validate_rule_input(80, "tcp", "accept", "1.2.3.4; rm -rf /").is_err());
+    }
+
+    #[test]
+    fn backend_names() {
+        assert_eq!(Backend::Firewalld.name(), "firewalld");
+        assert_eq!(Backend::Ufw.service(), Some("ufw"));
+        assert_eq!(Backend::Unsupported.name(), "none");
+    }
+}

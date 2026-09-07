@@ -1,6 +1,7 @@
 mod appstore;
 mod env;
 mod file;
+mod firewall;
 mod network;
 mod php;
 mod process;
@@ -159,6 +160,19 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             .await
         }
         Request::SiteVhostRemove { site_id, name } => site::vhost_remove(site_id, name).await,
+        Request::FirewallStatus { panel_port } => firewall::status(panel_port).await,
+        Request::FirewallRuleAdd {
+            port,
+            proto,
+            action,
+            source,
+            comment,
+            panel_port,
+        } => firewall::rule_add(port, proto, action, source, comment, panel_port).await,
+        Request::FirewallRuleDelete { id, panel_port } => {
+            firewall::rule_delete(id, panel_port).await
+        }
+        Request::FirewallToggle { action } => firewall::toggle(action).await,
         Request::EnvDetect => env::detect().await,
         Request::UserHomeInit { home_dir, owner } => {
             user::home_init(&home_dir, owner.as_deref()).await

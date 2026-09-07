@@ -202,6 +202,12 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         component: () => import('@/views/server/ip/index.vue'),
         meta: { title: 'IP 设置', icon: 'ep:postcard', affix: true },
       },
+      {
+        path: 'firewall',
+        name: 'ServerFirewall',
+        component: () => import('@/views/server/firewall/index.vue'),
+        meta: { title: '防火墙', icon: 'ep:lock', affix: true },
+      },
     ],
   },
   // 服务器状态

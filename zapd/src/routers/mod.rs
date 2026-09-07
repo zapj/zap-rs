@@ -55,6 +55,7 @@ pub mod system_config;
 pub mod system_cron;
 pub mod system_env;
 pub mod system_file;
+pub mod system_firewall;
 pub mod system_info;
 pub mod system_ip;
 pub mod system_job;
@@ -272,6 +273,23 @@ fn api_routers() -> Router {
         .route(
             "/system/config/time/timezones",
             get(system_config::list_timezones),
+        )
+        // 防火墙设置（服务器配置 → 防火墙，admin only）
+        .route(
+            "/system/config/firewall",
+            get(system_firewall::firewall_status),
+        )
+        .route(
+            "/system/config/firewall/rule/add",
+            post(system_firewall::firewall_rule_add),
+        )
+        .route(
+            "/system/config/firewall/rule/delete",
+            post(system_firewall::firewall_rule_delete),
+        )
+        .route(
+            "/system/config/firewall/toggle",
+            post(system_firewall::firewall_toggle),
         )
         .route("/system/config/network", get(system_config::network_get))
         .route(

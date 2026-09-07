@@ -296,11 +296,13 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (76, 7, 'server-ip', 'ip', 'server/ip/index', 'menu', 'IP 设置', 'ep:postcard', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (77, 7, 'server-env', 'env', 'server/env/index', 'menu', '运行环境', 'ep:magic-stick', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (80, 7, 'server-firewall', 'firewall', 'server/firewall/index', 'menu', '防火墙', 'ep:lock', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (78, 7, 'server-entities', 'entities', 'server/entities/index', 'menu', '同步运行环境', 'ep:user-filled', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (77, 7, 'server-env', 'env', 'server/env/index', 'menu', '运行环境', 'ep:magic-stick', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (79, 7, 'server-migrate', 'migrate', 'server/migrate/index', 'menu', '数据迁移', 'ep:sort', 1, 'admin', 9, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (78, 7, 'server-entities', 'entities', 'server/entities/index', 'menu', '同步运行环境', 'ep:user-filled', 1, 'admin', 9, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (79, 7, 'server-migrate', 'migrate', 'server/migrate/index', 'menu', '数据迁移', 'ep:sort', 1, 'admin', 10, 1, strftime('%s','now'), strftime('%s','now'));
 
     -- Terminal（Layout 包裹 + 一级直链：单个子菜单）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
@@ -448,6 +450,7 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 74);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 75);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 76);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 80);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 77);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 78);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 79);

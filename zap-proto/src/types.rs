@@ -250,6 +250,41 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         owner_user: Option<String>,
     },
+    /// 防火墙状态：探测后端（firewalld / ufw / nftables / iptables）并返回规则列表
+    #[serde(rename = "firewall.status")]
+    FirewallStatus {
+        /// 面板自身监听端口（用于标记"受保护"规则，避免把自己锁在外面）
+        panel_port: u16,
+    },
+    /// 新增防火墙规则（放行 / 拒绝）
+    #[serde(rename = "firewall.rule_add")]
+    FirewallRuleAdd {
+        /// 1 - 65535
+        port: u16,
+        /// tcp | udp
+        proto: String,
+        /// accept | drop
+        action: String,
+        /// 来源地址（IP 或 CIDR）；空串表示不限制来源
+        #[serde(default)]
+        source: String,
+        /// 备注（firewalld 写入 rich rule / ufw 写入 comment）
+        #[serde(default)]
+        comment: String,
+        /// 面板自身监听端口（用于拒绝"拒绝面板端口"这类自杀式操作）
+        panel_port: u16,
+    },
+    /// 删除防火墙规则（id 由 status 返回，按后端语义解析）
+    #[serde(rename = "firewall.rule_delete")]
+    FirewallRuleDelete {
+        id: String,
+        /// 面板自身监听端口
+        panel_port: u16,
+    },
+    /// 防火墙服务启停 / 开机自启：action = start | stop | enable | disable
+    #[serde(rename = "firewall.toggle")]
+    FirewallToggle { action: String },
+
     /// 移除站点 Nginx vhost（站点删除时清理，幂等）
     #[serde(rename = "site.vhost_remove")]
     SiteVhostRemove { site_id: i64, name: String },
