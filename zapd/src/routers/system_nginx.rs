@@ -6,6 +6,7 @@
 //! - GET  /system/nginx/config/content    读取指定配置内容（Query: path）
 //! - POST /system/nginx/config/save       保存配置（备份 → 写入 → nginx -t → 回滚/重载）
 //! - POST /system/nginx/control           服务控制 start/stop/restart/reload
+//! - POST /system/nginx/default-vhost     设置默认站点（IP 访问开关）{ enable }
 
 use std::net::SocketAddr;
 
@@ -124,6 +125,36 @@ pub async fn nginx_control(
             "nginx_control",
             "nginx",
             &format!("Nginx 服务操作 {}", body.action),
+        )
+        .await;
+    }
+    result
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NginxDefaultVhostBody {
+    pub enable: bool,
+}
+
+/// POST /system/nginx/default-vhost
+pub async fn nginx_default_vhost(
+    claims: ValidatedClaims,
+    client_addr: Extension<SocketAddr>,
+    Json(body): Json<NginxDefaultVhostBody>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    let result = exec(Request::NginxDefaultVhost { enable: body.enable }).await;
+    if result.is_ok() {
+        audit::log(
+            Some(&claims),
+            Some(client_addr.ip().to_string().as_str()),
+            "nginx_default_vhost",
+            "nginx",
+            if body.enable {
+                "开启默认站点（IP / 未匹配域名显示欢迎页）"
+            } else {
+                "关闭默认站点（IP / 未匹配域名直接断开）"
+            },
         )
         .await;
     }

@@ -57,6 +57,37 @@
     </el-card>
 
     <template v-if="installed">
+      <!-- 默认站点（IP / 未匹配域名兜底） -->
+      <el-card shadow="never" class="mt-3 default-vhost">
+        <div class="dvh-row">
+          <div class="dvh-left">
+            <div class="dvh-title">
+              默认站点（IP / 未绑定域名访问）
+              <el-tag size="small" :type="ipAccess ? 'success' : 'info'">
+                {{ ipAccess ? 'IP 访问已开启' : 'IP 访问已关闭' }}
+              </el-tag>
+            </div>
+            <div class="dvh-desc">
+              未绑定任何站点域名的请求（如通过服务器 IP 直接访问）的兜底行为：关闭时直接断开连接（返回
+              444，避免被其它站点按 default_server 接走造成串站）；开启后展示默认欢迎页。
+            </div>
+            <div v-if="ipAccess && status.default_page" class="dvh-path mono">
+              欢迎页文件（可直接编辑定制内容）：{{ status.default_page }}
+            </div>
+          </div>
+          <div class="dvh-right">
+            <el-switch
+              v-model="ipAccess"
+              :loading="savingDefaultVhost"
+              inline-prompt
+              active-text="开启"
+              inactive-text="关闭"
+              @change="saveDefaultVhost"
+            />
+          </div>
+        </div>
+      </el-card>
+
       <el-tabs v-model="mode" type="border-card" class="mt-3">
         <!-- 可视化配置 -->
         <el-tab-pane label="可视化配置" name="visual">
@@ -171,6 +202,7 @@ import {
   listNginxConfs,
   readNginxConf,
   saveNginxConf,
+  setNginxDefaultVhost,
   type NginxConfFile,
   type NginxStatus,
 } from '@/api/serverNginx.ts'
@@ -189,6 +221,33 @@ const versionText = computed(() => {
   const m = (status.value.version || '').match(/nginx\/([\d.]+)/)
   return m ? m[1] : (status.value.version || '-')
 })
+
+/* ---------- 默认站点（IP 访问） ---------- */
+const savingDefaultVhost = ref(false)
+const ipAccess = computed<boolean>({
+  get: () => status.value.default_ip_access ?? false,
+  set: (v: boolean) => {
+    status.value.default_ip_access = v
+  },
+})
+
+async function saveDefaultVhost(v: boolean | string | number) {
+  const enable = !!v
+  savingDefaultVhost.value = true
+  try {
+    const res = await setNginxDefaultVhost(enable)
+    ElMessage.success(
+      (enable ? '已开启默认站点（IP 访问展示欢迎页）' : '已关闭默认站点（IP 访问直接断开）') +
+        (res.data?.reason ? `，${res.data.reason}` : '，nginx -t 校验通过并已重载'),
+    )
+    await refreshStatus()
+  } catch {
+    /* interceptor：设置失败时刷新状态回退开关 */
+    await refreshStatus()
+  } finally {
+    savingDefaultVhost.value = false
+  }
+}
 
 /* ---------- 可视化 ---------- */
 interface FieldDef {
@@ -555,5 +614,34 @@ onMounted(refreshAll)
   color: var(--el-text-color-secondary);
   border-top: 1px solid var(--el-border-color-lighter);
   line-height: 1.6;
+}
+
+/* 默认站点（IP 访问） */
+.dvh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.dvh-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.dvh-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.7;
+  max-width: 720px;
+}
+.dvh-path {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  word-break: break-all;
 }
 </style>

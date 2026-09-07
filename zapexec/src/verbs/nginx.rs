@@ -4,9 +4,11 @@
 //! 「服务器状态 → Nginx Server」两个页面的后端能力：
 //!
 //! - 状态探测：安装位置 / 版本 / 主配置路径 / 运行态（systemd 或 pid）
-//! - 配置读写：仅允许操作主配置及其 conf 目录树内的 `*.conf`
-//!   （面板托管的站点 vhost 位于 `/etc/zap/webservers`，不在白名单内；
-//!    文件名以 `zap-` 开头的历史遗留配置也排除，避免误改托管文件）
+//! - 配置读写：`<nginx prefix>/conf` 目录内的文件均可编辑（含 `mime.types`、
+//!   `fastcgi_params` 等无 `.conf` 后缀的 include 数据文件）；主配置
+//!   include 指令（`conf.d/*.conf`、`sites-enabled/*.conf` 等）指向 conf 目录树外的
+//!   目标目录时，仅放行其中的 `*.conf`
+//!   （面板托管的站点 vhost 以 `zap-` 开头被排除，避免误改托管文件）
 //! - 保存链路：备份 → 写入 → `nginx -t` 校验 → 失败自动回滚 → 运行中则重载
 //! - 服务控制：start / stop / restart / reload（优先 systemd unit `nginx`）
 
@@ -21,7 +23,7 @@ use super::site;
 /// 单个配置文件体积上限（读取与写入共用，防止意外读取超大文件拖垮连接）。
 const MAX_CONF_BYTES: u64 = 2 * 1024 * 1024;
 
-/// 从 conf 目录树内收集 *.conf 的最大深度（conf/、conf/conf.d/ 等两层足够）。
+/// 从 conf 目录树内收集可编辑配置文件的最大深度（conf/、conf/conf.d/ 等两层足够）。
 const SCAN_DEPTH: usize = 2;
 
 // ── 探测与工具 ─────────────────────────────────────────────
@@ -106,8 +108,8 @@ fn settle_running(want: bool, tries: u32) -> bool {
     site::nginx_running()
 }
 
-/// 校验路径属于可编辑白名单：主配置本身，或主配置 conf 目录内的 *.conf
-/// （排除 zap 托管前缀与备份/临时文件）。
+/// 校验路径属于可编辑白名单：主配置本身、其 conf 目录树内的任意文件，
+/// 或主配置 include 指向目录内的 *.conf（排除 zap 托管前缀与备份/临时文件）。
 fn validate_conf_path(raw: &str) -> Result<(PathBuf, PathBuf, bool), String> {
     let Some((conf, bin)) = probe() else {
         return Err("Nginx 未安装或未探测到主配置，请先在应用商店安装 Nginx".to_string());
@@ -129,27 +131,34 @@ fn validate_conf_path(raw: &str) -> Result<(PathBuf, PathBuf, bool), String> {
     if is_main {
         return Ok((main_canon, bin, true));
     }
-    // 非主配置：必须位于 conf 目录树内、.conf 结尾、非托管前缀
+    // 非主配置：conf 目录树内的文件均可编辑（mime.types / fastcgi_params 等）；
+    // 主配置 include（conf.d / sites-enabled 等）指向 conf 目录树外的目录，仅放行 *.conf
     let conf_dir_canon = conf_dir
         .canonicalize()
         .map_err(|e| format!("conf 目录不可访问: {e}"))?;
-    if !canon.starts_with(&conf_dir_canon) {
-        return Err("仅允许编辑 Nginx 主配置 conf 目录内的 *.conf 文件".to_string());
+    let in_conf_tree = canon.starts_with(&conf_dir_canon);
+    let include_roots: Vec<PathBuf> = parse_include_targets(&conf, &conf_dir)
+        .into_iter()
+        .filter_map(|t| include_dir_root(&t))
+        .filter_map(|r| r.canonicalize().ok())
+        .collect();
+    if !in_conf_tree && !include_roots.iter().any(|r| canon.starts_with(r)) {
+        return Err("仅允许编辑 Nginx conf 目录内的文件，或主配置 include（conf.d / sites-enabled）目录内的 .conf 文件".to_string());
     }
     let name = canon
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_default()
         .to_string();
-    if !name.ends_with(".conf") {
-        return Err("仅支持编辑 .conf 配置文件".to_string());
-    }
     if name.starts_with("zap-")
         || name.ends_with(".bak")
         || name.ends_with(".tmp")
         || name.contains(".zap")
     {
         return Err("该文件为面板托管的站点/缓存配置，请勿直接编辑".to_string());
+    }
+    if !in_conf_tree && !name.ends_with(".conf") {
+        return Err("include 目录内仅支持编辑 .conf 配置文件".to_string());
     }
     Ok((canon, bin, false))
 }
@@ -213,6 +222,9 @@ pub async fn status() -> Response {
                 "pid": read_pid(),
                 "systemd": systemd_has("nginx"),
                 "systemd_active": systemd_active("nginx"),
+                "default_conf": default_vhost_path().display().to_string(),
+                "default_ip_access": default_ip_access(),
+                "default_page": default_page_path().display().to_string(),
             })),
         ))
     })
@@ -239,6 +251,51 @@ pub async fn conf_list() -> Response {
         files.push(file_entry(&conf, &conf_dir, true, meta.len()));
 
         collect_conf_files(&conf_dir, &conf_dir, 0, &mut files);
+        // include 感知：主配置 include（conf.d/*.conf、sites-enabled/*.conf 等）指到的文件
+        // 即使位于 conf 目录树外也一并收录（排除面板托管 zap-* 与模块加载目录）。
+        let mut seen: std::collections::HashSet<PathBuf> = files
+            .iter()
+            .filter_map(|f| f.get("path").and_then(|p| p.as_str()).map(PathBuf::from))
+            .collect();
+        for target in parse_include_targets(&conf, &conf_dir) {
+            let Some(root) = include_dir_root(&target) else {
+                continue;
+            };
+            let Ok(root_c) = root.canonicalize() else {
+                continue;
+            };
+            let mut hits: Vec<PathBuf> = Vec::new();
+            expand_include(&target, &mut hits);
+            for hit in hits {
+                let canon = hit.canonicalize().unwrap_or(hit);
+                // canonicalize 后飞出 include 根目录的文件是软链指向的面板托管文件
+                //（如 00-default.conf 位于 sites-available），不属于可手工编辑范围
+                if !canon.starts_with(&root_c) {
+                    continue;
+                }
+                let name = canon
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if !seen.insert(canon.clone())
+                    || !name.ends_with(".conf")
+                    || name.starts_with("zap-")
+                    || name.ends_with(".bak")
+                    || name.ends_with(".tmp")
+                    || name.contains(".zap")
+                {
+                    continue;
+                }
+                let Ok(meta) = std::fs::metadata(&canon) else {
+                    continue;
+                };
+                if meta.len() > MAX_CONF_BYTES {
+                    continue;
+                }
+                files.push(file_entry(&canon, &conf_dir, false, meta.len()));
+            }
+        }
 
         Ok(Response::ok(
             "ok",
@@ -259,6 +316,7 @@ fn file_entry(path: &Path, base: &Path, is_main: bool, size: u64) -> serde_json:
     let rel = path
         .strip_prefix(base)
         .map(|p| p.display().to_string())
+        .or_else(|_| path.strip_prefix("/").map(|p| p.display().to_string()))
         .unwrap_or_else(|_| path.display().to_string());
     let mtime = std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -274,6 +332,141 @@ fn file_entry(path: &Path, base: &Path, is_main: bool, size: u64) -> serde_json:
         "size": size,
         "mtime": mtime,
     })
+}
+
+/// 解析主配置中的 include 指令，返回 include 目标路径（相对路径以 conf 目录为基准）。
+/// 跳过注释行与模块加载目录（如 /etc/nginx/modules-enabled），避免把 load_module 片段混入可编辑列表。
+fn parse_include_targets(conf: &Path, conf_dir: &Path) -> Vec<PathBuf> {
+    let Ok(text) = std::fs::read_to_string(conf) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = t.strip_prefix("include") else {
+            continue;
+        };
+        let rest = rest.trim().trim_end_matches(';').trim();
+        if rest.is_empty() {
+            continue;
+        }
+        // 去掉行内注释（# 后的内容）
+        let rest = rest.split('#').next().unwrap_or(rest).trim();
+        if rest.starts_with("http_")
+            || Path::new(rest)
+                .components()
+                .any(|c| c.as_os_str().to_string_lossy().contains("modules"))
+        {
+            continue;
+        }
+        let p = Path::new(rest);
+        let target = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            conf_dir.join(p)
+        };
+        out.push(target);
+    }
+    out
+}
+
+/// 通配匹配（仅 * 与 ?，Linux 大小写敏感）。
+fn glob_match(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = name.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let (mut star, mut mark): (Option<usize>, usize) = (None, 0);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = ti;
+            pi += 1;
+        } else if let Some(sp) = star {
+            pi = sp + 1;
+            mark += 1;
+            ti = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// 展开 include 目标（支持多级通配目录，如 sites-enabled/*/*.conf）为实际文件路径。
+fn expand_include(target: &Path, out: &mut Vec<PathBuf>) {
+    let s = target.to_string_lossy();
+    if !s.contains('*') && !s.contains('?') {
+        if target.is_file() {
+            out.push(target.to_path_buf());
+        }
+        return;
+    }
+    let comps: Vec<&str> = s.split('/').filter(|c| !c.is_empty()).collect();
+    if comps.is_empty() {
+        return;
+    }
+    let mut root = PathBuf::new();
+    if s.starts_with('/') {
+        root.push("/");
+    }
+    expand_glob_dir(&root, &comps, out);
+}
+
+fn expand_glob_dir(dir: &Path, comps: &[&str], out: &mut Vec<PathBuf>) {
+    let Some((head, rest)) = comps.split_first() else {
+        return;
+    };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let nm = e.file_name();
+        let nm = nm.to_string_lossy();
+        if !glob_match(head, &nm) {
+            continue;
+        }
+        let p = e.path();
+        if rest.is_empty() {
+            if p.is_file() {
+                out.push(p);
+            }
+        } else if p.is_dir() {
+            expand_glob_dir(&p, rest, out);
+        }
+    }
+}
+
+/// include 目标对应的可编辑根目录：通配目标取通配符前的目录段；单文件 include 取父目录。
+fn include_dir_root(target: &Path) -> Option<PathBuf> {
+    let s = target.to_string_lossy();
+    let mut root = PathBuf::new();
+    if s.starts_with('/') {
+        root.push("/");
+    }
+    let mut wildcard_seen = false;
+    for seg in s.split('/') {
+        if seg.is_empty() {
+            continue;
+        }
+        if seg.contains('*') || seg.contains('?') {
+            wildcard_seen = true;
+            break;
+        }
+        root.push(seg);
+    }
+    if !wildcard_seen && target.is_file() {
+        root.pop(); // 单文件 include（如 conf 子目录里的独立文件）：允许其所在目录
+    }
+    (!root.as_os_str().is_empty()).then_some(root)
 }
 
 fn collect_conf_files(dir: &Path, base: &Path, depth: usize, out: &mut Vec<serde_json::Value>) {
@@ -302,8 +495,7 @@ fn collect_conf_files(dir: &Path, base: &Path, depth: usize, out: &mut Vec<serde
             .and_then(|n| n.to_str())
             .unwrap_or_default()
             .to_string();
-        if !name.ends_with(".conf")
-            || name.starts_with("zap-")
+        if name.starts_with("zap-")
             || name.ends_with(".bak")
             || name.ends_with(".tmp")
             || name.contains(".zap")
@@ -400,6 +592,154 @@ pub async fn conf_save(path: String, content: String) -> Response {
                 "tested": true,
                 "reloaded": reloaded,
                 "reason": reason,
+            })),
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+// ── 默认站点（IP / 未匹配域名兜底）─────────────────────────
+
+/// 默认站点欢迎页目录：`{ZAP_PATH}/data/www/_zap`（与维护页同目录，nginx worker 可读）。
+fn default_page_dir() -> PathBuf {
+    site::zap_path().join("data/www/_zap")
+}
+
+/// 默认站点欢迎页文件（可直接编辑定制 IP 直连展示内容）。
+fn default_page_path() -> PathBuf {
+    default_page_dir().join("ip-index.html")
+}
+
+/// 面板托管默认站点文件（webservers 数据根下的 sites-available）。
+fn default_vhost_path() -> PathBuf {
+    super::webconf::available_dir("nginx").join(site::DEFAULT_VHOST_FILE)
+}
+
+/// 当前默认站点形态：true = 欢迎页（开启 IP 访问）；false = 444 断开。
+fn default_ip_access() -> bool {
+    std::fs::read_to_string(default_vhost_path())
+        .map(|c| c.contains("ip-index.html"))
+        .unwrap_or(false)
+}
+
+/// 确保默认站点欢迎页存在（不存在时生成默认页面，目录 0755 / 文件 0644）。
+fn ensure_default_page() -> Result<PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = default_page_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建默认页目录失败: {e}"))?;
+    let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+    let file = default_page_path();
+    if !file.exists() {
+        let html = concat!(
+            "<!DOCTYPE html>\n",
+            "<html lang=\"zh-CN\">\n",
+            "<head><meta charset=\"utf-8\">",
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+            "<title>服务器默认页</title>\n",
+            "<style>body{font-family:system-ui,-apple-system,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;",
+            "display:flex;align-items:center;justify-content:center;height:100vh;margin:0;",
+            "background:#f5f7fa;color:#303133}",
+            ".box{text-align:center;padding:32px}",
+            "h1{font-size:22px;margin:0 0 12px}p{color:#909399;font-size:14px;line-height:1.8;margin:0 0 6px}</style>\n",
+            "</head>\n",
+            "<body><div class=\"box\">",
+            "<h1>服务器已就绪</h1>",
+            "<p>该页面由 Zap 面板的默认站点提供，用于通过服务器 IP 或未绑定域名访问的场景。</p>",
+            "<p>如需修改展示内容，请直接编辑默认站点欢迎页文件。</p>",
+            "</div></body></html>\n"
+        );
+        std::fs::write(&file, html).map_err(|e| format!("写入默认页失败: {e}"))?;
+    }
+    let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644));
+    Ok(file)
+}
+
+/// 默认站点「开启 IP 访问」形态：IP / 未匹配域名展示欢迎页；
+/// 443 无证书仍拒绝握手，避免被任意站点的 443 接走造成串站。
+fn render_ip_vhost(page_dir: &Path) -> String {
+    format!(
+        "# Generated by Zap Panel — 默认站点（IP / 未匹配域名欢迎页）— DO NOT EDIT\n\
+         server {{\n\
+         \x20   listen 80 default_server;\n\
+         \x20   listen [::]:80 default_server;\n\
+         \x20   server_name _;\n\
+         \x20   root {root};\n\
+         \x20   index ip-index.html;\n\
+         }}\n\
+         server {{\n\
+         \x20   listen 443 ssl default_server;\n\
+         \x20   listen [::]:443 ssl default_server;\n\
+         \x20   server_name _;\n\
+         \x20   ssl_reject_handshake on;\n\
+         }}\n",
+        root = page_dir.display(),
+    )
+}
+
+/// nginx.default_vhost：设置默认站点（IP / 未匹配域名兜底）形态。
+/// enable=false → 直接断开（80 返回 444、443 拒握手，防串站）；
+/// enable=true  → IP / 未匹配域名展示欢迎页（页面文件 `ip-index.html` 可自行编辑定制）。
+pub async fn default_vhost(enable: bool) -> Response {
+    tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        let Some((conf, bin)) = probe() else {
+            return Err("Nginx 未安装或未探测到主配置".to_string());
+        };
+        // 停用官方模板自带默认站点，避免 duplicate default server
+        site::deactivate_official_default(&conf);
+        let edir = super::webconf::enabled_dir("nginx");
+        let injected = super::webconf::ensure_include(&conf, &edir, "nginx")
+            .map_err(|e| format!("主配置注入 include 失败: {e}"))?;
+        let new = if enable {
+            ensure_default_page()?;
+            render_ip_vhost(&default_page_dir())
+        } else {
+            site::render_default_vhost()
+        };
+
+        let path = default_vhost_path();
+        let old = std::fs::read_to_string(&path).ok();
+        // 失败回滚：恢复旧内容（或移除新建文件），并回滚本次的 include 注入
+        let rollback = || {
+            match &old {
+                Some(o) => {
+                    let _ = super::webconf::publish_named("nginx", site::DEFAULT_VHOST_FILE, o);
+                }
+                None => {
+                    let _ = super::webconf::purge_named("nginx", site::DEFAULT_VHOST_FILE);
+                }
+            }
+            if injected {
+                super::webconf::restore_include(&conf);
+            }
+        };
+        if let Err(e) = super::webconf::publish_named("nginx", site::DEFAULT_VHOST_FILE, &new) {
+            rollback();
+            return Err(format!("写入默认站点配置失败: {e}"));
+        }
+        if let Err(e) = site::nginx_test(&bin) {
+            rollback();
+            return Err(format!("nginx -t 校验未通过，已回滚默认站点配置：\n{e}"));
+        }
+
+        let running = site::nginx_running();
+        let (reloaded, reason) = if running {
+            match site::reload_nginx(&bin) {
+                Ok(()) => (true, String::new()),
+                Err(e) => (false, e),
+            }
+        } else {
+            (false, "nginx 未运行，配置已生效，将在启动时加载".to_string())
+        };
+        Ok(Response::ok(
+            "ok",
+            Some(json!({
+                "enable": enable,
+                "reloaded": reloaded,
+                "reason": reason,
+                "default_conf": path.display().to_string(),
+                "default_page": default_page_path().display().to_string(),
             })),
         ))
     })
@@ -511,8 +851,6 @@ pub async fn control(action: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn version_line_parse_is_robust() {
         // nginx_version 依赖系统命令，这里只验证文本取首行逻辑不 panic

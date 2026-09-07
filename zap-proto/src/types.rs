@@ -526,6 +526,11 @@ pub enum Request {
     /// Nginx 服务控制：start / stop / restart / reload（优先 systemd unit nginx）
     #[serde(rename = "nginx.control")]
     NginxControl { action: String },
+    /// 设置默认站点（IP / 未匹配域名兜底）形态：
+    /// enable=false → 直接断开（444 / 443 拒握手，防串站）；
+    /// enable=true → IP / 未匹配域名展示欢迎页
+    #[serde(rename = "nginx.default_vhost")]
+    NginxDefaultVhost { enable: bool },
     /// 通用服务配置·状态探测（服务配置页：php / mysql / mariadb / docker，未安装时 installed=false）
     #[serde(rename = "service_conf.status")]
     ServiceConfStatus { service: String },

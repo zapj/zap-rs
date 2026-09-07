@@ -12,6 +12,12 @@ export interface NginxStatus {
   /** 是否存在 systemd unit nginx */
   systemd?: boolean
   systemd_active?: boolean
+  /** 默认站点（面板托管）配置文件路径 */
+  default_conf?: string
+  /** 默认站点当前是否开启 IP 访问（true = 欢迎页，false = 断开 444） */
+  default_ip_access?: boolean
+  /** 默认站点欢迎页文件（开启时可编辑该文件定制内容） */
+  default_page?: string
 }
 
 /** 可编辑配置文件条目 */
@@ -73,3 +79,18 @@ export const saveNginxConf = (path: string, content: string) =>
 
 export const controlNginx = (action: 'start' | 'stop' | 'restart' | 'reload') =>
   http.post<{ code: number; message: string; data: NginxControlData }>('/system/nginx/control', { action })
+
+export interface NginxDefaultVhostData {
+  enable: boolean
+  reloaded: boolean
+  reason?: string
+  default_conf: string
+  default_page: string
+}
+
+/** 设置默认站点（IP / 未匹配域名兜底）：enable=true 展示欢迎页，false 直接断开 */
+export const setNginxDefaultVhost = (enable: boolean) =>
+  http.post<{ code: number; message: string; data: NginxDefaultVhostData }>(
+    '/system/nginx/default-vhost',
+    { enable },
+  )

@@ -336,6 +336,10 @@ fn api_routers() -> Router {
             post(system_nginx::nginx_conf_save),
         )
         .route("/system/nginx/control", post(system_nginx::nginx_control))
+        .route(
+            "/system/nginx/default-vhost",
+            post(system_nginx::nginx_default_vhost),
+        )
         // 通用服务配置（服务配置：php / mysql / mariadb / docker，admin only）
         .route(
             "/system/service-conf/status",
