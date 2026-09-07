@@ -1,4 +1,4 @@
-use sqlx::{Executor, Row};
+use sqlx::Executor;
 
 use super::get_db_pool;
 
@@ -19,20 +19,12 @@ pub async fn init_schema() {
     init_cron_jobs_table().await;
     // IP 池管理表
     init_ip_pool_table().await;
-    // 用户站点管理表（php_instance / vhost_state 老库幂等补列）
+    // 用户站点管理表（列定义见 init_site_table，开发期直接 reset-db，无需补列迁移）
     init_site_table().await;
-    ensure_site_php_column().await;
-    ensure_site_vhost_column().await;
-    ensure_site_run_state_column().await;
-    ensure_site_vhost_error_columns().await;
-    // PHP-FPM 规格模板表 + user.fpm_spec_ref 列（老库幂等补列）
+    // PHP-FPM 规格模板表（user.fpm_spec_ref 已在 user 表中定义）
     init_fpm_spec_table().await;
-    ensure_user_fpm_spec_ref_column().await;
-    // 套餐（Packages）表：创建客户时可选择的资源套餐（max_domains 老库幂等补列）
+    // 套餐（Packages）表：创建客户时可选择的资源套餐
     init_packages_table().await;
-    ensure_package_max_domains_column().await;
-    // user.prefs 列（个人中心 → 偏好设置，老库幂等补列）
-    ensure_user_prefs_column().await;
     // 站内信（通知中心）表
     init_notice_message_table().await;
     // 全局运行环境状态表（scope=auto 自动探测快照 / scope=conf 面板默认配置）
@@ -69,6 +61,9 @@ async fn init_system_user_table_schema() {
         home_dir TEXT NOT NULL DEFAULT '',
         linux_user TEXT NOT NULL DEFAULT '',
         fpm_pool TEXT NOT NULL DEFAULT '',
+        -- fpm_spec_ref：''=面板全局默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名
+        fpm_spec_ref TEXT NOT NULL DEFAULT '',
+        -- prefs：个人中心 → 偏好设置（JSON 字符串）
         prefs TEXT NOT NULL DEFAULT '',
         last_login_time INTEGER,
         last_login_ip TEXT,
@@ -147,7 +142,7 @@ async fn init_packages_table() {
         updated_at INTEGER
     );
     INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, fpm_spec_ref, allow_ssh, owner_id, status, created_at, updated_at)
-    VALUES ('默认套餐', '不限磁盘、不限站点、允许 SSH 终端', 0, 0, 0, '', 1, 0, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES ('默认套餐', '不限磁盘、不限站点、不限域名、允许 SSH 终端', 0, 0, 0, '', 1, 0, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -665,6 +660,9 @@ async fn init_site_table() {
         name TEXT NOT NULL DEFAULT '',
         php_instance TEXT NOT NULL DEFAULT '',
         vhost_state TEXT NOT NULL DEFAULT 'pending',
+        vhost_error TEXT NOT NULL DEFAULT '',
+        vhost_synced_at INTEGER NOT NULL DEFAULT 0,
+        run_state TEXT NOT NULL DEFAULT 'running',
         web_root TEXT NOT NULL DEFAULT '',
         log_root TEXT NOT NULL DEFAULT '',
         status INTEGER NOT NULL DEFAULT 1,
@@ -690,144 +688,6 @@ async fn init_site_table() {
     CREATE INDEX idx_site_ip_site_id ON site_ip(site_id);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-}
-
-/// 老库兼容：site 表缺少 php_instance 列时幂等补列（已有列则跳过）
-async fn ensure_site_php_column() {
-    if !table_exists("site").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let rows = sqlx::query("PRAGMA table_info(site)")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    let has = rows.iter().any(|r| {
-        r.try_get::<String, _>("name")
-            .map(|n| n == "php_instance")
-            .unwrap_or(false)
-    });
-    if has {
-        return;
-    }
-    let _ = sqlx::query("ALTER TABLE site ADD COLUMN php_instance TEXT NOT NULL DEFAULT ''")
-        .execute(pool)
-        .await;
-}
-
-/// 老库兼容：site 表缺少 vhost_state 列时幂等补列（已有列则跳过）
-async fn ensure_site_vhost_column() {
-    if !table_exists("site").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let rows = sqlx::query("PRAGMA table_info(site)")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    let has = rows.iter().any(|r| {
-        r.try_get::<String, _>("name")
-            .map(|n| n == "vhost_state")
-            .unwrap_or(false)
-    });
-    if has {
-        return;
-    }
-    let _ = sqlx::query("ALTER TABLE site ADD COLUMN vhost_state TEXT NOT NULL DEFAULT 'pending'")
-        .execute(pool)
-        .await;
-}
-
-/// 套餐「单站点最大域名数」列（幂等补列）：`max_domains`，0 = 不限。
-async fn ensure_package_max_domains_column() {
-    if !table_exists("packages").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let rows = sqlx::query("PRAGMA table_info(packages)")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    let has = rows.iter().any(|r| {
-        r.try_get::<String, _>("name")
-            .map(|n| n == "max_domains")
-            .unwrap_or(false)
-    });
-    if !has {
-        let _ =
-            sqlx::query("ALTER TABLE packages ADD COLUMN max_domains INTEGER NOT NULL DEFAULT 0")
-                .execute(pool)
-                .await;
-    }
-}
-
-/// vhost 同步状态机配套列（幂等补列）：
-/// - `vhost_error`    最近一次同步失败原因（成功时清空）
-/// - `vhost_synced_at` 最近一次同步结束时间戳
-async fn ensure_site_vhost_error_columns() {
-    if !table_exists("site").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let rows = sqlx::query("PRAGMA table_info(site)")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    let has = |name: &str| {
-        rows.iter().any(|r| {
-            r.try_get::<String, _>("name")
-                .map(|n| n == name)
-                .unwrap_or(false)
-        })
-    };
-    if !has("vhost_error") {
-        let _ = sqlx::query("ALTER TABLE site ADD COLUMN vhost_error TEXT NOT NULL DEFAULT ''")
-            .execute(pool)
-            .await;
-    }
-    if !has("vhost_synced_at") {
-        let _ =
-            sqlx::query("ALTER TABLE site ADD COLUMN vhost_synced_at INTEGER NOT NULL DEFAULT 0")
-                .execute(pool)
-                .await;
-    }
-    // 历史值统一：老版本写的是 'error'，统一成 'failed'
-    let _ = sqlx::query("UPDATE site SET vhost_state = 'failed' WHERE vhost_state = 'error'")
-        .execute(pool)
-        .await;
-}
-
-/// 站点运行状态列 `run_state`（running / stopped / maintenance）。
-/// 老库补列后按现有 status 迁移：status=0 → stopped，其余 running。
-async fn ensure_site_run_state_column() {
-    if !table_exists("site").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let rows = sqlx::query("PRAGMA table_info(site)")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    let has = rows.iter().any(|r| {
-        r.try_get::<String, _>("name")
-            .map(|n| n == "run_state")
-            .unwrap_or(false)
-    });
-    if !has {
-        let _ =
-            sqlx::query("ALTER TABLE site ADD COLUMN run_state TEXT NOT NULL DEFAULT 'running'")
-                .execute(pool)
-                .await;
-    }
-    // status 与 run_state 的兼容映射（老数据只有 status）
-    let _ = sqlx::query("UPDATE site SET run_state = 'stopped' WHERE status = 0")
-        .execute(pool)
-        .await;
-    let _ = sqlx::query(
-        "UPDATE site SET run_state = 'running' WHERE status != 0 AND run_state NOT IN ('running','stopped','maintenance')",
-    )
-    .execute(pool)
-    .await;
 }
 
 // ── api_token（API Token 管理）──────────────────────────────
@@ -891,54 +751,6 @@ async fn init_fpm_spec_table() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_fpm_spec_name ON fpm_spec(name);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-}
-
-/// 老库兼容：user 表缺少 fpm_spec_ref 列时幂等补列（已有列则跳过）。
-/// fpm_spec_ref 取值：''=面板全局默认 / 'inherit'=继承 owner(reseller) 名下默认 / 模板名
-async fn ensure_user_fpm_spec_ref_column() {
-    if !table_exists("user").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let rows = sqlx::query("PRAGMA table_info(user)")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    let has = rows.iter().any(|r| {
-        r.try_get::<String, _>("name")
-            .map(|n| n == "fpm_spec_ref")
-            .unwrap_or(false)
-    });
-    if has {
-        return;
-    }
-    let _ = sqlx::query("ALTER TABLE user ADD COLUMN fpm_spec_ref TEXT NOT NULL DEFAULT ''")
-        .execute(pool)
-        .await;
-}
-
-/// 老库兼容：user 表缺少 prefs 列时幂等补列（已有列则跳过）。
-/// prefs 存当前用户个人偏好（个人中心 → 偏好设置），JSON 字符串。
-async fn ensure_user_prefs_column() {
-    if !table_exists("user").await {
-        return;
-    }
-    let pool = get_db_pool().await;
-    let rows = sqlx::query("PRAGMA table_info(user)")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    let has = rows.iter().any(|r| {
-        r.try_get::<String, _>("name")
-            .map(|n| n == "prefs")
-            .unwrap_or(false)
-    });
-    if has {
-        return;
-    }
-    let _ = sqlx::query("ALTER TABLE user ADD COLUMN prefs TEXT NOT NULL DEFAULT ''")
-        .execute(pool)
-        .await;
 }
 
 // ── notice_message（站内信 / 通知中心）────────────────────────
