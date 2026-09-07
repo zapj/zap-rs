@@ -323,11 +323,24 @@ fn valid_php_instance(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'@' | b'/'))
 }
 
+/// 未绑定套餐（或套餐未设置域名上限）时的兜底上限，避免无套餐用户无限制绑定域名。
+const DEFAULT_MAX_DOMAINS: usize = 50;
+
+/// 生效的域名上限：套餐 max_domains > 0 时用套餐值，否则用兜底值。
+fn domain_limit_of(max_domains: i64) -> usize {
+    if max_domains > 0 {
+        max_domains as usize
+    } else {
+        DEFAULT_MAX_DOMAINS
+    }
+}
+
 fn validate_site_fields(
     name: &str,
     domains: &[String],
     ips: &[String],
     remark: &str,
+    max_domains: i64,
 ) -> Result<(), ZapError> {
     if name.is_empty() {
         return Err(ZapError::New(
@@ -341,8 +354,23 @@ fn validate_site_fields(
             "站点名称过长（最多 120 个字符）".to_string(),
         ));
     }
-    if domains.len() > 50 {
-        return Err(ZapError::New(-1, "单个站点最多绑定 50 个域名".to_string()));
+    // 单站点域名数：优先取归属用户套餐的 max_domains，未配置时用兜底值
+    let limit = domain_limit_of(max_domains);
+    if domains.len() > limit {
+        return Err(ZapError::New(
+            -1,
+            if max_domains > 0 {
+                format!(
+                    "当前套餐限制单个站点最多绑定 {limit} 个域名（已填 {} 个）",
+                    domains.len()
+                )
+            } else {
+                format!(
+                    "单个站点最多绑定 {limit} 个域名（已填 {} 个）",
+                    domains.len()
+                )
+            },
+        ));
     }
     for d in domains {
         if !valid_domain(d) {
@@ -562,6 +590,8 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     let mut ip_map: HashMap<i64, Vec<String>> = HashMap::new();
     let mut vh_map: HashMap<i64, String> = HashMap::new();
     let mut rs_map: HashMap<i64, String> = HashMap::new();
+    let mut ve_map: HashMap<i64, String> = HashMap::new();
+    let mut vt_map: HashMap<i64, i64> = HashMap::new();
     let mut dir_map: HashMap<i64, (String, String)> = HashMap::new();
     // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
     let mut lu_map: HashMap<i64, String> = HashMap::new();
@@ -589,18 +619,21 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
         for (sid, ip) in iq.fetch_all(pool).await? {
             ip_map.entry(sid).or_default().push(ip);
         }
-        // vhost 同步状态（独立 map，不进入主行 tuple）
+        // vhost 同步状态 / 失败原因 / 最近同步时间（独立 map，不进入主行 tuple）
         let vsql = format!(
-            "SELECT id, vhost_state, run_state FROM site WHERE id IN ({}) ORDER BY id",
+            "SELECT id, vhost_state, run_state, vhost_error, vhost_synced_at \
+             FROM site WHERE id IN ({}) ORDER BY id",
             ph
         );
-        let mut vq = sqlx::query_as::<_, (i64, String, String)>(&vsql);
+        let mut vq = sqlx::query_as::<_, (i64, String, String, String, i64)>(&vsql);
         for id in &ids {
             vq = vq.bind(id);
         }
-        for (sid, state, run) in vq.fetch_all(pool).await? {
+        for (sid, state, run, err, ts) in vq.fetch_all(pool).await? {
             vh_map.insert(sid, state);
             rs_map.insert(sid, run);
+            ve_map.insert(sid, err);
+            vt_map.insert(sid, ts);
         }
         // 站点文档根 / 日志目录（独立 map，不进入主行 tuple）
         let dirsql = format!(
@@ -668,6 +701,16 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
             stopped += 1;
         }
     }
+    // 同步失败数（失败原因见每行的 vhost_error）
+    let failed = recs
+        .iter()
+        .filter(|r| {
+            matches!(
+                vh_map.get(&r.0).map(|s| s.as_str()).unwrap_or("pending"),
+                "failed" | "error"
+            )
+        })
+        .count();
     let vmode = crate::routers::system_env::vhost_mode().await;
     let list: Vec<Value> = recs
         .iter()
@@ -684,6 +727,8 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
                 "status": r.3,
                 "run_state": rs_map.get(&r.0).cloned().unwrap_or_else(|| if r.3 == 1 { RUN_RUNNING.to_string() } else { RUN_STOPPED.to_string() }),
                 "vhost_state": vh_map.get(&r.0).cloned().unwrap_or_else(|| "pending".into()),
+                "vhost_error": ve_map.get(&r.0).cloned().unwrap_or_default(),
+                "vhost_synced_at": vt_map.get(&r.0).copied().unwrap_or(0),
                 "web_root": dir_map.get(&r.0).map(|d| d.0.clone()).unwrap_or_default(),
                 "log_root": dir_map.get(&r.0).map(|d| d.1.clone()).unwrap_or_default(),
                 "remark": r.4,
@@ -700,6 +745,7 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
             "total": recs.len(),
             "running": running,
             "stopped": stopped,
+            "failed": failed,
             "vhost_mode": vmode,
             "rows": list,
         }
@@ -805,11 +851,14 @@ pub async fn site_add(
             "PHP 实例标识不合法（最长 120 字符，仅允许字母/数字/./_/-/@）".to_string(),
         ));
     }
-    validate_site_fields(&name, &domains, &ips, &remark)?;
-
     let pool = db::get_db_pool().await;
+    // 归属用户的套餐配额：站点数上限 + 单站点域名数上限（均为 0 时表示不限）
+    let pkg = crate::routers::package::package_of_user(owner).await;
+    let max_domains = pkg.as_ref().map(|p| p.max_domains).unwrap_or(0);
+    validate_site_fields(&name, &domains, &ips, &remark, max_domains)?;
+
     // 套餐限制：最大站点数（0 = 不限），达到上限时硬拦截
-    if let Some(pkg) = crate::routers::package::package_of_user(owner).await
+    if let Some(pkg) = &pkg
         && pkg.max_sites > 0
     {
         let used: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM site WHERE user_id = ?")
@@ -1004,7 +1053,12 @@ pub async fn site_update(
         }
         php_instance = p;
     }
-    validate_site_fields(&name, &domains, &ips, &remark)?;
+    // 归属可能已转移，域名数配额按新归属用户的套餐计算
+    let max_domains = crate::routers::package::package_of_user(new_owner)
+        .await
+        .map(|p| p.max_domains)
+        .unwrap_or(0);
+    validate_site_fields(&name, &domains, &ips, &remark, max_domains)?;
 
     let now = chrono::Local::now().timestamp();
     let mut tx = pool.begin().await?;
@@ -1259,8 +1313,53 @@ pub async fn site_sync(
     Ok(Json(json!({ "code": 0, "message": msg, "data": data })))
 }
 
-/// 单个站点全量同步核心（幂等，被 /site/sync、/site/sync_all 与数据迁移复用）
+// ── vhost 同步状态机 ────────────────────────────────────────
+// pending（同步中）→ synced（成功）/ failed（失败，原因写入 vhost_error）
+// 面板可据此展示「已同步 / 同步中 / 失败（原因）」并提供重试入口。
+
+async fn mark_sync_start(id: i64) {
+    let pool = db::get_db_pool().await;
+    let _ = sqlx::query("UPDATE site SET vhost_state = 'pending', vhost_error = '' WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await;
+}
+
+async fn mark_sync_result(id: i64, ok: bool, error: &str) {
+    let pool = db::get_db_pool().await;
+    let now = chrono::Local::now().timestamp();
+    let state = if ok { "synced" } else { "failed" };
+    let _ = sqlx::query(
+        "UPDATE site SET vhost_state = ?, vhost_error = ?, vhost_synced_at = ? WHERE id = ?",
+    )
+    .bind(state)
+    .bind(error)
+    .bind(now)
+    .bind(id)
+    .execute(pool)
+    .await;
+}
+
+/// 单个站点全量同步（幂等，被 /site/sync、/site/sync_all、启停与数据迁移复用）。
+/// 无论成功失败都会把结果写回 `vhost_state` / `vhost_error`。
 pub(crate) async fn sync_one_site(
+    id: i64,
+) -> Result<(String, Option<serde_json::Value>, String, i32), ZapError> {
+    mark_sync_start(id).await;
+    match sync_one_site_inner(id).await {
+        Ok(v) => {
+            mark_sync_result(id, true, "").await;
+            Ok(v)
+        }
+        Err(e) => {
+            mark_sync_result(id, false, &e.to_string()).await;
+            Err(e)
+        }
+    }
+}
+
+/// 同步执行体（不负责状态落库，由 sync_one_site 统一处理）
+async fn sync_one_site_inner(
     id: i64,
 ) -> Result<(String, Option<serde_json::Value>, String, i32), ZapError> {
     let pool = db::get_db_pool().await;
@@ -1386,13 +1485,6 @@ pub(crate) async fn sync_one_site(
         owner_user,
     })
     .await?;
-
-    let state = if resp.code == 0 { "synced" } else { "error" };
-    let _ = sqlx::query("UPDATE site SET vhost_state = ? WHERE id = ?")
-        .bind(state)
-        .bind(id)
-        .execute(pool)
-        .await;
 
     if resp.code != 0 {
         return Err(ZapError::New(
@@ -1583,6 +1675,14 @@ mod tests {
 
         // LIKE 转义：域名里的 _ 不应被当作通配符
         assert_eq!(like_escape("a_b.com"), "a\\_b.com");
+    }
+
+    #[test]
+    fn domain_limit_follows_package() {
+        // 套餐未配置（0）→ 用兜底值；配置了 → 用套餐值
+        assert_eq!(domain_limit_of(0), DEFAULT_MAX_DOMAINS);
+        assert_eq!(domain_limit_of(-5), DEFAULT_MAX_DOMAINS);
+        assert_eq!(domain_limit_of(10), 10);
     }
 
     #[test]

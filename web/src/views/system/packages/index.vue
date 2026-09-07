@@ -6,7 +6,7 @@
           <div>
             <div class="page-title">套餐</div>
             <div class="page-sub">
-              定义资源套餐（磁盘配额 / 站点数 / 流量 / FPM 规格 / SSH），创建客户时选择并自动继承
+              定义资源套餐（磁盘配额 / 站点数 / 单站点域名数 / 流量 / FPM 规格 / SSH），创建客户时选择并自动继承
             </div>
           </div>
           <div class="head-right">
@@ -35,6 +35,11 @@
         <el-table-column label="站点数" width="100">
           <template #default="{ row }">
             <span>{{ row.max_sites > 0 ? row.max_sites : '不限' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="单站点域名数" width="120">
+          <template #default="{ row }">
+            <span>{{ row.max_domains > 0 ? row.max_domains : '不限' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="月流量" width="120">
@@ -134,6 +139,17 @@
           />
           <span v-if="!unlimitedSites" class="form-hint">个（超限时拒绝创建站点）</span>
         </el-form-item>
+        <el-form-item label="单站点域名数">
+          <el-switch v-model="unlimitedDomains" active-text="不限" inactive-text="限额" />
+          <el-input-number
+            v-if="!unlimitedDomains"
+            v-model="form.max_domains"
+            :min="1"
+            :max="1000"
+            style="margin-left: 12px; width: 160px"
+          />
+          <span v-if="!unlimitedDomains" class="form-hint">个/站点（超限时拒绝保存）</span>
+        </el-form-item>
         <el-form-item label="月流量上限">
           <el-switch v-model="unlimitedBw" active-text="不限" inactive-text="限额" />
           <el-input-number
@@ -213,6 +229,7 @@ const form = reactive({
   remark: '',
   disk_quota_mb: 1024,
   max_sites: 5,
+  max_domains: 10,
   max_bandwidth_mb: 10240,
   fpm_spec_ref: '',
   allow_ssh: false,
@@ -221,6 +238,7 @@ const form = reactive({
 // 「不限」开关：true 时该限制项提交为 0
 const unlimitedDisk = ref(true)
 const unlimitedSites = ref(true)
+const unlimitedDomains = ref(true)
 const unlimitedBw = ref(true)
 
 const rules: FormRules = {
@@ -269,12 +287,14 @@ function resetForm() {
   form.remark = ''
   form.disk_quota_mb = 1024
   form.max_sites = 5
+  form.max_domains = 10
   form.max_bandwidth_mb = 10240
   form.fpm_spec_ref = ''
   form.allow_ssh = false
   form.status = 1
   unlimitedDisk.value = true
   unlimitedSites.value = true
+  unlimitedDomains.value = true
   unlimitedBw.value = true
   formRef.value?.clearValidate()
 }
@@ -293,6 +313,8 @@ function openEdit(row: PackageItem) {
   form.disk_quota_mb = row.disk_quota_mb > 0 ? row.disk_quota_mb : 1024
   unlimitedSites.value = row.max_sites <= 0
   form.max_sites = row.max_sites > 0 ? row.max_sites : 5
+  unlimitedDomains.value = (row.max_domains ?? 0) <= 0
+  form.max_domains = (row.max_domains ?? 0) > 0 ? row.max_domains : 10
   unlimitedBw.value = row.max_bandwidth_mb <= 0
   form.max_bandwidth_mb = row.max_bandwidth_mb > 0 ? row.max_bandwidth_mb : 10240
   form.fpm_spec_ref = row.fpm_spec_ref || ''
@@ -313,6 +335,7 @@ async function submitForm() {
     remark: form.remark.trim(),
     disk_quota_mb: unlimitedDisk.value ? 0 : form.disk_quota_mb,
     max_sites: unlimitedSites.value ? 0 : form.max_sites,
+    max_domains: unlimitedDomains.value ? 0 : form.max_domains,
     max_bandwidth_mb: unlimitedBw.value ? 0 : form.max_bandwidth_mb,
     fpm_spec_ref: form.fpm_spec_ref,
     allow_ssh: form.allow_ssh,

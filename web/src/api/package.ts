@@ -9,6 +9,8 @@ export interface PackageItem {
   disk_quota_mb: number
   /** 最大站点数（0 = 不限） */
   max_sites: number
+  /** 单站点最大域名数（0 = 不限） */
+  max_domains: number
   /** 月流量上限（MB，0 = 不限；面板暂无流量统计，仅记录） */
   max_bandwidth_mb: number
   /** PHP-FPM 规格模板名；'' = 面板默认 */
@@ -30,6 +32,8 @@ export interface PackagePayload {
   remark?: string
   disk_quota_mb?: number
   max_sites?: number
+  /** 单站点最大域名数（0 = 不限） */
+  max_domains?: number
   max_bandwidth_mb?: number
   fpm_spec_ref?: string
   allow_ssh?: boolean

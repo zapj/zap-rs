@@ -24,11 +24,13 @@ pub async fn init_schema() {
     ensure_site_php_column().await;
     ensure_site_vhost_column().await;
     ensure_site_run_state_column().await;
+    ensure_site_vhost_error_columns().await;
     // PHP-FPM 规格模板表 + user.fpm_spec_ref 列（老库幂等补列）
     init_fpm_spec_table().await;
     ensure_user_fpm_spec_ref_column().await;
-    // 套餐（Packages）表：创建客户时可选择的资源套餐
+    // 套餐（Packages）表：创建客户时可选择的资源套餐（max_domains 老库幂等补列）
     init_packages_table().await;
+    ensure_package_max_domains_column().await;
     // user.prefs 列（个人中心 → 偏好设置，老库幂等补列）
     ensure_user_prefs_column().await;
     // 站内信（通知中心）表
@@ -135,6 +137,7 @@ async fn init_packages_table() {
         remark TEXT NOT NULL DEFAULT '',
         disk_quota_mb INTEGER NOT NULL DEFAULT 0,
         max_sites INTEGER NOT NULL DEFAULT 0,
+        max_domains INTEGER NOT NULL DEFAULT 0,
         max_bandwidth_mb INTEGER NOT NULL DEFAULT 0,
         fpm_spec_ref TEXT NOT NULL DEFAULT '',
         allow_ssh INTEGER NOT NULL DEFAULT 0,
@@ -731,6 +734,65 @@ async fn ensure_site_vhost_column() {
         return;
     }
     let _ = sqlx::query("ALTER TABLE site ADD COLUMN vhost_state TEXT NOT NULL DEFAULT 'pending'")
+        .execute(pool)
+        .await;
+}
+
+/// 套餐「单站点最大域名数」列（幂等补列）：`max_domains`，0 = 不限。
+async fn ensure_package_max_domains_column() {
+    if !table_exists("packages").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let rows = sqlx::query("PRAGMA table_info(packages)")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let has = rows.iter().any(|r| {
+        r.try_get::<String, _>("name")
+            .map(|n| n == "max_domains")
+            .unwrap_or(false)
+    });
+    if !has {
+        let _ =
+            sqlx::query("ALTER TABLE packages ADD COLUMN max_domains INTEGER NOT NULL DEFAULT 0")
+                .execute(pool)
+                .await;
+    }
+}
+
+/// vhost 同步状态机配套列（幂等补列）：
+/// - `vhost_error`    最近一次同步失败原因（成功时清空）
+/// - `vhost_synced_at` 最近一次同步结束时间戳
+async fn ensure_site_vhost_error_columns() {
+    if !table_exists("site").await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let rows = sqlx::query("PRAGMA table_info(site)")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let has = |name: &str| {
+        rows.iter().any(|r| {
+            r.try_get::<String, _>("name")
+                .map(|n| n == name)
+                .unwrap_or(false)
+        })
+    };
+    if !has("vhost_error") {
+        let _ = sqlx::query("ALTER TABLE site ADD COLUMN vhost_error TEXT NOT NULL DEFAULT ''")
+            .execute(pool)
+            .await;
+    }
+    if !has("vhost_synced_at") {
+        let _ =
+            sqlx::query("ALTER TABLE site ADD COLUMN vhost_synced_at INTEGER NOT NULL DEFAULT 0")
+                .execute(pool)
+                .await;
+    }
+    // 历史值统一：老版本写的是 'error'，统一成 'failed'
+    let _ = sqlx::query("UPDATE site SET vhost_state = 'failed' WHERE vhost_state = 'error'")
         .execute(pool)
         .await;
 }

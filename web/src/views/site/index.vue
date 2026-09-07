@@ -21,6 +21,9 @@ interface SiteItem {
   remark: string
   php_instance: string
   vhost_state: string
+  /** 最近一次同步失败原因（成功为空） */
+  vhost_error: string
+  vhost_synced_at: number
   web_root: string
   log_root: string
   created_at: number
@@ -51,7 +54,7 @@ const currentUserName = computed(
 )
 
 const list = ref<SiteItem[]>([])
-const stats = reactive({ total: 0, running: 0, stopped: 0 })
+const stats = reactive({ total: 0, running: 0, stopped: 0, failed: 0 })
 // 虚拟主机运行模式：'www' 统一 www 用户 / 'system' 每面板用户独立 Linux 账号（取自 site/list 返回）
 const vhostMode = ref<'www' | 'system'>('www')
 const systemMode = computed(() => vhostMode.value === 'system')
@@ -127,6 +130,17 @@ const keyword = ref('')
 const filterStatus = ref<number | ''>('')
 const filterOwner = ref<number | ''>('')
 
+/** 同步状态：failed（新）/ error（历史数据）都算失败 */
+const isSyncFailed = (row: SiteItem) =>
+  row.vhost_state === 'failed' || row.vhost_state === 'error'
+
+/** 点击「同步失败」标签时弹出完整原因（可能很长，tooltip 只作摘要） */
+function showSyncError(row: SiteItem) {
+  ElMessageBox.alert(row.vhost_error || '未提供失败原因，可点「重试」再次同步', '同步失败原因', {
+    confirmButtonText: '知道了',
+  }).catch(() => {})
+}
+
 /** 运行状态：兼容老数据（库里还没有 run_state 时按 status 推导） */
 const runState = (row: SiteItem): 'running' | 'stopped' | 'maintenance' => {
   const s = (row.run_state || '').toLowerCase()
@@ -168,6 +182,7 @@ async function load() {
         total: number
         running: number
         stopped: number
+        failed?: number
         vhost_mode?: 'www' | 'system'
         rows: SiteItem[]
       }
@@ -175,7 +190,8 @@ async function load() {
     list.value = res.data?.rows || []
     stats.total = res.data?.total || 0
     stats.running = res.data?.running || 0
-    stats.stopped = res.data?.stopped || 0
+      stats.stopped = res.data?.stopped || 0
+    stats.failed = res.data?.failed || 0
     if (res.data?.vhost_mode) vhostMode.value = res.data.vhost_mode
   } catch {
     /* handled */
@@ -478,6 +494,12 @@ onMounted(() => {
           <div class="stat-label">已停止</div>
         </el-card>
       </el-col>
+      <el-col :xs="12" :sm="8" :md="8">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-num stat-red">{{ stats.failed }}</div>
+          <div class="stat-label">同步失败</div>
+        </el-card>
+      </el-col>
     </el-row>
 
     <!-- 运行模式说明 -->
@@ -623,15 +645,34 @@ onMounted(() => {
             <span v-else class="dim">默认 data/www（历史站点）</span>
           </template>
         </el-table-column>
-        <el-table-column label="部署" width="100">
+        <el-table-column label="部署" width="140">
           <template #default="{ row }">
-            <el-tag v-if="row.vhost_state === 'synced'" size="small" type="success" effect="plain">
+            <el-tooltip
+              v-if="isSyncFailed(row)"
+              :content="row.vhost_error || '同步失败，可点「重试」再次同步'"
+              placement="top"
+            >
+              <el-tag
+                size="small"
+                type="danger"
+                effect="plain"
+                class="cursor-help"
+                @click="showSyncError(row)"
+              >
+                同步失败
+              </el-tag>
+            </el-tooltip>
+            <el-tag
+              v-else-if="row.vhost_state === 'synced'"
+              size="small"
+              type="success"
+              effect="plain"
+            >
               已同步
             </el-tag>
-            <el-tag v-else-if="row.vhost_state === 'error'" size="small" type="danger" effect="plain">
-              同步失败
+            <el-tag v-else size="small" type="info" effect="plain">
+              {{ row.vhost_state === 'pending' ? '未同步' : row.vhost_state }}
             </el-tag>
-            <el-tag v-else size="small" type="info" effect="plain">未同步</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="180">
@@ -669,7 +710,7 @@ onMounted(() => {
               :loading="syncingId === row.id"
               :disabled="syncingId !== 0 && syncingId !== row.id"
               @click="syncSite(row.id)"
-            >同步</el-button>
+            >{{ isSyncFailed(row) ? '重试' : '同步' }}</el-button>
             <el-button
               link
               type="warning"
@@ -949,6 +990,12 @@ onMounted(() => {
 }
 .dim {
   color: var(--el-text-color-placeholder);
+}
+.cursor-help {
+  cursor: help;
+}
+.stat-red {
+  color: var(--el-color-danger);
 }
 .form-tip {
   width: 100%;

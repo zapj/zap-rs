@@ -5,6 +5,7 @@
 //! 限制项：
 //! - `disk_quota_mb`     磁盘配额（MB，0 = 不限），创建/变更用户时下发到系统 quota
 //! - `max_sites`         最大站点数（0 = 不限），创建站点时硬拦截
+//! - `max_domains`       单站点最大域名数（0 = 不限），创建/编辑站点时硬拦截
 //! - `max_bandwidth_mb`  月流量上限（MB，0 = 不限；面板暂无流量统计，仅记录与展示）
 //! - `fpm_spec_ref`      PHP-FPM 规格模板名（'' = 面板默认）
 //! - `allow_ssh`         是否允许使用 SSH 终端
@@ -38,6 +39,8 @@ pub struct PackageRow {
     pub remark: String,
     pub disk_quota_mb: i64,
     pub max_sites: i64,
+    /// 单站点最大域名数（0 = 不限）
+    pub max_domains: i64,
     pub max_bandwidth_mb: i64,
     pub fpm_spec_ref: String,
     pub allow_ssh: i32,
@@ -47,7 +50,7 @@ pub struct PackageRow {
     pub updated_at: i64,
 }
 
-const COLS: &str = "id, name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, \
+const COLS: &str = "id, name, remark, disk_quota_mb, max_sites, max_domains, max_bandwidth_mb, \
                     fpm_spec_ref, allow_ssh, owner_id, status, created_at, updated_at";
 
 fn validate_name(raw: &str) -> Result<String, ZapError> {
@@ -99,6 +102,7 @@ fn row_json(r: &PackageRow, users_count: i64) -> Value {
         "remark": r.remark,
         "disk_quota_mb": r.disk_quota_mb,
         "max_sites": r.max_sites,
+        "max_domains": r.max_domains,
         "max_bandwidth_mb": r.max_bandwidth_mb,
         "fpm_spec_ref": r.fpm_spec_ref,
         "allow_ssh": r.allow_ssh == 1,
@@ -184,6 +188,8 @@ pub struct PackageAddPayload {
     pub disk_quota_mb: Option<i64>,
     /// 最大站点数（0 = 不限）
     pub max_sites: Option<i64>,
+    /// 单站点最大域名数（0 = 不限）
+    pub max_domains: Option<i64>,
     /// 月流量上限（MB，0 = 不限，仅记录）
     pub max_bandwidth_mb: Option<i64>,
     /// PHP-FPM 规格模板名（'' = 面板默认）
@@ -208,6 +214,7 @@ pub async fn package_add(
     let remark = payload.remark.unwrap_or_default().trim().to_string();
     let disk_quota_mb = validate_limit(payload.disk_quota_mb.unwrap_or(0), "磁盘配额")?;
     let max_sites = validate_limit(payload.max_sites.unwrap_or(0), "最大站点数")?;
+    let max_domains = validate_limit(payload.max_domains.unwrap_or(0), "单站点最大域名数")?;
     let max_bandwidth_mb = validate_limit(payload.max_bandwidth_mb.unwrap_or(0), "月流量上限")?;
     let fpm_spec_ref = payload.fpm_spec_ref.unwrap_or_default().trim().to_string();
     if !fpm_spec_ref.is_empty() {
@@ -222,14 +229,15 @@ pub async fn package_add(
 
     let pool = db::get_db_pool().await;
     let result = sqlx::query(
-        "INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, \
+        "INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_domains, max_bandwidth_mb, \
          fpm_spec_ref, allow_ssh, owner_id, status, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&name)
     .bind(&remark)
     .bind(disk_quota_mb)
     .bind(max_sites)
+    .bind(max_domains)
     .bind(max_bandwidth_mb)
     .bind(&fpm_spec_ref)
     .bind(allow_ssh)
@@ -253,7 +261,7 @@ pub async fn package_add(
         Some(client_addr.ip().to_string().as_str()),
         "package_add",
         &format!("id={new_id}"),
-        &format!("name={name} sites={max_sites} disk={disk_quota_mb}MB"),
+        &format!("name={name} sites={max_sites} domains={max_domains} disk={disk_quota_mb}MB"),
     )
     .await;
     Ok(Json(
@@ -268,6 +276,7 @@ pub struct PackageUpdatePayload {
     pub remark: Option<String>,
     pub disk_quota_mb: Option<i64>,
     pub max_sites: Option<i64>,
+    pub max_domains: Option<i64>,
     pub max_bandwidth_mb: Option<i64>,
     pub fpm_spec_ref: Option<String>,
     pub allow_ssh: Option<bool>,
@@ -327,6 +336,15 @@ pub async fn package_update(
     if let Some(v) = payload.max_sites {
         let v = validate_limit(v, "最大站点数")?;
         sqlx::query("UPDATE packages SET max_sites = ?, updated_at = ? WHERE id = ?")
+            .bind(v)
+            .bind(now)
+            .bind(payload.id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(v) = payload.max_domains {
+        let v = validate_limit(v, "单站点最大域名数")?;
+        sqlx::query("UPDATE packages SET max_domains = ?, updated_at = ? WHERE id = ?")
             .bind(v)
             .bind(now)
             .bind(payload.id)
