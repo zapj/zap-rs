@@ -531,6 +531,11 @@ pub enum Request {
     /// enable=true → IP / 未匹配域名展示欢迎页
     #[serde(rename = "nginx.default_vhost")]
     NginxDefaultVhost { enable: bool },
+    /// 查询 / 设置 Nginx 状态页 stub_status：
+    /// enable=None → 仅查询是否启用并采集指标；
+    /// enable=Some(true/false) → 开启 / 关闭状态页（托管于 127.0.0.1 本机端口）
+    #[serde(rename = "nginx.stub_status")]
+    NginxStubStatus { enable: Option<bool> },
     /// 通用服务配置·状态探测（服务配置页：php / mysql / mariadb / docker，未安装时 installed=false）
     #[serde(rename = "service_conf.status")]
     ServiceConfStatus { service: String },

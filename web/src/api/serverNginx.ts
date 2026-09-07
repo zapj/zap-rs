@@ -94,3 +94,41 @@ export const setNginxDefaultVhost = (enable: boolean) =>
     '/system/nginx/default-vhost',
     { enable },
   )
+
+/** stub_status 状态页采集指标 */
+export interface NginxStubMetrics {
+  active: number
+  accepts: number
+  handled: number
+  requests: number
+  reading: number
+  writing: number
+  waiting: number
+}
+
+export interface NginxStubStatus {
+  enabled?: boolean
+  port?: number | null
+  running?: boolean
+  metrics?: NginxStubMetrics | null
+  worker_processes?: string
+  worker_connections?: string
+  processes?: { master: number; workers: number; cache: number; total: number }
+}
+
+export interface NginxStubSetData {
+  enable: boolean
+  port?: number | null
+  reloaded: boolean
+  reason?: string
+}
+
+/** 查询 Nginx 状态页 stub_status 并采集指标 */
+export const getNginxStubStatus = () =>
+  http.get<{ code: number; message: string; data: NginxStubStatus }>('/system/nginx/stub-status')
+
+/** 开启 / 关闭 Nginx 状态页 */
+export const setNginxStubStatus = (enable: boolean) =>
+  http.post<{ code: number; message: string; data: NginxStubSetData }>('/system/nginx/stub-status', {
+    enable,
+  })

@@ -7,6 +7,8 @@
 //! - POST /system/nginx/config/save       保存配置（备份 → 写入 → nginx -t → 回滚/重载）
 //! - POST /system/nginx/control           服务控制 start/stop/restart/reload
 //! - POST /system/nginx/default-vhost     设置默认站点（IP 访问开关）{ enable }
+//! - GET  /system/nginx/stub-status       查询状态页 stub_status 并采集指标
+//! - POST /system/nginx/stub-status       开启 / 关闭状态页 { enable }
 
 use std::net::SocketAddr;
 
@@ -125,6 +127,45 @@ pub async fn nginx_control(
             "nginx_control",
             "nginx",
             &format!("Nginx 服务操作 {}", body.action),
+        )
+        .await;
+    }
+    result
+}
+
+/// GET /system/nginx/stub-status（查询状态页并采集指标）
+pub async fn nginx_stub_status_get(claims: ValidatedClaims) -> ZapJsonResult {
+    require_admin(&claims)?;
+    exec(Request::NginxStubStatus { enable: None }).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NginxStubStatusBody {
+    pub enable: bool,
+}
+
+/// POST /system/nginx/stub-status（开启 / 关闭状态页）
+pub async fn nginx_stub_status_set(
+    claims: ValidatedClaims,
+    client_addr: Extension<SocketAddr>,
+    Json(body): Json<NginxStubStatusBody>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    let result = exec(Request::NginxStubStatus {
+        enable: Some(body.enable),
+    })
+    .await;
+    if result.is_ok() {
+        audit::log(
+            Some(&claims),
+            Some(client_addr.ip().to_string().as_str()),
+            "nginx_stub_status",
+            "nginx",
+            if body.enable {
+                "启用 Nginx 状态页 stub_status"
+            } else {
+                "关闭 Nginx 状态页 stub_status"
+            },
         )
         .await;
     }

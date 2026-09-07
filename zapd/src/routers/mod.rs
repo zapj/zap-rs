@@ -340,6 +340,10 @@ fn api_routers() -> Router {
             "/system/nginx/default-vhost",
             post(system_nginx::nginx_default_vhost),
         )
+        .route(
+            "/system/nginx/stub-status",
+            get(system_nginx::nginx_stub_status_get).post(system_nginx::nginx_stub_status_set),
+        )
         // 通用服务配置（服务配置：php / mysql / mariadb / docker，admin only）
         .route(
             "/system/service-conf/status",

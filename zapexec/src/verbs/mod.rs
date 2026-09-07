@@ -229,6 +229,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::NginxConfSave { path, content } => nginx::conf_save(path, content).await,
         Request::NginxControl { action } => nginx::control(&action).await,
         Request::NginxDefaultVhost { enable } => nginx::default_vhost(enable).await,
+        Request::NginxStubStatus { enable } => nginx::stub_status(enable).await,
         Request::ServiceConfStatus { service } => service_conf::status(&service).await,
         Request::ServiceConfList { service } => service_conf::conf_list(&service).await,
         Request::ServiceConfRead { service, path } => service_conf::conf_read(&service, path).await,
