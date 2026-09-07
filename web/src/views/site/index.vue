@@ -138,6 +138,13 @@ const selection = ref<SiteItem[]>([])
 // 归属用户下拉数据（admin / reseller）
 const ownerOptions = ref<OwnerOption[]>([])
 const ownersLoading = ref(false)
+// 「自动目录」输入框的家目录前缀：跟随当前归属用户（管理端建站归属所选用户，普通用户固定自己）
+const autoOwnerName = computed(() => {
+  if (!canManageAll.value) return userStore.userInfo.username || ''
+  const o = ownerOptions.value.find((x) => x.id === form.user_id)
+  return o?.username || ''
+})
+const autoHomePrefix = computed(() => (autoOwnerName.value ? `/home/${autoOwnerName.value}` : ''))
 
 // PHP 运行时选项：数据源 = 应用商店「已安装应用」中状态为 running 的 PHP 实例
 // （管理员在已安装列表停掉某版本实例后，自动从下拉中消失 → 用户不可再选择）
@@ -319,7 +326,7 @@ const gates = computed(() => {
 })
 /** 是否展示「反代 / 高级规则」区块 */
 const showProxyPanel = computed(() => gates.value.proxy || form.site_type === 'proxy')
-/** 是否可以切换「选择已有目录」 */
+/** 是否可以自定义站点目录（浏览选择已有目录 / 自动目录指定子路径） */
 const canPickDir = computed(() => gates.value.custom_dir || form.web_root_custom)
 
 async function loadFeature() {
@@ -350,7 +357,8 @@ interface SiteForm {
   pseudo_static: string
   pseudo_custom: string
   web_root_custom: boolean
-  web_root: string
+  /** 家目录前缀下的相对子路径（如 www/blog）；「已有目录」与「自动创建」共用该输入 */
+  web_root_sub: string
   upstreams: UpstreamSpec[]
   locations: LocationSpec[]
 }
@@ -367,11 +375,35 @@ const blankForm = (): SiteForm => ({
   pseudo_static: 'none',
   pseudo_custom: '',
   web_root_custom: false,
-  web_root: '',
+  web_root_sub: '',
   upstreams: [],
   locations: [],
 })
 const form = reactive<SiteForm>(blankForm())
+// 「自动按域名命名目录」的上次生成值：输入框被手动改过后不再自动覆盖
+const lastAutoDir = ref('')
+// 编辑到文档根不在家目录内的旧站点时记录原路径，仅用于提示（避免误迁移文档根）
+const legacyDocRoot = ref('')
+// 把第一个域名清洗成目录名：去协议/路径/端口，去掉常见 www. 前缀，保留合法字符
+function dirNameFromDomain(d: string): string {
+  let s = d.trim().toLowerCase()
+  s = s.replace(/^[a-z]+:\/\//, '').split(/[/?#]/)[0].split(':')[0]
+  if (s.startsWith('www.')) s = s.slice(4)
+  const name = s.replace(/[^a-z0-9._~-]/g, '-').replace(/^-+|-+$/g, '')
+  return name || d.trim().toLowerCase()
+}
+/** 输入第一个域名后，自动用域名生成站点目录名（仅新增站点、目录未被手动指定、且套餐允许自定义目录时） */
+function maybeAutoDirByDomain() {
+  if (formMode.value !== 'add') return
+  if (!canPickDir.value) return // 套餐未开放自定义目录：沿用面板默认规划，避免被后端门禁拦截
+  if (form.web_root_custom) return
+  const d = form.domains.find((x) => x.trim())
+  if (!d) return
+  if (form.web_root_sub.trim() && form.web_root_sub.trim() !== lastAutoDir.value) return
+  const rel = `www/${dirNameFromDomain(d)}`
+  form.web_root_sub = rel
+  lastAutoDir.value = rel
+}
 
 // 编辑时：若站点当前 PHP 实例已不在运行列表（管理员已停用），追加禁用选项以便展示并可改选
 const stalePhpInstance = computed(() => {
@@ -416,10 +448,11 @@ watch(
   () => form.site_type,
   (v, o) => {
     if (v === 'proxy') {
-      // 反代站点不落文档目录：清掉可能遗留的“选择已有目录”，目录回到自动
+      // 反代站点不落文档目录：清掉可能遗留的“已有目录”，目录回到自动
       form.php_instance = ''
       form.web_root_custom = false
-      form.web_root = ''
+      form.web_root_sub = ''
+      legacyDocRoot.value = ''
       if (!form.locations.length) form.locations.push(blankLocation('/'))
       if (!form.upstreams.length) form.upstreams.push(blankUpstream())
     } else if (o === 'proxy') {
@@ -427,11 +460,15 @@ watch(
       form.upstreams = []
       form.locations = []
       form.web_root_custom = false
-      form.web_root = ''
+      form.web_root_sub = ''
+      legacyDocRoot.value = ''
     }
     if (v !== 'php') form.php_instance = ''
   }
 )
+
+// 输入第一个域名后，自动生成站点目录名（详见 maybeAutoDirByDomain）
+watch(() => form.domains[0], maybeAutoDirByDomain)
 
 // ── 已有目录浏览（只列出归属用户家目录下已存在的目录）────────────
 const dirDialog = reactive({
@@ -470,7 +507,10 @@ function openDirBrowser() {
     return
   }
   dirDialog.ownerId = canManageAll.value ? form.user_id : null
-  dirFetch(form.web_root_custom && form.web_root ? form.web_root : '')
+  // 起始路径：家目录 + 当前相对子路径（为空则从家目录开始浏览）
+  const rel = form.web_root_sub.trim()
+  const cur = rel && autoHomePrefix.value ? joinPath(autoHomePrefix.value, rel) : ''
+  dirFetch(cur)
   dirDialog.visible = true
 }
 function dirGoHome() {
@@ -488,15 +528,34 @@ function dirEnter(name: string) {
 }
 function dirPickCurrent() {
   if (!dirDialog.path) return
-  form.web_root = dirDialog.path
+  // 选中家目录下已存在的目录 → 切到「已有目录」模式，并去掉家目录前缀只存相对子路径
   form.web_root_custom = true
+  const pre = dirDialog.home
+  form.web_root_sub =
+    pre && dirDialog.path.startsWith(pre + '/')
+      ? dirDialog.path.slice(pre.length + 1)
+      : dirDialog.path
   dirDialog.visible = false
-  ElMessage.success(`已选择站点目录：${form.web_root}`)
+  ElMessage.success(`已选择站点目录：${form.web_root_sub}`)
+}
+
+/** 从「已有目录」改回「自动创建」：目录不存在时创建站点会自动建好（不覆盖已有文件） */
+function switchToAutoDir() {
+  form.web_root_custom = false
+}
+
+/** 提交「已有目录」时：把相对子路径还原为家目录下的绝对路径 */
+function formAbsDir(): string {
+  const rel = form.web_root_sub.trim()
+  if (rel.startsWith('/')) return rel
+  return joinPath(autoHomePrefix.value || '/home', rel)
 }
 
 function openAdd() {
   formMode.value = 'add'
   Object.assign(form, blankForm())
+  lastAutoDir.value = ''
+  legacyDocRoot.value = ''
   if (canManageAll.value) {
     const me = ownerOptions.value.find((o) => o.id === userStore.userInfo.id)
     form.user_id = me ? me.id : ownerOptions.value[0]?.id ?? null
@@ -521,7 +580,20 @@ function openEdit(row: SiteItem) {
   form.pseudo_static = row.pseudo_static || 'none'
   form.pseudo_custom = row.pseudo_custom || ''
   form.web_root_custom = !!row.web_root_custom
-  form.web_root = row.web_root || ''
+  // 把已有文档根还原为「家目录前缀下的相对子路径」供编辑（已有目录 / 自动目录统一展示）
+  form.web_root_sub = ''
+  legacyDocRoot.value = ''
+  if (row.web_root) {
+    const uname = row.owner_username || ''
+    const pre = uname ? `/home/${uname}/` : ''
+    if (pre && row.web_root.startsWith(pre + '/')) {
+      form.web_root_sub = row.web_root.slice(pre.length)
+    } else if (!row.web_root_custom && uname) {
+      // 不在家目录内的旧「自动目录」：编辑提交空路径 = 保持原目录不迁移，仅提示
+      legacyDocRoot.value = row.web_root
+    }
+  }
+  lastAutoDir.value = form.web_root_sub
   form.upstreams = (row.upstreams || []).map((u) => ({ name: u.name, servers: u.servers }))
   form.locations = (row.locations || []).map((l) => ({
     path: l.path,
@@ -558,8 +630,17 @@ function validateForm(): string {
       if (n && names.has(n)) return `upstream 组名重复：${n}`
       if (n) names.add(n)
     }
-  } else if (form.web_root_custom && !form.web_root.trim()) {
-    return '请点击「浏览…」选择归属用户家目录下已存在的目录'
+  } else {
+    const s = form.web_root_sub.trim()
+    if (form.web_root_custom) {
+      if (!s) return '请先点击浏览按钮选择家目录下已存在的目录'
+      if (!autoHomePrefix.value) return '无法确定归属用户的家目录前缀，请重新选择归属用户'
+    } else if (s) {
+      if (s.split('/').some((seg) => seg === '..'))
+        return '站点目录不能包含 ..'
+      if (s.split('/').some((seg) => /[\u0000-\u001f\u007f]/.test(seg)))
+        return '站点目录包含非法控制字符'
+    }
   }
   return ''
 }
@@ -583,7 +664,8 @@ async function submitForm() {
     pseudo_static: pseudo,
     pseudo_custom: pseudo === 'custom' ? form.pseudo_custom : '',
     web_root_custom: form.web_root_custom,
-    web_root: form.web_root_custom ? form.web_root.trim() : '',
+    web_root: form.web_root_custom ? formAbsDir() : '',
+    web_root_sub: form.web_root_custom ? '' : form.web_root_sub.trim(),
     upstreams: form.upstreams.map((u) => ({ name: u.name.trim(), servers: u.servers.trim() })),
     locations: form.locations.map((l) => ({
       path: l.path.trim(),
@@ -1127,22 +1209,44 @@ onMounted(() => {
 
         <template v-if="form.site_type === 'php' || form.site_type === 'static'">
           <el-form-item label="站点目录">
-            <el-radio-group v-model="form.web_root_custom" :disabled="!canPickDir">
-              <el-radio :value="false" border>自动目录</el-radio>
-              <el-radio :value="true" border>选择已有目录</el-radio>
-            </el-radio-group>
-            <div class="form-tip">
-              自动目录按「归属用户家目录/www/站点名-站点ID」自动创建；选择已有目录则直接使用家目录下已存在的目录（不会写入默认 index.html）。
+            <div class="dir-picker">
+              <el-input
+                v-model="form.web_root_sub"
+                :disabled="!canPickDir"
+                clearable
+                :placeholder="
+                  !canPickDir
+                    ? '套餐未开放自定义站点目录，将使用自动规划目录'
+                    : form.web_root_custom
+                      ? '浏览选择家目录下已存在的目录'
+                      : 'www/目录名（输入域名后自动生成，可修改）'
+                "
+              >
+                <template #prepend>
+                  <span class="home-prefix">{{ autoHomePrefix }}/</span>
+                </template>
+                <template #append>
+                  <el-tooltip content="浏览并选择家目录下已存在的目录" placement="top">
+                    <el-button :icon="FolderOpened" :disabled="!canPickDir" @click="openDirBrowser" />
+                  </el-tooltip>
+                </template>
+              </el-input>
             </div>
-            <template v-if="form.web_root_custom">
-              <div class="dir-picker">
-                <el-input v-model="form.web_root" placeholder="选择归属用户家目录下的已有目录" disabled />
-                <el-button :icon="FolderOpened" @click="openDirBrowser">浏览…</el-button>
-              </div>
-              <div v-if="!gates.custom_dir && !canManageAll" class="form-tip">
-                自定义目录未对你的账号开放，可联系管理员在「系统 → 套餐」中开启
-              </div>
-            </template>
+            <div v-if="!canPickDir" class="form-tip">
+              自定义站点目录未对你的账号开放，可联系管理员在「系统 → 套餐」中开启
+            </div>
+            <div v-if="form.web_root_custom" class="form-tip">
+              将直接使用已选择的目录作为文档根（不写入默认 index.html、不修改目录权限）。
+              <a class="dir-mode-link" @click="switchToAutoDir">改回自动创建（目录不存在时自动新建）</a>
+            </div>
+            <div v-else class="form-tip">
+              目录位于归属用户家目录（{{ autoHomePrefix }}）下：输入第一个域名后会自动用域名生成目录名（如
+              www/example.com），可自行修改；目录不存在时创建站点会自动建好，不会覆盖已有文件。
+            </div>
+            <div v-if="legacyDocRoot" class="form-tip dir-legacy">
+              该站点当前文档根 {{ legacyDocRoot }} 不在家目录内：若不修改上方目录则保持不变；若填写新目录，
+              文档根将迁移到家目录下（旧目录内的文件不会自动搬移）。
+            </div>
           </el-form-item>
         </template>
 
@@ -1353,6 +1457,14 @@ onMounted(() => {
   font-size: 12px;
   line-height: 18px;
   color: var(--el-text-color-secondary);
+}
+.dir-mode-link {
+  color: var(--el-color-primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+.dir-legacy {
+  color: var(--el-color-warning);
 }
 .site-form {
   max-height: 66vh;

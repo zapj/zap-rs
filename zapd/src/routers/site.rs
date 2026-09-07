@@ -109,6 +109,10 @@ pub struct SiteAddPayload {
     /// 自定义站点目录绝对路径（web_root_custom=true 时必填）
     #[serde(default)]
     pub web_root: Option<String>,
+    /// 自动目录自定义子路径（相对归属用户家目录，如 www/blog；空/未填 = 面板默认规划
+    /// {home}/www/{name}-{id}）。目录不存在时 vhost 同步阶段会自动创建。
+    #[serde(default)]
+    pub web_root_sub: Option<String>,
     /// 自定义 upstream 组
     #[serde(default)]
     pub upstreams: Vec<UpstreamSpec>,
@@ -147,12 +151,16 @@ pub struct SiteUpdatePayload {
     #[serde(default)]
     pub pseudo_custom: Option<String>,
     /// Some(true)=切换为「选择已有目录」模式（需同时给 web_root）；
-    /// Some(false)=切回面板自动规划目录
+    /// Some(false)=切回面板自动目录
     #[serde(default)]
     pub web_root_custom: Option<bool>,
     /// 自定义站点目录绝对路径（web_root_custom=true 且首次指定时必填）
     #[serde(default)]
     pub web_root: Option<String>,
+    /// 自动目录自定义子路径（相对归属用户家目录）；Some(非空) 时刷新为 {home}/{sub}，
+    /// None / 空串 = 不迁移目录（维持现有文档根或按面板默认规划）。
+    #[serde(default)]
+    pub web_root_sub: Option<String>,
     #[serde(default)]
     pub upstreams: Option<Vec<UpstreamSpec>>,
     #[serde(default)]
@@ -812,6 +820,73 @@ async fn resolve_custom_web_root(owner: i64, raw: &str) -> Result<String, ZapErr
     Ok(p)
 }
 
+/// 归一化「自动目录自定义子路径」为 home 下的相对段（允许粘贴完整绝对路径：
+/// 已在 home 前缀下则截掉；其余情况剥离首尾 `/`）。
+/// 返回格式：`a/b/c`。拒绝 `..`、控制字符与非常规路径字符。
+fn clean_auto_sub(raw: &str, home: &str) -> Result<String, ZapError> {
+    let mut s = raw.trim();
+    // 粘贴了完整绝对路径（带 home 前缀）时直接截掉前缀
+    if let Some(rest) = s.strip_prefix(home) {
+        s = rest;
+    }
+    let s = s.trim_matches('/').trim();
+    let mut segs: Vec<&str> = Vec::new();
+    for part in s.split('/') {
+        let seg = part.trim();
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            return Err(ZapError::New(
+                -1,
+                "自定义站点目录不允许包含 ..".to_string(),
+            ));
+        }
+        if seg.chars().any(|c| {
+            c.is_control() || !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '~'))
+        }) {
+            return Err(ZapError::New(
+                -1,
+                format!("自定义站点目录段含非法字符：{seg}（仅允许字母/数字/_/-/./~）"),
+            ));
+        }
+        segs.push(seg);
+    }
+    if segs.is_empty() {
+        return Err(ZapError::New(
+            -1,
+            "请填写自定义站点目录（例如 www/blog）".to_string(),
+        ));
+    }
+    Ok(segs.join("/"))
+}
+
+/// 自动目录文档根规划：
+/// - `sub` 为空 → 面板默认规划 {home}/www/{sanitize(name)}-{site_id}（site_dirs_for）；
+/// - `sub` 非空 → {home}/{clean sub}（目录不存在时由 vhost 同步阶段递归创建，不会写占位覆盖已有文件）。
+/// 日志目录始终为 {home}/logs/{sanitize(name)}-{site_id}。
+async fn auto_dirs_for(
+    owner: i64,
+    name: &str,
+    site_id: i64,
+    sub: Option<&str>,
+) -> Result<(String, String), ZapError> {
+    let raw = sub.map(str::trim).unwrap_or("");
+    if raw.is_empty() {
+        return site_dirs_for(owner, name, site_id).await;
+    }
+    let home = home_dir_of(owner).await?;
+    if home.is_empty() {
+        return Err(ZapError::New(
+            -1,
+            "该用户家目录尚未初始化：请先创建并同步一次站点，再指定自定义站点目录".to_string(),
+        ));
+    }
+    let rel = clean_auto_sub(raw, &home)?;
+    let (_, log_root) = site_dirs_for(owner, name, site_id).await?;
+    Ok((format!("{home}/{rel}"), log_root))
+}
+
 /// 轻量业务校验（站点类型 / 伪静态 / 功能开关门禁 / upstream/location 字段形态）。
 /// 更细的 nginx 语法与注入校验由 zapexec 同步时兜底执行。
 async fn validate_advanced_inputs(
@@ -820,6 +895,8 @@ async fn validate_advanced_inputs(
     pseudo_static: &str,
     pseudo_custom: &str,
     web_root_custom: bool,
+    // 本次是否显式修改了自动目录自定义子路径（同样受「自定义目录」套餐能力约束）
+    auto_sub_custom: bool,
     upstreams: &[UpstreamSpec],
     locations: &[LocationSpec],
 ) -> Result<(), ZapError> {
@@ -843,10 +920,10 @@ async fn validate_advanced_inputs(
             "自定义 upstream / location 未对当前账号开放，请联系管理员在「系统 → 套餐」中开启「反向代理」".to_string(),
         ));
     }
-    if web_root_custom && !g_custom {
+    if (web_root_custom || auto_sub_custom) && !g_custom {
         return Err(ZapError::New(
             -1,
-            "选择已有目录未对当前账号开放，请联系管理员在「系统 → 套餐」中开启「自定义目录」".to_string(),
+            "自定义站点目录（指定子路径 / 选择已有目录）未对当前账号开放，请联系管理员在「系统 → 套餐」中开启「自定义目录」".to_string(),
         ));
     }
     if t == "proxy" && locations.is_empty() {
@@ -1335,12 +1412,19 @@ pub async fn site_add(
         let p = payload.pseudo_static.trim().to_lowercase();
         if p.is_empty() { "none".to_string() } else { p }
     };
+    let auto_sub_active = !payload.web_root_custom
+        && payload
+            .web_root_sub
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|s| !s.is_empty());
     validate_advanced_inputs(
         &claims,
         &payload.site_type,
         &pseudo_static,
         &payload.pseudo_custom,
         payload.web_root_custom,
+        auto_sub_active,
         &payload.upstreams,
         &payload.locations,
     )
@@ -1417,7 +1501,9 @@ pub async fn site_add(
         let (_, lr) = site_dirs_for(owner, &name, id).await?;
         (cw.clone(), lr)
     } else {
-        site_dirs_for(owner, &name, id).await?
+        // 自动目录：支持用户指定 {home}/子路径（缺省走面板默认规划 www/{name}-{id}）；
+        // 目录不存在时由 vhost 同步阶段的 ensure_web_root 递归创建
+        auto_dirs_for(owner, &name, id, payload.web_root_sub.as_deref()).await?
     };
     if !web_root.is_empty() {
         sqlx::query("UPDATE site SET web_root = ?, log_root = ? WHERE id = ?")
@@ -1607,13 +1693,32 @@ pub async fn site_update(
         .unwrap_or(0);
     validate_site_fields(&name, &domains, &ips, &remark, max_domains)?;
 
-    // 门禁只针对“本次显式变更”：存量反代 / 自定义目录站点被普通用户增量编辑时不会被误拦截
+    // 门禁只针对“本次显式变更”：存量反代 / 自定义目录站点被普通用户增量编辑时不会被误拦截；
+    // 自动目录子路径仅当“与当前文档根不同”才算显式变更（编辑自动目录站点时前端会回填相同子路径）
+    let auto_sub_active = !eff_custom
+        && payload
+            .web_root_sub
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|s| !s.is_empty())
+        && {
+            let home = home_dir_of(new_owner).await?;
+            if home.is_empty() {
+                true
+            } else if let Some(rel0) = old_web_root.strip_prefix(&format!("{home}/")) {
+                rel0.trim() != payload.web_root_sub.as_deref().map(str::trim).unwrap_or("")
+            } else {
+                // 当前文档根不在该家目录下（换属主 / 历史目录）：非空子路径视为迁移意图
+                true
+            }
+        };
     validate_advanced_inputs(
         &claims,
         payload.site_type.as_deref().unwrap_or(""),
         payload.pseudo_static.as_deref().unwrap_or(""),
         payload.pseudo_custom.as_deref().unwrap_or(""),
         payload.web_root_custom.unwrap_or(false),
+        auto_sub_active,
         payload.upstreams.as_deref().unwrap_or_default(),
         payload.locations.as_deref().unwrap_or_default(),
     )
@@ -1631,11 +1736,20 @@ pub async fn site_update(
     } else {
         None
     };
-    // 目录需要刷新：进入/退出自定义模式、切属主、改名、自定义路径变化
+    // 自动目录自定义子路径（auto 模式且显式提交非空子路径 → 刷新文档根为 {home}/{sub}）
+    let new_auto_dirs: Option<(String, String)> = if eff_custom || !auto_sub_active {
+        None
+    } else {
+        Some(
+            auto_dirs_for(new_owner, &name, payload.id, payload.web_root_sub.as_deref()).await?,
+        )
+    };
+    // 目录需要刷新：进入/退出自定义模式、切属主、改名、自定义路径 / 子路径变化
     let dir_changed = eff_custom != prof.3
         || new_owner != uid
         || name != old_name
-        || (eff_custom && new_custom_root.as_deref() != Some(old_web_root.as_str()));
+        || (eff_custom && new_custom_root.as_deref() != Some(old_web_root.as_str()))
+        || matches!(&new_auto_dirs, Some((w, _)) if w != &old_web_root);
 
     let now = chrono::Local::now().timestamp();
     let mut tx = pool.begin().await?;
@@ -1685,11 +1799,13 @@ pub async fn site_update(
                 .await?;
         }
     }
-    // 站点目录跟随变更刷新（自定义已有目录 / 面板自动规划目录）
+    // 站点目录跟随变更刷新（已有目录 / 自动目录自定义子路径 / 面板自动规划目录）
     if dir_changed {
         let (web_root, log_root) = if let Some(cw) = &new_custom_root {
             let (_, lr) = site_dirs_for(new_owner, &name, payload.id).await?;
             (cw.clone(), lr)
+        } else if let Some((w, l)) = &new_auto_dirs {
+            (w.clone(), l.clone())
         } else {
             site_dirs_for(new_owner, &name, payload.id).await?
         };
