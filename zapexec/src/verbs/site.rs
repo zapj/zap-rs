@@ -482,23 +482,47 @@ fn nginx_http2_on_syntax(bin: &std::path::Path) -> bool {
 /// - site_type：php（默认，PHP/PHP+静态）/ static / proxy（反向代理，忽略 root/PHP）
 /// - 伪静态预设只影响默认 `location /`（php/static 类型）
 /// - upstreams 渲染到 server 块之前；locations 按序渲染进 server（nginx 最长前缀匹配覆盖默认规则）
-fn render_vhost_full(
+///
+/// 入参全部为借用/复制字段，聚合为 [`VhostRenderSpec`] 传递（避免 15 个平铺参数）。
+#[derive(Clone, Copy)]
+struct VhostRenderSpec<'a> {
     site_id: i64,
-    name: &str,
-    domains: &[String],
-    root: &str,
-    php_socket: Option<&str>,
-    access_log: Option<&str>,
-    error_log: Option<&str>,
-    site_type: &str,
-    pseudo_static: &str,
-    pseudo_custom: &str,
-    upstreams: &[UpstreamSpec],
-    locations: &[LocationSpec],
-    ssl_files: Option<(&str, &str)>,
+    name: &'a str,
+    domains: &'a [String],
+    /// 文档根（proxy 类型为空串，不渲染 root 指令）
+    root: &'a str,
+    php_socket: Option<&'a str>,
+    access_log: Option<&'a str>,
+    error_log: Option<&'a str>,
+    site_type: &'a str,
+    pseudo_static: &'a str,
+    pseudo_custom: &'a str,
+    upstreams: &'a [UpstreamSpec],
+    locations: &'a [LocationSpec],
+    /// (证书 fullchain 路径, 私钥路径)；None = 不启用 HTTPS
+    ssl_files: Option<(&'a str, &'a str)>,
     force_https: bool,
-    ssl_tls: Option<&SslTlsCfg>,
-) -> String {
+    ssl_tls: Option<&'a SslTlsCfg>,
+}
+
+fn render_vhost_full(a: VhostRenderSpec<'_>) -> String {
+    let VhostRenderSpec {
+        site_id,
+        name,
+        domains,
+        root,
+        php_socket,
+        access_log,
+        error_log,
+        site_type,
+        pseudo_static,
+        pseudo_custom,
+        upstreams,
+        locations,
+        ssl_files,
+        force_https,
+        ssl_tls,
+    } = a;
     let s_type = norm_site_type(site_type);
     let comment = name.chars().filter(|c| !c.is_control()).collect::<String>();
     let server_name = {
@@ -890,7 +914,6 @@ fn path_under(base: &Path, p: &Path) -> bool {
 
 /// 校验 vhost 高级配置：站点类型 / 伪静态 / 自定义目录 / upstream / location。
 /// 失败返回带原因的 Err，同步方据此中止发布（nginx -t 仅是最后一道保险）。
-#[allow(clippy::too_many_arguments)]
 fn validate_vhost_cfg(
     site_type: &str,
     pseudo_static: &str,
@@ -1208,60 +1231,39 @@ fn fix_tree_owner(root: &Path, owner: &str, is_log: bool) -> Result<(), String> 
     }
 }
 
-#[allow(clippy::too_many_arguments)] // 同步站点完整 vhost 配置所需，参数固定且各司其职
-pub async fn vhost_sync(
-    site_id: i64,
-    name: String,
-    domains: Vec<String>,
-    enabled: bool,
-    mode: Option<String>,
-    php_socket: Option<String>,
-    web_root: Option<String>,
-    log_root: Option<String>,
-    owner_user: Option<String>,
-    site_type: String,
-    pseudo_static: String,
-    pseudo_custom: String,
-    web_root_custom: bool,
-    upstreams: Vec<UpstreamSpec>,
-    locations: Vec<LocationSpec>,
-    ssl_fullchain: Option<String>,
-    ssl_key: Option<String>,
-    force_https: bool,
-    ssl_protocols: String,
-    ssl_ciphers: String,
-    ssl_prefer_server_ciphers: bool,
-    ssl_http2: bool,
-) -> Response {
-    tokio::task::spawn_blocking(move || -> Result<Response, String> {
-        vhost_sync_inner(
-            site_id,
-            &name,
-            &domains,
-            enabled,
-            mode,
-            php_socket,
-            web_root,
-            log_root,
-            owner_user,
-            site_type,
-            pseudo_static,
-            pseudo_custom,
-            web_root_custom,
-            upstreams,
-            locations,
-            ssl_fullchain,
-            ssl_key,
-            force_https,
-            ssl_protocols,
-            ssl_ciphers,
-            ssl_prefer_server_ciphers,
-            ssl_http2,
-        )
-    })
-    .await
-    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
-    .unwrap_or_else(|e| Response::err(-1, e))
+/// 站点 vhost 同步命令的完整入参：协议 `site.vhost_sync` 的字段原样搬入，
+/// 由 [`vhost_sync`] 一路传给 [`vhost_sync_inner`]（避免平铺 22 个参数）。
+pub(super) struct SiteConfig {
+    pub(super) site_id: i64,
+    pub(super) name: String,
+    pub(super) domains: Vec<String>,
+    pub(super) enabled: bool,
+    pub(super) mode: Option<String>,
+    pub(super) php_socket: Option<String>,
+    pub(super) web_root: Option<String>,
+    pub(super) log_root: Option<String>,
+    pub(super) owner_user: Option<String>,
+    pub(super) site_type: String,
+    pub(super) pseudo_static: String,
+    pub(super) pseudo_custom: String,
+    pub(super) web_root_custom: bool,
+    pub(super) upstreams: Vec<UpstreamSpec>,
+    pub(super) locations: Vec<LocationSpec>,
+    pub(super) ssl_fullchain: Option<String>,
+    pub(super) ssl_key: Option<String>,
+    pub(super) force_https: bool,
+    pub(super) ssl_protocols: String,
+    pub(super) ssl_ciphers: String,
+    pub(super) ssl_prefer_server_ciphers: bool,
+    pub(super) ssl_http2: bool,
+}
+
+/// 同步站点完整 vhost 配置（拆箱到阻塞线程执行）。
+pub(super) async fn vhost_sync(cfg: SiteConfig) -> Response {
+    tokio::task::spawn_blocking(move || vhost_sync_inner(cfg))
+        .await
+        .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+        .unwrap_or_else(|e| Response::err(-1, e))
 }
 
 /// 站点运行状态：running / stopped / maintenance（None 时按 enabled 推导，兼容老面板）
@@ -1280,7 +1282,6 @@ fn run_mode(mode: Option<&str>, enabled: bool) -> &str {
     }
 }
 
-#[allow(clippy::too_many_arguments)] // 同 vhost_sync，同步所需配置字段固定
 /// 站点配置是否需要反代共享缓存区（任意 proxy location 启用了 zap_cache）
 fn needs_cache_zone(locations: &[LocationSpec]) -> bool {
     locations
@@ -1310,30 +1311,34 @@ fn ensure_cache_zone(_edir: &std::path::Path) -> Result<(), String> {
     super::webconf::publish_named("nginx", "00-zap-cache.conf", &content).map(|_| ())
 }
 
-fn vhost_sync_inner(
-    site_id: i64,
-    name: &str,
-    domains: &[String],
-    enabled: bool,
-    mode: Option<String>,
-    php_socket: Option<String>,
-    web_root: Option<String>,
-    log_root: Option<String>,
-    owner_user: Option<String>,
-    site_type: String,
-    pseudo_static: String,
-    pseudo_custom: String,
-    web_root_custom: bool,
-    upstreams: Vec<UpstreamSpec>,
-    locations: Vec<LocationSpec>,
-    ssl_fullchain: Option<String>,
-    ssl_key: Option<String>,
-    force_https: bool,
-    ssl_protocols: String,
-    ssl_ciphers: String,
-    ssl_prefer_server_ciphers: bool,
-    ssl_http2: bool,
-) -> Result<Response, String> {
+fn vhost_sync_inner(cfg: SiteConfig) -> Result<Response, String> {
+    // 解构为局部变量；name/domains 由 owned 转为借用，与函数体历史用法（&str / &[String]）一致
+    let SiteConfig {
+        site_id,
+        name,
+        domains,
+        enabled,
+        mode,
+        php_socket,
+        web_root,
+        log_root,
+        owner_user,
+        site_type,
+        pseudo_static,
+        pseudo_custom,
+        web_root_custom,
+        upstreams,
+        locations,
+        ssl_fullchain,
+        ssl_key,
+        force_https,
+        ssl_protocols,
+        ssl_ciphers,
+        ssl_prefer_server_ciphers,
+        ssl_http2,
+    } = cfg;
+    let name = &name;
+    let domains = &domains;
     let state = run_mode(mode.as_deref(), enabled);
     let conf_file = match find_nginx_conf_file() {
         Some(c) => c,
@@ -1497,23 +1502,23 @@ fn vhost_sync_inner(
         http2: ssl_http2,
         http2_on_syntax: nginx_http2_on_syntax(&bin),
     });
-    let content = render_vhost_full(
+    let content = render_vhost_full(VhostRenderSpec {
         site_id,
         name,
         domains,
-        &root_s,
-        php_socket.as_deref(),
-        access_log.as_deref(),
-        error_log.as_deref(),
-        &site_type,
-        &pseudo_static,
-        &pseudo_custom,
-        &upstreams,
-        &locations,
-        ssl_refs,
+        root: &root_s,
+        php_socket: php_socket.as_deref(),
+        access_log: access_log.as_deref(),
+        error_log: error_log.as_deref(),
+        site_type: &site_type,
+        pseudo_static: &pseudo_static,
+        pseudo_custom: &pseudo_custom,
+        upstreams: &upstreams,
+        locations: &locations,
+        ssl_files: ssl_refs,
         force_https,
-        ssl_tls_cfg.as_ref(),
-    );
+        ssl_tls: ssl_tls_cfg.as_ref(),
+    });
 
     // 面板侧快照（渲染源 / 入参 / 历史版本）：失败不影响发布，仅作排障与回滚副本
     let meta = json!({
@@ -1714,7 +1719,7 @@ mod tests {
         access_log: Option<&str>,
         error_log: Option<&str>,
     ) -> String {
-        render_vhost_full(
+        render_vhost_full(VhostRenderSpec {
             site_id,
             name,
             domains,
@@ -1722,15 +1727,15 @@ mod tests {
             php_socket,
             access_log,
             error_log,
-            "php",
-            "none",
-            "",
-            &[],
-            &[],
-            None,
-            false,
-            None,
-        )
+            site_type: "php",
+            pseudo_static: "none",
+            pseudo_custom: "",
+            upstreams: &[],
+            locations: &[],
+            ssl_files: None,
+            force_https: false,
+            ssl_tls: None,
+        })
     }
 
     #[test]
@@ -1834,23 +1839,23 @@ mod tests {
 
     #[test]
     fn render_static_type_has_no_php_and_tryfiles() {
-        let s = render_vhost_full(
-            1,
-            "s",
-            &["s.com".into()],
-            "/home/u/www/s-1",
-            None,
-            None,
-            None,
-            "static",
-            "none",
-            "",
-            &[],
-            &[],
-            None,
-            false,
-            None,
-        );
+        let s = render_vhost_full(VhostRenderSpec {
+            site_id: 1,
+            name: "s",
+            domains: &["s.com".into()],
+            root: "/home/u/www/s-1",
+            php_socket: None,
+            access_log: None,
+            error_log: None,
+            site_type: "static",
+            pseudo_static: "none",
+            pseudo_custom: "",
+            upstreams: &[],
+            locations: &[],
+            ssl_files: None,
+            force_https: false,
+            ssl_tls: None,
+        });
         assert!(s.contains("root /home/u/www/s-1;"));
         assert!(s.contains("try_files $uri $uri/ =404;"));
         assert!(!s.contains("fastcgi"), "静态站点不应有 PHP location");
@@ -1858,45 +1863,45 @@ mod tests {
 
     #[test]
     fn render_pseudo_thinkphp_and_laravel() {
-        let s = render_vhost_full(
-            1,
-            "tp",
-            &["tp.com".into()],
-            "/home/u/www/tp-1",
-            Some("unix:/run/php.sock"),
-            None,
-            None,
-            "php",
-            "thinkphp",
-            "",
-            &[],
-            &[],
-            None,
-            false,
-            None,
-        );
+        let s = render_vhost_full(VhostRenderSpec {
+            site_id: 1,
+            name: "tp",
+            domains: &["tp.com".into()],
+            root: "/home/u/www/tp-1",
+            php_socket: Some("unix:/run/php.sock"),
+            access_log: None,
+            error_log: None,
+            site_type: "php",
+            pseudo_static: "thinkphp",
+            pseudo_custom: "",
+            upstreams: &[],
+            locations: &[],
+            ssl_files: None,
+            force_https: false,
+            ssl_tls: None,
+        });
         assert!(
             s.contains("rewrite ^(.*)$ /index.php?s=$1 last;"),
             "thinkphp 伪静态规则应渲染进 location /"
         );
 
-        let s2 = render_vhost_full(
-            2,
-            "lv",
-            &["lv.com".into()],
-            "/home/u/www/lv-2",
-            Some("unix:/run/php.sock"),
-            None,
-            None,
-            "php",
-            "laravel",
-            "",
-            &[],
-            &[],
-            None,
-            false,
-            None,
-        );
+        let s2 = render_vhost_full(VhostRenderSpec {
+            site_id: 2,
+            name: "lv",
+            domains: &["lv.com".into()],
+            root: "/home/u/www/lv-2",
+            php_socket: Some("unix:/run/php.sock"),
+            access_log: None,
+            error_log: None,
+            site_type: "php",
+            pseudo_static: "laravel",
+            pseudo_custom: "",
+            upstreams: &[],
+            locations: &[],
+            ssl_files: None,
+            force_https: false,
+            ssl_tls: None,
+        });
         assert!(s2.contains("try_files $uri $uri/ /index.php?$query_string;"));
         assert!(
             !s2.contains("rewrite"),
@@ -1937,23 +1942,23 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let s = render_vhost_full(
-            3,
-            "proxy",
-            &["p.com".into()],
-            "",
-            None,
-            None,
-            None,
-            "proxy",
-            "none",
-            "",
-            &ups,
-            &locs,
-            None,
-            false,
-            None,
-        );
+        let s = render_vhost_full(VhostRenderSpec {
+            site_id: 3,
+            name: "proxy",
+            domains: &["p.com".into()],
+            root: "",
+            php_socket: None,
+            access_log: None,
+            error_log: None,
+            site_type: "proxy",
+            pseudo_static: "none",
+            pseudo_custom: "",
+            upstreams: &ups,
+            locations: &locs,
+            ssl_files: None,
+            force_https: false,
+            ssl_tls: None,
+        });
         assert!(s.contains("upstream backend {"), "应渲染 upstream 块");
         assert!(s.contains("server 127.0.0.1:9001;"));
         assert!(s.contains("server 127.0.0.1:9002 weight=2;"));
@@ -2140,23 +2145,23 @@ mod tests {
             http2: true,
             http2_on_syntax: true, // nginx ≥ 1.25.1
         };
-        let s = render_vhost_full(
-            9,
-            "ssl",
-            &["ssl.com".into()],
-            "/home/u/www/ssl-9",
-            None,
-            None,
-            None,
-            "php",
-            "none",
-            "",
-            &[],
-            &[],
-            Some(("/etc/zap/ssl/fullchain.pem", "/etc/zap/ssl/key.pem")),
-            false,
-            Some(&cfg),
-        );
+        let s = render_vhost_full(VhostRenderSpec {
+            site_id: 9,
+            name: "ssl",
+            domains: &["ssl.com".into()],
+            root: "/home/u/www/ssl-9",
+            php_socket: None,
+            access_log: None,
+            error_log: None,
+            site_type: "php",
+            pseudo_static: "none",
+            pseudo_custom: "",
+            upstreams: &[],
+            locations: &[],
+            ssl_files: Some(("/etc/zap/ssl/fullchain.pem", "/etc/zap/ssl/key.pem")),
+            force_https: false,
+            ssl_tls: Some(&cfg),
+        });
         assert!(
             s.contains("listen 443 ssl;"),
             "新版 nginx 用 http2 on 而非 listen 内嵌"
@@ -2175,23 +2180,23 @@ mod tests {
             http2: true,
             http2_on_syntax: false,
         };
-        let s2 = render_vhost_full(
-            10,
-            "legacy",
-            &["old.com".into()],
-            "/home/u/www/legacy-10",
-            None,
-            None,
-            None,
-            "static",
-            "none",
-            "",
-            &[],
-            &[],
-            Some(("/a/fullchain.pem", "/a/key.pem")),
-            false,
-            Some(&cfg2),
-        );
+        let s2 = render_vhost_full(VhostRenderSpec {
+            site_id: 10,
+            name: "legacy",
+            domains: &["old.com".into()],
+            root: "/home/u/www/legacy-10",
+            php_socket: None,
+            access_log: None,
+            error_log: None,
+            site_type: "static",
+            pseudo_static: "none",
+            pseudo_custom: "",
+            upstreams: &[],
+            locations: &[],
+            ssl_files: Some(("/a/fullchain.pem", "/a/key.pem")),
+            force_https: false,
+            ssl_tls: Some(&cfg2),
+        });
         assert!(
             s2.contains("listen 443 ssl http2;"),
             "老版 nginx 应内嵌 http2 到 listen"

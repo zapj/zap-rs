@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// serde `skip_serializing_if` 用的 false 判定（bool 字段默认值不写进 JSON）。
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// 反代 upstream 定义：vhost 渲染为 nginx `upstream <name> { ... }` 块。
 /// server 行一律以 `servers_ext` 表单字段维护（开发期不兼容旧版文本 servers）。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -383,10 +388,10 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         ssl_ciphers: String,
         /// 服务端密码套件优先（ssl_prefer_server_ciphers，仅影响 TLSv1.2）
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "is_false")]
         ssl_prefer_server_ciphers: bool,
         /// 是否启用 HTTP/2（nginx ≥ 1.25.1 渲染 `http2 on;`，旧版回退 `listen 443 ssl http2`）
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "is_false")]
         ssl_http2: bool,
     },
     /// 列出目录下的子目录（root 特权）：供面板站点「选择已有站点目录」浏览。
@@ -595,6 +600,10 @@ impl Response {
 }
 
 /// 握手与数据阶段共用的消息封装。
+///
+/// `Request` / `Response` 载荷较大（含站点同步等大字段），装箱存放：
+/// 避免 `Message` 的栈上尺寸被最大变体撑大（各变体尺寸差异 10 倍以上）。
+/// serde 序列化对 `Box<T>` 透明，线上 JSON 格式与未装箱时完全一致。
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
@@ -605,9 +614,9 @@ pub enum Message {
     /// server -> client：握手成功
     Welcome,
     /// client -> server：请求
-    Request(Request),
+    Request(Box<Request>),
     /// server -> client：响应
-    Response(Response),
+    Response(Box<Response>),
 }
 
 /// 站点/目录名安全规范化（zapd 与 zapexec 共用）：
@@ -791,6 +800,10 @@ mod tests {
                 ssl_fullchain: None,
                 ssl_key: None,
                 force_https: false,
+                ssl_protocols: String::new(),
+                ssl_ciphers: String::new(),
+                ssl_prefer_server_ciphers: false,
+                ssl_http2: false,
             })
             .unwrap(),
             r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com","b.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false,"force_https":false}"#
@@ -837,6 +850,10 @@ mod tests {
             ssl_fullchain: None,
             ssl_key: None,
             force_https: false,
+            ssl_protocols: String::new(),
+            ssl_ciphers: String::new(),
+            ssl_prefer_server_ciphers: false,
+            ssl_http2: false,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert_eq!(
@@ -989,10 +1006,10 @@ mod tests {
             },
             Message::Auth { mac: "def".into() },
             Message::Welcome,
-            Message::Request(Request::TimeSetTimezone {
+            Message::Request(Box::new(Request::TimeSetTimezone {
                 timezone: "Asia/Shanghai".into(),
-            }),
-            Message::Response(Response::ok("ok", None)),
+            })),
+            Message::Response(Box::new(Response::ok("ok", None))),
         ];
         for m in msgs {
             let json = serde_json::to_string(&m).unwrap();

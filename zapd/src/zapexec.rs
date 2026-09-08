@@ -75,11 +75,11 @@ pub struct ExecClient {
 
 impl ExecClient {
     pub async fn call(&mut self, req: Request) -> Result<Response, ZapError> {
-        frame::send(&mut self.wr, &Message::Request(req))
+        frame::send(&mut self.wr, &Message::Request(Box::new(req)))
             .await
             .map_err(io_err)?;
         match frame::recv(&mut self.rd).await.map_err(io_err)? {
-            Message::Response(resp) => Ok(resp),
+            Message::Response(resp) => Ok(*resp),
             _ => Err(ZapError::Error("zapexec 协议错误".to_string())),
         }
     }

@@ -97,7 +97,7 @@ pub async fn run(args: ClientArgs) {
         ClientVerb::FileInfo { path } => Request::FileInfo { path },
     };
 
-    frame::send(&mut wr, &Message::Request(req))
+    frame::send(&mut wr, &Message::Request(Box::new(req)))
         .await
         .expect("发送请求失败");
 

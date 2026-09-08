@@ -101,8 +101,8 @@ async fn handle_conn(
     loop {
         match frame::recv(&mut rd).await {
             Ok(Message::Request(req)) => {
-                let resp = verbs::dispatch(req, gid).await;
-                if frame::send(&mut wr, &Message::Response(resp))
+                let resp = verbs::dispatch(*req, gid).await;
+                if frame::send(&mut wr, &Message::Response(Box::new(resp)))
                     .await
                     .is_err()
                 {

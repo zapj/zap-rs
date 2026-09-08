@@ -48,21 +48,21 @@ mod tests {
     #[tokio::test]
     async fn round_trip_request() {
         let (mut a, mut b) = tokio::io::duplex(4096);
-        let msg = Message::Request(Request::FileRead {
+        let msg = Message::Request(Box::new(Request::FileRead {
             path: "/etc/hostname".into(),
-        });
+        }));
         send(&mut a, &msg).await.unwrap();
         let got = recv(&mut b).await.unwrap();
         assert!(matches!(
             got,
-            Message::Request(Request::FileRead { path }) if path == "/etc/hostname"
+            Message::Request(req) if matches!(&*req, Request::FileRead { path } if path == "/etc/hostname")
         ));
     }
 
     #[tokio::test]
     async fn round_trip_response() {
         let (mut a, mut b) = tokio::io::duplex(4096);
-        let msg = Message::Response(Response::err(7, "boom"));
+        let msg = Message::Response(Box::new(Response::err(7, "boom")));
         send(&mut a, &msg).await.unwrap();
         let got = recv(&mut b).await.unwrap();
         match got {
@@ -86,7 +86,10 @@ mod tests {
     async fn oversized_send_payload_rejected() {
         let (mut a, _b) = tokio::io::duplex(64);
         let big = "x".repeat(MAX_FRAME as usize + 1);
-        let msg = Message::Response(Response::ok("ok", Some(serde_json::json!({ "big": big }))));
+        let msg = Message::Response(Box::new(Response::ok(
+            "ok",
+            Some(serde_json::json!({ "big": big })),
+        )));
         let err = send(&mut a, &msg).await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }

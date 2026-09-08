@@ -170,7 +170,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             ssl_prefer_server_ciphers,
             ssl_http2,
         } => {
-            site::vhost_sync(
+            site::vhost_sync(site::SiteConfig {
                 site_id,
                 name,
                 domains,
@@ -193,7 +193,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
                 ssl_ciphers,
                 ssl_prefer_server_ciphers,
                 ssl_http2,
-            )
+            })
             .await
         }
         Request::SiteVhostRemove { site_id, name } => site::vhost_remove(site_id, name).await,
