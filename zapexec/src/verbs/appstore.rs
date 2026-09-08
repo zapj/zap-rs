@@ -694,6 +694,22 @@ fn task_env(
     env
 }
 
+/// 注入操作者上下文：面板登录用户名与虚拟主机运行模式（www / system）。
+/// 值由 zapd 在发起任务时随请求透传；重跑（run_retry）从原 spec 恢复，保证环境一致。
+/// 脚本内对应 ZAP_USER / ZAP_RUN_MODE。
+fn push_actor_env(
+    env: &mut Vec<(String, String)>,
+    user: Option<&str>,
+    run_mode: Option<&str>,
+) {
+    if let Some(u) = user.filter(|s| !s.is_empty()) {
+        env.push(("ZAP_USER".into(), u.to_string()));
+    }
+    if let Some(m) = run_mode.filter(|s| !s.is_empty()) {
+        env.push(("ZAP_RUN_MODE".into(), m.to_string()));
+    }
+}
+
 // ── 动词实现 ───────────────────────────────────────────────
 
 /// 校验 Git 源 URL：只允许 http(s) 或 git@ 形式，禁止命令注入。
@@ -906,6 +922,8 @@ pub async fn install(
     version: String,
     action: Option<String>,
     options: Option<BTreeMap<String, String>>,
+    user: Option<String>,
+    run_mode: Option<String>,
     run_id: String,
 ) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
@@ -920,6 +938,8 @@ pub async fn install(
             "version": version.clone(),
             "action": action.clone(),
             "options": options.clone(),
+            "user": user.clone(),
+            "run_mode": run_mode.clone(),
         });
         let snapshot = prepare_snapshot(&run_id, &pkg_dir, &spec)?;
         let script = script_file(&snapshot, "install", "install.sh")?;
@@ -927,6 +947,8 @@ pub async fn install(
         let mut env = task_env(&snapshot, &app_path, &name, Some(&version), &run_id);
         // 选项落盘 options.env / options.json 并注入 env
         env.extend(write_run_options(&snapshot, options.as_ref())?);
+        // 注入操作者上下文（面板登录用户与运行环境模式）
+        push_actor_env(&mut env, user.as_deref(), run_mode.as_deref());
         env.push((
             "PKG_SRC_PATH".into(),
             pkg_dir.to_string_lossy().into_owned(),
@@ -970,7 +992,12 @@ pub async fn install(
     .unwrap_or_else(|e| Response::err(-1, e))
 }
 
-pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
+pub async fn uninstall(
+    pkg_path: String,
+    user: Option<String>,
+    run_mode: Option<String>,
+    run_id: String,
+) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
         let (_, name) = validate_pkg_path(&pkg_path)?;
         let app_path = apps_dir().join(&pkg_path);
@@ -987,6 +1014,8 @@ pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
             "pkg_path": pkg_path.clone(),
             "source": source.clone(),
             "repo_id": repo_id.clone(),
+            "user": user.clone(),
+            "run_mode": run_mode.clone(),
         });
         let snapshot = prepare_snapshot(&run_id, &pkg_dir, &spec)?;
         let script = script_file(&snapshot, "uninstall", "uninstall.sh")?;
@@ -999,6 +1028,8 @@ pub async fn uninstall(pkg_path: String, run_id: String) -> Response {
             meta_version.as_deref(),
             &run_id,
         );
+        // 注入操作者上下文（面板登录用户与运行环境模式）
+        push_actor_env(&mut env, user.as_deref(), run_mode.as_deref());
         env.push((
             "PKG_SRC_PATH".into(),
             pkg_dir.to_string_lossy().into_owned(),
@@ -1030,6 +1061,8 @@ pub async fn upgrade(
     old_version: String,
     action: Option<String>,
     options: Option<BTreeMap<String, String>>,
+    user: Option<String>,
+    run_mode: Option<String>,
     run_id: String,
 ) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
@@ -1058,11 +1091,15 @@ pub async fn upgrade(
             "old_version": old_version.clone(),
             "action": action.clone(),
             "options": options.clone(),
+            "user": user.clone(),
+            "run_mode": run_mode.clone(),
         });
         let snapshot = prepare_snapshot(&run_id, &pkg_dir, &spec)?;
         let mut env = task_env(&snapshot, &app_path, &name, Some(&version), &run_id);
         // 选项落盘 options.env / options.json 并注入 env
         env.extend(write_run_options(&snapshot, options.as_ref())?);
+        // 注入操作者上下文（面板登录用户与运行环境模式）
+        push_actor_env(&mut env, user.as_deref(), run_mode.as_deref());
         env.push((
             "PKG_SRC_PATH".into(),
             pkg_dir.to_string_lossy().into_owned(),
@@ -1233,6 +1270,8 @@ pub async fn run_retry(run_id: String, new_run_id: String) -> Response {
         }
         // 选项以快照 options.env 为准（用户重跑前编辑过的内容同样生效）
         env.extend(read_options_env(&snapshot));
+        // 恢复原任务的操作者上下文（spec 在首次发起时记录，保证重跑环境一致）
+        push_actor_env(&mut env, spec["user"].as_str(), spec["run_mode"].as_str());
 
         let mut steps = Vec::new();
 

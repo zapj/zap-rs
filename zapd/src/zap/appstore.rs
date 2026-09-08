@@ -217,6 +217,11 @@ struct AppYaml {
     default_port: Option<u16>,
     #[serde(default)]
     scripts: Option<Value>,
+    /// 可浏览/安装此包的角色白名单（如 [admin, user]）；空或未声明 = 仅 admin 可见可操作。
+    /// 声明后 admin 恒可见可操作，命中白名单的角色同样可见可安装
+    /// （install/upgrade 后端二次校验）。
+    #[serde(default, deserialize_with = "de_str_list")]
+    roles: Option<Vec<String>>,
 }
 
 /// version 字段解析结果：默认版本 + 全部可安装版本。
@@ -284,6 +289,59 @@ where
         serde_yaml::Value::Number(n) => n.as_i64().map(|i| i != 0).unwrap_or(false),
         _ => false,
     })
+}
+
+/// 字符串或字符串数组统一解析为 Vec<String>（roles 白名单兼容两种写法）。
+/// 非字符串/数组时返回 None。
+fn de_str_list<'de, D>(d: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_yaml::Value::deserialize(d)?;
+    Ok(match v {
+        serde_yaml::Value::String(s) => Some(vec![s.trim().to_string()]),
+        serde_yaml::Value::Sequence(seq) => Some(seq.iter().filter_map(yaml_scalar_to_string).collect()),
+        _ => None,
+    })
+}
+
+/// 读取指定包声明的角色白名单（app.yaml roles 字段）。
+/// 优先级与 scan_packages 一致：custom 覆盖同名 Git 源包。
+/// 找不到包 / 未声明 roles → None（= 默认仅 admin 可操作，由调用方判定）。
+pub async fn package_roles_of(pkg_path: &str) -> Option<Vec<String>> {
+    let Some((cat, name)) = pkg_path.split_once('/') else {
+        return None;
+    };
+    if cat.is_empty() || name.is_empty() {
+        return None;
+    }
+    let pkg_rel = format!("{cat}/{name}");
+    let appstore = appstore_dir();
+    let repos_root = appstore.join("repos");
+    let custom_dir = appstore.join("custom");
+    let repo_list = read_repos_value().await.unwrap_or_default();
+    tokio::task::spawn_blocking(move || {
+        let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+        if let Some(repos) = repo_list.get("repos").and_then(|r| r.as_array()) {
+            for repo in repos {
+                if let Some(id) = repo.get("id").and_then(|v| v.as_str()) {
+                    dirs.push(repos_root.join(id));
+                }
+            }
+        }
+        dirs.push(custom_dir);
+        // 倒序命中：custom 优先级最高
+        for dir in dirs.iter().rev() {
+            let yaml_path = dir.join(&pkg_rel).join("app.yaml");
+            if let Some(a) = parse_app_yaml(&yaml_path) {
+                return Some(a.roles.unwrap_or_default());
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// 扫描全部 Git 源 + 自定义包。同名覆盖顺序（优先级从低到高）：
@@ -363,6 +421,7 @@ fn scan_source_dir(
                     "allow_multiple_instances": app_yaml.allow_multiple_instances,
                     "default_port": app_yaml.default_port,
                     "scripts": app_yaml.scripts.clone().unwrap_or(Value::Null),
+                    "roles": app_yaml.roles.clone().unwrap_or_default(),
                     "source": source,
                     "repo_id": repo_id,
                 }),

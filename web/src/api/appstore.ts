@@ -59,6 +59,8 @@ export interface AppPackage {
   allow_multiple_instances: boolean
   default_port: number | null
   scripts: any
+  /** 可浏览/安装此包的角色白名单（app.yaml roles）；空/缺省 = 所有角色开放 */
+  roles?: string[]
   source: 'official' | 'custom'
   repo_id?: string
   installed: boolean

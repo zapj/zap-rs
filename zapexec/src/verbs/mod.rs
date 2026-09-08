@@ -97,11 +97,29 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             version,
             action,
             options,
+            user,
+            run_mode,
             run_id,
-        } => appstore::install(pkg_path, source, repo_id, version, action, options, run_id).await,
-        Request::AppstoreUninstall { pkg_path, run_id } => {
-            appstore::uninstall(pkg_path, run_id).await
+        } => {
+            appstore::install(
+                pkg_path,
+                source,
+                repo_id,
+                version,
+                action,
+                options,
+                user,
+                run_mode,
+                run_id,
+            )
+            .await
         }
+        Request::AppstoreUninstall {
+            pkg_path,
+            user,
+            run_mode,
+            run_id,
+        } => appstore::uninstall(pkg_path, user, run_mode, run_id).await,
         Request::AppstoreUpgrade {
             pkg_path,
             source,
@@ -110,6 +128,8 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             old_version,
             action,
             options,
+            user,
+            run_mode,
             run_id,
         } => {
             appstore::upgrade(
@@ -120,6 +140,8 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
                 old_version,
                 action,
                 options,
+                user,
+                run_mode,
                 run_id,
             )
             .await

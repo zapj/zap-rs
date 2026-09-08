@@ -293,12 +293,21 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
   },
 ]
 
+// 路由滚动策略：
+// - 带 hash（同页锚点直达 / 点击页内目录）→ 平滑滚动到目标元素。
+//   .app-main 才是实际滚动容器，vue-router 的 el 定位走 scrollIntoView，可穿透定位；
+//   目标不存在时回退顶部。
+// - 其余导航 → 回到顶部。
 const router = createRouter({
   // 带上后端配置的前缀（zap.yaml 的 server.url_prefix），无前缀时为 '/'
   history: createWebHistory(BASE || '/'),
   routes: constantRoutes,
-  // 刷新时滚动到顶部
-  scrollBehavior: () => ({ left: 0, top: 0 }),
+  scrollBehavior: (to) => {
+    if (to.hash && document.querySelector(to.hash)) {
+      return { el: to.hash, behavior: 'smooth' }
+    }
+    return { left: 0, top: 0 }
+  },
 })
 
 // 重置路由
@@ -306,7 +315,12 @@ export function resetRouter() {
   const newRouter = createRouter({
     history: createWebHistory(BASE || '/'),
     routes: constantRoutes,
-    scrollBehavior: () => ({ left: 0, top: 0 }),
+    scrollBehavior: (to) => {
+      if (to.hash && document.querySelector(to.hash)) {
+        return { el: to.hash, behavior: 'smooth' }
+      }
+      return { left: 0, top: 0 }
+    },
   })
   ;(router as any).matcher = (newRouter as any).matcher
 }

@@ -13,7 +13,14 @@
       <div class="guide-body">
         <aside class="guide-toc">
           <div class="toc-title">本页目录</div>
-          <a v-for="t in toc" :key="t.id" :href="'#' + t.id" class="toc-item">{{ t.label }}</a>
+          <a
+            v-for="t in toc"
+            :key="t.id"
+            :href="'#' + t.id"
+            class="toc-item"
+            title="跳转到本页对应章节"
+            @click.prevent="scrollToSection(t.id)"
+          >{{ t.label }}</a>
         </aside>
 
         <main class="guide-content">
@@ -59,6 +66,7 @@
               <tr><td><code>scripts</code></td><td>map</td><td>脚本文件名覆盖：<code>install / uninstall / upgrade</code> → 文件名</td></tr>
               <tr><td><code>options</code></td><td>map / list</td><td>安装/升级可选项定义：动作键 → 选项列表；顶层直接写列表等价于作用于 install 动作（见第六节）</td></tr>
               <tr><td><code>allow_multiple_instances</code></td><td>bool</td><td>为 true 时已安装仍可再装其它版本（多实例）</td></tr>
+              <tr><td><code>roles</code></td><td>string / string[]</td><td>可「浏览 + 安装 / 升级」此包的角色白名单（如 <code>[admin, user]</code>）。<strong>空 / 未声明 = 默认仅 admin 可见可操作</strong>；声明后 admin 恒可操作，命中白名单的角色也能在商店看到并安装 / 升级（Web 商店隐藏未命中角色、install / upgrade 后端二次校验）。典型用途：<code>webapps</code> 类产品（如 wordpress）声明 roles 开放给普通用户角色，由用户自己到商店一键安装</td></tr>
               <tr><td><code>default_port</code></td><td>int</td><td>默认端口（仅展示用途）</td></tr>
             </tbody>
           </table>
@@ -121,7 +129,7 @@
           <pre class="code">{{ codes.model }}</pre>
           <ul>
             <li><code>PKG_PATH</code> 指向的是这个快照目录（含 <code>app.yaml</code>、脚本、<code>options.env</code> 等），不是仓库源目录；运行中修改仓库不会影响已在队列/运行中的任务；</li>
-            <li><code>run.json</code> 记录本次运行的原始参数（动作 / 版本 / 选项），供重跑还原环境；</li>
+            <li><code>run.json</code> 记录本次运行的原始参数（动作 / 版本 / 选项 / 操作者与运行模式），供重跑还原环境（重跑时 <code>ZAP_USER</code> / <code>ZAP_RUN_MODE</code> 与原任务保持一致）；</li>
             <li>全部步骤退出码为 0（成功）后，系统自动清理 <code>runs/&lt;run_id&gt;</code>（脚本快照与 <code>build/</code> 编译目录一并清理），避免磁盘堆积；</li>
             <li>失败（任一退出码非 0）则保留整个运行现场：<code>pkg/</code> 内脚本与 <code>options.env</code> 可在「应用商店 → 运行记录」中读取/编辑，<code>build/</code> 编译残留一并保留便于排查，之后「编辑脚本 / 重跑」复用同一快照重试；</li>
             <li>全局串行队列：同一时间仅执行一个脚本任务，后续任务先排队，日志中会提示「任务进入执行队列，等待前序任务完成后自动开始」；</li>
@@ -154,6 +162,8 @@
               <tr><td><code>MINOR_VERSION</code></td><td>目标版本次版本号（如 1.24.0 → 24）</td></tr>
               <tr><td><code>APP_OLD_VERSION</code></td><td>升级前旧版本（仅升级注入）</td></tr>
               <tr><td><code>ACTION</code></td><td>动作键（由 actions 自定义操作发起时注入，如 build）</td></tr>
+              <tr><td><code>ZAP_USER</code></td><td>发起本次操作的面板登录用户名（install / uninstall / upgrade 及失败重跑都会注入）。多用户 / 多角色场景下，脚本可据此把安装产物、文件属主等归属到操作者名下</td></tr>
+              <tr><td><code>ZAP_RUN_MODE</code></td><td>虚拟主机运行模式：<code>www</code>（统一 www 用户）或 <code>system</code>（独立系统用户）。webapps 类应用据此设置站点文件属主 / 运行身份（与「服务器 → 运行环境」的全局配置保持一致）</td></tr>
               <tr><td>选项变量</td><td>每个 options 项按 <code>name</code> 直接注入同名环境变量（见第七节）</td></tr>
             </tbody>
           </table>
@@ -248,6 +258,17 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * 目录点击：平滑滚动到对应章节，并把锚点写入地址栏（不触发整页路由跳转/回顶）。
+ * 页面实际滚动容器是 .app-main，scrollIntoView 可直接作用于该容器。
+ */
+function scrollToSection(id: string) {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  if (history.replaceState) history.replaceState(null, '', '#' + id)
+}
+
 const codes = {
   tree: `repos/<仓库>/
 └── <category>/

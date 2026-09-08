@@ -125,7 +125,7 @@
                 :key="key"
                 size="small"
                 type="primary"
-                :disabled="!isAdmin"
+                :disabled="!canOperatePkg(pkg)"
                 @click="handleInstall(pkg, key)"
               >{{ label }}</el-button>
             </template>
@@ -133,7 +133,7 @@
               v-else
               size="small"
               type="primary"
-              :disabled="!isAdmin"
+              :disabled="!canOperatePkg(pkg)"
               @click="handleInstall(pkg)"
             >安装</el-button>
           </template>
@@ -143,7 +143,7 @@
               size="small"
               type="primary"
               plain
-              :disabled="!isAdmin"
+              :disabled="!canOperatePkg(pkg)"
               @click="handleInstall(pkg)"
             >再次安装</el-button>
             <el-button
@@ -152,7 +152,7 @@
               size="small"
               type="success"
               plain
-              :disabled="!isAdmin"
+              :disabled="!canOperatePkg(pkg)"
               @click="handleInstall(pkg, key)"
             >{{ label }}</el-button>
             <el-button
@@ -160,14 +160,14 @@
               size="small"
               type="warning"
               plain
-              :disabled="!isAdmin"
+              :disabled="!canOperatePkg(pkg)"
               @click="handleUpgrade(pkg)"
             >升级</el-button>
             <el-button
               size="small"
               type="danger"
               plain
-              :disabled="!isAdmin"
+              :disabled="!canOperatePkg(pkg)"
               @click="handleUninstall(pkg)"
             >卸载</el-button>
           </template>
@@ -350,6 +350,27 @@ import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 
+/**
+ * 当前用户能否浏览该包（应用商店列表可见）：
+ * admin 恒可见；app.yaml roles 空/未声明 = 仅 admin 可见；
+ * 声明了 roles = admin + 命中白名单的角色可见。
+ */
+function canViewPkg(pkg: AppPackage): boolean {
+  if (isAdmin.value) return true
+  const rs = pkg.roles
+  if (!rs || rs.length === 0) return false
+  return rs.some((r) => userStore.roles.includes(r))
+}
+
+/**
+ * 当前用户能否对该包执行安装/升级/卸载：
+ * custom 包仅管理员；官方包按 roles 判定（可见即命中白名单，可操作）。
+ */
+function canOperatePkg(pkg: AppPackage): boolean {
+  if (pkg.source === 'custom') return isAdmin.value
+  return canViewPkg(pkg)
+}
+
 // ── Git 源（多源）───────────────────────────────────────────
 
 const repos = ref<RepoSource[]>([])
@@ -437,7 +458,8 @@ const activeCategory = ref('all')
 const keyword = ref('')
 
 const filteredPackages = computed(() => {
-  let list = packages.value
+  // 按包角色白名单过滤：admin 恒可见；roles 空/未声明 = 仅 admin 可见；命中角色也可见
+  let list = packages.value.filter(canViewPkg)
   if (activeCategory.value !== 'all') {
     list = list.filter((p) => p.category === activeCategory.value)
   }

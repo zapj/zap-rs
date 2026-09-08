@@ -253,11 +253,26 @@ pub enum Request {
         /// 用户在安装表单中填写的选项（app.yaml options，键=选项名，值=字符串化表单值）
         #[serde(skip_serializing_if = "Option::is_none")]
         options: Option<BTreeMap<String, String>>,
+        /// 发起操作的面板登录用户名（注入 ZAP_USER，供安装脚本按操作者归属）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+        /// 虚拟主机运行模式：www（统一 www 用户）| system（独立系统用户）；注入 ZAP_RUN_MODE
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_mode: Option<String>,
         run_id: String,
     },
     /// 卸载包：执行 uninstall.sh 并删除已安装目录
     #[serde(rename = "appstore.uninstall")]
-    AppstoreUninstall { pkg_path: String, run_id: String },
+    AppstoreUninstall {
+        pkg_path: String,
+        /// 发起操作的面板登录用户名（注入 ZAP_USER）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+        /// 虚拟主机运行模式：www | system（注入 ZAP_RUN_MODE）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_mode: Option<String>,
+        run_id: String,
+    },
     /// 升级包：执行 upgrade.sh（缺省时先 uninstall.sh 再 install.sh）
     #[serde(rename = "appstore.upgrade")]
     AppstoreUpgrade {
@@ -274,6 +289,12 @@ pub enum Request {
         /// 升级表单选项（键=选项名，值=字符串化表单值）；缺省复用安装选项定义
         #[serde(skip_serializing_if = "Option::is_none")]
         options: Option<BTreeMap<String, String>>,
+        /// 发起操作的面板登录用户名（注入 ZAP_USER）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+        /// 虚拟主机运行模式：www | system（注入 ZAP_RUN_MODE）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_mode: Option<String>,
         run_id: String,
     },
     /// 运行自定义脚本（仅限 appstore/custom/ 内）
@@ -732,6 +753,8 @@ mod tests {
                 version: "11.4.4".into(),
                 action: None,
                 options: None,
+                user: None,
+                run_mode: None,
                 run_id: "r1".into(),
             })
             .unwrap(),
@@ -745,6 +768,8 @@ mod tests {
                 version: "8.3.3".into(),
                 action: Some("build".into()),
                 options: None,
+                user: None,
+                run_mode: None,
                 run_id: "r2".into(),
             })
             .unwrap(),

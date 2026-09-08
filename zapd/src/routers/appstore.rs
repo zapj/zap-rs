@@ -19,6 +19,7 @@ use tracing::{error, info};
 
 use crate::{
     config,
+    routers::system_env,
     zap::{
         ZapError, ZapJsonResult, appstore as ast, audit,
         jwt::{self, Claims, ValidatedClaims},
@@ -32,6 +33,46 @@ fn require_admin(claims: &Claims) -> Result<(), ZapError> {
         Ok(())
     } else {
         Err(ZapError::New(-1, "权限不足，需要管理员权限".to_string()))
+    }
+}
+
+/// 包角色门禁（install / upgrade）：
+/// - admin 恒可安装/升级，不受 roles 限制；
+/// - roles 为空/未声明 = 仅 admin 可见可操作；
+/// - 声明了 roles = 当前登录角色必须命中其一才放行（否则拒绝并提示开放角色）。
+async fn check_pkg_roles(claims: &Claims, pkg_path: &str) -> Result<(), ZapError> {
+    if jwt::is_admin(claims) {
+        return Ok(());
+    }
+    let denied = || {
+        ZapError::New(
+            -1,
+            "该软件包默认仅管理员可操作；如需开放请在该包 app.yaml 声明 roles 并授予当前角色"
+                .to_string(),
+        )
+    };
+    let Some(roles) = ast::package_roles_of(pkg_path).await else {
+        return Err(denied());
+    };
+    if roles.is_empty() {
+        return Err(denied());
+    }
+    let mine: Vec<&str> = claims
+        .roles
+        .split(',')
+        .map(|r| r.trim())
+        .filter(|r| !r.is_empty())
+        .collect();
+    if roles.iter().any(|r| mine.contains(&r.as_str())) {
+        Ok(())
+    } else {
+        Err(ZapError::New(
+            -1,
+            format!(
+                "当前角色无权安装该应用（该应用仅对以下角色开放: {}）",
+                roles.join(" / ")
+            ),
+        ))
     }
 }
 
@@ -290,6 +331,8 @@ pub async fn install(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<InstallPayload>,
 ) -> ZapJsonResult {
+    // 包角色门禁：admin 恒可安装；roles 缺省 = 仅 admin，声明后按白名单校验
+    check_pkg_roles(&claims, &payload.pkg_path).await?;
     // 自定义包包含任意脚本，仅管理员可安装
     if payload.source == "custom" {
         require_admin(&claims)?;
@@ -309,6 +352,10 @@ pub async fn install(
     )
     .await?;
 
+    // 注入操作者上下文：面板登录用户与虚拟主机运行模式（www / system）
+    let user = claims.sub.clone();
+    let run_mode = system_env::vhost_mode().await;
+
     let resp = zapexec::call(Request::AppstoreInstall {
         pkg_path: payload.pkg_path.clone(),
         source: payload.source.clone(),
@@ -316,6 +363,8 @@ pub async fn install(
         version: payload.version.clone(),
         action: payload.action.clone(),
         options,
+        user: Some(user),
+        run_mode: Some(run_mode),
         run_id: run_id.clone(),
     })
     .await?;
@@ -373,8 +422,14 @@ pub async fn uninstall(
     )
     .await?;
 
+    // 注入操作者上下文：面板登录用户与虚拟主机运行模式（www / system）
+    let user = claims.sub.clone();
+    let run_mode = system_env::vhost_mode().await;
+
     let resp = zapexec::call(Request::AppstoreUninstall {
         pkg_path: payload.pkg_path.clone(),
+        user: Some(user),
+        run_mode: Some(run_mode),
         run_id: run_id.clone(),
     })
     .await?;
@@ -416,6 +471,8 @@ pub async fn upgrade(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<UpgradePayload>,
 ) -> ZapJsonResult {
+    // 包角色门禁：admin 恒可升级；roles 缺省 = 仅 admin，声明后按白名单校验
+    check_pkg_roles(&claims, &payload.pkg_path).await?;
     let old_version = ast::installed_version_of(&payload.pkg_path)
         .await
         .unwrap_or_default();
@@ -434,6 +491,10 @@ pub async fn upgrade(
     )
     .await?;
 
+    // 注入操作者上下文：面板登录用户与虚拟主机运行模式（www / system）
+    let user = claims.sub.clone();
+    let run_mode = system_env::vhost_mode().await;
+
     let resp = zapexec::call(Request::AppstoreUpgrade {
         pkg_path: payload.pkg_path.clone(),
         source: payload.source.clone(),
@@ -442,6 +503,8 @@ pub async fn upgrade(
         old_version,
         action: payload.action.clone(),
         options,
+        user: Some(user),
+        run_mode: Some(run_mode),
         run_id: run_id.clone(),
     })
     .await?;
