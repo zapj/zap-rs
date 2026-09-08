@@ -6,7 +6,6 @@ import {
   FolderOpened,
   Plus,
   Refresh,
-  RefreshRight,
   Search,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -280,7 +279,11 @@ async function loadOwners() {
 
 // 筛选
 const keyword = ref('')
-const filterStatus = ref<number | ''>('')
+/** 顶部统计胶囊筛选：running / stopped / failed；再次点击取消（回到全部） */
+const activePill = ref<'' | 'running' | 'stopped' | 'failed'>('')
+function togglePill(k: 'running' | 'stopped' | 'failed') {
+  activePill.value = activePill.value === k ? '' : k
+}
 const filterOwner = ref<number | ''>('')
 
 /** 同步状态：failed（新）/ error（历史数据）都算失败 */
@@ -318,7 +321,10 @@ const filtered = computed(() => {
         it.ips.some((ip) => ip.toLowerCase().includes(k))
       if (!hit) return false
     }
-    if (filterStatus.value !== '' && it.status !== filterStatus.value) return false
+    const pill = activePill.value
+    if (pill === 'running' && it.status !== 1) return false
+    if (pill === 'stopped' && it.status !== 0) return false
+    if (pill === 'failed' && !isSyncFailed(it)) return false
     if (canManageAll.value && filterOwner.value !== '' && it.user_id !== filterOwner.value)
       return false
     return true
@@ -1013,14 +1019,16 @@ async function submitForm() {
   if (isEdit.value) payload.id = form.id
   formLoading.value = true
   try {
-    const res = await http.post<{ code: number; message: string }>(
+    const res = await http.post<{ code: number; message: string; data?: { id?: number } }>(
       isEdit.value ? '/site/update' : '/site/add',
       payload
     )
     ElMessage.success(res.message)
     formVisible.value = false
     load()
-    if (isEdit.value) syncSite(form.id) // 域名 / PHP / 类型 / 目录变更后自动同步 vhost
+    // 新增 / 编辑落库后均自动同步 vhost（新建默认「运行中」：渲染 conf → nginx -t → reload）
+    const id = isEdit.value ? form.id : (res.data?.id ?? 0)
+    if (id) syncSite(id)
   } catch {
     /* handled */
   } finally {
@@ -1032,35 +1040,6 @@ async function submitForm() {
 const syncingId = ref(0)
 // 正在切换运行状态的站点 id（启停/维护按钮的 loading）
 const stateLoadingId = ref(0)
-const syncingAll = ref(false)
-
-// 全部站点按当前 vhost 模式再同步（切换「www / system」模式后的批量入口）
-async function syncAllSites() {
-  const modeTip =
-    vhostMode.value === 'system'
-      ? '当前为「系统用户隔离」模式：将按「归属用户 × PHP 版本」重建独立 pool 与 socket，并把 web 目录属主切为该用户的 Linux 账号。'
-      : '当前为「统一 www」模式：将把所有站点切回 www 用户运行并复用实例全局 socket。'
-  try {
-    await ElMessageBox.confirm(
-      `${modeTip}\n\n该操作会对所有站点执行 nginx 配置渲染 + reload，是否继续？`,
-      '全部再同步',
-      { type: 'warning', confirmButtonText: '开始同步' }
-    )
-  } catch {
-    return
-  }
-  syncingAll.value = true
-  try {
-    const res = await http.post<{ code: number; message: string }>('/site/sync_all')
-    ElMessage.success(res.message || '全部站点已按当前模式同步')
-    load()
-  } catch (e: any) {
-    ElMessage.error(e.message || '部分站点同步失败，请查看面板运行日志')
-    load()
-  } finally {
-    syncingAll.value = false
-  }
-}
 async function syncSite(id: number): Promise<boolean> {
   if (syncingId.value) return false
   syncingId.value = id
@@ -1071,6 +1050,7 @@ async function syncSite(id: number): Promise<boolean> {
     return true
   } catch (e: any) {
     ElMessage.error(e.message || 'vhost 同步失败，请确认已安装并启动 Nginx')
+    load() // 后端已回写 failed，刷新以展示「同步失败 + 重试」
     return false
   } finally {
     syncingId.value = 0
@@ -1134,34 +1114,6 @@ onMounted(() => {
 
 <template>
   <div>
-    <!-- 统计卡 -->
-    <el-row :gutter="16" class="stat-row">
-      <el-col :xs="12" :sm="8" :md="8">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-num">{{ stats.total }}</div>
-          <div class="stat-label">站点总数</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="8" :md="8">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-num stat-green">{{ stats.running }}</div>
-          <div class="stat-label">运行中</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="8" :md="8">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-num stat-gray">{{ stats.stopped }}</div>
-          <div class="stat-label">已停止</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="8" :md="8">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-num stat-red">{{ stats.failed }}</div>
-          <div class="stat-label">同步失败</div>
-        </el-card>
-      </el-col>
-    </el-row>
-
     <!-- 运行模式说明 -->
     <el-alert
       v-if="systemMode"
@@ -1181,6 +1133,33 @@ onMounted(() => {
       <!-- 工具栏 -->
       <div class="toolbar">
         <div class="toolbar-left">
+          <!-- 统计胶囊：运行/停止/同步失败计数，点击即筛选（再次点击取消） -->
+          <div class="stat-pills">
+            <span
+              class="pill"
+              :class="{ active: activePill === 'running' }"
+              title="仅看运行中的站点"
+              @click="togglePill('running')"
+            >
+              <i class="dot dot-green" />运行中 <b>{{ stats.running }}</b>
+            </span>
+            <span
+              class="pill"
+              :class="{ active: activePill === 'stopped' }"
+              title="仅看已停止的站点"
+              @click="togglePill('stopped')"
+            >
+              <i class="dot dot-gray" />已停止 <b>{{ stats.stopped }}</b>
+            </span>
+            <span
+              class="pill pill-failed"
+              :class="{ active: activePill === 'failed' }"
+              title="仅看同步失败的站点（部署列可查原因并重试）"
+              @click="togglePill('failed')"
+            >
+              <i class="dot dot-red" />同步失败 <b>{{ stats.failed }}</b>
+            </span>
+          </div>
           <el-input
             v-model="keyword"
             placeholder="搜索站点名称 / 域名 / IP"
@@ -1188,10 +1167,6 @@ onMounted(() => {
             style="width: 240px"
             :prefix-icon="Search"
           />
-          <el-select v-model="filterStatus" placeholder="状态" clearable style="width: 120px">
-            <el-option label="运行中" :value="1" />
-            <el-option label="已停止" :value="0" />
-          </el-select>
           <el-select
             v-if="canManageAll"
             v-model="filterOwner"
@@ -1211,11 +1186,6 @@ onMounted(() => {
           <el-button :icon="Refresh" circle @click="load" />
         </div>
         <div class="toolbar-right">
-          <el-button
-            :icon="RefreshRight"
-            :loading="syncingAll"
-            @click="syncAllSites"
-          >全部再同步</el-button>
           <el-button type="danger" plain :icon="Delete" :disabled="!selection.length" @click="removeRows(selection)">
             删除选中
           </el-button>
@@ -2076,32 +2046,66 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.stat-row {
-  margin-bottom: 0;
+/* 工具栏统计胶囊（替代原顶部大卡片） */
+.stat-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
 }
-.stat-card {
-  text-align: center;
-  padding: 4px 0;
-}
-.stat-num {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-}
-.stat-label {
-  margin-top: 6px;
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
 }
-.stat-green {
-  color: #67c23a;
+.pill:hover {
+  background: var(--el-fill-color);
 }
-.stat-gray {
-  color: var(--el-text-color-secondary);
+.pill.active {
+  background: var(--el-color-primary);
+  color: #fff;
+}
+.pill-failed.active {
+  background: var(--el-color-danger);
+}
+.pill b {
+  font-weight: 600;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+.dot-green {
+  background: #67c23a;
+}
+.dot-gray {
+  background: var(--el-text-color-placeholder);
+}
+.dot-red {
+  background: var(--el-color-danger);
+}
+.pill.active .dot {
+  background: #fff;
 }
 
 .mode-alert {
-  margin-top: 16px;
+  margin-top: 0;
 }
 .mode-alert code {
   padding: 1px 6px;
@@ -2145,9 +2149,6 @@ onMounted(() => {
 }
 .cursor-help {
   cursor: help;
-}
-.stat-red {
-  color: var(--el-color-danger);
 }
 .form-tip {
   width: 100%;
