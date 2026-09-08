@@ -290,7 +290,7 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
     path: '/terminal',
     component: Layout,
     redirect: '/terminal/index',
-    meta: { title: '终端', icon: 'Monitor', roles: ['admin', 'user'] },
+    meta: { title: '终端', icon: 'Monitor', roles: ['admin', 'user', 'reseller'] },
     children: [
       {
         path: 'index',

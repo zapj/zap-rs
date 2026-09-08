@@ -34,6 +34,8 @@ pub async fn init_table() {
         let sql = r#"
         CREATE TABLE ssh_connections (
             id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            -- user_id：归属用户 id（0 = 历史/无主连接，启动时自动划归 admin）
+            user_id INTEGER NOT NULL DEFAULT 0,
             name VARCHAR(128) NOT NULL,
             host VARCHAR(256) NOT NULL,
             port INTEGER DEFAULT 22,
@@ -46,19 +48,39 @@ pub async fn init_table() {
             sort_order INTEGER DEFAULT 0,
             created_at INTEGER,
             updated_at INTEGER
-        )
+        );
+        CREATE INDEX IF NOT EXISTS idx_ssh_conn_user ON ssh_connections(user_id);
         "#;
         let pool = db::get_db_pool().await;
         pool.execute(sql).await.unwrap();
         info!("ssh_connections table created");
     }
-    // 默认本地连接：面板本机 127.0.0.1/root，密码留空。
+    // 老库升级（幂等）：为存量 ssh_connections 补充归属列
+    let _ = db::get_db_pool()
+        .await
+        .execute("ALTER TABLE ssh_connections ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")
+        .await;
+    let _ = db::get_db_pool()
+        .await
+        .execute("CREATE INDEX IF NOT EXISTS idx_ssh_conn_user ON ssh_connections(user_id)")
+        .await;
+    // 严格隔离的归属兜底：所有历史/无主连接（user_id=0，含旧版默认本机连接）
+    // 一律划归 admin 账号（admin 在 init_schema 中先于此函数种子化），
+    // 保证这些连接仍由面板管理员可见可管，同时不会泄漏给其他任何用户。
+    let _ = db::get_db_pool()
+        .await
+        .execute(
+            "UPDATE ssh_connections SET user_id = (SELECT id FROM user WHERE username = 'admin' LIMIT 1) \
+             WHERE user_id = 0 AND EXISTS (SELECT 1 FROM user WHERE username = 'admin')",
+        )
+        .await;
+    // 默认本地连接：面板本机 127.0.0.1/root，密码留空，归属 admin。
     // 新库与老库都幂等补插（已存在 root@127.0.0.1 或 root@localhost 则跳过），
     // 用户后续自行编辑填写密码或改为密钥。
     ensure_default_loopback_connection().await;
 }
 
-/// 幂等补插默认本地连接（127.0.0.1 / root / 22，密码为空）。
+/// 幂等补插默认本地连接（127.0.0.1 / root / 22，密码为空），归属 admin。
 /// 空密码连接双击时由前端弹窗输入密码、仅本次会话使用不落库。
 async fn ensure_default_loopback_connection() {
     let pool = db::get_db_pool().await;
@@ -76,10 +98,19 @@ async fn ensure_default_loopback_connection() {
     }
     let now = chrono::Utc::now().timestamp();
     let remark = "本机默认连接：未设置密码，双击连接时输入密码（仅本次会话使用，不会保存）";
+    // 归属 admin（严格隔离下仅 admin 自己能看见）；查不到 admin 时先落 user_id=0，
+    // 下次启动由 init_table 的兜底迁移划归 admin
+    let owner: i64 = sqlx::query_scalar("SELECT id FROM user WHERE username = 'admin' LIMIT 1")
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(0);
     sqlx::query(
-        "INSERT INTO ssh_connections (name, host, port, username, auth_type, password, ssh_key_name, remark, status, sort_order, created_at, updated_at)
-         VALUES ('localhost', '127.0.0.1', 22, 'root', 'password', '', '', ?, 1, 0, ?, ?)",
+        "INSERT INTO ssh_connections (user_id, name, host, port, username, auth_type, password, ssh_key_name, remark, status, sort_order, created_at, updated_at)
+         VALUES (?, 'localhost', '127.0.0.1', 22, 'root', 'password', '', '', ?, 1, 0, ?, ?)",
     )
+    .bind(owner)
     .bind(remark)
     .bind(now)
     .bind(now)
@@ -104,6 +135,11 @@ async fn table_exists(table_name: &str) -> bool {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SshConnection {
     pub id: i64,
+    /// 归属用户 id（连接严格按归属隔离：各角色仅能查看/管理自己的连接）
+    pub owner_id: i64,
+    /// 归属用户名（用户已删除时为空）
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner_name: String,
     pub name: String,
     pub host: String,
     pub port: i32,
@@ -125,6 +161,8 @@ fn row_to_conn(row: &sqlx::sqlite::SqliteRow) -> SshConnection {
     let stored_password: String = row.try_get("password").unwrap_or_default();
     SshConnection {
         id: row.get("id"),
+        owner_id: row.try_get("owner_id").unwrap_or(0),
+        owner_name: row.try_get("owner_name").unwrap_or_default(),
         name: row.get("name"),
         host: row.get("host"),
         port: row.get("port"),
@@ -139,6 +177,28 @@ fn row_to_conn(row: &sqlx::sqlite::SqliteRow) -> SshConnection {
         created_at: row.try_get("created_at").unwrap_or(0),
         updated_at: row.try_get("updated_at").unwrap_or(0),
     }
+}
+
+// ── 归属 / 可见性 ────────────────────────────────────────────
+
+/// SSH 连接严格按归属隔离（为安全起见，admin / reseller / 普通用户一律只看自己的连接）：
+/// 仅 owner = 当前登录用户时可访问；历史/无主连接（user_id=0）已在启动迁移中划归 admin。
+async fn connection_in_scope(claims: &Claims, conn_id: i64) -> Result<i64, ZapError> {
+    let pool = db::get_db_pool().await;
+    let row: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM ssh_connections WHERE id = ?")
+        .bind(conn_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some((owner_id,)) = row else {
+        return Err(ZapError::New(-1, "连接不存在".to_string()));
+    };
+    if owner_id != claims.id as i64 {
+        return Err(ZapError::New(
+            -1,
+            "无权访问该连接：连接归属其他用户".to_string(),
+        ));
+    }
+    Ok(owner_id)
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,27 +245,35 @@ fn default_auth_type() -> String {
 
 // ── CRUD handlers ──────────────────────────────────────────
 
-pub async fn list_connections(_claims: ValidatedClaims) -> ZapJsonResult {
+const CONN_SEL_COLS: &str = "s.id, s.name, s.host, s.port, s.username, s.auth_type, s.password, \
+                             s.ssh_key_name, s.remark, s.status, s.sort_order, s.created_at, s.updated_at, \
+                             s.user_id AS owner_id";
+
+/// 列表严格隔离：仅列出当前登录用户（含 admin / reseller）自己创建的连接。
+pub async fn list_connections(claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
-    let rows = sqlx::query(
-        "SELECT id, name, host, port, username, auth_type, password, ssh_key_name,
-                remark, status, sort_order, created_at, updated_at
-         FROM ssh_connections ORDER BY sort_order, id",
-    )
-    .fetch_all(pool)
-    .await?;
+    let sel = format!(
+        "SELECT {CONN_SEL_COLS}, u.username AS owner_name \
+         FROM ssh_connections s LEFT JOIN user u ON u.id = s.user_id"
+    );
+    let rows: Vec<sqlx::sqlite::SqliteRow> =
+        sqlx::query(&format!("{sel} WHERE s.user_id = ? ORDER BY s.sort_order, s.id"))
+            .bind(claims.id as i64)
+            .fetch_all(pool)
+            .await?;
 
     let connections: Vec<SshConnection> = rows.iter().map(row_to_conn).collect();
     Ok(Json(json!({ "code": 0, "data": connections })))
 }
 
-pub async fn get_connection(_claims: ValidatedClaims, Path(id): Path<i64>) -> ZapJsonResult {
+pub async fn get_connection(claims: ValidatedClaims, Path(id): Path<i64>) -> ZapJsonResult {
+    connection_in_scope(&claims, id).await?;
     let pool = db::get_db_pool().await;
-    let row = sqlx::query(
-        "SELECT id, name, host, port, username, auth_type, password, ssh_key_name,
-                remark, status, sort_order, created_at, updated_at
-         FROM ssh_connections WHERE id = ?",
-    )
+    let row = sqlx::query(&format!(
+        "SELECT {CONN_SEL_COLS}, u.username AS owner_name \
+         FROM ssh_connections s LEFT JOIN user u ON u.id = s.user_id \
+         WHERE s.id = ?"
+    ))
     .bind(id)
     .fetch_optional(pool)
     .await?;
@@ -252,9 +320,10 @@ pub async fn create_connection(
     let encrypted_password = crypto::encrypt_password(&payload.password);
 
     sqlx::query(
-        "INSERT INTO ssh_connections (name, host, port, username, auth_type, password, ssh_key_name, remark, status, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)"
+        "INSERT INTO ssh_connections (user_id, name, host, port, username, auth_type, password, ssh_key_name, remark, status, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)"
     )
+    .bind(claims.id as i64)
     .bind(payload.name.trim())
     .bind(payload.host.trim())
     .bind(payload.port)
@@ -288,14 +357,8 @@ pub async fn update_connection(
     Json(payload): Json<UpdateConnectionPayload>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
-
-    let row = sqlx::query("SELECT id FROM ssh_connections WHERE id = ?")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
-    if row.is_none() {
-        return Err(ZapError::New(-1, "连接不存在".to_string()));
-    }
+    // 归属校验：仅本人 / reseller 名下客户 / admin 可编辑
+    connection_in_scope(&claims, id).await?;
 
     let now = chrono::Utc::now().timestamp();
 
@@ -400,6 +463,8 @@ pub async fn delete_connection(
     Path(id): Path<i64>,
 ) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
+    // 归属校验：仅本人 / reseller 名下客户 / admin 可删除
+    connection_in_scope(&claims, id).await?;
 
     let result = sqlx::query("DELETE FROM ssh_connections WHERE id = ?")
         .bind(id)
@@ -473,6 +538,23 @@ pub async fn ws_terminal(
                 "当前套餐「{}」未开启 SSH 终端，请联系服务商变更套餐",
                 pkg.name
             )))
+            .unwrap();
+    }
+
+    // 连接归属校验：严格隔离——任何角色（含 admin/reseller）仅能对自己创建的连接建立终端会话
+    if let Err(e) = connection_in_scope(&claims, id).await {
+        let msg = match &e {
+            ZapError::New(_, m) => m.clone(),
+            other => other.to_string(),
+        };
+        let status = if msg.contains("连接不存在") {
+            StatusCode::NOT_FOUND
+        } else {
+            StatusCode::FORBIDDEN
+        };
+        return axum::response::Response::builder()
+            .status(status)
+            .body(axum::body::Body::from(msg))
             .unwrap();
     }
 
@@ -888,9 +970,10 @@ pub struct TestConnectionQuery {
 }
 
 pub async fn test_connection(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
     Query(params): Query<TestConnectionQuery>,
 ) -> ZapJsonResult {
+    connection_in_scope(&claims, params.id).await?;
     let conn_info = load_connection_info(params.id).await?;
     let addr = format!("{}:{}", conn_info.host, conn_info.port);
 
@@ -952,6 +1035,8 @@ pub async fn push_key_to_host(
     Path(id): Path<i64>,
     Json(payload): Json<PushKeyPayload>,
 ) -> ZapJsonResult {
+    // 归属校验：仅连接归属范围内可推送公钥
+    connection_in_scope(&claims, id).await?;
     let conn_info = load_connection_info(id).await?;
     if conn_info.auth_type != "key" {
         return Err(ZapError::New(

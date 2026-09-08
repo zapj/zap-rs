@@ -5,6 +5,10 @@ import type { ApiResponse } from '@/types/api_response'
 
 export interface SshConnection {
   id: number
+  /** 归属用户 id（0 = 系统级/历史连接，仅管理员可见） */
+  owner_id?: number
+  /** 归属用户名 */
+  owner_name?: string
   name: string
   host: string
   port: number
