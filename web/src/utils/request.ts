@@ -86,11 +86,7 @@ service.interceptors.response.use(
               error.config.headers['Authorization'] = `Bearer ${newToken}`
               return service(error.config)
             } catch {
-              removeToken()
-              ElMessage({ message: '登录已过期，请重新登录', type: 'error', duration: 5000 })
-              setTimeout(() => {
-                window.location.href = withBase('/login')
-              }, 1500)
+              handleAuthExpired()
             } finally {
               isRefreshing = false
             }
@@ -117,6 +113,16 @@ service.interceptors.response.use(
           break
 
         default:
+          // 本地已无凭据却仍请求受保护接口（如会话被清理后的残留请求）：
+          // 与 401 同等看待，引导重新登录，而不是悬着一个英文报错
+          if (
+            status === 400 &&
+            data?.message &&
+            /Missing credentials|Invalid token/i.test(String(data.message))
+          ) {
+            handleAuthExpired('登录状态已失效，请重新登录')
+            break
+          }
           ElMessage({ message: data?.message || `请求错误 (${status})`, type: 'error', duration: 5000 })
       }
     } else if (error.message?.includes('Network Error')) {
@@ -131,11 +137,31 @@ service.interceptors.response.use(
 )
 
 // ── Token 刷新 ──────────────────────────────────────────────
+
+/**
+ * 认证失效统一处理：清空本地凭据并引导重新登录。
+ * 避免反复收到 "Missing credentials / Invalid token" 等英文报错却停留在页面上。
+ */
+function handleAuthExpired(message = '登录已过期，请重新登录') {
+  removeToken()
+  ElMessage({ message, type: 'error', duration: 5000 })
+  setTimeout(() => {
+    window.location.href = withBase('/login')
+  }, 1500)
+}
+
 async function refreshToken(): Promise<string> {
+  // reflash_token 要求携带仍有效的 Bearer 凭据（过期前 60 秒的缓冲窗口内刷新）
+  const token = getToken()
   const resp = await axios.post(
     `${API_BASE || import.meta.env.VITE_API_URL}/auth/reflash_token`,
     {},
-    { headers: { 'Content-Type': 'application/json' } },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    },
   )
   if (resp.data?.access_token) {
     setToken(resp.data.access_token)
