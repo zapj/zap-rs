@@ -179,6 +179,40 @@ pub enum Request {
     /// 把公钥写入本机系统用户的 ~/.ssh/authorized_keys（root 特权，仅本地回环连接用）
     #[serde(rename = "ssh_key.install_local")]
     SshKeyInstallLocal { username: String, key_name: String },
+    /// 把指定的公钥内容写入本机系统用户的 ~/.ssh/authorized_keys（root 特权，
+    /// 支持「用户自己的家目录密钥」做本地回环授权，公钥内容由 zapd 鉴权后下发）
+    #[serde(rename = "ssh_key.install_pub")]
+    SshKeyInstallPub { username: String, public_key: String },
+    /// 生成面板用户自己的 SSH 密钥（存于该用户家目录 `~/.ssh/zap_<name>`，属主为用户本人）
+    #[serde(rename = "ssh_user_key.generate")]
+    SshUserKeyGenerate {
+        linux_user: String,
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        key_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bits: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        comment: Option<String>,
+    },
+    /// 导入面板用户自己的 SSH 密钥（私钥写入用户家目录）
+    #[serde(rename = "ssh_user_key.import")]
+    SshUserKeyImport {
+        linux_user: String,
+        name: String,
+        private_key: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        public_key: Option<String>,
+    },
+    /// 删除面板用户自己的 SSH 密钥（含 .pub）
+    #[serde(rename = "ssh_user_key.delete")]
+    SshUserKeyDelete { linux_user: String, name: String },
+    /// 读取用户家目录私钥内容（仅终端连接时使用，私钥不落 DB / 不返回前端列表）
+    #[serde(rename = "ssh_user_key.private_get")]
+    SshUserKeyPrivateGet { linux_user: String, name: String },
+    /// 读取用户家目录公钥内容
+    #[serde(rename = "ssh_user_key.public_get")]
+    SshUserKeyPublicGet { linux_user: String, name: String },
     /// 读取主机名与 DNS 解析器配置
     #[serde(rename = "network.get")]
     NetworkGet,

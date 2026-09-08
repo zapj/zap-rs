@@ -98,3 +98,59 @@ export function pushKeyDirect(data: {
 }) {
   return http.post<ApiResponse>('/terminal/push-key', data)
 }
+
+// ── 我的 SSH 密钥（存自己的家目录 ~/.ssh）────────────────────
+
+export interface UserSshKey {
+  name: string
+  /** user=我的密钥（家目录 ~/.ssh）；system=系统级密钥（仅 admin 可见，/etc/zap/ssh） */
+  scope: 'user' | 'system'
+  comment: string
+  fingerprint: string
+  created_at: number
+}
+
+/** 我的密钥列表（admin 额外含系统级密钥，保持历史连接可选） */
+export function getUserSshKeys() {
+  return http.get<ApiResponse<UserSshKey[]>>('/terminal/keys')
+}
+
+/** 生成新密钥并保存到自己的家目录 ~/.ssh */
+export function generateUserKey(data: {
+  name: string
+  key_type?: string
+  bits?: number
+  comment?: string
+}) {
+  return http.post<ApiResponse>('/terminal/keys/generate', data)
+}
+
+/** 导入私钥到自己的家目录 ~/.ssh */
+export function importUserKey(data: {
+  name: string
+  private_key: string
+  public_key?: string
+  comment?: string
+}) {
+  return http.post<ApiResponse>('/terminal/keys/import', data)
+}
+
+/** 删除自己的密钥（家目录文件一并清理） */
+export function deleteUserKey(name: string) {
+  return http.post<ApiResponse>('/terminal/keys/delete', { name })
+}
+
+/** 查看自己的公钥内容 */
+export function getUserKeyPublic(name: string) {
+  return http.get<ApiResponse<{ public_key: string; comment: string; fingerprint: string }>>(
+    '/terminal/keys/public',
+    { params: { name } },
+  )
+}
+
+/** 查看自己的私钥内容（仅本人可读取家目录文件） */
+export function getUserKeyPrivate(name: string) {
+  return http.get<ApiResponse<{ name: string; private_key: string }>>('/terminal/keys/private', {
+    params: { name },
+  })
+}

@@ -4,9 +4,12 @@
     <div class="terminal-sidebar" :style="{ width: sidebarWidth + 'px' }">
       <div class="sidebar-header">
         <span class="sidebar-title">连接管理</span>
-        <el-button type="primary" size="small" :icon="Plus" :disabled="isReadOnly" @click="showAddDialog = true">
-          添加
-        </el-button>
+        <div class="sidebar-actions">
+          <el-button link type="primary" size="small" :icon="Key" @click="openKeyManager">我的密钥</el-button>
+          <el-button type="primary" size="small" :icon="Plus" :disabled="isReadOnly" @click="showAddDialog = true">
+            添加
+          </el-button>
+        </div>
       </div>
 
       <div class="sidebar-search">
@@ -156,8 +159,8 @@
             <el-select v-model="form.ssh_key_name" placeholder="选择密钥" clearable>
               <el-option
                 v-for="key in sshKeys"
-                :key="key.name"
-                :label="key.name"
+                :key="key.scope + ':' + key.name"
+                :label="key.scope === 'system' ? key.name + '（系统级）' : key.name"
                 :value="key.name"
               />
             </el-select>
@@ -165,13 +168,24 @@
               <span v-if="form.host && isLoopbackHost(form.host)">
                 本地主机连接：写入本机用户 authorized_keys（需 admin 角色）
               </span>
-              <span v-else>密钥需添加到主机 ~/.ssh/authorized_keys 才能登录</span>
+              <span v-else-if="form.ssh_key_name">密钥需已添加到主机 ~/.ssh/authorized_keys 才能登录</span>
+              <span v-else>暂无可用密钥，请先在「我的密钥」中生成/导入</span>
               <el-button
                 type="primary"
                 link
                 size="small"
                 :icon="Key"
-                :disabled="!form.ssh_key_name || isReadOnly || (form.host && isLoopbackHost(form.host) && !isAdmin)"
+                :disabled="isReadOnly"
+                @click="openKeyManager"
+              >
+                管理我的密钥
+              </el-button>
+              <el-button
+                v-if="form.ssh_key_name"
+                type="primary"
+                link
+                size="small"
+                :disabled="isReadOnly || (form.host && isLoopbackHost(form.host) && !isAdmin)"
                 @click="openPushKeyFromForm"
               >
                 {{ form.host && isLoopbackHost(form.host) ? '写入本机 SSH 授权' : '推送公钥到远程主机' }}
@@ -240,6 +254,130 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 我的 SSH 密钥管理 -->
+    <el-dialog v-model="showKeyManager" title="我的 SSH 密钥" width="780px" @open="loadMyKeys">
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px">
+        密钥保存在你自己的家目录 <code>~/.ssh</code>（<code>zap_</code> 前缀），私钥仅本人可见、不会上传数据库。
+        <template v-if="isAdmin">admin 额外展示系统级密钥（服务器 /etc/zap/ssh，用于本机授权与历史连接）。</template>
+      </el-alert>
+      <div class="keymgr-toolbar">
+        <el-button type="primary" size="small" :icon="Plus" :disabled="isReadOnly" @click="openKeyGen">生成密钥</el-button>
+        <el-button size="small" :icon="Key" :disabled="isReadOnly" @click="openKeyImport">导入密钥</el-button>
+        <div style="flex: 1"></div>
+        <el-button size="small" text :loading="keyLoading" @click="loadMyKeys">刷新</el-button>
+      </div>
+      <el-table :data="myKeys" v-loading="keyLoading" size="small" max-height="400" empty-text="还没有密钥，点击「生成密钥」创建">
+        <el-table-column prop="name" label="名称" min-width="130">
+          <template #default="{ row }">
+            <span>{{ row.name }}</span>
+            <el-tag v-if="row.scope === 'system'" size="small" type="warning" effect="plain" style="margin-left: 6px">
+              系统
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="comment" label="注释" min-width="120" show-overflow-tooltip />
+        <el-table-column label="指纹" min-width="210" show-overflow-tooltip>
+          <template #default="{ row }">
+            <code class="fp">{{ row.fingerprint }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" align="right">
+          <template #default="{ row }">
+            <template v-if="row.scope === 'user'">
+              <el-button link type="primary" size="small" @click="copyPub(row)">复制公钥</el-button>
+              <el-button link type="primary" size="small" @click="viewPrivate(row)">查看私钥</el-button>
+              <el-button link type="danger" size="small" :disabled="isReadOnly" @click="removeKey(row)">删除</el-button>
+            </template>
+            <span v-else class="dim">系统级密钥仅服务器管理</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button type="primary" @click="showKeyManager = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 生成密钥 -->
+    <el-dialog v-model="showKeyGen" title="生成 SSH 密钥" width="480px" :close-on-click-modal="false">
+      <el-form label-width="90px">
+        <el-form-item label="密钥名称" required>
+          <el-input v-model="keyGenForm.name" placeholder="如：my-server（字母/数字/-/_，最多 64 位）" />
+        </el-form-item>
+        <el-form-item label="密钥类型" required>
+          <el-radio-group v-model="keyGenForm.key_type">
+            <el-radio value="ed25519">ed25519（推荐）</el-radio>
+            <el-radio value="rsa">RSA</el-radio>
+            <el-radio value="ecdsa">ECDSA</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="keyGenForm.key_type === 'rsa'" label="RSA 位数">
+          <el-select v-model="keyGenForm.bits" style="width: 120px">
+            <el-option :value="2048" label="2048" />
+            <el-option :value="4096" label="4096" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="注释">
+          <el-input v-model="keyGenForm.comment" placeholder="可选，如 user@example.com" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showKeyGen = false">取消</el-button>
+        <el-button type="primary" :loading="keySaving" @click="submitKeyGen">生成并保存到家目录</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 导入密钥 -->
+    <el-dialog v-model="showKeyImport" title="导入 SSH 密钥" width="560px" :close-on-click-modal="false">
+      <el-form label-width="90px">
+        <el-form-item label="密钥名称" required>
+          <el-input v-model="keyImportForm.name" placeholder="如：my-server（字母/数字/-/_，最多 64 位）" />
+        </el-form-item>
+        <el-form-item label="私钥内容" required>
+          <el-input
+            v-model="keyImportForm.private_key"
+            type="textarea"
+            :rows="9"
+            placeholder="粘贴 OpenSSH 私钥（BEGIN ... PRIVATE KEY）"
+            style="font-family: monospace"
+          />
+        </el-form-item>
+        <el-form-item label="公钥内容">
+          <el-input
+            v-model="keyImportForm.public_key"
+            type="textarea"
+            :rows="3"
+            placeholder="可选；留空时由服务器从私钥自动推导"
+            style="font-family: monospace"
+          />
+        </el-form-item>
+        <el-form-item label="注释">
+          <el-input v-model="keyImportForm.comment" placeholder="可选" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showKeyImport = false">取消</el-button>
+        <el-button type="primary" :loading="keySaving" @click="submitKeyImport">导入并保存到家目录</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 查看私钥 -->
+    <el-dialog v-model="showPrivateView" title="查看私钥" width="620px">
+      <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 10px">
+        私钥「{{ privateViewKey?.name }}」仅在你的家目录 ~/.ssh 中，请妥善保管，切勿泄露。
+      </el-alert>
+      <el-input
+        :model-value="privateViewKey?.content ?? ''"
+        type="textarea"
+        :rows="12"
+        readonly
+        style="font-family: monospace"
+      />
+      <template #footer>
+        <el-button @click="showPrivateView = false">关闭</el-button>
+        <el-button type="primary" @click="copyPrivate">复制私钥</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -259,7 +397,14 @@ import {
   testConnection,
   pushKeyToHost,
   pushKeyDirect,
+  getUserSshKeys,
+  generateUserKey,
+  importUserKey,
+  deleteUserKey,
+  getUserKeyPublic,
+  getUserKeyPrivate,
   type SshConnection,
+  type UserSshKey,
 } from '@/api/terminal'
 import { getToken } from '@/utils/auth'
 import { wsUrl } from '@/utils/base'
@@ -272,7 +417,7 @@ const isReadOnly = computed(() => userStore.roles.includes('demo'))
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 
 const connections = ref<SshConnection[]>([])
-const sshKeys = ref<{ name: string }[]>([])
+const sshKeys = ref<{ name: string; scope: 'user' | 'system' }[]>([])
 const activeConnId = ref<number | null>(null)
 
 // 搜索过滤
@@ -452,13 +597,165 @@ async function loadConnections() {
 
 async function loadSshKeys() {
   try {
-    const { http } = await import('@/utils/request')
-    const resp = await http.get<any>('/system/config/ssh/keys')
-    if (resp.code === 0) {
-      sshKeys.value = resp.data || []
-    }
+    const resp = await getUserSshKeys()
+    sshKeys.value = resp.data || []
   } catch {
     // SSH keys may not be available
+  }
+}
+
+// ── 我的 SSH 密钥管理 ─────────────────────────────────────────
+
+const showKeyManager = ref(false)
+const myKeys = ref<UserSshKey[]>([])
+const keyLoading = ref(false)
+const keySaving = ref(false)
+
+function openKeyManager() {
+  showKeyManager.value = true
+  loadMyKeys()
+}
+
+async function loadMyKeys() {
+  keyLoading.value = true
+  try {
+    const resp = await getUserSshKeys()
+    myKeys.value = resp.data || []
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载密钥失败')
+  } finally {
+    keyLoading.value = false
+  }
+}
+
+const KEY_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
+async function copyPub(key: UserSshKey) {
+  try {
+    const resp = await getUserKeyPublic(key.name)
+    const pub = resp.data?.public_key
+    if (!pub) throw new Error('公钥为空')
+    await navigator.clipboard.writeText(pub)
+    ElMessage.success('公钥已复制')
+  } catch (e: any) {
+    ElMessage.error(e.message || '复制失败')
+  }
+}
+
+const showPrivateView = ref(false)
+const privateViewKey = ref<{ name: string; content: string } | null>(null)
+
+async function viewPrivate(key: UserSshKey) {
+  try {
+    const resp = await getUserKeyPrivate(key.name)
+    const content = resp.data?.private_key
+    if (!content) throw new Error('私钥为空')
+    privateViewKey.value = { name: key.name, content }
+    showPrivateView.value = true
+  } catch (e: any) {
+    ElMessage.error(e.message || '读取私钥失败')
+  }
+}
+
+async function copyPrivate() {
+  const k = privateViewKey.value
+  if (!k) return
+  try {
+    await navigator.clipboard.writeText(k.content)
+    ElMessage.success('私钥已复制')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+async function removeKey(key: UserSshKey) {
+  try {
+    await ElMessageBox.confirm(`确定删除密钥「${key.name}」？删除后需重新生成/导入。`, '删除密钥', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteUserKey(key.name)
+    ElMessage.success('已删除')
+    await Promise.all([loadMyKeys(), loadSshKeys()])
+  } catch (e: any) {
+    ElMessage.error(e.message || '删除失败')
+  }
+}
+
+// 生成
+const showKeyGen = ref(false)
+const keyGenForm = ref({ name: '', key_type: 'ed25519', bits: 4096, comment: '' })
+
+function openKeyGen() {
+  keyGenForm.value = { name: '', key_type: 'ed25519', bits: 4096, comment: '' }
+  showKeyGen.value = true
+}
+
+async function submitKeyGen() {
+  const f = keyGenForm.value
+  const name = f.name.trim()
+  if (!KEY_NAME_RE.test(name)) {
+    ElMessage.warning('密钥名称仅允许字母/数字/-/_（字母开头，最多 64 字符）')
+    return
+  }
+  keySaving.value = true
+  try {
+    await generateUserKey({
+      name,
+      key_type: f.key_type,
+      bits: f.key_type === 'rsa' ? f.bits : undefined,
+      comment: f.comment.trim() || undefined,
+    })
+    ElMessage.success('密钥已生成并保存到家目录 ~/.ssh')
+    showKeyGen.value = false
+    await Promise.all([loadMyKeys(), loadSshKeys()])
+  } catch (e: any) {
+    ElMessage.error(e.message || '生成失败')
+  } finally {
+    keySaving.value = false
+  }
+}
+
+// 导入
+const showKeyImport = ref(false)
+const keyImportForm = ref({ name: '', private_key: '', public_key: '', comment: '' })
+
+function openKeyImport() {
+  keyImportForm.value = { name: '', private_key: '', public_key: '', comment: '' }
+  showKeyImport.value = true
+}
+
+async function submitKeyImport() {
+  const f = keyImportForm.value
+  const name = f.name.trim()
+  if (!KEY_NAME_RE.test(name)) {
+    ElMessage.warning('密钥名称仅允许字母/数字/-/_（字母开头，最多 64 字符）')
+    return
+  }
+  if (!f.private_key.trim()) {
+    ElMessage.warning('请粘贴私钥内容')
+    return
+  }
+  keySaving.value = true
+  try {
+    await importUserKey({
+      name,
+      private_key: f.private_key,
+      public_key: f.public_key.trim() || undefined,
+      comment: f.comment.trim() || undefined,
+    })
+    ElMessage.success('密钥已导入到家目录 ~/.ssh')
+    showKeyImport.value = false
+    await Promise.all([loadMyKeys(), loadSshKeys()])
+  } catch (e: any) {
+    ElMessage.error(e.message || '导入失败')
+  } finally {
+    keySaving.value = false
   }
 }
 
@@ -911,6 +1208,34 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px 12px;
+}
+
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.keymgr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.keymgr-toolbar .fp,
+.code {
+  font-family: var(--el-font-family-mono, Menlo, Monaco, Consolas, monospace);
+}
+
+.fp {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.dim {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .sidebar-title {

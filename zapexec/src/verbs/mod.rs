@@ -12,6 +12,7 @@ mod service_conf;
 mod site;
 mod ssh;
 mod ssh_key;
+mod ssh_user_key;
 mod time;
 mod upgrade;
 mod user;
@@ -71,6 +72,31 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::SshKeyDeauthorize { index } => ssh_key::deauthorize(index).await,
         Request::SshKeyInstallLocal { username, key_name } => {
             ssh_key::install_local(username, key_name).await
+        }
+        Request::SshKeyInstallPub { username, public_key } => {
+            ssh_key::install_pub(username, public_key).await
+        }
+        Request::SshUserKeyGenerate {
+            linux_user,
+            name,
+            key_type,
+            bits,
+            comment,
+        } => ssh_user_key::generate(linux_user, name, key_type, bits, comment).await,
+        Request::SshUserKeyImport {
+            linux_user,
+            name,
+            private_key,
+            public_key,
+        } => ssh_user_key::import(linux_user, name, private_key, public_key, None).await,
+        Request::SshUserKeyDelete { linux_user, name } => {
+            ssh_user_key::delete(linux_user, name).await
+        }
+        Request::SshUserKeyPrivateGet { linux_user, name } => {
+            ssh_user_key::private_get(linux_user, name).await
+        }
+        Request::SshUserKeyPublicGet { linux_user, name } => {
+            ssh_user_key::public_get(linux_user, name).await
         }
         Request::FileList { path } => file::list(path).await,
         Request::FileRead { path } => file::read(path).await,

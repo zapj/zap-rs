@@ -449,9 +449,6 @@ fn user_info(username: &str) -> Option<(u32, u32, PathBuf)> {
 /// 以 0600 保存，仅写入公钥，不涉及私钥。
 pub async fn install_local(username: String, key_name: String) -> Response {
     tokio::task::spawn_blocking(move || {
-        if !valid_username(&username) {
-            return Response::err(-1, "无效的系统用户名");
-        }
         if !valid_name(&key_name) {
             return Response::err(-1, "无效的密钥名称");
         }
@@ -460,62 +457,76 @@ pub async fn install_local(username: String, key_name: String) -> Response {
             Ok(c) => c.trim().to_string(),
             Err(_) => return Response::err(-1, "公钥不存在，请先生成或导入密钥"),
         };
-        if pub_line.is_empty() {
-            return Response::err(-1, "公钥内容为空");
+        match append_pub_to_local_user(&username, &pub_line) {
+            Ok(msg) => Response::ok(msg, None),
+            Err(e) => Response::err(-1, e),
         }
-        let (uid, gid, home) = match user_info(&username) {
-            Some(v) => v,
-            None => return Response::err(-1, format!("系统用户 '{username}' 不存在")),
-        };
-
-        let ssh_dir = home.join(".ssh");
-        if ssh_dir.exists() {
-            let meta = match std::fs::metadata(&ssh_dir) {
-                Ok(m) => m,
-                Err(e) => return Response::err(-1, format!("读取 ~/.ssh 失败: {e}")),
-            };
-            if !meta.is_dir() {
-                return Response::err(-1, "~/.ssh 不是目录");
-            }
-        } else if let Err(e) = std::fs::create_dir_all(&ssh_dir) {
-            return Response::err(-1, format!("创建 ~/.ssh 失败: {e}"));
-        }
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&ssh_dir, std::fs::Permissions::from_mode(0o700));
-        if let Ok(c) = std::ffi::CString::new(ssh_dir.as_os_str().as_encoded_bytes()) {
-            unsafe {
-                libc::chown(c.as_ptr(), uid, gid);
-            }
-        }
-
-        let auth_path = ssh_dir.join("authorized_keys");
-        let mut existing = if auth_path.exists() {
-            std::fs::read_to_string(&auth_path).unwrap_or_default()
-        } else {
-            String::new()
-        };
-        if existing.lines().any(|l| l.trim() == pub_line) {
-            return Response::ok(format!("公钥已存在于 {username} 的 authorized_keys"), None);
-        }
-        if !existing.is_empty() && !existing.ends_with('\n') {
-            existing.push('\n');
-        }
-        existing.push_str(&pub_line);
-        existing.push('\n');
-        if let Err(e) = std::fs::write(&auth_path, &existing) {
-            return Response::err(-1, format!("写入 authorized_keys 失败: {e}"));
-        }
-        let _ = std::fs::set_permissions(&auth_path, std::fs::Permissions::from_mode(0o600));
-        if let Ok(c) = std::ffi::CString::new(auth_path.as_os_str().as_encoded_bytes()) {
-            unsafe {
-                libc::chown(c.as_ptr(), uid, gid);
-            }
-        }
-        Response::ok(
-            format!("公钥已写入本机 {username} 的 ~/.ssh/authorized_keys"),
-            None,
-        )
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+/// 追加指定公钥内容到本机系统用户的 `~/.ssh/authorized_keys`。
+/// 用于「用户自己的家目录密钥」的本地回环授权：zapd 完成归属校验后下发公钥内容，
+/// 由 root 写入目标系统用户，避免 zapd（zapadm）直接读取用户家目录。
+pub async fn install_pub(username: String, public_key: String) -> Response {
+    tokio::task::spawn_blocking(move || match append_pub_to_local_user(&username, public_key.trim()) {
+        Ok(msg) => Response::ok(msg, None),
+        Err(e) => Response::err(-1, e),
+    })
+    .await
+    .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+/// 把单行公钥追加到本机用户 authorized_keys 的公共实现。
+fn append_pub_to_local_user(username: &str, pub_line: &str) -> Result<String, String> {
+    if !valid_username(username) {
+        return Err("无效的系统用户名".to_string());
+    }
+    if pub_line.trim().is_empty() {
+        return Err("公钥内容为空".to_string());
+    }
+    let (uid, gid, home) =
+        user_info(username).ok_or_else(|| format!("系统用户 '{username}' 不存在"))?;
+
+    let ssh_dir = home.join(".ssh");
+    if ssh_dir.exists() {
+        let meta =
+            std::fs::metadata(&ssh_dir).map_err(|e| format!("读取 ~/.ssh 失败: {e}"))?;
+        if !meta.is_dir() {
+            return Err("~/.ssh 不是目录".to_string());
+        }
+    } else {
+        std::fs::create_dir_all(&ssh_dir).map_err(|e| format!("创建 ~/.ssh 失败: {e}"))?;
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(&ssh_dir, std::fs::Permissions::from_mode(0o700));
+    if let Ok(c) = std::ffi::CString::new(ssh_dir.as_os_str().as_encoded_bytes()) {
+        unsafe {
+            libc::chown(c.as_ptr(), uid, gid);
+        }
+    }
+
+    let auth_path = ssh_dir.join("authorized_keys");
+    let mut existing = if auth_path.exists() {
+        std::fs::read_to_string(&auth_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    if existing.lines().any(|l| l.trim() == pub_line) {
+        return Ok(format!("公钥已存在于 {username} 的 authorized_keys"));
+    }
+    if !existing.is_empty() && !existing.ends_with('\n') {
+        existing.push('\n');
+    }
+    existing.push_str(pub_line);
+    existing.push('\n');
+    std::fs::write(&auth_path, &existing).map_err(|e| format!("写入 authorized_keys 失败: {e}"))?;
+    let _ = std::fs::set_permissions(&auth_path, std::fs::Permissions::from_mode(0o600));
+    if let Ok(c) = std::ffi::CString::new(auth_path.as_os_str().as_encoded_bytes()) {
+        unsafe {
+            libc::chown(c.as_ptr(), uid, gid);
+        }
+    }
+    Ok(format!("公钥已写入本机 {username} 的 ~/.ssh/authorized_keys"))
 }

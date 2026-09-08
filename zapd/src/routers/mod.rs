@@ -48,6 +48,7 @@ pub mod package;
 pub mod site;
 pub mod ssh_keys;
 pub mod ssh_terminal;
+pub mod ssh_user_keys;
 pub mod ssl;
 pub mod system_audit;
 pub mod system_basic;
@@ -485,6 +486,22 @@ fn api_routers() -> Router {
         )
         .route("/terminal/push-key", post(ssh_terminal::push_key_direct))
         .route("/terminal/ws/{id}", get(ssh_terminal::ws_terminal))
+        // 「我的 SSH 密钥」（面板用户自管密钥，存家目录 ~/.ssh；admin 列表额外含系统级密钥）
+        .route("/terminal/keys", get(ssh_user_keys::list_keys))
+        .route(
+            "/terminal/keys/public",
+            get(ssh_user_keys::public_key),
+        )
+        .route(
+            "/terminal/keys/private",
+            get(ssh_user_keys::private_key),
+        )
+        .route(
+            "/terminal/keys/generate",
+            post(ssh_user_keys::generate_key),
+        )
+        .route("/terminal/keys/import", post(ssh_user_keys::import_key))
+        .route("/terminal/keys/delete", post(ssh_user_keys::delete_key))
         // System
         .route("/system/info", get(system_info::system_info))
         .route("/system/status", get(system_info::system_status))
