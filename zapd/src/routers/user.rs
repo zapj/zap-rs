@@ -216,6 +216,13 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
         .fetch_one(pool)
         .await;
     if let Ok(user) = result {
+        // 当前生效套餐：绑定套餐（启用中）优先，未绑定回退全局默认套餐（用于首页展示限额）
+        let bound_pkg = crate::routers::package::package_of_user(user.id).await;
+        let bound = bound_pkg.is_some();
+        let pkg = match bound_pkg {
+            Some(p) => Some(p),
+            None => crate::routers::package::default_package().await,
+        };
         return Json(json!({
             "code": 0,
             "message": "OK",
@@ -233,6 +240,20 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
                 "last_login_time": user.last_login_time,
                 "roles": user.roles.split(',').collect::<Vec<&str>>(),
                 "permissions": user.permissions.split(',').collect::<Vec<&str>>(),
+                // 套餐信息：package_bound 标记是否绑定自己的套餐（false = 回退全局默认）
+                "package_bound": bound,
+                "package": pkg.map(|p| json!({
+                    "id": p.id,
+                    "name": p.name,
+                    "remark": p.remark,
+                    "disk_quota_mb": p.disk_quota_mb,
+                    "max_sites": p.max_sites,
+                    "max_domains": p.max_domains,
+                    "max_bandwidth_mb": p.max_bandwidth_mb,
+                    "fpm_spec_ref": p.fpm_spec_ref,
+                    "allow_ssh": p.allow_ssh == 1,
+                    "allow_proxy": p.allow_proxy == 1,
+                })),
             }
         }));
     }

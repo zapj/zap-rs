@@ -153,6 +153,21 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
       },
     ],
   },
+  // SSL/TLS（Layout 包裹 + 一级直链：admin / user）
+  {
+    path: '/ssl-tls',
+    component: Layout,
+    redirect: '/ssl-tls/certs',
+    meta: { title: 'SSL/TLS', icon: 'ep:lock', roles: ['admin', 'user'] },
+    children: [
+      {
+        path: 'certs',
+        name: 'SslCerts',
+        component: () => import('@/views/ssl-tls/certs/index.vue'),
+        meta: { title: 'SSL 证书', icon: 'ep:lock', affix: true },
+      },
+    ],
+  },
   // 服务配置（各运行服务的配置：应用商店安装后可用；未安装时页面引导）
   {
     path: '/services',

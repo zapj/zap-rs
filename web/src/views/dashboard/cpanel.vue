@@ -9,13 +9,61 @@
       </el-input>
     </div>
 
-    <!-- 资源用量 -->
-    <el-row :gutter="16" class="usage-row">
-      <el-col :xs="12" :sm="6" v-for="u in usageCards" :key="u.label">
-        <el-card shadow="hover" class="usage-card">
-          <div class="usage-label">{{ u.label }}</div>
-          <el-progress type="dashboard" :percentage="u.percent" :width="90" :color="u.color" />
-          <div class="usage-text">{{ u.text }}</div>
+    <!-- 常规信息 + 使用情况 -->
+    <el-row :gutter="16" class="info-row">
+      <!-- 常规信息 -->
+      <el-col :xs="24" :sm="12">
+        <el-card shadow="hover" class="info-card">
+          <template #header>
+            <div class="card-header"><span>常规信息</span></div>
+          </template>
+          <el-descriptions :column="1" label-width="110px">
+            <el-descriptions-item label="当前用户">
+              {{ account.nickname || account.username || '—'
+              }}<span v-if="account.username" class="muted">（{{ account.username }}）</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="登录邮箱">{{ account.email || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="家目录">{{ account.home_dir || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="上次登录 IP">{{ account.last_login_ip || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="上次登录时间">{{ fmtTime(account.last_login_time) }}</el-descriptions-item>
+            <el-descriptions-item label="共享 IP">{{ server.public_ip || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="服务器">{{ server.host_name || '—' }}</el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+      </el-col>
+
+      <!-- 使用情况 -->
+      <el-col :xs="24" :sm="12">
+        <el-card shadow="hover" class="info-card">
+          <template #header>
+            <div class="card-header"><span>使用情况</span></div>
+          </template>
+          <el-descriptions :column="1" label-width="110px">
+            <el-descriptions-item label="套餐">
+              {{ pkg.name || '未绑定套餐' }}
+              <span v-if="pkg.name && !packageBound" class="muted">（未绑定，按全局默认）</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="站点数量">
+              {{ stats.total }} 个
+              <span class="muted">（上限 {{ fmtLimit(pkg.max_sites) }}）</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="域名数量">
+              {{ stats.domains }} 个
+              <span class="muted">（单站上限 {{ fmtLimit(pkg.max_domains) }}）</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="磁盘配额">{{ fmtMb(pkg.disk_quota_mb) }}</el-descriptions-item>
+            <el-descriptions-item label="带宽">{{ fmtMb(pkg.max_bandwidth_mb) }}</el-descriptions-item>
+            <el-descriptions-item label="FPM 规格">
+              <el-tag v-if="!pkg.fpm_spec_ref" size="small" type="info" effect="plain">
+                面板默认
+              </el-tag>
+              <span v-else>{{ pkg.fpm_spec_ref }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="SSH 终端">
+              {{ packageBound ? (pkg.allow_ssh ? '允许' : '禁止') : '允许（未绑定）' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="反向代理">{{ pkg.allow_proxy ? '允许' : '禁止' }}</el-descriptions-item>
+          </el-descriptions>
         </el-card>
       </el-col>
     </el-row>
@@ -49,7 +97,9 @@ import { ElMessage } from 'element-plus'
 import { Icon, resolveIcon } from '@/utils/icon'
 import { useUserStore } from '@/stores/user'
 import { getSystemInfo } from '@/api/dashboard'
-import { formatBytes } from '@/utils/fmt'
+import { getUserInfo } from '@/api/user'
+import { getCertList } from '@/api/ssl'
+import { http } from '@/utils/request'
 
 interface AppEntry {
   title: string
@@ -76,6 +126,8 @@ const groups: AppGroup[] = [
     title: '常用功能',
     items: [
       { title: '文件管理', icon: 'ep:folder', path: '/files', roles: ['user', 'reseller'] },
+      { title: '站点', icon: 'ep:aim', path: '/site', roles: ['user', 'reseller'] },
+      { title: 'SSL/TLS', icon: 'ep:lock', path: '/ssl-tls', roles: ['user'] },
       { title: '终端', icon: 'ep:monitor', path: '/terminal', roles: ['user', 'reseller'] },
       { title: '个人中心', icon: 'ep:user', path: '/profile', roles: ['user', 'reseller'] },
     ],
@@ -114,66 +166,80 @@ function handleClick(item: AppEntry) {
   }
 }
 
-// ── 资源用量 ───────────────────────────────────────────────
-interface UsageCard {
-  label: string
-  percent: number
-  text: string
-  color: string
+// ── 常规信息 + 使用情况 ─────────────────────────────────────
+const account = ref<Record<string, any>>({})
+const server = ref<Record<string, any>>({})
+const stats = ref({ total: 0, running: 0, domains: 0, ssl: 0 })
+/** 当前生效套餐（/user/info 返回；未绑定时回退全局默认套餐） */
+const packageBound = ref(false)
+const pkg = ref<Record<string, any>>({})
+
+const fmtTime = (ts: number) => (ts ? new Date(ts * 1000).toLocaleString() : '—')
+/** 数值上限展示：<=0 表示不限 */
+const fmtLimit = (v?: number) => (!Number(v) ? '不限' : `${v} 个`)
+/** MB 容量展示：>= 1024 换算成 GB */
+const fmtMb = (v?: number) => {
+  const mb = Number(v) || 0
+  if (mb <= 0) return '不限'
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1).replace(/\.0$/, '')} GB` : `${mb} MB`
 }
 
-const usageCards = ref<UsageCard[]>([
-  { label: '磁盘', percent: 0, text: '--', color: '#409EFF' },
-  { label: '内存', percent: 0, text: '--', color: '#67C23A' },
-  { label: 'CPU', percent: 0, text: '--', color: '#E6A23C' },
-  { label: '负载', percent: 0, text: '--', color: '#F56C6C' },
-])
-
-function clamp(v: number) {
-  return Math.min(100, Math.max(0, Math.round(v)))
-}
-
-async function loadUsage() {
+async function loadAccount() {
+  account.value = { ...userStore.userInfo }
   try {
-    const resp = await getSystemInfo()
-    if (resp.code !== 0 || !resp.data) return
-    const d = resp.data as any
-    const cards = usageCards.value
-
-    // 磁盘（根分区）
-    const root = Array.isArray(d.disk_info)
-      ? d.disk_info.find((i: any) => i.mount_point === '/')
-      : undefined
-    if (root && root.total_space) {
-      const used = root.total_space - root.available_space
-      cards[0].percent = clamp((used / root.total_space) * 100)
-      cards[0].text = `${formatBytes(used, 1)} / ${formatBytes(root.total_space, 1)}`
-    }
-
-    // 内存
-    if (d.memory_total_b && d.available_memory_b !== undefined) {
-      const used = d.memory_total_b - d.available_memory_b
-      cards[1].percent = clamp((used / d.memory_total_b) * 100)
-      cards[1].text = `${formatBytes(used, 1)} / ${formatBytes(d.memory_total_b, 1)}`
-    }
-
-    // CPU
-    if (d.cpu_usage !== undefined) {
-      cards[2].percent = clamp(d.cpu_usage)
-      cards[2].text = `${d.cpu_usage.toFixed(1)}%`
-    }
-
-    // 负载（1 分钟均值 / CPU 核数）
-    if (d.loadavg_one !== undefined && d.cpu_num) {
-      cards[3].percent = clamp((d.loadavg_one / d.cpu_num) * 100)
-      cards[3].text = d.loadavg_one.toFixed(2)
+    const res = await getUserInfo()
+    if (res?.data) {
+      const d = res.data as any
+      account.value = { ...account.value, ...d }
+      packageBound.value = !!d.package_bound
+      pkg.value = d.package || {}
     }
   } catch {
-    // 忽略，保留占位
+    /* 保留既有信息 */
   }
 }
 
-onMounted(loadUsage)
+async function loadServer() {
+  try {
+    const res = await getSystemInfo()
+    if (res?.data) server.value = res.data
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadStats() {
+  // 站点数与运行数、域名总数（接口按角色返回可见范围）
+  try {
+    const res = await http.get<{ code: number; data: any }>('/site/list')
+    const d = res.data as any
+    let domains = 0
+    if (Array.isArray(d?.rows)) {
+      d.rows.forEach((s: any) => {
+        domains += (s.domains || []).length
+      })
+    }
+    stats.value.total = d?.total || 0
+    stats.value.running = d?.running || 0
+    stats.value.domains = domains
+  } catch {
+    /* ignore */
+  }
+  // SSL 证书数（仅具备 SSL/TLS 权限的角色：user；reseller 无此菜单，避免 403 报错）
+  if (roles.includes('user')) {
+    try {
+      const res = await getCertList()
+      const arr = Array.isArray(res?.data) ? (res.data as any[]) : []
+      stats.value.ssl = arr.length
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadAccount(), loadServer(), loadStats()])
+})
 </script>
 
 <style scoped>
@@ -189,32 +255,27 @@ onMounted(loadUsage)
   max-width: 480px;
 }
 
-.usage-row {
+.info-row {
   margin-bottom: 8px;
 }
 
-.usage-card {
-  text-align: center;
+.info-card {
   margin-bottom: 16px;
 }
 
-.usage-card :deep(.el-card__body) {
+.info-card :deep(.el-card__header) {
+  padding: 12px 16px;
+}
+
+.card-header {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
   align-items: center;
+  font-weight: 600;
 }
 
-.usage-label {
-  font-size: 14px;
+.muted {
   color: var(--el-text-color-secondary);
-  margin-bottom: 4px;
-}
-
-.usage-text {
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  margin-top: 4px;
-  word-break: break-all;
 }
 
 .group {
