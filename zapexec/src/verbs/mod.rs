@@ -171,10 +171,28 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             ssl_http2,
         } => {
             site::vhost_sync(
-                site_id, name, domains, enabled, mode, php_socket, web_root, log_root, owner_user,
-                site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations,
-                ssl_fullchain, ssl_key, force_https, ssl_protocols, ssl_ciphers,
-                ssl_prefer_server_ciphers, ssl_http2,
+                site_id,
+                name,
+                domains,
+                enabled,
+                mode,
+                php_socket,
+                web_root,
+                log_root,
+                owner_user,
+                site_type,
+                pseudo_static,
+                pseudo_custom,
+                web_root_custom,
+                upstreams,
+                locations,
+                ssl_fullchain,
+                ssl_key,
+                force_https,
+                ssl_protocols,
+                ssl_ciphers,
+                ssl_prefer_server_ciphers,
+                ssl_http2,
             )
             .await
         }

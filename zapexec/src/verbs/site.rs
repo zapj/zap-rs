@@ -273,7 +273,14 @@ fn ensure_web_root(
 /// 站点类型白名单
 const SITE_TYPES: [&str; 3] = ["php", "static", "proxy"];
 /// 伪静态预设 key（custom = 使用自定义规则文本）
-const PSEUDO_PRESETS: [&str; 6] = ["none", "thinkphp", "laravel", "wordpress", "codeigniter", "custom"];
+const PSEUDO_PRESETS: [&str; 6] = [
+    "none",
+    "thinkphp",
+    "laravel",
+    "wordpress",
+    "codeigniter",
+    "custom",
+];
 
 fn norm_site_type(t: &str) -> &'static str {
     match t.trim().to_lowercase().as_str() {
@@ -287,8 +294,12 @@ fn norm_site_type(t: &str) -> &'static str {
 /// kind 只匹配白名单预设；custom 使用面板提交的多行指令原文。
 fn pseudo_location_body(kind: &str, custom: &str) -> Option<String> {
     match kind.trim().to_lowercase().as_str() {
-        "thinkphp" => Some("if (!-e $request_filename) {\n    rewrite ^(.*)$ /index.php?s=$1 last;\n}".to_string()),
-        "codeigniter" => Some("if (!-e $request_filename) {\n    rewrite ^(.*)$ /index.php/$1 last;\n}".to_string()),
+        "thinkphp" => Some(
+            "if (!-e $request_filename) {\n    rewrite ^(.*)$ /index.php?s=$1 last;\n}".to_string(),
+        ),
+        "codeigniter" => Some(
+            "if (!-e $request_filename) {\n    rewrite ^(.*)$ /index.php/$1 last;\n}".to_string(),
+        ),
         "laravel" | "wordpress" | "drupal" | "typecho" => {
             Some("try_files $uri $uri/ /index.php?$query_string;".to_string())
         }
@@ -336,13 +347,22 @@ fn render_location_body(l: &LocationSpec) -> String {
             }
             // 超时（秒）
             if l.conn_timeout > 0 {
-                b.push_str(&format!("        proxy_connect_timeout {}s;\n", l.conn_timeout));
+                b.push_str(&format!(
+                    "        proxy_connect_timeout {}s;\n",
+                    l.conn_timeout
+                ));
             }
             if l.read_timeout > 0 {
-                b.push_str(&format!("        proxy_read_timeout {}s;\n", l.read_timeout));
+                b.push_str(&format!(
+                    "        proxy_read_timeout {}s;\n",
+                    l.read_timeout
+                ));
             }
             if l.send_timeout > 0 {
-                b.push_str(&format!("        proxy_send_timeout {}s;\n", l.send_timeout));
+                b.push_str(&format!(
+                    "        proxy_send_timeout {}s;\n",
+                    l.send_timeout
+                ));
             }
             // 跳转策略
             if !l.proxy_redirect.trim().is_empty() {
@@ -424,7 +444,9 @@ fn sanitize_protocols(raw: &str) -> String {
 /// 剔除任何可用于截断注入指令的字符（; # \n 引号 花括号 斜杠等）。
 fn sanitize_ciphers(raw: &str) -> String {
     raw.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '!' | '+' | '-' | '_' | '.' | ' '))
+        .filter(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, ':' | '!' | '+' | '-' | '_' | '.' | ' ')
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -880,7 +902,9 @@ fn validate_vhost_cfg(
 ) -> Result<(), String> {
     let raw = site_type.trim().to_lowercase();
     if !SITE_TYPES.contains(&raw.as_str()) {
-        return Err(format!("站点类型仅支持 php / static / proxy（收到：{site_type}）"));
+        return Err(format!(
+            "站点类型仅支持 php / static / proxy（收到：{site_type}）"
+        ));
     }
     let s_type = norm_site_type(site_type);
     let pseudo = pseudo_static.trim().to_lowercase();
@@ -989,16 +1013,23 @@ fn validate_vhost_cfg(
         match kind.as_str() {
             "proxy" => {
                 let t = l.target.trim();
-                if t.is_empty() || t.chars().any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#' | '$')) {
+                if t.is_empty()
+                    || t.chars()
+                        .any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#' | '$'))
+                {
                     return Err(format!("proxy_pass 目标非法：{}", l.target));
                 }
-                if let Some(url) = t.strip_prefix("http://").or_else(|| t.strip_prefix("https://")) {
+                if let Some(url) = t
+                    .strip_prefix("http://")
+                    .or_else(|| t.strip_prefix("https://"))
+                {
                     if url.trim().is_empty() {
                         return Err("proxy_pass 目标 URL 缺少主机".to_string());
                     }
                 } else if t.starts_with("unix:") {
                     return Err(
-                        "proxy_pass 暂不支持 unix socket，请填 http(s):// 地址或 upstream 组名".to_string(),
+                        "proxy_pass 暂不支持 unix socket，请填 http(s):// 地址或 upstream 组名"
+                            .to_string(),
                     );
                 } else if !names.contains(t) {
                     return Err(format!(
@@ -1041,7 +1072,8 @@ fn validate_vhost_cfg(
                 let pr = l.proxy_redirect.trim();
                 if !pr.is_empty()
                     && (pr.len() > 400
-                        || pr.chars()
+                        || pr
+                            .chars()
                             .any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#')))
                 {
                     return Err("proxy_redirect 规则非法或超长".to_string());
@@ -1069,8 +1101,11 @@ fn validate_vhost_cfg(
                 }
                 let t = l.target.trim();
                 if t.is_empty()
-                    || t.chars().any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#' | '$'))
-                    || !(t.starts_with("http://") || t.starts_with("https://") || t.starts_with('/'))
+                    || t.chars()
+                        .any(|c| c.is_control() || matches!(c, '{' | '}' | ';' | '#' | '$'))
+                    || !(t.starts_with("http://")
+                        || t.starts_with("https://")
+                        || t.starts_with('/'))
                 {
                     return Err(format!(
                         "redirect 目标需为 http(s):// 地址或站内路径：{}",
@@ -1088,7 +1123,8 @@ fn validate_vhost_cfg(
             }
             "alias" => {
                 let t = l.target.trim();
-                let r = root.ok_or_else(|| "alias location 仅用于 php / static 站点".to_string())?;
+                let r =
+                    root.ok_or_else(|| "alias location 仅用于 php / static 站点".to_string())?;
                 let tp = Path::new(t);
                 if !t.starts_with('/') || !path_under(r, tp) {
                     return Err(format!("alias 目标必须位于站点目录内：{t}"));
@@ -1114,11 +1150,19 @@ fn validate_vhost_cfg(
                     if s == "include" || s.starts_with("include ") || s.starts_with("include\t") {
                         return Err("raw 自由指令体中不允许 include".to_string());
                     }
-                    if s.starts_with("server") || s.starts_with("location ") || s.starts_with("upstream") {
-                        return Err("raw 自由指令体不允许嵌套 server / location / upstream 块".to_string());
+                    if s.starts_with("server")
+                        || s.starts_with("location ")
+                        || s.starts_with("upstream")
+                    {
+                        return Err(
+                            "raw 自由指令体不允许嵌套 server / location / upstream 块".to_string()
+                        );
                     }
                     if s.contains('{') || s.contains('}') {
-                        return Err("raw 自由指令体不允许出现花括号（仅支持单层 location 内指令）".to_string());
+                        return Err(
+                            "raw 自由指令体不允许出现花括号（仅支持单层 location 内指令）"
+                                .to_string(),
+                        );
                     }
                 }
             }
@@ -1191,10 +1235,28 @@ pub async fn vhost_sync(
 ) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
         vhost_sync_inner(
-            site_id, &name, &domains, enabled, mode, php_socket, web_root, log_root, owner_user,
-            site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations,
-            ssl_fullchain, ssl_key, force_https, ssl_protocols, ssl_ciphers,
-            ssl_prefer_server_ciphers, ssl_http2,
+            site_id,
+            &name,
+            &domains,
+            enabled,
+            mode,
+            php_socket,
+            web_root,
+            log_root,
+            owner_user,
+            site_type,
+            pseudo_static,
+            pseudo_custom,
+            web_root_custom,
+            upstreams,
+            locations,
+            ssl_fullchain,
+            ssl_key,
+            force_https,
+            ssl_protocols,
+            ssl_ciphers,
+            ssl_prefer_server_ciphers,
+            ssl_http2,
         )
     })
     .await
@@ -1229,12 +1291,12 @@ fn needs_cache_zone(locations: &[LocationSpec]) -> bool {
 /// 幂等准备反代共享缓存区：
 /// - 磁盘缓存目录（{ZAP_PATH}/data/cache/nginx-zap_cache）存在且属主 www:www（nginx worker 写）；
 /// - 向 nginx include 目录发布固定名 zone 定义文件（include 位于 http 上下文，zone 随之生效）。
+///
 /// zone 文件独立于站点 vhost、可被多个站点复用；无站点引用时残留亦无害。
 fn ensure_cache_zone(_edir: &std::path::Path) -> Result<(), String> {
     let cache_root = zap_path().join("data/cache/nginx-zap_cache");
     if !cache_root.exists() {
-        std::fs::create_dir_all(&cache_root)
-            .map_err(|e| format!("创建反代缓存目录失败: {e}"))?;
+        std::fs::create_dir_all(&cache_root).map_err(|e| format!("创建反代缓存目录失败: {e}"))?;
         let _ = std::process::Command::new("chown")
             .args(["-R", "www:www"])
             .arg(&cache_root)
@@ -1426,8 +1488,7 @@ fn vhost_sync_inner(
             None
         }
     };
-    let ssl_refs: Option<(&str, &str)> =
-        ssl_files.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
+    let ssl_refs: Option<(&str, &str)> = ssl_files.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
     // TLS 高级设置：仅绑定证书时构造渲染配置（http2 指令写法取决于 nginx 版本）
     let ssl_tls_cfg = ssl_files.as_ref().map(|_| SslTlsCfg {
         protocols: ssl_protocols,
@@ -1481,13 +1542,13 @@ fn vhost_sync_inner(
 
     // 反代缓存：任一 proxy location 启用 zap_cache 时，先幂等发布共享缓存区
     // （nginx -t 需要 zone 已存在；失败时恢复 include 再中止）
-    if needs_cache_zone(&locations) {
-        if let Err(e) = ensure_cache_zone(&edir) {
-            if injected {
-                super::webconf::restore_include(&conf_file);
-            }
-            return Err(e);
+    if needs_cache_zone(&locations)
+        && let Err(e) = ensure_cache_zone(&edir)
+    {
+        if injected {
+            super::webconf::restore_include(&conf_file);
         }
+        return Err(e);
     }
 
     // 发布前保留上一版内容，便于校验失败时回滚
@@ -1837,7 +1898,10 @@ mod tests {
             None,
         );
         assert!(s2.contains("try_files $uri $uri/ /index.php?$query_string;"));
-        assert!(!s2.contains("rewrite"), "laravel 用 try_files 实现，不应出现 rewrite");
+        assert!(
+            !s2.contains("rewrite"),
+            "laravel 用 try_files 实现，不应出现 rewrite"
+        );
     }
 
     #[test]
@@ -1895,7 +1959,10 @@ mod tests {
         assert!(s.contains("server 127.0.0.1:9002 weight=2;"));
         assert!(s.contains("location / {"));
         assert!(s.contains("proxy_pass backend;"));
-        assert!(s.contains("proxy_set_header Upgrade $http_upgrade;"), "ws 开关应输出升级头");
+        assert!(
+            s.contains("proxy_set_header Upgrade $http_upgrade;"),
+            "ws 开关应输出升级头"
+        );
         assert!(s.contains("location /admin {"));
         assert!(s.contains("return 403;"));
         assert!(s.contains("location /static {"));
@@ -1926,8 +1993,22 @@ mod tests {
 
         // 合法：带 location /
         let locs2 = vec![
-            LocationSpec { path: "/".into(), kind: "proxy".into(), target: "b".into(), code: 0, ws: false, ..Default::default() },
-            LocationSpec { path: "/api".into(), kind: "proxy".into(), target: "b".into(), code: 0, ws: false, ..Default::default() },
+            LocationSpec {
+                path: "/".into(),
+                kind: "proxy".into(),
+                target: "b".into(),
+                code: 0,
+                ws: false,
+                ..Default::default()
+            },
+            LocationSpec {
+                path: "/api".into(),
+                kind: "proxy".into(),
+                target: "b".into(),
+                code: 0,
+                ws: false,
+                ..Default::default()
+            },
         ];
         assert!(validate_vhost_cfg("proxy", "none", "", false, None, &ups, &locs2).is_ok());
     }
@@ -1944,20 +2025,70 @@ mod tests {
             servers_ext: vec![sv("127.0.0.1:1", 0)],
             ..Default::default()
         }];
-        let locs = vec![LocationSpec { path: "/".into(), kind: "proxy".into(), target: "missing".into(), code: 0, ws: false, ..Default::default() }];
+        let locs = vec![LocationSpec {
+            path: "/".into(),
+            kind: "proxy".into(),
+            target: "missing".into(),
+            code: 0,
+            ws: false,
+            ..Default::default()
+        }];
         assert!(validate_vhost_cfg("proxy", "none", "", false, None, &ups, &locs).is_err());
         // proxy_pass 注入分号/花括号
-        let locs2 = vec![LocationSpec { path: "/".into(), kind: "proxy".into(), target: "ok; #x".into(), code: 0, ws: false, ..Default::default() }];
+        let locs2 = vec![LocationSpec {
+            path: "/".into(),
+            kind: "proxy".into(),
+            target: "ok; #x".into(),
+            code: 0,
+            ws: false,
+            ..Default::default()
+        }];
         assert!(validate_vhost_cfg("proxy", "none", "", false, None, &ups, &locs2).is_err());
         // alias 越出站点目录
-        let locs3 = vec![LocationSpec { path: "/x".into(), kind: "alias".into(), target: "/etc".into(), code: 0, ws: false, ..Default::default() }];
+        let locs3 = vec![LocationSpec {
+            path: "/x".into(),
+            kind: "alias".into(),
+            target: "/etc".into(),
+            code: 0,
+            ws: false,
+            ..Default::default()
+        }];
         assert!(validate_vhost_cfg("php", "none", "", false, Some(&tmp), &[], &locs3).is_err());
         // 自定义伪静态花括号不配对
-        assert!(validate_vhost_cfg("php", "custom", "if (x) { rewrite ^ y last;", false, Some(&tmp), &[], &[]).is_err());
+        assert!(
+            validate_vhost_cfg(
+                "php",
+                "custom",
+                "if (x) { rewrite ^ y last;",
+                false,
+                Some(&tmp),
+                &[],
+                &[]
+            )
+            .is_err()
+        );
         // 自定义伪静态禁止 location
-        assert!(validate_vhost_cfg("php", "custom", "location /x {}", false, Some(&tmp), &[], &[]).is_err());
+        assert!(
+            validate_vhost_cfg(
+                "php",
+                "custom",
+                "location /x {}",
+                false,
+                Some(&tmp),
+                &[],
+                &[]
+            )
+            .is_err()
+        );
         // deny 状态码白名单
-        let locs4 = vec![LocationSpec { path: "/".into(), kind: "deny".into(), target: String::new(), code: 500, ws: false, ..Default::default() }];
+        let locs4 = vec![LocationSpec {
+            path: "/".into(),
+            kind: "deny".into(),
+            target: String::new(),
+            code: 500,
+            ws: false,
+            ..Default::default()
+        }];
         assert!(validate_vhost_cfg("php", "none", "", false, Some(&tmp), &[], &locs4).is_err());
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -1967,8 +2098,14 @@ mod tests {
         let base = Path::new("/home/u/www");
         assert!(path_under(base, Path::new("/home/u/www/blog")));
         assert!(path_under(base, Path::new("/home/u/www")));
-        assert!(!path_under(base, Path::new("/home/u/www2/blog")), "同前缀不同目录应拒绝");
-        assert!(!path_under(base, Path::new("/home/u/www/../etc")), ".. 应拒绝");
+        assert!(
+            !path_under(base, Path::new("/home/u/www2/blog")),
+            "同前缀不同目录应拒绝"
+        );
+        assert!(
+            !path_under(base, Path::new("/home/u/www/../etc")),
+            ".. 应拒绝"
+        );
         assert!(!path_under(base, Path::new("/etc")), "站外路径应拒绝");
     }
 
@@ -2020,7 +2157,10 @@ mod tests {
             false,
             Some(&cfg),
         );
-        assert!(s.contains("listen 443 ssl;"), "新版 nginx 用 http2 on 而非 listen 内嵌");
+        assert!(
+            s.contains("listen 443 ssl;"),
+            "新版 nginx 用 http2 on 而非 listen 内嵌"
+        );
         assert!(s.contains("http2 on;"));
         assert!(s.contains("ssl_certificate /etc/zap/ssl/fullchain.pem;"));
         assert!(s.contains("ssl_protocols TLSv1.3 TLSv1.2;"));
@@ -2052,13 +2192,19 @@ mod tests {
             false,
             Some(&cfg2),
         );
-        assert!(s2.contains("listen 443 ssl http2;"), "老版 nginx 应内嵌 http2 到 listen");
+        assert!(
+            s2.contains("listen 443 ssl http2;"),
+            "老版 nginx 应内嵌 http2 到 listen"
+        );
         assert!(!s2.contains("http2 on;"), "老版 nginx 不支持 http2 on 指令");
         assert!(
             s2.contains("ssl_protocols TLSv1.2 TLSv1.3;"),
             "协议缺省回退 TLSv1.2 TLSv1.3"
         );
         assert!(!s2.contains("ssl_ciphers"), "套件为空不输出 ssl_ciphers");
-        assert!(!s2.contains("ssl_prefer_server_ciphers"), "未开启不输出 prefer 指令");
+        assert!(
+            !s2.contains("ssl_prefer_server_ciphers"),
+            "未开启不输出 prefer 指令"
+        );
     }
 }

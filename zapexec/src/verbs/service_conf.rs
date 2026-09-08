@@ -299,7 +299,11 @@ fn supported(key: &str) -> Option<&'static ServiceDef> {
             bin_candidates: &["mariadbd", "mysqld", "mysql"],
             version_args: &["--version"],
             version_in_stderr: false,
-            main_candidates: &["/etc/mysql/mariadb.conf.d/99-zap.cnf", "/etc/mysql/my.cnf", "/etc/my.cnf"],
+            main_candidates: &[
+                "/etc/mysql/mariadb.conf.d/99-zap.cnf",
+                "/etc/mysql/my.cnf",
+                "/etc/my.cnf",
+            ],
             exts: &["cnf", "conf"],
             format: ConfFormat::Ini,
             ini_comment: "#",
@@ -379,7 +383,10 @@ fn find_bin(d: &ServiceDef) -> Option<PathBuf> {
 
 /// 取版本号（首个二进制 + 固定参数的首行输出）。
 fn detect_version(d: &ServiceDef, bin: &Path) -> String {
-    let mut cmd = root_cmd(bin.to_str().unwrap_or(bin.file_name().and_then(|n| n.to_str()).unwrap_or("")));
+    let mut cmd = root_cmd(
+        bin.to_str()
+            .unwrap_or(bin.file_name().and_then(|n| n.to_str()).unwrap_or("")),
+    );
     for a in d.version_args {
         cmd.arg(a);
     }
@@ -428,7 +435,11 @@ fn probe_main(d: &ServiceDef) -> Option<(PathBuf, PathBuf, bool)> {
     for cand in d.main_candidates {
         if cand.contains('*') {
             if let Some(p) = glob_first(cand) {
-                return Some((p.clone(), p.parent().unwrap_or(Path::new("/")).to_path_buf(), true));
+                return Some((
+                    p.clone(),
+                    p.parent().unwrap_or(Path::new("/")).to_path_buf(),
+                    true,
+                ));
             }
             continue;
         }
@@ -437,7 +448,11 @@ fn probe_main(d: &ServiceDef) -> Option<(PathBuf, PathBuf, bool)> {
         }
         let p = PathBuf::from(cand);
         if p.is_file() {
-            return Some((p.clone(), p.parent().unwrap_or(Path::new("/")).to_path_buf(), true));
+            return Some((
+                p.clone(),
+                p.parent().unwrap_or(Path::new("/")).to_path_buf(),
+                true,
+            ));
         }
     }
     // 全部不存在：服务已安装时允许回退到首个不含通配的候选（UI 可新建）
@@ -530,10 +545,7 @@ fn backup_dir(svc: &str) -> PathBuf {
 fn backup_file(svc: &str, path: &Path) -> Result<PathBuf, String> {
     let dir = backup_dir(svc);
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建备份目录失败: {e}"))?;
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("conf");
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("conf");
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -581,7 +593,14 @@ fn validate_path(
         .to_string();
     let ok_ext = d.exts.iter().any(|e| fname.ends_with(&format!(".{e}")));
     if !ok_ext {
-        return Err(format!("仅支持编辑 {}", d.exts.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(" / ")));
+        return Err(format!(
+            "仅支持编辑 {}",
+            d.exts
+                .iter()
+                .map(|e| format!(".{e}"))
+                .collect::<Vec<_>>()
+                .join(" / ")
+        ));
     }
     if fname.starts_with("zap-")
         || fname.ends_with(".bak")
@@ -616,13 +635,7 @@ fn file_entry(path: &Path, base: &Path, is_main: bool, size: u64, exists: bool) 
 }
 
 fn collect_files(d: &ServiceDef, root: &Path, out: &mut Vec<Value>) {
-    fn walk(
-        d: &ServiceDef,
-        dir: &Path,
-        base: &Path,
-        depth: usize,
-        out: &mut Vec<Value>,
-    ) {
+    fn walk(d: &ServiceDef, dir: &Path, base: &Path, depth: usize, out: &mut Vec<Value>) {
         if depth > SCAN_DEPTH {
             return;
         }
@@ -783,10 +796,8 @@ fn ini_read_values(
             in_block = false;
             continue;
         }
-        if in_block {
-            if let Some((k, v)) = parse_ini_line(t) {
-                in_block_values.insert(k, v);
-            }
+        if in_block && let Some((k, v)) = parse_ini_line(t) {
+            in_block_values.insert(k, v);
         }
     }
     // 2) 全文扫描未注释赋值，记最后出现的值作为回退
@@ -801,10 +812,11 @@ fn ini_read_values(
         }
     }
     for f in fields {
-        let v = in_block_values
-            .get(f.key)
-            .or_else(|| fallback.get(f.key));
-        values.insert(f.key.to_string(), v.cloned().map_or(Value::Null, Value::String));
+        let v = in_block_values.get(f.key).or_else(|| fallback.get(f.key));
+        values.insert(
+            f.key.to_string(),
+            v.cloned().map_or(Value::Null, Value::String),
+        );
     }
     values
 }
@@ -817,13 +829,20 @@ fn parse_ini_line(line: &str) -> Option<(String, String)> {
     if key.is_empty() {
         return None;
     }
-    let val = line[eq + 1..].trim().trim_end_matches(';').trim().to_string();
+    let val = line[eq + 1..]
+        .trim()
+        .trim_end_matches(';')
+        .trim()
+        .to_string();
     Some((key, val))
 }
 
 // ── json 关键项 ──────────────────────────────────────────────
 
-fn json_read_values(content: &str, fields: &[FieldDef]) -> std::collections::BTreeMap<String, Value> {
+fn json_read_values(
+    content: &str,
+    fields: &[FieldDef],
+) -> std::collections::BTreeMap<String, Value> {
     let mut values = std::collections::BTreeMap::new();
     let parsed: Value = serde_json::from_str(content.trim()).unwrap_or(Value::Null);
     for f in fields {
@@ -859,9 +878,7 @@ fn set_json_path(obj: &mut Value, path: &[&str], value: Value) {
         o.insert(path[0].to_string(), value);
         return;
     }
-    let entry = o
-        .entry(path[0].to_string())
-        .or_insert_with(|| json!({}));
+    let entry = o.entry(path[0].to_string()).or_insert_with(|| json!({}));
     set_json_path(entry, &path[1..], value);
 }
 
@@ -877,10 +894,15 @@ where
         .unwrap_or_else(|e| Response::err(-1, e))
 }
 
+/// installed_info 返回的组装信息（status / list 共用）。
+type InstalledInfo = (
+    Option<PathBuf>,
+    Option<String>,
+    Option<(PathBuf, PathBuf, bool)>,
+);
+
 /// 组装常见安装信息（status / list 共用）。
-fn installed_info(
-    d: &ServiceDef,
-) -> (Option<PathBuf>, Option<String>, Option<(PathBuf, PathBuf, bool)>) {
+fn installed_info(d: &ServiceDef) -> InstalledInfo {
     let bin = find_bin(d);
     let unit = active_unit(d);
     let installed = bin.is_some() || unit.is_some();
@@ -902,7 +924,10 @@ pub async fn status(svc: &str) -> Response {
                 Some(json!({ "installed": false, "service": svc })),
             ));
         }
-        let version = bin.as_deref().map(|b| detect_version(d, b)).unwrap_or_default();
+        let version = bin
+            .as_deref()
+            .map(|b| detect_version(d, b))
+            .unwrap_or_default();
         let (conf_file, conf_dir, main_exists) = match &main {
             Some((m, dir, exists)) => (
                 Some(m.display().to_string()),
@@ -969,7 +994,11 @@ pub async fn conf_list(svc: &str) -> Response {
             collect_files(d, &root, &mut files);
             // 目录扫描可能再次命中主配置文件，去重
             files.retain(|f| {
-                let p = f.get("path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                let p = f
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
                 seen.insert(p)
             });
         }
@@ -1202,8 +1231,7 @@ pub async fn keys_save(svc: &str, keys: std::collections::BTreeMap<String, Strin
                         set_json_path(&mut obj, f.jpath, v);
                     }
                 }
-                serde_json::to_string_pretty(&obj)
-                    .map_err(|e| format!("序列化 JSON 失败: {e}"))?
+                serde_json::to_string_pretty(&obj).map_err(|e| format!("序列化 JSON 失败: {e}"))?
             }
         };
         let backup = backup_file(&svc, &main)?;
@@ -1260,7 +1288,11 @@ pub async fn control(svc: &str, action: &str) -> Response {
                     "systemctl {} {} 失败：{}",
                     action,
                     unit,
-                    String::from_utf8_lossy(&o.stderr).trim().chars().take(2000).collect::<String>()
+                    String::from_utf8_lossy(&o.stderr)
+                        .trim()
+                        .chars()
+                        .take(2000)
+                        .collect::<String>()
                 ));
             }
             if action == "restart" {

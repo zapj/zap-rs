@@ -652,8 +652,14 @@ async fn ensure_domains_unique(
 /// 站点类型白名单（与 zapexec 保持一致）
 const SITE_TYPES: [&str; 3] = ["php", "static", "proxy"];
 /// 伪静态预设 key 白名单
-const PSEUDO_PRESETS: [&str; 6] =
-    ["none", "thinkphp", "laravel", "wordpress", "codeigniter", "custom"];
+const PSEUDO_PRESETS: [&str; 6] = [
+    "none",
+    "thinkphp",
+    "laravel",
+    "wordpress",
+    "codeigniter",
+    "custom",
+];
 
 fn is_operator(claims: &jwt::Claims) -> bool {
     jwt::is_admin(claims) || jwt::is_reseller(claims)
@@ -734,25 +740,41 @@ fn norm_pseudo(preset: &str, custom: &str, allow_custom: bool) -> Result<(), Zap
 
 /// 站点扩展档案（与 site_profile 列一一对应；ssl_cert_id>0 = 绑定证书库证书启用 HTTPS）
 /// 8..11：TLS 高级设置（ssl_protocols / ssl_ciphers / ssl_prefer_server_ciphers / ssl_http2）
-type ProfileRow = (String, String, String, bool, String, String, i64, bool, String, String, bool, bool);
+type ProfileRow = (
+    String,
+    String,
+    String,
+    bool,
+    String,
+    String,
+    i64,
+    bool,
+    String,
+    String,
+    bool,
+    bool,
+);
+
+/// load_profile 的原始查询行（列序见 SQL；i64 为 SQLite 原生整数，映射时转 bool）
+type ProfileRowRaw = (
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    i64,
+    i64,
+    String,
+    String,
+    i64,
+    i64,
+);
 
 /// 读取站点扩展档案；老站点（无档案行）返回默认值
 async fn load_profile(site_id: i64) -> ProfileRow {
     let pool = db::get_db_pool().await;
-    let row: Option<(
-        String,
-        String,
-        String,
-        i64,
-        String,
-        String,
-        i64,
-        i64,
-        String,
-        String,
-        i64,
-        i64,
-    )> = sqlx::query_as(
+    let row: Option<ProfileRowRaw> = sqlx::query_as(
         "SELECT site_type, pseudo_static, pseudo_custom, web_root_custom, upstreams, locations, \
                 ssl_cert_id, force_https, ssl_protocols, ssl_ciphers, \
                 ssl_prefer_server_ciphers, ssl_http2 \
@@ -765,7 +787,18 @@ async fn load_profile(site_id: i64) -> ProfileRow {
     .flatten();
     row.map(|(t, p, pc, wc, u, l, ssl, fh, pr, ci, pp, h2)| {
         (
-            t, p, pc, wc != 0, u, l, ssl, fh != 0, pr, ci, pp != 0, h2 != 0,
+            t,
+            p,
+            pc,
+            wc != 0,
+            u,
+            l,
+            ssl,
+            fh != 0,
+            pr,
+            ci,
+            pp != 0,
+            h2 != 0,
         )
     })
     .unwrap_or_else(|| {
@@ -833,7 +866,11 @@ async fn save_profile(
     .bind(if force_https { 1i64 } else { 0i64 })
     .bind(ssl_protocols)
     .bind(ssl_ciphers)
-    .bind(if ssl_prefer_server_ciphers { 1i64 } else { 0i64 })
+    .bind(if ssl_prefer_server_ciphers {
+        1i64
+    } else {
+        0i64
+    })
     .bind(if ssl_http2 { 1i64 } else { 0i64 })
     .bind(now)
     .execute(pool)
@@ -856,7 +893,8 @@ async fn ensure_cert_bindable(cert_id: i64, owner_user_id: i64) -> Result<(), Za
         Some((1, _)) => Err(ZapError::New(
             -1,
             "所选 SSL 证书不属于本站点的归属用户：请先在「SSL/TLS → 证书管理」为该用户添加证书，\
-             或将现有证书「归属」改为该用户（系统证书 0 需先转归属）后再绑定".to_string(),
+             或将现有证书「归属」改为该用户（系统证书 0 需先转归属）后再绑定"
+                .to_string(),
         )),
         Some(_) => Err(ZapError::New(
             -1,
@@ -898,19 +936,20 @@ async fn resolve_custom_web_root(owner: i64, raw: &str) -> Result<String, ZapErr
         ));
     }
     if !p.starts_with('/') {
-        return Err(ZapError::New(-1, "自定义站点目录必须是绝对路径".to_string()));
-    }
-    if p.split('/').any(|s| s == "..") {
         return Err(ZapError::New(
             -1,
-            "自定义站点目录不允许包含 ..".to_string(),
+            "自定义站点目录必须是绝对路径".to_string(),
         ));
+    }
+    if p.split('/').any(|s| s == "..") {
+        return Err(ZapError::New(-1, "自定义站点目录不允许包含 ..".to_string()));
     }
     let home = home_dir_of(owner).await?;
     if home.is_empty() {
         return Err(ZapError::New(
             -1,
-            "该用户家目录尚未初始化：请先用「自动目录」创建并同步一次站点，再改用自定义目录".to_string(),
+            "该用户家目录尚未初始化：请先用「自动目录」创建并同步一次站点，再改用自定义目录"
+                .to_string(),
         ));
     }
     if !(p == home || p.starts_with(&format!("{home}/"))) {
@@ -946,10 +985,7 @@ fn clean_auto_sub(raw: &str, home: &str) -> Result<String, ZapError> {
             continue;
         }
         if seg == ".." {
-            return Err(ZapError::New(
-                -1,
-                "自定义站点目录不允许包含 ..".to_string(),
-            ));
+            return Err(ZapError::New(-1, "自定义站点目录不允许包含 ..".to_string()));
         }
         if seg.chars().any(|c| {
             c.is_control() || !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '~'))
@@ -973,6 +1009,7 @@ fn clean_auto_sub(raw: &str, home: &str) -> Result<String, ZapError> {
 /// 自动目录文档根规划：
 /// - `sub` 为空 → 面板默认规划 {home}/www/{sanitize(name)}-{site_id}（site_dirs_for）；
 /// - `sub` 非空 → {home}/{clean sub}（目录不存在时由 vhost 同步阶段递归创建，不会写占位覆盖已有文件）。
+///
 /// 日志目录始终为 {home}/logs/{sanitize(name)}-{site_id}。
 async fn auto_dirs_for(
     owner: i64,
@@ -1015,7 +1052,8 @@ async fn validate_advanced_inputs(
         if t == "proxy" && !g_proxy {
             return Err(ZapError::New(
                 -1,
-                "反向代理功能未对当前账号开放，请联系管理员在「系统 → 套餐」中为你的套餐开启".to_string(),
+                "反向代理功能未对当前账号开放，请联系管理员在「系统 → 套餐」中为你的套餐开启"
+                    .to_string(),
             ));
         }
     }
@@ -1042,7 +1080,10 @@ async fn validate_advanced_inputs(
     let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for u in upstreams {
         let n = u.name.trim();
-        if n.is_empty() || !n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        if n.is_empty()
+            || !n
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         {
             return Err(ZapError::New(
                 -1,
@@ -1058,16 +1099,17 @@ async fn validate_advanced_inputs(
                 return Err(ZapError::New(
                     -1,
                     format!("upstream 负载策略不支持：{other}"),
-                ))
+                ));
             }
         }
         for s in &u.servers_ext {
             let a = s.addr.trim();
             if a.len() > 200
                 || (!a.is_empty()
-                    && !a
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '/' | '_' | '-' | '[' | ']' | '%')))
+                    && !a.chars().all(|c| {
+                        c.is_ascii_alphanumeric()
+                            || matches!(c, '.' | ':' | '/' | '_' | '-' | '[' | ']' | '%')
+                    }))
             {
                 return Err(ZapError::New(
                     -1,
@@ -1110,7 +1152,10 @@ async fn validate_advanced_inputs(
             return Err(ZapError::New(-1, "代理超时最大 86400 秒".to_string()));
         }
         if l.headers.len() > 20 {
-            return Err(ZapError::New(-1, "每个 location 自定义请求头最多 20 个".to_string()));
+            return Err(ZapError::New(
+                -1,
+                "每个 location 自定义请求头最多 20 个".to_string(),
+            ));
         }
         for h in &l.headers {
             if h.key.trim().len() > 64
@@ -1169,7 +1214,10 @@ async fn validate_advanced_inputs(
                     ));
                 }
                 if l.raw.len() > 8000 {
-                    return Err(ZapError::New(-1, "raw 自由指令体过长（上限 8000 字符）".to_string()));
+                    return Err(ZapError::New(
+                        -1,
+                        "raw 自由指令体过长（上限 8000 字符）".to_string(),
+                    ));
                 }
                 if l.raw.contains('{') || l.raw.contains('}') {
                     return Err(ZapError::New(
@@ -1291,26 +1339,45 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
              FROM site_profile WHERE site_id IN ({})",
             ph
         );
-        let mut pq2 = sqlx::query_as::<_, (
-            i64,
-            String,
-            String,
-            String,
-            i64,
-            String,
-            String,
-            i64,
-            i64,
-            String,
-            String,
-            i64,
-            i64,
-        )>(&psql2);
+        let mut pq2 = sqlx::query_as::<
+            _,
+            (
+                i64,
+                String,
+                String,
+                String,
+                i64,
+                String,
+                String,
+                i64,
+                i64,
+                String,
+                String,
+                i64,
+                i64,
+            ),
+        >(&psql2);
         for id in &ids {
             pq2 = pq2.bind(id);
         }
         for (sid, t, p, pc, wc, u, l, ssl, fh, pr, ci, pp, h2) in pq2.fetch_all(pool).await? {
-            pf_map.insert(sid, (t, p, pc, wc != 0, u, l, ssl, fh != 0, pr, ci, pp != 0, h2 != 0));
+            pf_map.insert(
+                sid,
+                (
+                    t,
+                    p,
+                    pc,
+                    wc != 0,
+                    u,
+                    l,
+                    ssl,
+                    fh != 0,
+                    pr,
+                    ci,
+                    pp != 0,
+                    h2 != 0,
+                ),
+            );
         }
         // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
         let mut owner_ids: Vec<i64> = rows.iter().map(|r| r.1).collect();
@@ -1544,7 +1611,7 @@ pub async fn site_dirs_browse(
             return Err(ZapError::New(
                 -1,
                 "普通用户只能浏览自己家目录下的目录".to_string(),
-            ))
+            ));
         }
         None => claims.id as i64,
     };
@@ -1649,9 +1716,7 @@ pub async fn site_add(
     .await?;
     // 自定义已有目录：在开启事务前向 root 侧验证「存在且位于家目录内」（避免事务内做外部 IO）
     let custom_web_root = if payload.web_root_custom {
-        Some(
-            resolve_custom_web_root(owner, payload.web_root.as_deref().unwrap_or("")).await?,
-        )
+        Some(resolve_custom_web_root(owner, payload.web_root.as_deref().unwrap_or("")).await?)
     } else {
         None
     };
@@ -1817,10 +1882,20 @@ pub async fn site_update(
     let eff_type = norm_site_type(&eff_type_raw)?;
     // 空预设归一为 none（老档案/空提交不再显示空字符串）
     let eff_pseudo = {
-        let v = payload.pseudo_static.clone().unwrap_or_else(|| prof.1.clone());
-        if v.trim().is_empty() { "none".to_string() } else { v }
+        let v = payload
+            .pseudo_static
+            .clone()
+            .unwrap_or_else(|| prof.1.clone());
+        if v.trim().is_empty() {
+            "none".to_string()
+        } else {
+            v
+        }
     };
-    let eff_pseudo_custom = payload.pseudo_custom.clone().unwrap_or_else(|| prof.2.clone());
+    let eff_pseudo_custom = payload
+        .pseudo_custom
+        .clone()
+        .unwrap_or_else(|| prof.2.clone());
     let eff_custom = payload.web_root_custom.unwrap_or(prof.3);
     let eff_upstreams: Vec<UpstreamSpec> = match &payload.upstreams {
         Some(v) => v.clone(),
@@ -1834,8 +1909,14 @@ pub async fn site_update(
     let eff_ssl_cert_id = payload.ssl_cert_id.unwrap_or(prof.6).max(0);
     let eff_force_https = payload.force_https.unwrap_or(prof.7);
     // TLS 高级设置：None = 保持现值；空串 = 面板默认（协议 TLSv1.2+TLSv1.3 / 不输出套件）
-    let eff_ssl_protocols = payload.ssl_protocols.clone().unwrap_or_else(|| prof.8.clone());
-    let eff_ssl_ciphers = payload.ssl_ciphers.clone().unwrap_or_else(|| prof.9.clone());
+    let eff_ssl_protocols = payload
+        .ssl_protocols
+        .clone()
+        .unwrap_or_else(|| prof.8.clone());
+    let eff_ssl_ciphers = payload
+        .ssl_ciphers
+        .clone()
+        .unwrap_or_else(|| prof.9.clone());
     let eff_ssl_prefer = payload.ssl_prefer_server_ciphers.unwrap_or(prof.10);
     let eff_ssl_http2 = payload.ssl_http2.unwrap_or(prof.11);
 
@@ -1982,7 +2063,13 @@ pub async fn site_update(
         None
     } else {
         Some(
-            auto_dirs_for(new_owner, &name, payload.id, payload.web_root_sub.as_deref()).await?,
+            auto_dirs_for(
+                new_owner,
+                &name,
+                payload.id,
+                payload.web_root_sub.as_deref(),
+            )
+            .await?,
         )
     };
     // 目录需要刷新：进入/退出自定义模式、切属主、改名、自定义路径 / 子路径变化
@@ -2166,7 +2253,10 @@ pub async fn site_delete(
     iq.execute(&mut *tx).await?;
 
     // 站点扩展档案（site_profile）随站点删除
-    let psql = format!("DELETE FROM site_profile WHERE site_id IN ({})", placeholders);
+    let psql = format!(
+        "DELETE FROM site_profile WHERE site_id IN ({})",
+        placeholders
+    );
     let mut pq = sqlx::query(&psql);
     for id in &payload.ids {
         pq = pq.bind(id);
@@ -2375,7 +2465,9 @@ async fn sync_one_site_inner(
 
     // 站点扩展档案（类型 / 伪静态 / 自定义目录 / upstream / location）
     let prof = load_profile(id).await;
-    let s_type = norm_site_type(&prof.0).map(str::to_string).unwrap_or_else(|_| "php".to_string());
+    let s_type = norm_site_type(&prof.0)
+        .map(str::to_string)
+        .unwrap_or_else(|_| "php".to_string());
     let is_proxy = s_type == "proxy";
 
     // 运行实体准备（幂等）：

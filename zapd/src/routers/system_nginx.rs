@@ -38,7 +38,9 @@ async fn exec(req: Request) -> Result<Json<serde_json::Value>, ZapError> {
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": "ok", "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": "ok", "data": resp.data }),
+    ))
 }
 
 /// GET /system/nginx/status
@@ -110,7 +112,10 @@ pub async fn nginx_control(
     Json(body): Json<NginxControlBody>,
 ) -> ZapJsonResult {
     require_admin(&claims)?;
-    if !matches!(body.action.as_str(), "start" | "stop" | "restart" | "reload") {
+    if !matches!(
+        body.action.as_str(),
+        "start" | "stop" | "restart" | "reload"
+    ) {
         return Err(ZapError::New(
             -1,
             "仅支持 start / stop / restart / reload".to_string(),
@@ -184,7 +189,10 @@ pub async fn nginx_default_vhost(
     Json(body): Json<NginxDefaultVhostBody>,
 ) -> ZapJsonResult {
     require_admin(&claims)?;
-    let result = exec(Request::NginxDefaultVhost { enable: body.enable }).await;
+    let result = exec(Request::NginxDefaultVhost {
+        enable: body.enable,
+    })
+    .await;
     if result.is_ok() {
         audit::log(
             Some(&claims),

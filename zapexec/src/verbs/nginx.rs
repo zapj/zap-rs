@@ -176,10 +176,7 @@ fn backup_dir() -> PathBuf {
 fn backup_file(path: &Path) -> Result<PathBuf, String> {
     let dir = backup_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建备份目录失败: {e}"))?;
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("conf");
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("conf");
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -734,7 +731,10 @@ pub async fn default_vhost(enable: bool) -> Response {
                 Err(e) => (false, e),
             }
         } else {
-            (false, "nginx 未运行，配置已生效，将在启动时加载".to_string())
+            (
+                false,
+                "nginx 未运行，配置已生效，将在启动时加载".to_string(),
+            )
         };
         Ok(Response::ok(
             "ok",
@@ -806,12 +806,10 @@ fn stub_port_from_conf() -> Option<u16> {
 
 /// 探测一段区间内可绑定的本机端口（用于状态页首次启用）。
 fn pick_stub_port(start: u16) -> Result<u16, String> {
-    let mut port = start;
-    for _ in 0..200 {
+    for port in (start..).take(200) {
         if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
             return Ok(port);
         }
-        port += 1;
     }
     Err("未找到可用的本机端口".to_string())
 }
@@ -820,8 +818,8 @@ fn pick_stub_port(start: u16) -> Result<u16, String> {
 fn fetch_stub(port: u16) -> Result<StubMetrics, String> {
     use std::io::{Read, Write};
     let addr = format!("127.0.0.1:{port}");
-    let mut stream = std::net::TcpStream::connect(&addr)
-        .map_err(|e| format!("连接状态页 {addr} 失败: {e}"))?;
+    let mut stream =
+        std::net::TcpStream::connect(&addr).map_err(|e| format!("连接状态页 {addr} 失败: {e}"))?;
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
     let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(3)));
     let req = format!(
@@ -884,12 +882,12 @@ fn config_directive(conf: &Path, name: &str) -> Option<String> {
     for line in content.lines() {
         let (code, _) = line.split_once('#').unwrap_or((line, ""));
         let l = code.trim();
-        if l == name || l.starts_with(&format!("{name} ")) || l.starts_with(&format!("{name}\t")) {
-            if let Some(rest) = l[name.len()..].trim().split_whitespace().next() {
-                let v = rest.trim_end_matches(';');
-                if v.eq_ignore_ascii_case("auto") || v.chars().all(|c| c.is_ascii_digit()) {
-                    return Some(v.to_string());
-                }
+        if (l == name || l.starts_with(&format!("{name} ")) || l.starts_with(&format!("{name}\t")))
+            && let Some(rest) = l[name.len()..].split_whitespace().next()
+        {
+            let v = rest.trim_end_matches(';');
+            if v.eq_ignore_ascii_case("auto") || v.chars().all(|c| c.is_ascii_digit()) {
+                return Some(v.to_string());
             }
         }
     }
@@ -983,7 +981,11 @@ pub async fn stub_status(enable: Option<bool>) -> Response {
                 let old = std::fs::read_to_string(stub_conf_path()).ok();
                 // 开启：复用已有端口，否则选择可用端口
                 let new_port = if on {
-                    Some(stub_port_from_conf().or_else(|| pick_stub_port(8014).ok()).unwrap_or(8014))
+                    Some(
+                        stub_port_from_conf()
+                            .or_else(|| pick_stub_port(8014).ok())
+                            .unwrap_or(8014),
+                    )
                 } else {
                     None
                 };
@@ -992,8 +994,7 @@ pub async fn stub_status(enable: Option<bool>) -> Response {
                     match &new_content {
                         Some(_) => match &old {
                             Some(o) => {
-                                let _ =
-                                    super::webconf::publish_named("nginx", STUB_SERVER_FILE, o);
+                                let _ = super::webconf::publish_named("nginx", STUB_SERVER_FILE, o);
                             }
                             None => {
                                 let _ = super::webconf::purge_named("nginx", STUB_SERVER_FILE);
@@ -1001,8 +1002,7 @@ pub async fn stub_status(enable: Option<bool>) -> Response {
                         },
                         None => {
                             if let Some(o) = &old {
-                                let _ =
-                                    super::webconf::publish_named("nginx", STUB_SERVER_FILE, o);
+                                let _ = super::webconf::publish_named("nginx", STUB_SERVER_FILE, o);
                             }
                         }
                     }
@@ -1031,7 +1031,10 @@ pub async fn stub_status(enable: Option<bool>) -> Response {
                         Err(e) => (false, e),
                     }
                 } else {
-                    (false, "nginx 未运行，配置已生效，将在启动时加载".to_string())
+                    (
+                        false,
+                        "nginx 未运行，配置已生效，将在启动时加载".to_string(),
+                    )
                 };
                 Ok(Response::ok(
                     "ok",
@@ -1119,10 +1122,7 @@ pub async fn control(action: &str) -> Response {
                             .output()
                             .map_err(|e| format!("启动 nginx 失败: {e}"))?;
                         if !o.status.success() {
-                            return Err(format!(
-                                "启动 nginx 失败：{}",
-                                output_err(&o, "未知错误")
-                            ));
+                            return Err(format!("启动 nginx 失败：{}", output_err(&o, "未知错误")));
                         }
                         settle_running(true, 10);
                     }

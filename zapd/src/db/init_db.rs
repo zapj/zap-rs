@@ -154,8 +154,8 @@ async fn init_packages_table() {
 
 /// 老库升级（幂等）：
 /// 1. packages 补 `allow_proxy` 列（旧版无该列）；
-/// 2. 移除 `allow_custom_dir` 列 ——「自定义目录」能力已并入全量开放
-///   （SQLite < 3.35 不支持 DROP COLUMN，失败时保留列但业务代码不再读写，无碍）；
+/// 2. 移除 `allow_custom_dir` 列 ——「自定义目录」能力已并入全量开放；
+///    （SQLite < 3.35 不支持 DROP COLUMN，失败时保留列但业务代码不再读写，无碍）
 /// 3. 旧版「站点全局功能开关」（server_env scope='conf' 的 site.user_proxy /
 ///    site.user_custom_dir）迁移：allow_proxy 同步给全部现有套餐后清理旧配置键。
 async fn migrate_package_site_capabilities() {

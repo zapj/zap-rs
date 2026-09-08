@@ -38,7 +38,9 @@ async fn exec(req: Request) -> Result<Json<serde_json::Value>, ZapError> {
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(json!({ "code": 0, "message": "ok", "data": resp.data })))
+    Ok(Json(
+        json!({ "code": 0, "message": "ok", "data": resp.data }),
+    ))
 }
 
 fn validate_service(service: &str) -> Result<String, ZapError> {
@@ -54,20 +56,14 @@ pub struct ServiceQuery {
 }
 
 /// GET /system/service-conf/status
-pub async fn status(
-    claims: ValidatedClaims,
-    Query(q): Query<ServiceQuery>,
-) -> ZapJsonResult {
+pub async fn status(claims: ValidatedClaims, Query(q): Query<ServiceQuery>) -> ZapJsonResult {
     require_admin(&claims)?;
     let service = validate_service(&q.service)?;
     exec(Request::ServiceConfStatus { service }).await
 }
 
 /// GET /system/service-conf/list
-pub async fn conf_list(
-    claims: ValidatedClaims,
-    Query(q): Query<ServiceQuery>,
-) -> ZapJsonResult {
+pub async fn conf_list(claims: ValidatedClaims, Query(q): Query<ServiceQuery>) -> ZapJsonResult {
     require_admin(&claims)?;
     let service = validate_service(&q.service)?;
     exec(Request::ServiceConfList { service }).await
@@ -128,10 +124,7 @@ pub async fn conf_save(
 }
 
 /// GET /system/service-conf/keys
-pub async fn keys_get(
-    claims: ValidatedClaims,
-    Query(q): Query<ServiceQuery>,
-) -> ZapJsonResult {
+pub async fn keys_get(claims: ValidatedClaims, Query(q): Query<ServiceQuery>) -> ZapJsonResult {
     require_admin(&claims)?;
     let service = validate_service(&q.service)?;
     exec(Request::ServiceConfKeys { service }).await
@@ -184,7 +177,10 @@ pub async fn control(
 ) -> ZapJsonResult {
     require_admin(&claims)?;
     let service = validate_service(&body.service)?;
-    if !matches!(body.action.as_str(), "start" | "stop" | "restart" | "reload") {
+    if !matches!(
+        body.action.as_str(),
+        "start" | "stop" | "restart" | "reload"
+    ) {
         return Err(ZapError::New(
             -1,
             "仅支持 start / stop / restart / reload".to_string(),

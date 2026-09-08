@@ -25,8 +25,8 @@ use tracing::{info, warn};
 
 use crate::{
     db,
-    zap::{ZapError, ZapJsonResult, audit, jwt},
     zap::jwt::ValidatedClaims,
+    zap::{ZapError, ZapJsonResult, audit, jwt},
 };
 
 // ── 行结构 ───────────────────────────────────────────────────
@@ -86,11 +86,12 @@ async fn cert_in_scope(claims: &jwt::Claims, cert_id: i64) -> Result<i64, ZapErr
         return Ok(cuid);
     }
     if jwt::is_reseller(claims) {
-        let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM user WHERE id = ? AND owner_id = ?")
-            .bind(cuid)
-            .bind(claims.id as i64)
-            .fetch_one(pool)
-            .await?;
+        let (cnt,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM user WHERE id = ? AND owner_id = ?")
+                .bind(cuid)
+                .bind(claims.id as i64)
+                .fetch_one(pool)
+                .await?;
         if cnt > 0 {
             return Ok(cuid);
         }
@@ -425,7 +426,10 @@ pub async fn cert_update(
                 .execute(pool)
                 .await;
                 if let Err(e) = crate::routers::site::sync_one_site(sid).await {
-                    warn!("证书 {} 归属变更后自动解绑站点 {} 失败: {}", payload.id, sid, e);
+                    warn!(
+                        "证书 {} 归属变更后自动解绑站点 {} 失败: {}",
+                        payload.id, sid, e
+                    );
                 }
             }
         }
