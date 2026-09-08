@@ -24,8 +24,10 @@ use super::site;
 /// 单个配置文件体积上限（读取与写入共用，防止意外读取超大文件拖垮连接）。
 const MAX_CONF_BYTES: u64 = 2 * 1024 * 1024;
 
-/// 从 conf 目录树内收集可编辑配置文件的最大深度（conf/、conf/conf.d/ 等两层足够）。
-const SCAN_DEPTH: usize = 2;
+/// 从 conf 目录树内收集可编辑配置文件的防御性最大深度。
+/// conf/ 及其任意子目录（conf.d/、sites-enabled/、用户自建 vhosts/ 等）都应可编辑，
+/// 上限仅用于防御 symlink 循环等异常目录结构导致的无限递归。
+const SCAN_DEPTH: usize = 16;
 
 // ── 探测与工具 ─────────────────────────────────────────────
 
@@ -167,9 +169,11 @@ fn validate_conf_path(raw: &str) -> Result<(PathBuf, PathBuf, bool), String> {
     Ok((canon, bin, false))
 }
 
-/// 数据区备份目录：`{ZAP_PATH}/data/nginx/backups`。
+/// 数据区备份目录：`{ZAP_PATH}/data/backups/nginx`。
+/// 统一约定：所有服务的配置文件备份都放在 `{ZAP_PATH}/data/backups/<svc>`
+/// 下，每服务一个子目录（nginx、php74、php81…），便于统一浏览与容量管理。
 fn backup_dir() -> PathBuf {
-    site::zap_path().join("data/nginx/backups")
+    site::zap_path().join("data/backups/nginx")
 }
 
 /// 备份当前文件（保留最近 20 份）。
@@ -251,7 +255,8 @@ pub async fn conf_list() -> Response {
         let meta = std::fs::metadata(&conf).map_err(|e| format!("读取主配置失败: {e}"))?;
         files.push(file_entry(&conf, &conf_dir, true, meta.len()));
 
-        collect_conf_files(&conf_dir, &conf_dir, 0, &mut files);
+        // 目录扫描会再次收录主配置自身,跳过它避免列表出现两个 nginx.conf
+        collect_conf_files(&conf_dir, &conf_dir, 0, Some(&conf), &mut files);
         // include 感知：主配置 include（conf.d/*.conf、sites-enabled/*.conf 等）指到的文件
         // 即使位于 conf 目录树外也一并收录（排除面板托管 zap-* 与模块加载目录）。
         let mut seen: std::collections::HashSet<PathBuf> = files
@@ -470,7 +475,13 @@ fn include_dir_root(target: &Path) -> Option<PathBuf> {
     (!root.as_os_str().is_empty()).then_some(root)
 }
 
-fn collect_conf_files(dir: &Path, base: &Path, depth: usize, out: &mut Vec<serde_json::Value>) {
+fn collect_conf_files(
+    dir: &Path,
+    base: &Path,
+    depth: usize,
+    skip: Option<&Path>,
+    out: &mut Vec<serde_json::Value>,
+) {
     if depth > SCAN_DEPTH {
         return;
     }
@@ -488,8 +499,18 @@ fn collect_conf_files(dir: &Path, base: &Path, depth: usize, out: &mut Vec<serde
     entries.sort();
     for p in entries {
         if p.is_dir() {
-            collect_conf_files(&p, base, depth + 1, out);
+            // 不跟随符号链接目录,避免 conf 树内出现 symlink 环时无限递归;
+            // 常规 nginx 子目录均为真实目录,不受影响。
+            if p.is_symlink() {
+                continue;
+            }
+            collect_conf_files(&p, base, depth + 1, skip, out);
             continue;
+        }
+        if let Some(skip_path) = skip
+            && p == skip_path
+        {
+            continue; // 主配置已单独收录,跳过目录扫描里的同名条目
         }
         let name = p
             .file_name()

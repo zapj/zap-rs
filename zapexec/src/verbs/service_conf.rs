@@ -538,8 +538,11 @@ fn service_running(d: &ServiceDef, bin: Option<&Path>) -> bool {
 
 // ── 文件操作 ─────────────────────────────────────────────────
 
+/// 服务配置备份目录：`{ZAP_PATH}/data/backups/<svc>`（svc 为实例名，如
+/// php74 / php81 / mysql 等）。统一约定：nginx 与各服务应用的备份共用
+/// `data/backups/` 根目录，每服务一个子目录，便于统一浏览与容量管理。
 fn backup_dir(svc: &str) -> PathBuf {
-    zap_path().join("data/services").join(svc).join("backups")
+    zap_path().join("data/backups").join(svc)
 }
 
 fn backup_file(svc: &str, path: &Path) -> Result<PathBuf, String> {

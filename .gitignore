@@ -18,3 +18,4 @@ data/appstore/custom/*
 data/apps/*/
 data/sites/*
 data/ssl/
+data/backups/
