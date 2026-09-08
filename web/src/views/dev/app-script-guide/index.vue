@@ -432,7 +432,7 @@ export default { name: 'DevAppScriptGuide' }
 }
 .guide-toc {
   position: sticky;
-  top: 76px;
+  top: 8px;
   flex: 0 0 200px;
   border-right: 1px solid var(--el-border-color-lighter);
   padding: 4px 16px 16px 0;

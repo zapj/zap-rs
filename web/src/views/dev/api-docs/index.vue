@@ -133,7 +133,7 @@ onMounted(async () => {
 .api-docs-container { padding: 20px; min-height: calc(100vh - 200px); }
 .docs-layout { display: flex; gap: 16px; align-items: flex-start; }
 
-.docs-nav { width: 230px; flex-shrink: 0; position: sticky; top: 80px; }
+.docs-nav { width: 230px; flex-shrink: 0; position: sticky; top: 8px; }
 .nav-title { padding: 4px 8px 10px; border-bottom: 1px solid var(--el-border-color-lighter); margin-bottom: 8px; }
 .nav-title .title { font-size: 15px; font-weight: 700; }
 .nav-title .sub { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 2px; }
