@@ -131,13 +131,53 @@ fn build_menu_tree(rows: &[MenuRow], parent_id: i64) -> Vec<Value> {
 
 // ── handlers ───────────────────────────────────────────────
 
-/// Get full menu tree (for rendering sidebar)
-pub async fn get_menus_tree() -> ZapJsonResult {
+/// Get menu tree visible to the current user (for rendering sidebar)。
+///
+/// - admin 恒返回全部启用的菜单；
+/// - 其他角色按「用户角色 key → roles.id → role_menus」动态授权过滤，
+///   角色管理里给角色勾选的菜单即在此生效（menus.roles 仅为内置角色的静态标注）。
+pub async fn get_menus_tree(claims: ValidatedClaims) -> ZapJsonResult {
     let pool = db::get_db_pool().await;
-    let rows: Vec<MenuRow> =
+    let my_keys: Vec<&str> = claims
+        .roles
+        .split(',')
+        .map(|r| r.trim())
+        .filter(|r| !r.is_empty())
+        .collect();
+    let is_admin = my_keys.iter().any(|r| *r == "admin");
+
+    let rows: Vec<MenuRow> = if is_admin {
         sqlx::query_as("SELECT * FROM menus WHERE status = 1 ORDER BY sort_order, id")
             .fetch_all(pool)
-            .await?;
+            .await?
+    } else if my_keys.is_empty() {
+        Vec::new()
+    } else {
+        // 角色 key → 角色 id
+        let mut qb =
+            sqlx::QueryBuilder::<Sqlite>::new("SELECT id FROM roles WHERE role_key IN (");
+        let mut sep = qb.separated(", ");
+        for k in &my_keys {
+            sep.push_bind(*k);
+        }
+        qb.push(")");
+        let role_ids: Vec<(i64,)> = qb.build_query_as().fetch_all(pool).await?;
+        if role_ids.is_empty() {
+            Vec::new()
+        } else {
+            // 仅返回该角色被 role_menus 授权的菜单（子菜单授权父不授权时整棵子树自然消失）
+            let mut qb2 = sqlx::QueryBuilder::<Sqlite>::new(
+                "SELECT * FROM menus WHERE status = 1 AND id IN \
+                 (SELECT menu_id FROM role_menus WHERE role_id IN (",
+            );
+            let mut sep2 = qb2.separated(", ");
+            for (rid,) in &role_ids {
+                sep2.push_bind(*rid);
+            }
+            qb2.push(")) ORDER BY sort_order, id");
+            qb2.build_query_as::<MenuRow>().fetch_all(pool).await?
+        }
+    };
 
     let tree = build_menu_tree(&rows, 0);
     Ok(Json(json!({ "code": 0, "message": "ok", "data": tree })))

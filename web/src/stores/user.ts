@@ -85,10 +85,29 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  /**
+   * 清理上一账号生成的动态路由与菜单。
+   * 用动态 import 规避 user → router/permission 的循环依赖；
+   * 否则「同会话换账号登录」时 guard 会因残留菜单直接放行，导致低权限账号看到高权限菜单。
+   */
+  async function clearDynamicRoutes() {
+    try {
+      const [{ resetRouter }, { usePermissionStore }] = await Promise.all([
+        import('@/router'),
+        import('@/stores/permission'),
+      ])
+      usePermissionStore().setRoutes([])
+      resetRouter()
+    } catch {
+      // 清理失败不影响登出本身
+    }
+  }
+
   // 退出登录
   async function logout() {
     try {
       await logoutApi()
+      await clearDynamicRoutes()
       token.value = ''
       userId.value = 0
       name.value = ''
@@ -107,6 +126,7 @@ export const useUserStore = defineStore('user', () => {
 
   // 重置 Token（不调用后端）
   async function resetToken() {
+    await clearDynamicRoutes()
     token.value = ''
     userId.value = 0
     name.value = ''
