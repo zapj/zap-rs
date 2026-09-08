@@ -80,7 +80,7 @@
             <el-icon><FolderAdd /></el-icon>
             新建目录
           </el-button>
-          <el-button size="small" @click="showNewFileDialog" v-if="isAdmin">
+          <el-button size="small" @click="showNewFileDialog">
             <el-icon><DocumentAdd /></el-icon>
             新建文件
           </el-button>
@@ -145,22 +145,10 @@
               <el-button size="small" link type="primary" @click.stop="handleDownload(row)">
                 下载
               </el-button>
-              <el-button
-                size="small"
-                link
-                type="warning"
-                @click.stop="showRenameDialog(row)"
-                v-if="isAdmin"
-              >
+              <el-button size="small" link type="warning" @click.stop="showRenameDialog(row)">
                 重命名
               </el-button>
-              <el-button
-                size="small"
-                link
-                type="danger"
-                @click.stop="handleDelete(row)"
-                v-if="isAdmin"
-              >
+              <el-button size="small" link type="danger" @click.stop="handleDelete(row)">
                 删除
               </el-button>
             </template>
@@ -245,12 +233,11 @@
         v-model="editContent"
         class="fm-editor"
         :path="editingFullPath"
-        :readonly="!isAdmin"
         placeholder="文件内容"
       />
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
-        <el-button v-if="isAdmin" type="primary" :loading="saving" @click="doSaveEdit">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="doSaveEdit">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -287,7 +274,8 @@ import CodeEditor from '@/components/CodeEditor.vue'
 // ── store ──────────────────────────────────────────────────
 
 const userStore = useUserStore()
-const isAdmin = computed(() => userStore.roles.includes('admin'))
+// 写操作面向所有登录用户（admin / user / reseller）开放；
+// 普通用户的访问范围由后端按「本人 home 与私有 tmp」白名单兜底。
 
 // ── state ──────────────────────────────────────────────────
 
@@ -380,6 +368,8 @@ async function loadFileList() {
   loading.value = true
   try {
     const res = await listFiles(currentPath.value)
+    // 以服务端返回的实际目录为基准（普通用户访问 / 时后端会落到其 home）
+    if (res.data?.current_path) currentPath.value = res.data.current_path
     fileList.value = res.data?.entries || []
   } catch {
     // handled by interceptor

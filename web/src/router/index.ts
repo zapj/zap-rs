@@ -128,7 +128,7 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
     path: '/files',
     component: Layout,
     redirect: '/files/index',
-    meta: { title: '文件管理', icon: 'Folder', roles: ['admin', 'user'] },
+    meta: { title: '文件管理', icon: 'Folder', roles: ['admin', 'user', 'reseller'] },
     children: [
       {
         path: 'index',
