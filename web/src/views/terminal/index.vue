@@ -5,7 +5,16 @@
       <div class="sidebar-header">
         <span class="sidebar-title">连接管理</span>
         <div class="sidebar-actions">
-          <el-button link type="primary" size="small" :icon="Key" @click="openKeyManager">我的密钥</el-button>
+          <el-button
+            v-if="canUseUserKeys || isAdmin"
+            link
+            type="primary"
+            size="small"
+            :icon="Key"
+            @click="openKeyManager"
+          >
+            我的密钥
+          </el-button>
           <el-button type="primary" size="small" :icon="Plus" :disabled="isReadOnly" @click="showAddDialog = true">
             添加
           </el-button>
@@ -169,8 +178,12 @@
                 本地主机连接：写入本机用户 authorized_keys（需 admin 角色）
               </span>
               <span v-else-if="form.ssh_key_name">密钥需已添加到主机 ~/.ssh/authorized_keys 才能登录</span>
+              <span v-else-if="!canUseUserKeys && !isAdmin">
+                当前为「统一 www」共享模式（无独立 Linux 账号），暂不支持个人密钥，请改用密码认证
+              </span>
               <span v-else>暂无可用密钥，请先在「我的密钥」中生成/导入</span>
               <el-button
+                v-if="canUseUserKeys || isAdmin"
                 type="primary"
                 link
                 size="small"
@@ -257,13 +270,32 @@
 
     <!-- 我的 SSH 密钥管理 -->
     <el-dialog v-model="showKeyManager" title="我的 SSH 密钥" width="780px" @open="loadMyKeys">
-      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px">
+      <el-alert :type="canUseUserKeys ? 'info' : 'warning'" :closable="false" show-icon style="margin-bottom: 12px">
         密钥保存在你自己的家目录 <code>~/.ssh</code>（<code>zap_</code> 前缀），私钥仅本人可见、不会上传数据库。
         <template v-if="isAdmin">admin 额外展示系统级密钥（服务器 /etc/zap/ssh，用于本机授权与历史连接）。</template>
+        <div v-if="!canUseUserKeys" style="margin-top: 4px">
+          当前为「统一 www」运行模式（用户未创建独立 Linux 账号），个人家目录密钥不可用，生成/导入已禁用；
+          请管理员在「服务器 → 运行环境」切换为「独立系统用户」模式后再使用个人密钥。
+        </div>
       </el-alert>
       <div class="keymgr-toolbar">
-        <el-button type="primary" size="small" :icon="Plus" :disabled="isReadOnly" @click="openKeyGen">生成密钥</el-button>
-        <el-button size="small" :icon="Key" :disabled="isReadOnly" @click="openKeyImport">导入密钥</el-button>
+        <el-button
+          type="primary"
+          size="small"
+          :icon="Plus"
+          :disabled="!canUseUserKeys || isReadOnly"
+          @click="openKeyGen"
+        >
+          生成密钥
+        </el-button>
+        <el-button
+          size="small"
+          :icon="Key"
+          :disabled="!canUseUserKeys || isReadOnly"
+          @click="openKeyImport"
+        >
+          导入密钥
+        </el-button>
         <div style="flex: 1"></div>
         <el-button size="small" text :loading="keyLoading" @click="loadMyKeys">刷新</el-button>
       </div>
@@ -419,6 +451,11 @@ const isAdmin = computed(() => userStore.roles.includes('admin'))
 const connections = ref<SshConnection[]>([])
 const sshKeys = ref<{ name: string; scope: 'user' | 'system' }[]>([])
 const activeConnId = ref<number | null>(null)
+
+// 「我的密钥」能力门禁：仅「独立系统用户」(system) 模式支持家目录密钥（取自 /terminal/keys 响应）
+const vhostMode = ref<'www' | 'system'>('www')
+const userKeysEnabled = ref(true)
+const canUseUserKeys = computed(() => userKeysEnabled.value && vhostMode.value === 'system')
 
 // 搜索过滤
 const connKeyword = ref('')
@@ -598,7 +635,10 @@ async function loadConnections() {
 async function loadSshKeys() {
   try {
     const resp = await getUserSshKeys()
-    sshKeys.value = resp.data || []
+    const d = resp.data
+    vhostMode.value = d?.vhost_mode ?? 'www'
+    userKeysEnabled.value = d?.user_keys_enabled ?? true
+    sshKeys.value = d?.items || []
   } catch {
     // SSH keys may not be available
   }
@@ -620,7 +660,10 @@ async function loadMyKeys() {
   keyLoading.value = true
   try {
     const resp = await getUserSshKeys()
-    myKeys.value = resp.data || []
+    const d = resp.data
+    vhostMode.value = d?.vhost_mode ?? 'www'
+    userKeysEnabled.value = d?.user_keys_enabled ?? true
+    myKeys.value = d?.items || []
   } catch (e: any) {
     ElMessage.error(e.message || '加载密钥失败')
   } finally {

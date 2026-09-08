@@ -27,6 +27,23 @@ fn valid_key_name(name: &str) -> bool {
     first_ok && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+/// 「我的密钥」依赖独立 Linux 系统账号承载家目录密钥文件（~/.ssh）：
+/// 仅 system 模式（每面板用户一个真实系统账号）才能安全落盘。
+/// www 共享模式下无独立账号（/etc/passwd 不存在该名义用户），文件无法隔离，
+/// 直接禁用并给出指引（与磁盘配额跳过、不建每用户 PHP pool 的既有惯例一致）。
+async fn ensure_user_keys_enabled() -> Result<(), ZapError> {
+    if crate::routers::system_env::vhost_mode().await != "system" {
+        return Err(ZapError::New(
+            -1,
+            "当前为「统一 www」运行模式（用户未创建独立 Linux 账号），不支持个人 SSH 密钥。\
+             请管理员在「服务器 → 运行环境」切换为「独立系统用户」模式后重试；\
+             切换前可改用密码认证（admin 仍可使用服务器系统级密钥）。"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// 当前登录用户绑定的系统用户（linux_user）。无绑定则拒绝密钥管理。
 async fn require_linux_user(claims: &ValidatedClaims) -> Result<String, ZapError> {
     let pool = db::get_db_pool().await;
@@ -63,31 +80,39 @@ async fn own_key_row(
 // ── GET /terminal/keys ─────────────────────────────────────
 
 /// 我的密钥列表：本人 + (admin) 系统级密钥。
+/// data.items：密钥列表；另返回 vhost_mode / user_keys_enabled 能力门禁信息，
+/// 供前端决定是否展示「我的密钥」入口（www 共享模式无独立系统账号 → 不展示本人密钥）。
 pub async fn list_keys(claims: ValidatedClaims) -> ZapJsonResult {
-    let pool = db::get_db_pool().await;
-    let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
-        "SELECT name, comment, fingerprint, created_at FROM user_ssh_keys
-         WHERE user_id = ? ORDER BY id DESC",
-    )
-    .bind(claims.id as i64)
-    .fetch_all(pool)
-    .await?;
+    let mode = crate::routers::system_env::vhost_mode().await;
+    let keys_enabled = mode == "system";
+    let mut items: Vec<Value> = Vec::new();
 
-    let mut items: Vec<Value> = rows
-        .into_iter()
-        .map(|(name, comment, fingerprint, created_at)| {
-            json!({
-                "name": name,
-                "scope": "user",
-                "comment": comment,
-                "fingerprint": fingerprint,
-                "created_at": created_at,
-            })
-        })
-        .collect();
+    // 本人「我的密钥」仅在 system 模式展示：www 模式无独立账号，密钥文件不落盘
+    if keys_enabled {
+        let pool = db::get_db_pool().await;
+        let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
+            "SELECT name, comment, fingerprint, created_at FROM user_ssh_keys
+             WHERE user_id = ? ORDER BY id DESC",
+        )
+        .bind(claims.id as i64)
+        .fetch_all(pool)
+        .await?;
+        items.extend(
+            rows.into_iter()
+                .map(|(name, comment, fingerprint, created_at)| {
+                    json!({
+                        "name": name,
+                        "scope": "user",
+                        "comment": comment,
+                        "fingerprint": fingerprint,
+                        "created_at": created_at,
+                    })
+                }),
+        );
+    }
 
     // admin 额外展示系统级密钥（/etc/zap/ssh，服务器侧），仅名称/指纹等元数据；
-    // 保持历史连接可引用，也便于本机回环授权操作选择
+    // 与运行模式无关：本机回环授权 / 历史连接 / 推送公钥仍可引用
     if is_admin(&claims) {
         if let Ok(resp) = crate::zapexec::call(Request::SshKeyList).await
             && resp.code == 0
@@ -119,7 +144,14 @@ pub async fn list_keys(claims: ValidatedClaims) -> ZapJsonResult {
         }
     }
 
-    Ok(Json(json!({ "code": 0, "data": items })))
+    Ok(Json(json!({
+        "code": 0,
+        "data": {
+            "items": items,
+            "vhost_mode": mode,
+            "user_keys_enabled": keys_enabled,
+        }
+    })))
 }
 
 // ── POST /terminal/keys/generate ───────────────────────────
@@ -136,6 +168,7 @@ pub struct GeneratePayload {
 }
 
 pub async fn generate_key(claims: ValidatedClaims, Json(payload): Json<GeneratePayload>) -> ZapJsonResult {
+    ensure_user_keys_enabled().await?;
     let name = payload.name.trim().to_string();
     if !valid_key_name(&name) {
         return Err(ZapError::New(
@@ -217,6 +250,7 @@ pub struct ImportPayload {
 }
 
 pub async fn import_key(claims: ValidatedClaims, Json(payload): Json<ImportPayload>) -> ZapJsonResult {
+    ensure_user_keys_enabled().await?;
     let name = payload.name.trim().to_string();
     if !valid_key_name(&name) {
         return Err(ZapError::New(
@@ -292,6 +326,7 @@ pub struct DeletePayload {
 }
 
 pub async fn delete_key(claims: ValidatedClaims, Json(payload): Json<DeletePayload>) -> ZapJsonResult {
+    ensure_user_keys_enabled().await?;
     let name = payload.name.trim().to_string();
     own_key_row(&claims, &name).await?; // 归属校验 + 存在性
     let linux_user = require_linux_user(&claims).await?;
@@ -332,6 +367,7 @@ pub async fn public_key(claims: ValidatedClaims, Query(q): Query<KeyNameQuery>) 
 
 /// 下载自己的私钥（经 zapexec root 读取家目录文件，仅本人可操作）。
 pub async fn private_key(claims: ValidatedClaims, Query(q): Query<KeyNameQuery>) -> ZapJsonResult {
+    ensure_user_keys_enabled().await?;
     let name = q.name.trim().to_string();
     own_key_row(&claims, &name).await?;
     let linux_user = require_linux_user(&claims).await?;

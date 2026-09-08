@@ -110,9 +110,18 @@ export interface UserSshKey {
   created_at: number
 }
 
+/** 我的密钥列表响应：items + 能力门禁信息（仅「独立系统用户」模式支持家目录密钥） */
+export interface SshKeysPayload {
+  items: UserSshKey[]
+  /** 虚拟主机运行模式：www=统一 www 用户 / system=每用户独立 Linux 账号 */
+  vhost_mode: 'www' | 'system'
+  /** 是否支持个人家目录密钥（www 共享模式无独立 Linux 账号 → false） */
+  user_keys_enabled: boolean
+}
+
 /** 我的密钥列表（admin 额外含系统级密钥，保持历史连接可选） */
 export function getUserSshKeys() {
-  return http.get<ApiResponse<UserSshKey[]>>('/terminal/keys')
+  return http.get<ApiResponse<SshKeysPayload>>('/terminal/keys')
 }
 
 /** 生成新密钥并保存到自己的家目录 ~/.ssh */
