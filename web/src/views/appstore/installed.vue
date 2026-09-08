@@ -343,11 +343,13 @@ const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 
 const CATEGORY_LABELS: Record<string, string> = {
-  database: '数据库',
-  application: '应用',
-  webserver: 'Web 服务器',
+  infra: '基础设施',
+  application: '应用程序',
+  webapps: 'Web 应用程序',
+  database: '数据层',
   library: '基础库',
 }
+const CATEGORY_ORDER = ['infra', 'application', 'webapps', 'database', 'library']
 
 const stateMeta: Record<
   string,
@@ -381,7 +383,11 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const categories = computed(() => {
   const set = new Set(list.value.map((i) => i.category).filter(Boolean))
-  return Array.from(set)
+  const rank = (c: string) => {
+    const i = CATEGORY_ORDER.indexOf(c)
+    return i === -1 ? 99 : i
+  }
+  return Array.from(set).sort((a, b) => rank(a) - rank(b))
 })
 
 const filtered = computed(() => {

@@ -57,9 +57,10 @@
     <div class="filter-bar">
       <el-radio-group v-model="activeCategory" size="small">
         <el-radio-button value="all">全部</el-radio-button>
-        <el-radio-button value="database">数据库</el-radio-button>
-        <el-radio-button value="application">应用</el-radio-button>
-        <el-radio-button value="webserver">Web 服务器</el-radio-button>
+        <el-radio-button value="infra">基础设施</el-radio-button>
+        <el-radio-button value="application">应用程序</el-radio-button>
+        <el-radio-button value="webapps">Web 应用程序</el-radio-button>
+        <el-radio-button value="database">数据层</el-radio-button>
         <el-radio-button value="library">基础库</el-radio-button>
       </el-radio-group>
       <el-input

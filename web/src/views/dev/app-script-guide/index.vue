@@ -27,6 +27,11 @@
           <h2 id="sec-package">一、包结构与目录约定</h2>
           <p>仓库内每个应用是一个 <code>category/name</code> 目录（分类/名称），包路径仅允许 ASCII 字母、数字、<code>-</code>、<code>_</code>：</p>
           <pre class="code">{{ codes.tree }}</pre>
+          <p class="sec-sub"><strong>官方分类（category）</strong>＝仓库一级目录名，当前共五类：</p>
+          <pre class="code">{{ codes.categories }}</pre>
+          <el-alert type="warning" :closable="false" class="doc-tip">
+            商店列表仅扫描这五类目录；放在其它目录名下的包不会被收录，<code>app.yaml</code> 的 <code>category</code> 字段须与此保持一致（缺省取父目录名）。
+          </el-alert>
           <ul>
             <li><code>app.yaml</code>：应用描述，见第二节；</li>
             <li><code>install.sh</code> / <code>uninstall.sh</code> / <code>upgrade.sh</code>：默认生命周期脚本文件名，可用 <code>scripts</code> 字段覆盖（见第三节）；</li>
@@ -45,7 +50,7 @@
             <tbody>
               <tr><td><code>name</code></td><td>string</td><td>包名，缺省取目录名</td></tr>
               <tr><td><code>title</code></td><td>string</td><td>显示名称</td></tr>
-              <tr><td><code>category</code></td><td>string</td><td>分类，缺省取父目录名</td></tr>
+              <tr><td><code>category</code></td><td>string</td><td>分类，官方五类之一（<code>infra</code> / <code>application</code> / <code>webapps</code> / <code>database</code> / <code>library</code>），缺省取父目录名；不在五类目录下的包不会进入商店可用列表</td></tr>
               <tr><td><code>description</code></td><td>string</td><td>简介</td></tr>
               <tr><td><code>version</code></td><td>string / array</td><td>单值或数组（如 <code>[1.24.0, 1.22.1]</code>）；数组表示支持安装的多个版本，首个为默认版本</td></tr>
               <tr><td><code>deps</code></td><td>string[]</td><td>兼容旧写法：依赖名列表</td></tr>
@@ -97,7 +102,7 @@
               <tr><td><code>config_files</code></td><td>string[] / {path,label}[]</td><td>可编辑文件列表（可选）；「已安装」详情据此提供多个配置文件编辑入口，每项为纯路径或 <code>{path, label}</code>；未填时回退 <code>config_file</code></td></tr>
               <tr><td><code>pid_file</code></td><td>string</td><td>pid 文件路径；守护型填写，作无 systemd 环境下的兜底探活</td></tr>
               <tr><td><code>expose</code></td><td>string / string[]</td><td>暴露入口：<code>tcp:80</code>、<code>unix:/run/xxx.sock</code> 等，可多行数组；无则 <code>none</code></td></tr>
-              <tr><td><code>tags</code></td><td>string[]</td><td>分类 / 特性标签（如 <code>webserver</code>、<code>library</code>）</td></tr>
+              <tr><td><code>tags</code></td><td>string[]</td><td>分类 / 特性标签（如 <code>infra</code>、<code>library</code>）</td></tr>
             </tbody>
           </table>
           <el-alert type="info" :closable="false" class="doc-tip">
@@ -219,7 +224,7 @@
 
           <!-- 九、完整示例 -->
           <h2 id="sec-example">九、完整示例：nginx 编译模块多选</h2>
-          <p>仓库样例 <code>webserver/nginx</code>（数据目录 <code>data/appstore/repos/zap-appstore/webserver/nginx/</code>）演示了「编译哪些模块」的多选场景。要点：</p>
+          <p>仓库样例 <code>infra/nginx</code>（数据目录 <code>data/appstore/repos/zap-appstore/infra/nginx/</code>）演示了「编译哪些模块」的多选场景。要点：</p>
           <ul>
             <li>动作键 <code>build</code> 与 <code>actions.build: 编译安装</code> 对应，从该动作发起安装时用户可勾选模块；</li>
             <li>选项脚本直接以 <code>$MODULES</code> / <code>$EXTRA_CONFIG</code> 取用（env 已注入）；</li>
@@ -252,6 +257,12 @@ const codes = {
         ├── uninstall.sh      # 卸载脚本（缺省文件名）
         ├── upgrade.sh        # 升级脚本（可选）
         └── ...               # 其余资源，随快照下发
+`,
+  categories: `infra          基础设施       如 nginx 等基础服务 / Web 服务器（样例 infra/nginx/）
+application    应用程序       独立形态的应用与运行环境（如 php）
+webapps        Web 应用程序   面向 Web 的产品应用（博客 / CMS 等）
+database       数据层         数据库与存储服务（如 mariadb / mysql）
+library        基础库         编译期依赖库（如 openssl / libpng / libpcre2）
 `,
   model: `\$ZAP_PATH/
 ├── data/appstore/
@@ -318,8 +329,9 @@ opts = json.load(open(sys.argv[1]))
 print(opts.get("MODULES", ""))
 PY
 `,
-  nginxYaml: `# webserver/nginx/app.yaml（节选）
+  nginxYaml: `# infra/nginx/app.yaml（节选）
 name: nginx
+category: infra              # 分类 = 仓库一级目录名
 version: [1.24.0]
 actions:
   build: 编译安装

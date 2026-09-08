@@ -139,7 +139,7 @@ deploy_appstore() {
     # 发行包无内置包时留空，交由下方 git clone 拉取（离线则面板中可重试更新）
     if [ ! -d "$BUILTIN/.git" ] && [ ! -d "$BUILTIN/database" ]; then
         mkdir -p "$BUILTIN"
-        for c in database application webserver library; do
+        for c in infra application webapps database library; do
             [ -d "$SRC/data/appstore/repos/zap-appstore/$c" ] && cp -Rf "$SRC/data/appstore/repos/zap-appstore/$c" "$BUILTIN/" 2>/dev/null || true
         done
     fi

@@ -86,7 +86,7 @@ data/apps/         # 已安装软件实例（{pkg}/meta.yaml），卸载 = 删�
 # app.yaml
 name: mariadb
 version: "11.4.4"
-category: database        # database | application | webserver | library
+category: database        # infra | application | webapps | database | library
 title: MariaDB
 description: ...
 deps: []                  # 依赖包

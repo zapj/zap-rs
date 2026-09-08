@@ -320,7 +320,8 @@ fn scan_source_dir(
     repo_id: Option<&str>,
     by_path: &mut std::collections::BTreeMap<String, Value>,
 ) {
-    for category in ["database", "application", "webserver", "library"] {
+    // AppStore 分类：基础设施 / 应用程序 / Web 应用程序 / 数据层 / 基础库
+    for category in ["infra", "application", "webapps", "database", "library"] {
         let cat_dir = dir.join(category);
         let Ok(entries) = std::fs::read_dir(&cat_dir) else {
             continue;

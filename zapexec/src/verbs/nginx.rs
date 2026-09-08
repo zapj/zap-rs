@@ -55,15 +55,18 @@ fn quote_bin(bin: &Path) -> String {
     bin.to_string_lossy().replace('\'', "'\\''")
 }
 
-/// 读取 nginx 版本（`nginx -v` 的 stderr 首行）。
+/// 读取 nginx 版本（`nginx -v` 的输出首行）。
 fn nginx_version(bin: &Path) -> String {
-    let o = root_cmd("bash")
-        .args(["-c"])
-        .arg(format!("'{}' -v 2>&1", quote_bin(bin)))
-        .output();
+    let o = root_cmd(&bin.to_string_lossy()).arg("-v").output();
     match o {
         Ok(o) => {
+            // `nginx -v` 将版本输出到 stderr，个别包装脚本可能走 stdout，两者都读。
             let text = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            let text = if text.is_empty() {
+                String::from_utf8_lossy(&o.stdout).trim().to_string()
+            } else {
+                text
+            };
             text.lines().next().unwrap_or("").trim().to_string()
         }
         Err(_) => String::new(),
