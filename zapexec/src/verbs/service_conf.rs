@@ -263,22 +263,41 @@ const DOCKER_FIELDS: &[FieldDef] = &[
     },
 ];
 
+/// PHP 类型服务的静态定义（type 级 "php"，面向系统包安装）。
+const PHP_DEF: ServiceDef = ServiceDef {
+    key: "php",
+    label: "PHP",
+    unit_candidates: &["php-fpm"],
+    bin_candidates: &["php-fpm", "php"],
+    version_args: &["-v"],
+    version_in_stderr: false,
+    main_candidates: &["/etc/php/*/fpm/php.ini", "/etc/php.ini"],
+    exts: &["ini"],
+    format: ConfFormat::Ini,
+    ini_comment: ";",
+    fields: PHP_FIELDS,
+};
+
+/// PHP 实例短名识别：svc = "php" + 版本号数字（php74 / php81 …，
+/// 对应应用商店实例安装目录 `{ZAP_APPS_DIR}/php-74` 与 unit
+/// `php-fpm-74`）。多版本实例的配置路径/unit 与类型级 "php" 不同。
+fn php_inst_svc(svc: &str) -> Option<String> {
+    let rest = svc.strip_prefix("php")?;
+    if rest.is_empty() || rest.len() > 3 || !rest.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(rest.to_string())
+}
+
 /// 服务注册表：新增服务在此追加即可（key 需与前端菜单/API 一致）。
+/// php<版本号>（php74 / php81 …）作为 PHP 实例 svc 一并识别，复用 PHP_DEF
+/// 的字段 / 白名单 / 关键项，探测与路径在 `php_inst` / `installed_info` 覆写。
 fn supported(key: &str) -> Option<&'static ServiceDef> {
+    if php_inst_svc(key).is_some() {
+        return Some(&PHP_DEF);
+    }
     Some(match key {
-        "php" => &ServiceDef {
-            key: "php",
-            label: "PHP",
-            unit_candidates: &["php-fpm"],
-            bin_candidates: &["php-fpm", "php"],
-            version_args: &["-v"],
-            version_in_stderr: false,
-            main_candidates: &["/etc/php/*/fpm/php.ini", "/etc/php.ini"],
-            exts: &["ini"],
-            format: ConfFormat::Ini,
-            ini_comment: ";",
-            fields: PHP_FIELDS,
-        },
+        "php" => &PHP_DEF,
         "mysql" => &ServiceDef {
             key: "mysql",
             label: "MySQL",
@@ -513,7 +532,20 @@ fn running_by_proc(bin: &Path) -> bool {
     false
 }
 
-/// 实际使用的 systemd unit 名（无 .service 后缀）。
+/// PHP 实例探测上下文：由 svc（php74）定位到安装目录。
+struct PhpInst {
+    digits: String,
+    dir: PathBuf,
+}
+
+/// PHP 实例解析：svc=php74 → 安装目录 `{ZAP_APPS_DIR}/php-74`（不存在返回 None）。
+fn php_inst(svc: &str) -> Option<PhpInst> {
+    let digits = php_inst_svc(svc)?;
+    let dir = super::install_root().join(format!("php-{digits}"));
+    dir.is_dir().then_some(PhpInst { digits, dir })
+}
+
+/// 候选探测：取第一个存在的 systemd unit 名（无 .service 后缀）。
 fn active_unit(d: &ServiceDef) -> Option<String> {
     d.unit_candidates
         .iter()
@@ -521,9 +553,19 @@ fn active_unit(d: &ServiceDef) -> Option<String> {
         .map(|u| u.to_string())
 }
 
+/// 实际使用的 systemd unit 名（无 .service 后缀）。
+/// PHP 实例 svc 使用实例 unit `php-fpm-<ver>`；其余走候选探测。
+fn effective_unit(d: &ServiceDef, svc: &str) -> Option<String> {
+    if let Some(inst) = php_inst(svc) {
+        let u = format!("php-fpm-{}", inst.digits);
+        return systemd_has(&u).then_some(u);
+    }
+    active_unit(d)
+}
+
 /// 服务当前运行态。
-fn service_running(d: &ServiceDef, bin: Option<&Path>) -> bool {
-    if let Some(unit) = active_unit(d) {
+fn service_running(d: &ServiceDef, svc: &str, bin: Option<&Path>) -> bool {
+    if let Some(unit) = effective_unit(d, svc) {
         if systemd_active(&unit) {
             return true;
         }
@@ -905,7 +947,23 @@ type InstalledInfo = (
 );
 
 /// 组装常见安装信息（status / list 共用）。
-fn installed_info(d: &ServiceDef) -> InstalledInfo {
+/// PHP 实例 svc（php74 / php81 …）直接定位安装目录内路径与实例 unit：
+/// bin = {dir}/bin/php、主配置 = {dir}/etc/php.ini（目录 etc 为可编辑根）。
+fn installed_info(d: &ServiceDef, svc: &str) -> InstalledInfo {
+    if let Some(inst) = php_inst(svc) {
+        let bin = inst.dir.join("bin/php");
+        let bin = bin.is_file().then_some(bin);
+        let unit = effective_unit(d, svc);
+        let main = if bin.is_some() {
+            let m = inst.dir.join("etc/php.ini");
+            let exists = m.is_file();
+            let root = m.parent().unwrap_or(&inst.dir).to_path_buf();
+            Some((m, root, exists))
+        } else {
+            None
+        };
+        return (bin, unit, main);
+    }
     let bin = find_bin(d);
     let unit = active_unit(d);
     let installed = bin.is_some() || unit.is_some();
@@ -920,7 +978,7 @@ pub async fn status(svc: &str) -> Response {
         let Some(d) = supported(&svc) else {
             return Err(format!("不支持的服务类型: {svc}"));
         };
-        let (bin, unit, main) = installed_info(d);
+        let (bin, unit, main) = installed_info(d, &svc);
         if bin.is_none() && unit.is_none() {
             return Ok(Response::ok(
                 "ok",
@@ -939,7 +997,7 @@ pub async fn status(svc: &str) -> Response {
             ),
             None => (None, None, false),
         };
-        let running = service_running(d, bin.as_deref());
+        let running = service_running(d, &svc, bin.as_deref());
         let bin_path = bin.as_deref().map(|b| b.display().to_string());
         Ok(Response::ok(
             "ok",
@@ -968,7 +1026,7 @@ pub async fn conf_list(svc: &str) -> Response {
         let Some(d) = supported(&svc) else {
             return Err(format!("不支持的服务类型: {svc}"));
         };
-        let (bin, unit, main) = installed_info(d);
+        let (bin, unit, main) = installed_info(d, &svc);
         if bin.is_none() && unit.is_none() {
             return Ok(Response::ok(
                 "ok",
@@ -1026,7 +1084,7 @@ pub async fn conf_read(svc: &str, path: String) -> Response {
         let Some(d) = supported(&svc) else {
             return Err(format!("不支持的服务类型: {svc}"));
         };
-        let (_, _, Some((main, root, _))) = installed_info(d) else {
+        let (_, _, Some((main, root, _))) = installed_info(d, &svc) else {
             return Err(format!("{} 未安装或未探测到配置，请先在应用商店安装", d.label));
         };
         let (canon, is_main) = validate_path(d, &main, &root, &path)?;
@@ -1072,7 +1130,7 @@ pub async fn conf_save(svc: &str, path: String, content: String) -> Response {
         if content.len() as u64 > MAX_FILE_BYTES {
             return Err("内容超过 2MB，请精简后重试".to_string());
         }
-        let (_, _, Some((main, root, _))) = installed_info(d) else {
+        let (_, _, Some((main, root, _))) = installed_info(d, &svc) else {
             return Err(format!("{} 未安装或未探测到配置", d.label));
         };
         let (canon, is_main) = validate_path(d, &main, &root, &path)?;
@@ -1111,7 +1169,7 @@ pub async fn keys_get(svc: &str) -> Response {
         let Some(d) = supported(&svc) else {
             return Err(format!("不支持的服务类型: {svc}"));
         };
-        let (bin, unit, main) = installed_info(d);
+        let (bin, unit, main) = installed_info(d, &svc);
         if bin.is_none() && unit.is_none() {
             return Ok(Response::ok(
                 "ok",
@@ -1177,7 +1235,7 @@ pub async fn keys_save(svc: &str, keys: std::collections::BTreeMap<String, Strin
         let Some(d) = supported(&svc) else {
             return Err(format!("不支持的服务类型: {svc}"));
         };
-        let (_, _, Some((main, _, _))) = installed_info(d) else {
+        let (_, _, Some((main, _, _))) = installed_info(d, &svc) else {
             return Err(format!("{} 未安装或未探测到配置", d.label));
         };
         let old = if main.exists() {
@@ -1270,8 +1328,8 @@ pub async fn control(svc: &str, action: &str) -> Response {
             return Err(format!("不支持的服务类型: {svc}"));
         };
         let bin = find_bin(d);
-        // 优先已注册/存在的 unit；其次用二进制的 systemd 名做一次尝试
-        let unit = active_unit(d).or_else(|| {
+        // 优先已注册/存在的 unit（实例 svc 走 php-fpm-<ver>）；其次用二进制的 systemd 名做一次尝试
+        let unit = effective_unit(d, &svc).or_else(|| {
             bin.as_ref()
                 .and_then(|b| b.file_stem())
                 .and_then(|s| s.to_str())
@@ -1308,7 +1366,7 @@ pub async fn control(svc: &str, action: &str) -> Response {
         if action == "start" || action == "restart" {
             std::thread::sleep(std::time::Duration::from_millis(300));
         }
-        let running = service_running(d, bin.as_deref());
+        let running = service_running(d, &svc, bin.as_deref());
         let state = if running { "running" } else { "stopped" };
         Ok(Response::ok(
             "ok",
@@ -1319,6 +1377,196 @@ pub async fn control(svc: &str, action: &str) -> Response {
                 "state": state,
             })),
         ))
+    })
+    .await
+}
+
+// ── PHP 多版本实例：列表 + 全局默认访问 ─────────────────────────
+
+/// 全局命令注册目录（install.sh 把实例注册到此处供所有用户直接使用）。
+const GLOBAL_BIN_DIR: &str = "/usr/local/bin";
+/// 全局默认访问注册的命令名（与应用商店 php install.sh 一致）。
+const GLOBAL_LINK_NAMES: &[&str] = &["php", "php-cgi", "pear", "pecl"];
+
+fn global_bin_link(name: &str) -> PathBuf {
+    PathBuf::from(GLOBAL_BIN_DIR).join(name)
+}
+
+/// 宽松等价比较：优先 canonicalize，失败回退字符串相等（失效链接场景）。
+fn paths_equal(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
+    }
+}
+
+/// 当前 /usr/local/bin/php 全局默认指向的目标（无注册链接则 None）。
+fn global_default_bin() -> Option<PathBuf> {
+    std::fs::read_link(global_bin_link("php")).ok()
+}
+
+/// 单个 PHP 实例的概要（instances 列表项），字段与 status 对齐。
+fn instance_summary(svc: &str) -> Result<Value, String> {
+    let Some(d) = supported(svc) else {
+        return Err(format!("不支持的服务类型: {svc}"));
+    };
+    let (bin, unit, main) = installed_info(d, svc);
+    let installed = bin.is_some() || unit.is_some();
+    let (conf_file, main_exists) = match &main {
+        Some((m, _, exists)) => (Some(m.display().to_string()), *exists),
+        None => (None, false),
+    };
+    let version = if installed {
+        bin.as_deref()
+            .map(|b| detect_version(d, b))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let is_default = bin.as_deref().is_some_and(|b| {
+        global_default_bin().is_some_and(|t| paths_equal(&t, b))
+    });
+    let dir = php_inst(svc).map(|i| i.dir.display().to_string());
+    Ok(json!({
+        "svc": svc,
+        "instance": svc,
+        "label": d.label,
+        "version": version,
+        "dir": dir,
+        "installed": installed,
+        "running": installed && service_running(d, svc, bin.as_deref()),
+        "bin": bin.as_deref().map(|b| b.display().to_string()),
+        "unit": unit,
+        "systemd": unit.is_some(),
+        "conf_file": conf_file,
+        "main_exists": main_exists,
+        "is_default": is_default,
+    }))
+}
+
+/// service_conf.instances：列出某服务的全部已安装版本实例。
+/// 目前支持 php（应用商店 php-<ver> 目录实例）；无目录实例时回退类型级
+/// php（系统包），保证既有「服务配置 → PHP」页能力不回归。
+pub async fn instances(svc: &str) -> Response {
+    let svc = svc.to_string();
+    run_blocking(move || {
+        if svc != "php" {
+            return Err("实例列表目前仅支持 php 服务".to_string());
+        }
+        let mut list: Vec<Value> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(super::install_root()) {
+            let mut dirs: Vec<PathBuf> = rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_dir()
+                        && p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with("php-"))
+                })
+                .collect();
+            dirs.sort();
+            for dir in dirs {
+                let Some(digits) = dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.trim_start_matches("php-").to_string())
+                else {
+                    continue;
+                };
+                if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+                    continue;
+                }
+                let s = format!("php{digits}");
+                if let Ok(v) = instance_summary(&s)
+                    && v.get("installed").and_then(|x| x.as_bool()).unwrap_or(false)
+                {
+                    list.push(v);
+                }
+            }
+        }
+        // 未发现目录实例（非应用商店安装）时，兼容系统包 PHP
+        if list.is_empty()
+            && let Ok(v) = instance_summary("php")
+            && v.get("installed").and_then(|x| x.as_bool()).unwrap_or(false)
+        {
+            list.push(v);
+        }
+        Ok(Response::ok("ok", Some(json!({ "instances": list }))))
+    })
+    .await
+}
+
+/// service_conf.default：设置 / 取消某 PHP 实例的「全局默认访问」。
+///
+/// - enable=true：把该实例注册到 `/usr/local/bin`（php / php-cgi / pear /
+///   pecl），系统所有用户执行 `php` 默认使用本版本；`/usr/bin/php` 沿用
+///   install.sh 语义仅在不存在时补链，避免抢占 Debian alternatives。
+/// - enable=false：仅当 `/usr/local/bin/php` 当前指向本实例时移除注册
+///   （已被其它实例接管则拒绝取消，避免误删别家链接）。
+pub async fn set_default(svc: &str, enable: bool) -> Response {
+    let svc = svc.to_string();
+    run_blocking(move || {
+        let Some(inst) = php_inst(&svc) else {
+            return Err(format!("未找到 PHP 实例 {svc}（安装目录不存在）"));
+        };
+        let bin_dir = inst.dir.join("bin");
+        if enable {
+            let mut registered: Vec<String> = Vec::new();
+            for name in GLOBAL_LINK_NAMES {
+                let src = bin_dir.join(name);
+                if !src.is_file() {
+                    continue;
+                }
+                let link = global_bin_link(name);
+                let _ = std::fs::remove_file(&link);
+                std::os::unix::fs::symlink(&src, &link)
+                    .map_err(|e| format!("注册 /usr/local/bin/{name} 失败: {e}"))?;
+                registered.push(name.to_string());
+            }
+            if registered.is_empty() {
+                return Err(format!("实例 {svc} 的 bin 目录为空，无法注册全局命令"));
+            }
+            let ub = PathBuf::from("/usr/bin/php");
+            if !ub.exists() && bin_dir.join("php").is_file() {
+                let _ = std::os::unix::fs::symlink(bin_dir.join("php"), &ub);
+            }
+            Ok(Response::ok(
+                "ok",
+                Some(json!({
+                    "enabled": true,
+                    "service": svc,
+                    "registered": registered,
+                })),
+            ))
+        } else {
+            let mine = bin_dir.join("php");
+            let cur = std::fs::read_link(global_bin_link("php")).unwrap_or_default();
+            if !paths_equal(&cur, &mine) {
+                return Err(
+                    "当前 /usr/local/bin/php 不指向该实例（未注册或被其它实例接管），无需取消"
+                        .to_string(),
+                );
+            }
+            let mut removed: Vec<String> = Vec::new();
+            for name in GLOBAL_LINK_NAMES {
+                let src = bin_dir.join(name);
+                let link = global_bin_link(name);
+                let owned = std::fs::read_link(&link).unwrap_or_default();
+                if paths_equal(&owned, &src) {
+                    let _ = std::fs::remove_file(&link);
+                    removed.push(name.to_string());
+                }
+            }
+            Ok(Response::ok(
+                "ok",
+                Some(json!({
+                    "enabled": false,
+                    "service": svc,
+                    "removed": removed,
+                })),
+            ))
+        }
     })
     .await
 }

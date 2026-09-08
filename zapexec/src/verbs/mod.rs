@@ -263,6 +263,10 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::ServiceConfControl { service, action } => {
             service_conf::control(&service, &action).await
         }
+        Request::ServiceConfInstances { service } => service_conf::instances(&service).await,
+        Request::ServiceConfDefault { service, enable } => {
+            service_conf::set_default(&service, enable).await
+        }
     }
 }
 

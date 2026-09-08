@@ -116,3 +116,45 @@ export function controlServiceConf(service: string, action: string) {
     { service, action },
   )
 }
+
+// ── 多版本实例（php74 / php81 …，目前 php 可用）─────────────────
+
+export interface ServiceConfInstance {
+  svc: string
+  instance: string
+  label?: string
+  version: string
+  /** 安装目录（如 /usr/local/apps/php-74） */
+  dir?: string | null
+  installed: boolean
+  running: boolean
+  bin?: string | null
+  unit?: string | null
+  systemd?: boolean
+  conf_file?: string | null
+  main_exists?: boolean
+  /** 该实例是否为系统全局默认（/usr/local/bin/php 指向它） */
+  is_default: boolean
+}
+
+export function getServiceConfInstances(service: string) {
+  return http.get<{ code: number; message: string; data: { instances: ServiceConfInstance[] } }>(
+    '/system/service-conf/instances',
+    { params: { service } },
+  )
+}
+
+export interface ServiceConfDefaultResult {
+  enabled: boolean
+  service?: string
+  registered?: string[]
+  removed?: string[]
+}
+
+/** 设置 / 取消某实例的「全局默认访问」（注册到 /usr/local/bin） */
+export function setServiceConfDefault(service: string, enable: boolean) {
+  return http.post<{ code: number; message: string; data: ServiceConfDefaultResult }>(
+    '/system/service-conf/default',
+    { service, enable },
+  )
+}

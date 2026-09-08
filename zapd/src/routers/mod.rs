@@ -373,6 +373,14 @@ fn api_routers() -> Router {
             "/system/service-conf/control",
             post(system_service_conf::control),
         )
+        .route(
+            "/system/service-conf/instances",
+            get(system_service_conf::instances),
+        )
+        .route(
+            "/system/service-conf/default",
+            post(system_service_conf::set_default),
+        )
         // 数据迁移（服务器配置 → 数据迁移，admin only）
         .route(
             "/system/migrate/users",

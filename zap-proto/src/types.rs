@@ -569,6 +569,12 @@ pub enum Request {
     /// 通用服务配置·服务控制 start / stop / restart / reload
     #[serde(rename = "service_conf.control")]
     ServiceConfControl { service: String, action: String },
+    /// 通用服务配置·列出服务已安装的版本实例（php74 / php81 …），目前 php 可用
+    #[serde(rename = "service_conf.instances")]
+    ServiceConfInstances { service: String },
+    /// 通用服务配置·设置 / 取消某实例的「全局默认访问」（注册到 /usr/local/bin）
+    #[serde(rename = "service_conf.default")]
+    ServiceConfDefault { service: String, enable: bool },
 }
 
 /// `zapexec` -> `zapd` 的响应。

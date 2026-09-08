@@ -44,15 +44,77 @@ async fn exec(req: Request) -> Result<Json<serde_json::Value>, ZapError> {
 }
 
 fn validate_service(service: &str) -> Result<String, ZapError> {
-    if !matches!(service, "php" | "mysql" | "mariadb" | "docker") {
-        return Err(ZapError::New(-1, "不支持的服务类型".to_string()));
+    let known = matches!(service, "php" | "mysql" | "mariadb" | "docker");
+    // PHP 多版本实例 svc：php74 / php81 …（zapexec 按实例定位配置/unit）
+    let php_inst = service
+        .strip_prefix("php")
+        .is_some_and(|r| !r.is_empty() && r.len() <= 3 && r.chars().all(|c| c.is_ascii_digit()));
+    if known || php_inst {
+        Ok(service.to_string())
+    } else {
+        Err(ZapError::New(-1, "不支持的服务类型".to_string()))
     }
-    Ok(service.to_string())
+}
+
+/// 是否为 PHP 版本实例 svc（php74 / php81 …，排除类型级 "php"）。
+fn is_php_instance_svc(service: &str) -> bool {
+    service
+        .strip_prefix("php")
+        .is_some_and(|r| !r.is_empty() && r.len() <= 3 && r.chars().all(|c| c.is_ascii_digit()))
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ServiceQuery {
     pub service: String,
+}
+
+/// GET /system/service-conf/instances
+pub async fn instances(claims: ValidatedClaims, Query(q): Query<ServiceQuery>) -> ZapJsonResult {
+    require_admin(&claims)?;
+    let service = validate_service(&q.service)?;
+    exec(Request::ServiceConfInstances { service }).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ServiceDefaultBody {
+    pub service: String,
+    pub enable: bool,
+}
+
+/// POST /system/service-conf/default
+pub async fn set_default(
+    claims: ValidatedClaims,
+    client_addr: Extension<SocketAddr>,
+    Json(body): Json<ServiceDefaultBody>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    let service = validate_service(&body.service)?;
+    if !is_php_instance_svc(&service) {
+        return Err(ZapError::New(
+            -1,
+            "全局默认访问仅支持 PHP 版本实例（php74 / php81 …）".to_string(),
+        ));
+    }
+    let result = exec(Request::ServiceConfDefault {
+        service,
+        enable: body.enable,
+    })
+    .await;
+    if result.is_ok() {
+        audit::log(
+            Some(&claims),
+            Some(client_addr.ip().to_string().as_str()),
+            "service_conf_default",
+            "service-conf",
+            &format!(
+                "{} PHP 实例 {} 的全局默认访问",
+                if body.enable { "开启" } else { "取消" },
+                body.service
+            ),
+        )
+        .await;
+    }
+    result
 }
 
 /// GET /system/service-conf/status
