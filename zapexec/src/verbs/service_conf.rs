@@ -291,7 +291,8 @@ const PHP_DEF: ServiceDef = ServiceDef {
 /// 对应应用商店实例安装目录 `{ZAP_APPS_DIR}/php-74` 与 unit
 /// `php-fpm-74`）。多版本实例的配置路径/unit 与类型级 "php" 不同。
 fn php_inst_svc(svc: &str) -> Option<String> {
-    let rest = svc.strip_prefix("php")?;
+    // 容忍 `php74` 与 `php-74` 两种写法（svc 规范为前者，后者仅作兼容）
+    let rest = svc.strip_prefix("php")?.trim_start_matches('-');
     if rest.is_empty() || rest.len() > 3 || !rest.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
@@ -635,11 +636,59 @@ struct PhpInst {
     dir: PathBuf,
 }
 
-/// PHP 实例解析：svc=php74 → 安装目录 `{ZAP_APPS_DIR}/php-74`（不存在返回 None）。
+/// 实例目录名候选：`php-74` 与 `php74` 都接受（历史两种写法都出现过）。
+fn inst_dir_names(digits: &str) -> [String; 2] {
+    [format!("php-{digits}"), format!("php{digits}")]
+}
+
+/// 应用商店登记的 PHP 实例（authoritative）：`instance` / `install_dir` / `config_file` / `svc_name`。
+struct PhpReg {
+    svc: String,
+    dir: PathBuf,
+    conf: Option<PathBuf>,
+    unit: Option<String>,
+}
+
+/// 读取全部 PHP 实例登记项（instance 形如 php74 / php81）。
+fn php_registrations() -> Vec<PhpReg> {
+    super::appstore::registered_apps()
+        .into_iter()
+        .filter(|a| php_inst_svc(&a.instance).is_some())
+        .filter_map(|a| {
+            let digits = php_inst_svc(&a.instance)?;
+            let dir = match a.install_dir.filter(|d| d.is_dir()) {
+                Some(d) => d,
+                None => inst_dir_names(&digits)
+                    .iter()
+                    .map(|n| super::install_root().join(n))
+                    .find(|d| d.is_dir())?,
+            };
+            Some(PhpReg {
+                svc: a.instance,
+                dir,
+                conf: a.config_file,
+                unit: a.svc_name,
+            })
+        })
+        .collect()
+}
+
+fn php_reg_of(svc: &str) -> Option<PhpReg> {
+    php_registrations().into_iter().find(|r| r.svc == svc)
+}
+
+/// PHP 实例解析：svc=php74 → **优先**取 info.yaml 登记的 install_dir，
+/// 兜底按目录名 `php-74` / `php74` 在应用安装根下查找（不存在返回 None）。
 fn php_inst(svc: &str) -> Option<PhpInst> {
     let digits = php_inst_svc(svc)?;
-    let dir = super::install_root().join(format!("php-{digits}"));
-    dir.is_dir().then_some(PhpInst { digits, dir })
+    if let Some(r) = php_reg_of(svc) {
+        return Some(PhpInst { digits, dir: r.dir });
+    }
+    inst_dir_names(&digits)
+        .iter()
+        .map(|n| super::install_root().join(n))
+        .find(|d| d.is_dir())
+        .map(|dir| PhpInst { digits, dir })
 }
 
 /// 候选探测：取第一个存在的 systemd unit 名（无 .service 后缀）。
@@ -654,6 +703,12 @@ fn active_unit(d: &ServiceDef) -> Option<String> {
 /// PHP 实例 svc 使用实例 unit `php-fpm-<ver>`；其余走候选探测。
 fn effective_unit(d: &ServiceDef, svc: &str) -> Option<String> {
     if let Some(inst) = php_inst(svc) {
+        // 优先 info.yaml 登记的 svc_name，兜底 php-fpm-<版本>
+        if let Some(u) = php_reg_of(svc).and_then(|r| r.unit)
+            && systemd_has(&u)
+        {
+            return Some(u);
+        }
         let u = format!("php-fpm-{}", inst.digits);
         return systemd_has(&u).then_some(u);
     }
@@ -1053,7 +1108,10 @@ fn installed_info(d: &ServiceDef, svc: &str) -> InstalledInfo {
         let bin = bin.is_file().then_some(bin);
         let unit = effective_unit(d, svc);
         let main = if bin.is_some() {
-            let m = inst.dir.join("etc/php.ini");
+            // 主配置优先用 info.yaml 登记的 config_file，兜底 {dir}/etc/php.ini
+            let m = php_reg_of(svc)
+                .and_then(|r| r.conf)
+                .unwrap_or_else(|| inst.dir.join("etc/php.ini"));
             let exists = m.is_file();
             let root = m.parent().unwrap_or(&inst.dir).to_path_buf();
             Some((m, root, exists))
@@ -1606,36 +1664,51 @@ pub async fn instances(svc: &str) -> Response {
             return Err("实例列表目前仅支持 php 服务".to_string());
         }
         let mut list: Vec<Value> = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(super::install_root()) {
-            let mut dirs: Vec<PathBuf> = rd
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.is_dir()
-                        && p.file_name()
-                            .and_then(|n| n.to_str())
-                            .is_some_and(|n| n.starts_with("php-"))
-                })
-                .collect();
-            dirs.sort();
-            for dir in dirs {
-                let Some(digits) = dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|n| n.trim_start_matches("php-").to_string())
-                else {
-                    continue;
-                };
-                if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
-                    continue;
-                }
-                let s = format!("php{digits}");
-                if let Ok(v) = instance_summary(&s)
-                    && v.get("installed")
-                        .and_then(|x| x.as_bool())
-                        .unwrap_or(false)
-                {
-                    list.push(v);
+        let mut seen: std::collections::HashSet<String> = Default::default();
+        let mut push = |svc: String| {
+            if !seen.insert(svc.clone()) {
+                return;
+            }
+            if let Ok(v) = instance_summary(&svc)
+                && v.get("installed")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false)
+            {
+                list.push(v);
+            }
+        };
+        // 闭包借用 list/seen，独立作用域避免与后续借用冲突
+        {
+            let mut try_push = |svc: String| push(svc);
+            // 1) 应用商店登记优先（instance / install_dir / config_file 都来自 info.yaml）
+            for r in php_registrations() {
+                try_push(r.svc);
+            }
+            // 2) 目录兜底：php-74 与 php74 两种命名都扫，覆盖未登记 / 手工安装
+            if let Ok(rd) = std::fs::read_dir(super::install_root()) {
+                let mut dirs: Vec<PathBuf> = rd
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.is_dir()
+                            && p.file_name()
+                                .and_then(|n| n.to_str())
+                                .is_some_and(|n| n.starts_with("php"))
+                    })
+                    .collect();
+                dirs.sort();
+                for dir in dirs {
+                    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+                        continue;
+                    };
+                    let digits = name
+                        .trim_start_matches("php-")
+                        .trim_start_matches("php")
+                        .to_string();
+                    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+                        continue;
+                    }
+                    try_push(format!("php{digits}"));
                 }
             }
         }
@@ -1850,6 +1923,16 @@ mod tests {
         assert_eq!(files[0]["exists"], Value::Bool(false));
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    /// instance 用无连字符（php74），目录用连字符（php-74）——两种写法都要认。
+    #[test]
+    fn instance_naming_is_tolerant() {
+        assert_eq!(php_inst_svc("php74").as_deref(), Some("74"));
+        assert_eq!(php_inst_svc("php-74").as_deref(), Some("74"));
+        assert_eq!(php_inst_svc("php"), None, "类型级 php 不算实例");
+        assert_eq!(php_inst_svc("php8x"), None);
+        assert_eq!(inst_dir_names("74"), ["php-74", "php74"]);
     }
 
     #[test]

@@ -44,8 +44,63 @@ fn appstore_dir() -> PathBuf {
 /// 安装元数据目录（apps/<category>/<name>/meta.yaml + info.yaml）。
 /// 只存记录；第三方软件本体安装在 `super::install_root()`
 /// （默认 /usr/local/apps，环境变量 ZAP_APPS_DIR 可覆盖）。
-fn apps_dir() -> PathBuf {
+pub(crate) fn apps_dir() -> PathBuf {
     zap_path().join("data/apps")
+}
+
+/// 已安装应用的登记信息（`apps/<category>/<name>/info.yaml`）。
+///
+/// 安装脚本在这里登记实例名、安装目录、主配置与 systemd 单元 —— 这是**权威来源**：
+/// 其它模块（如 service_conf 的 PHP 实例探测）应读它，而不是按目录名反推。
+#[derive(Debug, Clone)]
+pub(crate) struct AppRegistration {
+    /// info.yaml 的 instance（缺省回退包名），如 `php74`
+    pub instance: String,
+    pub install_dir: Option<PathBuf>,
+    pub config_file: Option<PathBuf>,
+    pub svc_name: Option<String>,
+}
+
+/// 枚举全部已安装应用的登记信息（无 info.yaml 的应用也会列出，字段为 None）。
+pub(crate) fn registered_apps() -> Vec<AppRegistration> {
+    let mut out = Vec::new();
+    let Ok(categories) = std::fs::read_dir(apps_dir()) else {
+        return out;
+    };
+    for cat in categories.flatten() {
+        let cat_path = cat.path();
+        if !cat_path.is_dir() {
+            continue;
+        }
+        let category = cat.file_name().to_string_lossy().to_string();
+        let Ok(apps) = std::fs::read_dir(&cat_path) else {
+            continue;
+        };
+        for app in apps.flatten() {
+            let app_path = app.path();
+            if !app_path.is_dir() {
+                continue;
+            }
+            let name = app.file_name().to_string_lossy().to_string();
+            let info = read_info_yaml(&app_path);
+            let pick = |k: &str| -> Option<String> {
+                info.as_ref()?
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            };
+            let instance = pick("instance")
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| name.clone());
+            out.push(AppRegistration {
+                instance,
+                install_dir: pick("install_dir").map(PathBuf::from),
+                config_file: pick("config_file").map(PathBuf::from),
+                svc_name: pick("svc_name"),
+            });
+        }
+    }
+    out
 }
 
 fn logs_dir() -> PathBuf {
@@ -697,11 +752,7 @@ fn task_env(
 /// 注入操作者上下文：面板登录用户名与虚拟主机运行模式（www / system）。
 /// 值由 zapd 在发起任务时随请求透传；重跑（run_retry）从原 spec 恢复，保证环境一致。
 /// 脚本内对应 ZAP_USER / ZAP_RUN_MODE。
-fn push_actor_env(
-    env: &mut Vec<(String, String)>,
-    user: Option<&str>,
-    run_mode: Option<&str>,
-) {
+fn push_actor_env(env: &mut Vec<(String, String)>, user: Option<&str>, run_mode: Option<&str>) {
     if let Some(u) = user.filter(|s| !s.is_empty()) {
         env.push(("ZAP_USER".into(), u.to_string()));
     }
