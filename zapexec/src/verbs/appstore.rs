@@ -727,7 +727,8 @@ fn base_env() -> Vec<(String, String)> {
 
 /// 构造包脚本执行环境：在 base_env 基础上补齐脚本通用变量。
 /// - PKG_PATH 为包源目录（含脚本/app.yaml），APP_PATH 为安装目录
-/// - version 为 Some 时注入 APP_VERSION 及由其解析的 MAJOR_VERSION/MINOR_VERSION
+/// - version 为 Some 时注入 APP_VERSION 及由其解析的 MAJOR_VERSION/MINOR_VERSION，
+///   并按 app.yaml version_meta 解析该版本家族注入 APP_FAMILY（合并入口专用，如 MySQL/MariaDB）
 /// - LOG_FILE / CPU_NUM 由 spawn_background 统一注入
 fn task_env(
     pkg_dir: &Path,
@@ -765,8 +766,27 @@ fn task_env(
                 rest.split('.').next().unwrap_or("").to_string(),
             ));
         }
+        // 家族标识（合并入口专用，如 MySQL/MariaDB 同包不同家族）：
+        // 以 app.yaml version_meta 为准下发 APP_FAMILY，脚本据此分流，不得自行按版本号
+        // 猜测（跨家族版本号可能重合，仅凭版本号无法区分）。解析不到时不注入，
+        // 由脚本自行兜底（安装脚本对缺失家族直接报错，防止装错家族）。
+        if let Some(family) = family_from_version_meta(pkg_dir, v) {
+            env.push(("APP_FAMILY".into(), family));
+        }
     }
     env
+}
+
+/// 解析包 app.yaml version_meta 中指定版本的家族标识（如 mysql / mariadb）。
+/// version_meta 形如：`"9.7.2": { family: mysql }`；缺失或结构不符返回 None。
+fn family_from_version_meta(pkg_dir: &Path, version: &str) -> Option<String> {
+    let content = std::fs::read_to_string(pkg_dir.join("app.yaml")).ok()?;
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;
+    yaml.get("version_meta")?
+        .get(version)?
+        .get("family")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 /// 注入操作者上下文：面板登录用户名与虚拟主机运行模式（www / system）。
@@ -1065,6 +1085,7 @@ pub async fn install(
 
 pub async fn uninstall(
     pkg_path: String,
+    options: Option<BTreeMap<String, String>>,
     user: Option<String>,
     run_mode: Option<String>,
     run_id: String,
@@ -1085,6 +1106,7 @@ pub async fn uninstall(
             "pkg_path": pkg_path.clone(),
             "source": source.clone(),
             "repo_id": repo_id.clone(),
+            "options": options.clone(),
             "user": user.clone(),
             "run_mode": run_mode.clone(),
         });
@@ -1099,6 +1121,8 @@ pub async fn uninstall(
             meta_version.as_deref(),
             &run_id,
         );
+        // 选项落盘 options.env / options.json 并注入 env（卸载脚本可通过环境变量读取）
+        env.extend(write_run_options(&snapshot, options.as_ref())?);
         // 注入操作者上下文（面板登录用户与运行环境模式）
         push_actor_env(&mut env, user.as_deref(), run_mode.as_deref());
         env.push((

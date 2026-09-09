@@ -68,6 +68,7 @@
               <tr><td><code>allow_multiple_instances</code></td><td>bool</td><td>为 true 时已安装仍可再装其它版本（多实例）</td></tr>
               <tr><td><code>roles</code></td><td>string / string[]</td><td>可「浏览 + 安装 / 升级」此包的角色白名单（如 <code>[admin, user]</code>）。<strong>空 / 未声明 = 默认仅 admin 可见可操作</strong>；声明后 admin 恒可操作，命中白名单的角色也能在商店看到并安装 / 升级（Web 商店隐藏未命中角色、install / upgrade 后端二次校验）。典型用途：<code>webapps</code> 类产品（如 wordpress）声明 roles 开放给普通用户角色，由用户自己到商店一键安装</td></tr>
               <tr><td><code>default_port</code></td><td>int</td><td>默认端口（仅展示用途）</td></tr>
+              <tr><td><code>version_meta</code></td><td>map</td><td>版本 → 附加元数据。合并入口（多家族一包，如 MySQL / MariaDB）的核心：前端分组展示、zapexec 下发家族、脚本分流均以它为准（字段与用法见第十节「合并入口示例」）</td></tr>
             </tbody>
           </table>
 
@@ -152,6 +153,7 @@
               <tr><td><code>CPU_NUM</code></td><td>可用 CPU 核数（编译可参考，如 make -j）</td></tr>
               <tr><td><code>PKG_PATH</code></td><td>本次运行脚本快照目录（含 app.yaml / 脚本 / options.env / options.json）</td></tr>
               <tr><td><code>PKG_SRC_PATH</code></td><td>仓库内源码目录（<code>repos/&lt;repo&gt;/&lt;category&gt;/&lt;name&gt;</code>），需要读源码附件时用</td></tr>
+              <tr><td><code>APP_FAMILY</code></td><td>目标版本所属家族（如 mysql / mariadb）。仅当 <code>app.yaml version_meta</code> 声明了该版本的 family 时注入；install / uninstall / upgrade 均会注入。脚本家族分流的唯一依据，<strong>不要按版本号自行猜测</strong>（跨家族版本号可能重合）</td></tr>
               <tr><td><code>APP_ID</code></td><td>本次运行 run_id</td></tr>
               <tr><td><code>APP_NAME</code></td><td>包名</td></tr>
               <tr><td><code>APP_PATH</code></td><td>本应用元数据登记目录（<code>$ZAP_PATH/data/apps/&lt;category&gt;/&lt;name&gt;</code>）：系统写 <code>meta.yaml</code>、脚本登记 <code>info.yaml</code>，勿放安装产物（登记字段见第三节「实例登记」）</td></tr>
@@ -169,10 +171,15 @@
           </table>
 
           <!-- 六、options 定义 -->
-          <h2 id="sec-options">六、options：安装 / 升级可选项</h2>
+          <h2 id="sec-options">六、options：安装 / 升级 / 卸载可选项</h2>
           <p>
-            <code>app.yaml</code> 顶层 <code>options</code> 定义表单项；Web 端检测到选项时，点击安装 / 升级会先弹出选项表单，确认后选项随安装请求提交。
-            结构为「动作键 → 选项列表」，顶层直接写列表等价于作用于 install 动作：
+            <code>app.yaml</code> 顶层 <code>options</code> 可按动作键（<code>install</code> / <code>upgrade</code> / <code>uninstall</code>）分别定义；
+            Web 端检测到选项时，点击对应按钮会先弹出选项表单，确认后选项随该动作请求提交。
+            动作键的值支持两种写法：<strong>选项数组</strong>，或 <strong><code>{ items, intro }</code> 对象</strong>——
+            其中 <code>items</code> 为选项数组，<code>intro</code> 为整组介绍 / 说明（纯展示，不参与提交与 env 注入），
+            Web 端渲染在<strong>选项表单最下方</strong>；仅有 <code>intro</code> 而无 <code>items</code> 时同样会弹出，作为该动作的说明页。
+            install / upgrade 未声明动作键时缺省回退 <code>install</code> 定义；uninstall 不回退（未声明 <code>options.uninstall</code> 即不弹窗）。
+            顶层直接写数组等价于作用于全部动作：
           </p>
           <pre class="code">{{ codes.optionsYaml }}</pre>
           <table class="doc-table">
@@ -196,7 +203,7 @@
             <li><code>bool</code> → <code>true</code> / <code>false</code>；</li>
             <li><code>number</code> → 数字字符串；</li>
             <li><code>multiselect</code> → 勾选项按 <code>separator</code> 拼接为一个字符串（缺省空格，如 <code>"ssl gzip stub_status"</code>）；</li>
-            <li>安装与升级共用同一份选项定义与表单逻辑。</li>
+            <li>提交后选项随该动作落盘并注入运行环境变量，各动作的选项互不干扰（升级缺省策略为「先卸载再安装」时，升级选项对两个脚本均可见）。</li>
           </ul>
 
           <!-- 七、脚本如何读取 -->
@@ -243,8 +250,42 @@
           <pre class="code">{{ codes.nginxYaml }}</pre>
           <pre class="code">{{ codes.nginxUse }}</pre>
 
-          <!-- 十、失败排查 -->
-          <h2 id="sec-trouble">十、失败排查与重跑工作流</h2>
+          <!-- 十、合并入口示例 -->
+          <h2 id="sec-family">十、完整示例：MySQL / MariaDB 合并入口</h2>
+          <p>
+            <strong>合并入口</strong>指一个包承载多个「家族」（同族不同系列），典型是官方样例
+            <code>database/mysql</code>：同一入口安装 MySQL 或 MariaDB，两者一次只能安装其一。
+            家族的唯一事实来源是 <code>app.yaml version_meta</code>——前端分组展示、zapexec
+            下发家族、脚本分流全部以它为准，脚本不得自行按版本号猜测家族。
+          </p>
+          <p class="sec-sub"><strong>为什么不能按版本号猜家族？</strong></p>
+          <ul>
+            <li>家族与版本是「一一映射」：<code>version_meta</code> 以版本字符串为键，<strong>同一包内版本号必须全局唯一</strong>——若未来 MySQL 与 MariaDB 出现完全相同的版本串，该版本无法同时归属两家，只能拆成独立入口或错开版本号；</li>
+            <li>即便版本串不重复（如 mysql 9.x 与 mariadb 9.x 并存），仅按主版本号（8 / 9 / 10…）粗分也会产生歧义；</li>
+            <li>安装装错家族代价高（安装目录 / 服务单元 / 配置全不同），取不到家族宁可报错也不猜。</li>
+          </ul>
+          <pre class="code">{{ codes.familyYaml }}</pre>
+          <p>
+            <code>version_meta</code> 条目字段：<code>family</code> = 家族标识（分组、校验与 env 下发用）；
+            <code>label</code> = 家族短名（版本下拉选项内标签、卡片选中态标签，如 MySQL / MariaDB）；
+            <code>group</code> = 下拉分组标题（如 MySQL Community Server / MariaDB Server）。
+            <strong>展示名（label / group）无任何前端内置映射</strong>，全由这里声明——新增家族只需改 app.yaml，无需改前端。
+          </p>
+          <p class="sec-sub"><strong>脚本侧：只认系统下发的 APP_FAMILY</strong></p>
+          <p>
+            install / uninstall / upgrade 发起时，zapexec 以所选版本在 <code>version_meta</code>
+            反查家族并注入环境变量 <code>APP_FAMILY</code>（见第五节），入口脚本据此直接分流到对应家族子脚本：
+          </p>
+          <pre class="code">{{ codes.familyInstall }}</pre>
+          <ul>
+            <li>入口脚本只做分流，真实安装逻辑放在 <code>mysql-install.sh</code> / <code>mariadb-install.sh</code> 等家族子脚本内（文件名自定，入口以 <code>exec</code> 转交，子脚本保持 <code>set -euo pipefail</code>）；</li>
+            <li><code>APP_FAMILY</code> 缺失（该版本未在 version_meta 声明）时，安装入口应<strong>直接报错退出</strong>而非猜测；卸载脚本可回退按主版本号猜测并打印告警（旧运行环境兜底）；</li>
+            <li>新增版本须同步维护 <code>version</code> 数组与 <code>version_meta</code> 条目，缺一不可；</li>
+            <li>合并入口不建议单独写 <code>upgrade.sh</code>：升级走系统默认两段式（先卸载旧家族、再安装目标版本），天然规避跨家族残留（MySQL → MariaDB 等场景）。</li>
+          </ul>
+
+          <!-- 十一、失败排查 -->
+          <h2 id="sec-trouble">十一、失败排查与重跑工作流</h2>
           <ol>
             <li>「应用商店 → 运行记录」查看失败运行的日志（末尾 <code>__ZAP_DONE__ &lt;code&gt;</code> 即退出码）；</li>
             <li>失败现场默认保留在 <code>data/appstore/runs/&lt;run_id&gt;/</code>：<code>pkg/</code> 内脚本与 <code>options.env</code> 可查看/编辑，<code>build/</code> 编译残留一并保留供排查；然后「编辑脚本 / 重跑」——重跑以快照内文件为准，编辑过的选项同样生效；</li>
@@ -319,21 +360,43 @@ tags:
   - language
 EOF
 `,
-  optionsYaml: `options:
-  build:                # 动作键；顶层直接写列表 = install
-    - name: MODULES
-      label: 编译模块
-      type: multiselect
-      choices: [ssl, gzip, stub_status, ipv6]
-      separator: ' '
-      default: ssl
-      required: true
-      desc: 勾选需要编译进 nginx 的模块
-    - name: EXTRA_CONFIG
-      label: 额外 configure 参数
-      type: string
-      placeholder: --with-http_v2_module
-      desc: 原样拼接到 ./configure 末尾
+  optionsYaml: `# 动作键 install / upgrade / uninstall 可分别定义（未声明时缺省回退 install，
+# uninstall 不回退：未声明 options.uninstall 即卸载不弹窗）
+# 动作键的值两种写法：选项数组；或 { items, intro }
+# intro：整组介绍，展示在选项表单最下方（纯展示，不注入 env）；仅有 intro 也会作为说明页弹出
+# 顶层直接写数组 = 作用于全部动作
+options:
+  install:
+    intro: 以下选项决定本次编译包含的模块与附加 configure 参数。
+    items:
+      - name: MODULES
+        label: 编译模块
+        type: multiselect
+        choices: [ssl, gzip, stub_status, ipv6]
+        separator: ' '
+        default: ssl
+        required: true
+        desc: 勾选需要编译进 nginx 的模块
+      - name: EXTRA_CONFIG
+        label: 额外 configure 参数
+        type: string
+        placeholder: --with-http_v2_module
+        desc: 原样拼接到 ./configure 末尾
+  upgrade:
+    intro: 升级会保留数据并重装目标版本，以下选项对备份与安装脚本同时生效。
+    items:
+      - name: BACKUP
+        label: 升级前备份
+        type: bool
+        default: true
+  uninstall:
+    intro: 卸载将删除安装目录并移除服务配置，建议保留数据备份。
+    items:
+      - name: KEEP_DATA
+        label: 保留数据
+        type: bool
+        default: true
+        desc: 关闭后不保留数据目录
 `,
   readOpts: `# 方式一：直接用注入的环境变量（env 已注入，最常用）
 echo "已选模块: $MODULES"
@@ -389,6 +452,37 @@ options:
 make -j"$CPU_NUM" || exit 1
 make install || exit 1
 `,
+  familyYaml: `# database/mysql/app.yaml（节选）：合并入口 = 一个包承载多个家族
+# 规则：同一包内版本字符串全局唯一；家族由 version_meta 一一声明
+name: mysql
+title: MySQL / MariaDB
+version: [9.7.2, 8.4.11, 8.0.46, 12.3.3, 11.8.9, 10.11.19]
+allow_multiple_instances: 'no'
+scripts:
+  install: install.sh          # 入口脚本：按 APP_FAMILY 分流到家族子脚本
+version_meta:
+  # 展示名（label / group）无前端内置映射，全由这里声明
+  # label：短名（下拉选项内标签、卡片选中态）；group：下拉分组标题
+  "9.7.2":    { family: mysql,   label: MySQL,   group: MySQL Community Server }
+  "8.4.11":   { family: mysql,   label: MySQL,   group: MySQL Community Server }
+  "12.3.3":   { family: mariadb, label: MariaDB, group: MariaDB Server }
+  "10.11.19": { family: mariadb, label: MariaDB, group: MariaDB Server }
+`,
+  familyInstall: `#!/bin/bash
+# install.sh —— 合并入口：只按 APP_FAMILY 分流，绝不按版本号猜家族
+# APP_FAMILY 由 zapexec 依 app.yaml version_meta 注入（install/uninstall/upgrade 均注入）
+set -euo pipefail
+
+case "\${APP_FAMILY:-}" in
+    mysql)   exec "\${BASH_SOURCE[0]%/*}/mysql-install.sh" ;;
+    mariadb) exec "\${BASH_SOURCE[0]%/*}/mariadb-install.sh" ;;
+    *)
+        echo "[mysql-mariadb] 无法确定家族: APP_FAMILY=\${APP_FAMILY:-空} (\${APP_VERSION:-unknown})"
+        echo "[mysql-mariadb] 请检查 app.yaml version_meta 是否声明了该版本的 family"
+        exit 1
+        ;;
+esac
+`,
 }
 </script>
 
@@ -403,7 +497,8 @@ const toc = [
   { id: 'sec-read', label: '七、脚本如何读取' },
   { id: 'sec-limits', label: '八、命名与长度限制' },
   { id: 'sec-example', label: '九、完整示例' },
-  { id: 'sec-trouble', label: '十、失败排查' },
+  { id: 'sec-family', label: '十、合并入口示例' },
+  { id: 'sec-trouble', label: '十一、失败排查' },
 ]
 export default { name: 'DevAppScriptGuide' }
 </script>

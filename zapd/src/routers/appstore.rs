@@ -404,6 +404,8 @@ pub async fn install(
 #[derive(Debug, Deserialize)]
 pub struct UninstallPayload {
     pub pkg_path: String,
+    /// 卸载表单选项：选项名 -> 字符串化值（app.yaml options.uninstall）
+    pub options: Option<BTreeMap<String, String>>,
 }
 
 pub async fn uninstall(
@@ -411,6 +413,10 @@ pub async fn uninstall(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<UninstallPayload>,
 ) -> ZapJsonResult {
+    let options = match sanitize_options(payload.options.clone()) {
+        Ok(o) => o,
+        Err(e) => return Err(ZapError::New(-1, e)),
+    };
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
     ast::register_run(
@@ -428,6 +434,7 @@ pub async fn uninstall(
 
     let resp = zapexec::call(Request::AppstoreUninstall {
         pkg_path: payload.pkg_path.clone(),
+        options,
         user: Some(user),
         run_mode: Some(run_mode),
         run_id: run_id.clone(),
@@ -443,7 +450,11 @@ pub async fn uninstall(
         Some(client_addr.ip().to_string().as_str()),
         "appstore_uninstall",
         &payload.pkg_path,
-        "",
+        &payload
+            .options
+            .as_ref()
+            .map(|o| format!("options=[{}]", o.keys().cloned().collect::<Vec<_>>().join(",")))
+            .unwrap_or_default(),
     )
     .await;
     info!("AppStore uninstall started: {}", payload.pkg_path);

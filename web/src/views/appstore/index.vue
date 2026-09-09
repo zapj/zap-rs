@@ -115,7 +115,7 @@
                     <div class="ver-opt-row">
                       <span>{{ ver }}</span>
                       <el-tag :type="familyTagType(g.family)" size="small" effect="plain">
-                        {{ familyShort(g.family) }}
+                        {{ g.short }}
                       </el-tag>
                     </div>
                   </el-option>
@@ -129,7 +129,7 @@
               :type="familyTagType(familyOf(pkg, curVersion(pkg)))"
               size="small"
               effect="light"
-            >{{ familyShort(familyOf(pkg, curVersion(pkg))) }}</el-tag>
+            >{{ familyLabelOf(pkg, curVersion(pkg)) }}</el-tag>
           </span>
           <span v-else>版本: <b>{{ pkg.version || '-' }}</b></span>
           <span v-if="depList(pkg).length" class="pkg-deps">依赖: {{ depList(pkg).join('、') }}</span>
@@ -143,7 +143,7 @@
             size="small"
             :type="familyTagType(familyOf(pkg, pkg.installed_version))"
             effect="plain"
-          >{{ familyShort(familyOf(pkg, pkg.installed_version)) }}</el-tag>
+          >{{ familyLabelOf(pkg, pkg.installed_version) }}</el-tag>
           <span v-if="pkg.upgraded_from">（升级自 {{ pkg.upgraded_from }}）</span>
         </div>
         <div class="pkg-actions">
@@ -330,17 +330,14 @@
           <div v-if="o.desc" class="opt-tip">{{ o.desc }}</div>
         </el-form-item>
       </el-form>
-      <div class="opt-hint">
+      <div v-if="optIntro" class="opt-intro">
         <el-icon><InfoFilled /></el-icon>
-        <span>
-          选项会写入运行快照的 options.env / options.json（与脚本同目录），并注入同名环境变量；
-          脚本内可直接以 $选项名 使用，也可 source $PKG_PATH/options.env
-        </span>
+        <span>{{ optIntro }}</span>
       </div>
       <template #footer>
         <el-button @click="optDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="optSubmitting" @click="submitOptions">
-          {{ optMode === 'install' ? '确认安装' : '确认升级' }}
+          {{ optConfirmLabel }}
         </el-button>
       </template>
     </el-dialog>
@@ -373,6 +370,7 @@ import {
   type FormOptions,
   type RepoSource,
   type RunItem,
+  type VersionMeta,
 } from '@/api/appstore'
 import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
 
@@ -530,34 +528,40 @@ function curVersion(pkg: AppPackage): string {
   return selVersion.value[pkg.pkg_path] || pkg.version || ''
 }
 
-// ── 版本家族元数据（MySQL / MariaDB 合并入口的 version_meta）────────
+// ── 版本家族元数据（app.yaml version_meta，任意包可用）──────────────────
 
-/** 某版本的家族；未声明 version_meta 或版本不在其中时返回空串 */
-function familyOf(pkg: AppPackage, ver?: string | null): '' | 'mysql' | 'mariadb' {
-  if (!ver || !pkg.version_meta) return ''
-  const f = pkg.version_meta[ver]?.family
-  return f === 'mysql' || f === 'mariadb' ? f : ''
+/** version_meta 中某版本的元数据；未声明 / 版本不在其中时返回 undefined */
+function metaOf(pkg: AppPackage, ver?: string | null): VersionMeta | undefined {
+  if (!ver || !pkg.version_meta) return undefined
+  return pkg.version_meta[ver]
 }
 
-const FAMILY_SHORT: Record<string, string> = { mysql: 'MySQL', mariadb: 'MariaDB' }
-const FAMILY_GROUP: Record<string, string> = {
-  mysql: 'MySQL Community Server',
-  mariadb: 'MariaDB Server',
+/** 某版本的家族标识（family 字段）；未声明 / 为空时返回空串（= 无家族，不分组） */
+function familyOf(pkg: AppPackage, ver?: string | null): string {
+  const f = metaOf(pkg, ver)?.family
+  return typeof f === 'string' ? f.trim() : ''
 }
 
-function familyShort(f: string): string {
-  return FAMILY_SHORT[f] || f
+/** 家族展示名（无内置映射，全部来自 version_meta）：label 缺省回退 family 原文 */
+function familyLabelOf(pkg: AppPackage, ver?: string | null): string {
+  const f = familyOf(pkg, ver)
+  if (!f) return ''
+  return metaOf(pkg, ver)?.label || f
 }
 
-/** 家族在标签 / 选中态里的配色：mysql 蓝、mariadb 绿，一眼区分 */
-function familyTagType(f: string): 'primary' | 'success' {
-  return f === 'mariadb' ? 'success' : 'primary'
+/** 家族在标签 / 选中态里的配色：已知家族专属色，其余默认主色 */
+const FAMILY_TAG_TYPE: Record<string, 'primary' | 'success' | 'warning' | 'info'> = {
+  mysql: 'primary',
+  mariadb: 'success',
+}
+function familyTagType(f: string): 'primary' | 'success' | 'warning' | 'info' {
+  return FAMILY_TAG_TYPE[f] || 'primary'
 }
 
 /** 确认文案用：家族在则 “MySQL 8.0.46”，否则回退 “v8.0.46” */
 function verLabel(pkg: AppPackage, ver: string): string {
   const f = familyOf(pkg, ver)
-  return f ? `${familyShort(f)} ${ver}` : `v${ver}`
+  return f ? `${familyLabelOf(pkg, ver)} ${ver}` : `v${ver}`
 }
 
 /**
@@ -566,15 +570,24 @@ function verLabel(pkg: AppPackage, ver: string): string {
  */
 function versionGroups(
   pkg: AppPackage,
-): Array<{ family: string; label: string; versions: string[] }> {
+): Array<{ family: string; label: string; short: string; versions: string[] }> {
   if (!pkg.version_meta) return []
-  const groups: Array<{ family: string; label: string; versions: string[] }> = []
+  const groups: Array<{ family: string; label: string; short: string; versions: string[] }> = []
   for (const ver of pkg.versions || []) {
     const f = familyOf(pkg, ver)
     if (!f) return [] // 某个版本缺家族元数据 → 整组回退扁平，避免误标
+    const meta = metaOf(pkg, ver)
     const last = groups[groups.length - 1]
     if (last && last.family === f) last.versions.push(ver)
-    else groups.push({ family: f, label: FAMILY_GROUP[f] || f, versions: [ver] })
+    else
+      groups.push({
+        family: f,
+        // 组名 = meta.group，缺省回退短名/家族原文
+        label: meta?.group || meta?.label || f,
+        // 选项内小标签 = meta.label（短名），缺省回退家族原文
+        short: meta?.label || f,
+        versions: [ver],
+      })
   }
   return groups.length > 1 ? groups : []
 }
@@ -601,7 +614,7 @@ function depList(pkg: AppPackage): string[] {
 
 // ── 安装/升级选项（app.yaml options 动态表单）───────────────
 
-type OptMode = 'install' | 'upgrade'
+type OptMode = 'install' | 'upgrade' | 'uninstall'
 
 const optDialogVisible = ref(false)
 const optMode = ref<OptMode>('install')
@@ -612,27 +625,72 @@ const optList = ref<AppOption[]>([])
 const optValues = ref<Record<string, any>>({})
 const optFieldError = ref<Record<string, string>>({})
 const optSubmitting = ref(false)
+/** 整组介绍（app.yaml options.<动作>.intro，展示在选项表单最下方） */
+const optIntro = ref('')
+
+/** 对话框动作中文名（随包是否已安装区分再次安装 / 安装） */
+function optModeName(m: OptMode, pkg: AppPackage): string {
+  if (m === 'upgrade') return '升级'
+  if (m === 'uninstall') return '卸载'
+  return pkg.installed ? '再次安装' : '安装'
+}
 
 const optDialogTitle = computed(() => {
   const pkg = optPkg.value
   if (!pkg) return ''
-  const modeName = optMode.value === 'install' ? (pkg.installed ? '再次安装' : '安装') : '升级'
   const act = optMode.value === 'install' && optActionKey.value
     ? ` · ${actionLabel(pkg, optActionKey.value)}`
     : ''
-  return `${modeName} ${pkg.title || pkg.name}${act} — 选项`
+  return `${optModeName(optMode.value, pkg)} ${pkg.title || pkg.name}${act} — 选项`
 })
 
-/** 包在该动作下需要填写的选项（缺省回退到 install 键;顶层数组作用于所有动作） */
-function optionsFor(pkg: AppPackage, actionKey?: string): AppOption[] {
+const optConfirmLabel = computed(() =>
+  optMode.value === 'uninstall'
+    ? '确认卸载'
+    : optMode.value === 'upgrade'
+      ? '确认升级'
+      : '确认安装',
+)
+
+/** 解析单个动作键下的选项定义：兼容「选项数组」与「{ items, intro } 对象」两种写法 */
+function parseActionOptions(v: unknown): { items: AppOption[]; intro: string } {
+  if (!v) return { items: [], intro: '' }
+  if (Array.isArray(v)) return { items: v as AppOption[], intro: '' }
+  const g = v as { items?: unknown; intro?: unknown }
+  return {
+    items: Array.isArray(g.items) ? (g.items as AppOption[]) : [],
+    intro: typeof g.intro === 'string' ? g.intro : '',
+  }
+}
+
+/** 命中当前动作键的选项定义（含整组介绍）；顶层数组作用于所有动作。
+ * strict=true 时不回退 install 键（卸载场景：未声明 options.uninstall 即视为无卸载选项） */
+function actionOptions(pkg: AppPackage, actionKey?: string, strict = false): { items: AppOption[]; intro: string } {
   const o = pkg.options as unknown
-  if (!o) return []
-  if (Array.isArray(o)) return o as AppOption[]
-  const m = o as Record<string, AppOption[]>
-  if (actionKey && m[actionKey]) return m[actionKey]
-  if (m.install) return m.install
+  if (!o) return { items: [], intro: '' }
+  if (Array.isArray(o)) return parseActionOptions(o)
+  const m = o as Record<string, unknown>
+  if (actionKey && m[actionKey] !== undefined) return parseActionOptions(m[actionKey])
+  if (strict) return { items: [], intro: '' }
+  if (m.install !== undefined) return parseActionOptions(m.install)
   const first = Object.keys(m)[0]
-  return first ? m[first] || [] : []
+  return first ? parseActionOptions(m[first]) : { items: [], intro: '' }
+}
+
+/** 包在该动作下需要填写的选项（缺省回退到 install 键;顶层数组作用于所有动作） */
+function optionsFor(pkg: AppPackage, actionKey?: string, strict = false): AppOption[] {
+  return actionOptions(pkg, actionKey, strict).items
+}
+
+/** 该组选项的整体介绍（app.yaml options.<动作>.intro，展示在选项表单最下方） */
+function optionsIntro(pkg: AppPackage, actionKey?: string, strict = false): string {
+  return actionOptions(pkg, actionKey, strict).intro
+}
+
+/** 该动作是否需要弹选项对话框：有可填选项，或声明了整组介绍（仅介绍也可作为动作说明弹出） */
+function hasOptionsDialog(pkg: AppPackage, actionKey?: string, strict = false): boolean {
+  const { items, intro } = actionOptions(pkg, actionKey, strict)
+  return items.length > 0 || !!intro
 }
 
 function optType(o: AppOption): AppOption['type'] {
@@ -662,19 +720,20 @@ function optDefault(o: AppOption): any {
 }
 
 function openOptionsDialog(pkg: AppPackage, actionKey: string | undefined, mode: OptMode) {
-  const defs = optionsFor(pkg, actionKey)
-  if (!defs.length) return
+  // 卸载不默认复用安装选项：仅在声明了 options.uninstall（或顶层数组）时弹出
+  const strict = mode === 'uninstall'
+  const defs = optionsFor(pkg, actionKey, strict)
+  const intro = optionsIntro(pkg, actionKey, strict)
+  if (!defs.length && !intro) return
   optMode.value = mode
   optPkg.value = pkg
   optActionKey.value = actionKey || ''
   optList.value = defs
+  optIntro.value = intro
   const vals: Record<string, any> = {}
   for (const o of defs) vals[o.name] = optDefault(o)
   optValues.value = vals
   optFieldError.value = {}
-  const ver = curVersion(pkg)
-  const modeName = mode === 'install' ? (pkg.installed ? '再次安装' : '安装') : '升级'
-  const actionLabel_ = mode === 'install' ? actionLabel(pkg, actionKey) : ''
   optSubmitting.value = false
   optDialogVisible.value = true
 }
@@ -719,7 +778,7 @@ async function submitOptions() {
     const ok =
       optMode.value === 'install'
         ? await doInstall(pkg, optActionKey.value || undefined, opts)
-        : await doUpgrade(pkg, opts)
+        : await (optMode.value === 'upgrade' ? doUpgrade(pkg, opts) : doUninstall(pkg, opts))
     if (ok) optDialogVisible.value = false
   } finally {
     optSubmitting.value = false
@@ -729,8 +788,8 @@ async function submitOptions() {
 // ── 安装 / 卸载 / 升级 ─────────────────────────────────────
 
 async function handleInstall(pkg: AppPackage, actionKey?: string) {
-  // 该动作定义了选项表单 → 先收集选项再安装
-  if (optionsFor(pkg, actionKey).length) {
+  // 该动作定义了选项或整组介绍 → 先弹窗（收集选项 / 展示说明）再安装
+  if (hasOptionsDialog(pkg, actionKey)) {
     openOptionsDialog(pkg, actionKey, 'install')
     return
   }
@@ -771,22 +830,34 @@ async function doInstall(pkg: AppPackage, actionKey?: string, options?: FormOpti
 }
 
 async function handleUninstall(pkg: AppPackage) {
+  // 包声明了卸载选项/介绍（app.yaml options.uninstall）→ 先弹窗再卸载
+  if (hasOptionsDialog(pkg, 'uninstall', true)) {
+    openOptionsDialog(pkg, undefined, 'uninstall')
+    return
+  }
+  await doUninstall(pkg)
+}
+
+/** 真正发起卸载;成功返回 true（关闭选项对话框） */
+async function doUninstall(pkg: AppPackage, options?: FormOptions): Promise<boolean> {
   try {
     await ElMessageBox.confirm(`确定卸载 ${pkg.title || pkg.name}？此操作可能删除数据。`, '卸载确认', {
       type: 'warning',
     })
-    const resp = await uninstallPackage({ pkg_path: pkg.pkg_path })
+    const resp = await uninstallPackage({ pkg_path: pkg.pkg_path, options })
     ElMessage.success('卸载已启动')
     logDrawerRef.value?.openDrawer(resp.data.run_id, `卸载 ${pkg.name}`)
     trackRun(resp.data.run_id, `${pkg.title || pkg.name} 卸载`)
+    return true
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message || '卸载失败')
+    return false
   }
 }
 
 async function handleUpgrade(pkg: AppPackage) {
-  // 该包定义了升级选项（或缺省复用安装选项）→ 先收集选项再升级
-  if (optionsFor(pkg, 'upgrade').length) {
+  // 该包定义了升级选项/介绍（或缺省复用安装定义）→ 先弹窗再升级
+  if (hasOptionsDialog(pkg, 'upgrade')) {
     openOptionsDialog(pkg, undefined, 'upgrade')
     return
   }
@@ -801,12 +872,12 @@ async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolea
     ElMessage.warning(`已安装 v${ver}，无需重复升级（如需重装请使用「再次安装」）`)
     return false
   }
-  // MySQL / MariaDB 合并入口：跨家族不能升级（mariadb → mysql 等），须先卸载再装目标版本
+  // 合并入口（version_meta 声明家族）：跨家族不能升级（mariadb → mysql 等），须先卸载再装目标版本
   const instFam = familyOf(pkg, pkg.installed_version)
   const tgtFam = familyOf(pkg, ver)
   if (instFam && tgtFam && instFam !== tgtFam) {
     ElMessage.warning(
-      `${familyShort(instFam)} 与 ${familyShort(tgtFam)} 不能互相升级，请先卸载后重新安装目标版本`,
+      `${familyLabelOf(pkg, pkg.installed_version)} 与 ${familyLabelOf(pkg, ver)} 不能互相升级，请先卸载后重新安装目标版本`,
     )
     return false
   }
@@ -970,21 +1041,21 @@ onMounted(() => {
   white-space: pre-line;
 }
 
-.opt-hint {
+.opt-intro {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-size: 12.5px;
+  color: var(--el-text-color-regular);
+  line-height: 1.7;
+  margin: 14px 0 2px;
+  padding: 10px 12px;
   background: var(--el-fill-color-light);
-  border-radius: 4px;
-  padding: 8px 10px;
-  line-height: 1.6;
-  margin-top: 4px;
+  border-radius: 6px;
 }
-
-.opt-hint .el-icon {
-  margin-top: 2px;
+.opt-intro .el-icon {
+  margin-top: 3px;
+  flex: none;
 }
 
 .repo-card {

@@ -299,6 +299,9 @@ pub enum Request {
     #[serde(rename = "appstore.uninstall")]
     AppstoreUninstall {
         pkg_path: String,
+        /// 用户在卸载表单中填写的选项（app.yaml options.uninstall，键=选项名，值=字符串化表单值）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        options: Option<BTreeMap<String, String>>,
         /// 发起操作的面板登录用户名（注入 ZAP_USER）
         #[serde(skip_serializing_if = "Option::is_none")]
         user: Option<String>,

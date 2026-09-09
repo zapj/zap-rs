@@ -143,10 +143,11 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         }
         Request::AppstoreUninstall {
             pkg_path,
+            options,
             user,
             run_mode,
             run_id,
-        } => appstore::uninstall(pkg_path, user, run_mode, run_id).await,
+        } => appstore::uninstall(pkg_path, options, user, run_mode, run_id).await,
         Request::AppstoreUpgrade {
             pkg_path,
             source,

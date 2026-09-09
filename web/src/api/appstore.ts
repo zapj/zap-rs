@@ -34,15 +34,30 @@ export interface AppOption {
   separator?: string
 }
 
+/** 某动作键下的一组选项：值可写为选项数组，或对象 { items, intro }。
+ * intro：整组介绍 / 说明，Web 端展示在选项表单最下方（不参与提交与 env 注入）。 */
+export interface OptionsGroup {
+  items: AppOption[]
+  intro?: string
+}
+
 export interface AppChoice {
   label: string
   value: string
 }
 
-/** version_meta 中单个版本的元数据（family 用于合并入口的下拉分组与标注） */
+/**
+ * version_meta 中单个版本的元数据。任意包可声明（后端原样透传）：
+ * - family：家族标识（如 mysql / mariadb / openresty…）。同包多家族时，版本下拉按它分组、
+ *   且禁止跨家族直接升级（须先卸载再装目标家族版本）；
+ * - label：家族短名（选项内标签 / 卡片选中态标签，如 MySQL、MariaDB），缺省回退 family 原文；
+ * - group：家族下拉分组标题（如 MySQL Community Server），缺省回退 label / family。
+ * 展示名无任何前端内置映射，全部由 version_meta 提供。
+ */
 export interface VersionMeta {
-  family?: 'mysql' | 'mariadb'
+  family?: string
   label?: string
+  group?: string
   [key: string]: unknown
 }
 
@@ -62,8 +77,8 @@ export interface AppPackage {
   dependencies: Record<string, string> | string[]
   /** 自定义操作按钮：动作键 -> 按钮文案（如 build: 编译安装） */
   actions: Record<string, string>
-  /** 安装/升级可选项：动作键 -> 选项列表（缺省动作键时使用 install 键） */
-  options?: Record<string, AppOption[]>
+  /** 安装/升级可选项：动作键 -> 选项列表或 {items,intro}；顶层数组 = install 动作；缺省动作键时使用 install 键 */
+  options?: Record<string, AppOption[] | OptionsGroup> | AppOption[]
   /** 是否允许多实例安装（已安装仍可安装其他版本） */
   allow_multiple_instances: boolean
   default_port: number | null
@@ -122,8 +137,11 @@ export const installPackage = (data: {
   options?: FormOptions
 }) => http.post<any>('/appstore/install', data)
 
-export const uninstallPackage = (data: { pkg_path: string }) =>
-  http.post<any>('/appstore/uninstall', data)
+export const uninstallPackage = (data: {
+  pkg_path: string
+  /** 卸载表单选项 */
+  options?: FormOptions
+}) => http.post<any>('/appstore/uninstall', data)
 
 export const upgradePackage = (data: {
   pkg_path: string
