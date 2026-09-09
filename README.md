@@ -1,114 +1,304 @@
 <div align="center">
-<h1>ZAP</h1>
+
+# ZAP
+
+**现代化 Linux 服务器 / VPS 控制面板**
+
+轻量级 · 高性能 · 特权分离 · 单文件部署
+
+[![Rust](https://img.shields.io/badge/Rust-2024%20Edition-orange?logo=rust)](https://www.rust-lang.org)
+[![Vue](https://img.shields.io/badge/Vue-3.5-brightgreen?logo=vue.js)](https://vuejs.org)
+[![Version](https://img.shields.io/badge/version-1.0.3-blue)](https://github.com/zapj/zap-rs)
+[![Platform](https://img.shields.io/badge/platform-Linux%20amd64%20%7C%20arm64-lightgrey?logo=linux)](https://www.kernel.org)
+[![License](https://img.shields.io/badge/license-Open%20Source%20%2B%20Commercial-green)](#授权与商业模式)
+
 </div>
 
-Linux 服务器/VPS管理系统 
+---
 
+## 项目简介
 
-### 环境要求
-- [x] Linux (CentOS 、 Ubunut 、Debian 、 AlmaLinux、RockyLinux 、RedHat) amd64
+ZAP 是一套面向 **Linux 服务器与 VPS** 的现代化主机控制面板，定位为 cPanel / WHM、Plesk、宝塔 的轻量替代方案。
 
-### 使用说明
+后端以 **Rust** 编写（Axum + Tokio + SQLx），前端采用 **Vue 3 + Element Plus**，编译时通过 `rust-embed` 将前端产物嵌入单一二进制，最终以 **一个可执行文件** 交付，无需 PHP / Python / Node 运行时，内存与 CPU 占用远低于传统面板。
 
-### Future
+ZAP 采用 **开源核心 + 商业授权** 的双轨模式：个人与企业在遵守开源协议的前提下可免费使用全部核心功能，商业版面向 IDC、云厂商与托管服务商提供品牌定制、技术支持与商业分发授权。
 
+> 演示与下载：<https://zap.cn> ｜ 文档建设中
 
-### ZAP 功能
+---
 
-- [x] 在线安装软件 WebServer （nginx 、apache）  ， 数据库
-- [x] AppStore 应用商店（软件安装 / 卸载 / 升级，独立软件库仓库，实时运行日志）
-- [x] Web SSH
-- [x] Proxy
-- [x] 网站
-- [x] 定时任务
-- [x] 服务器监控
+## 核心特性
 
+### 网站与域名
 
+- 站点全生命周期管理：创建 / 编辑 / 删除 / 停用 / 维护模式（三态切换）
+- 多域名绑定、多 IP 绑定、自定义站点目录、运行目录
+- Nginx 虚拟主机配置在线编辑与保存，配置语法校验
+- Nginx 服务状态、启停重载、`stub_status` 监控
+- PHP-FPM 多版本实例管理（php74 / php81 …）与 `fpm_spec` 参数调优
+- 站点目录与文件结构浏览，目录保护
 
-## 安装步骤
+### SSL / TLS
 
-### 默认密码 123456
+- 手动导入证书（PEM 粘贴上传，自动解析域名与有效期）
+- 一键自签名证书（rcgen）
+- **Let's Encrypt** 自动签发（ACME HTTP-01，acme-lib）
+- 证书列表、详情、续期、删除，到期预警
 
-1. cd web  && npm install
-2. cargo run --bin zapd
+### 应用商店（AppStore）
 
+- Web 服务器 / 数据库 / 运行环境 / Web 应用 的在线安装、卸载、升级
+- 多 Git 源管理，内置官方源 + 管理员自定义源
+- 安装过程实时日志（WebSocket + xterm，可中断）
+- 用户自定义包与自定义脚本（按用户隔离，升级永不覆盖）
+- 通用服务配置管理：PHP / MySQL / MariaDB 配置在线读写与启停
 
-## 特权操作架构（zapexec）
+### 服务器运维
 
-`zapd` 以非特权用户 `zapadm` 运行，需要 root 权限的系统操作（时间同步、时区、SSH 服务等）通过独立的 `zapexec` 守护进程完成，从而收敛特权边界。
+| 能力 | 说明 |
+| --- | --- |
+| 实时监控 | CPU、内存、磁盘、网络、负载、进程（sysinfo / systemstat） |
+| 文件管理 | 在线浏览、编辑（CodeMirror）、上传下载、新建 / 重命名 / 删除 |
+| Web 终端 | 浏览器内 SSH 终端（xterm.js + ssh2），支持密钥推送 |
+| SSH 管理 | SSH 服务状态 / 重启 / 安装、SSH 密钥管理、主机连接管理 |
+| 计划任务 | Cron 任务增删改查与执行记录 |
+| 防火墙 | firewalld / ufw / nftables / iptables 统一抽象，面板端口防自锁 |
+| 系统配置 | 时间同步、时区、主机名、DNS Resolver、IP 池、环境变量 |
+| 服务管理 | systemd 服务状态与进程管理 |
+| 备份升级 | 面板备份 / 还原，在线一键升级（zapupgrade 原子替换） |
 
-- **zapd**（`zapadm`）—— 业务主进程，通过 Unix socket 转发特权请求
-- **zapexec**（root）—— 常驻特权守护进程，白名单分发 `time` / `ssh` / `ssh_key` / `file` / `appstore` 动词，不提供任意 shell 执行入口
-- **zap-proto** —— 共享协议 crate：帧编解码 + HMAC 挑战/响应认证
+### 多用户与商业化能力
 
-通信链路：`zapd` → Unix socket `/run/zap/exec.sock` → SO_PEERCRED 校验 uid → HMAC 认证 → `zapexec` 以 root 执行。
+- **用户 / 角色 / 权限**：RBAC 角色体系，菜单级权限控制
+- **套餐（Package）与分销（Reseller）**：资源配额与代理账号体系
+- **TOTP 两步验证**：登录二次校验（二维码绑定）
+- **站内通知**：系统公告与用户消息
+- **审计日志**：所有关键操作留痕，可追溯
 
-### exec 配置段
+### 安全设计
 
-`zap.yaml` 中：
+- 面板 **仅提供 HTTPS**，HTTP 自动 301 跳转；TLS 1.2+，支持 ALPN h2
+- **特权分离架构**：业务进程以非特权用户 `zapadm` 运行，root 操作收敛至独立守护进程
+- JWT 鉴权 + 密钥轮换，密码 bcrypt 加盐存储
+- 演示账号只读守卫，防止越权写入
+- 支持 URL 前缀部署（`url_prefix`），便于反向代理与路径隔离
 
-```yaml
-exec:
-  socket_path: /run/zap/exec.sock   # zapd ↔ zapexec 的 Unix socket
-  secret_path: /etc/zap/exec.key    # HMAC 共享密钥（首次启动自动生成）
+---
+
+## 架构设计
+
+### 组件划分
+
+| 组件 | 运行身份 | 职责 |
+| --- | --- | --- |
+| **zapd** | `zapadm`（非特权） | 业务主进程：HTTP/HTTPS 服务、路由、鉴权、SQLite 持久化、调度器 |
+| **zapexec** | `root` | 特权守护进程：白名单动词执行系统变更，**不提供任意 shell 执行入口** |
+| **zap-proto** | — | 共享协议库：长度前缀 JSON 帧编解码 + HMAC-SHA256 挑战/响应认证 |
+| **zapctl** | `root` | 命令行运维工具：服务管理、备份还原、用户管理、配置读写 |
+| **zapupgrade** | `root`（一次性） | 升级器：校验 → 备份 → 原子替换 → 重启服务 |
+
+### 特权调用链路
+
+```
+浏览器 ──HTTPS──> zapd (zapadm)
+                     │
+                     │  Unix Socket /run/zap/exec.sock
+                     │  ├─ SO_PEERCRED 校验对端 uid
+                     │  └─ HMAC-SHA256 挑战/响应认证
+                     ▼
+                  zapexec (root) ──> 白名单动词分发
+                                     time / ssh / ssh_key / file / appstore ...
 ```
 
-生产环境约定（配置/凭据统一在 `/etc/zap`，程序在 `/usr/local/zap`，运行时数据在 `/run/zap`）：
+业务进程永不持有 root 权限，所有系统级变更必须经过协议校验与白名单分发，从架构上收敛攻击面。
 
-- 配置 `/etc/zap/zap.yaml`：`root:zapadm` 0660，首次安装由 `install.sh` 生成（升级不覆盖）
-- TLS 证书 `/etc/zap/zap.crt`、`/etc/zap/zap.key`：`root:zapadm` 0640，首次安装由 `install.sh` 生成
-- HMAC 密钥 `/etc/zap/exec.key`：`root:zapadm` 0640，首次启动由 `zapexec` 自动生成
-- SSH 密钥目录 `/etc/zap/ssh`：`root:zapadm` 0750，密钥由 `zapexec` 写入、`zapd` 读取
-- socket 目录 `/run/zap`：`root:zapadm` 0750（`zapexec.service` 的 `RuntimeDirectory` 创建）
-- 服务单元：`scripts/systemd/zapexec.service`（以 root 运行）
+### 技术栈
+
+**后端**：Rust 2024 · Axum 0.8 · Tokio · SQLx(SQLite) · OpenSSL(vendored) / rcgen / acme-lib · ssh2 · jsonwebtoken / bcrypt · sysinfo / systemstat · tokio-cron-scheduler · rust-embed
+
+**前端**：Vue 3.5 · TypeScript · Vite · Element Plus · Pinia · UnoCSS · xterm.js · CodeMirror 6 · Chart.js · Axios
+
+---
+
+## 快速开始
+
+### 环境要求
+
+- 操作系统：CentOS / RHEL / Rocky Linux / AlmaLinux / Ubuntu / Debian（**amd64、arm64**）
+- 全新安装，建议使用干净的 minimal 系统
+- root 权限；防火墙需放行面板端口
+
+### 一键安装
+
+```bash
+wget -O install.sh https://mirrors.zap.cn/zap/install.sh && bash install.sh
+```
+
+安装完成后访问 `https://<服务器IP>:2600`，按引导初始化管理员账号。
+
+### 命令行运维（zapctl）
+
+```bash
+zapctl start | stop | restart | status      # 面板服务管理
+zapctl logs                                  # 查看运行日志
+zapctl backup | restore                      # 备份与还原
+zapctl user add|list|passwd                  # 面板用户管理
+zapctl config get|set <key>                  # 读写 zap.yaml
+```
+
+### 本地开发
+
+```bash
+git clone https://github.com/zapj/zap-rs.git && cd zap-rs
+
+./rundev.sh                 # 构建前端 + 后端并启动（https://127.0.0.1:2600）
+./rundev.sh --release       # release 模式
+./rundev.sh --skip-web      # 跳过前端构建
+./rundev.sh --reset-db      # 重建数据库（admin 初始密码 A123456）
+```
+
+> `zapexec` 需要 root 权限，脚本会通过 `sudo` 启动。软件安装根目录默认为 `/usr/local/apps`，可通过 `export ZAP_APPS_DIR=...` 覆盖。
+
+### 发布打包
+
+```bash
+COS_ID=xxx COS_KEY=xxx ./build.sh
+```
+
+产物为 `zap-v{version}-linux-{amd64|arm64}.tar.gz`，含 sha256 校验文件并上传至镜像站。
+
+---
+
+## 目录结构
+
+```
+zap-rs/
+├── zapd/           # 面板主服务（Axum 路由、业务内核、调度器）
+├── zapexec/        # root 特权守护进程（白名单动词执行）
+├── zap-proto/      # zapd ↔ zapexec 共享协议（帧编解码 + HMAC 认证）
+├── zapctl/         # 命令行运维工具
+├── zapupgrade/     # 在线升级器
+├── web/            # Vue 3 前端
+├── scripts/        # 安装/卸载脚本、systemd 单元、服务配置模板
+├── conf/           # 开发用配置与自签证书
+└── data/           # 运行时数据（SQLite、应用商店、已安装应用）
+```
+
+生产环境路径约定：
+
+| 用途 | 路径 |
+| --- | --- |
+| 配置文件 | `/etc/zap/zap.yaml` |
+| TLS 证书 | `/etc/zap/zap.crt`、`/etc/zap/zap.key` |
+| HMAC 密钥 | `/etc/zap/exec.key`（首次启动自动生成） |
+| SSH 密钥 | `/etc/zap/ssh/` |
+| 程序目录 | `/usr/local/zap/` |
+| 运行时 | `/run/zap/`（Unix socket） |
+| 软件安装 | `/usr/local/apps/` |
+
+### 配置示例（`zap.yaml`）
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 2600
+  cert_file: /etc/zap/zap.crt
+  key_file: /etc/zap/zap.key
+  url_prefix: ""          # 反代路径前缀，可选
+jwt:
+  jwt_secure: <随机密钥>
+  jwt_expire: 3600
+exec:
+  socket_path: /run/zap/exec.sock
+  secret_path: /etc/zap/exec.key
+db:
+  path: /usr/local/zap/data/zap.db
+```
+
+---
 
 ## AppStore 应用商店
-
-提供软件包（WebServer / 数据库 / 应用 / 基础库）的安装、卸载、升级，运行过程实时日志（Web Terminal），以及用户自定义包与自定义脚本管理。
-
-### 目录结构（`{ZAP}/data/`）
 
 ```
 data/appstore/
 ├── repos.yaml     # Git 源配置列表（多源：id / 名称 / 地址 / 同步状态）
 ├── repos/         # 所有 Git 源（一个源一个目录，目录名 = 源 id）
-│   └── zap-appstore/   # ★ 内置官方源（构建时从独立 git 仓库同步进发行包，可更新不可删除）
-├── custom/        # ★ 用户自定义包与脚本（升级永不覆盖）
-│   └── scripts/{username}/   # 按用户隔离的自定义脚本
+│   └── zap-appstore/   # 内置官方源（可更新、不可删除）
+├── custom/        # 用户自定义包与脚本（升级永不覆盖）
+│   └── scripts/{username}/   # 按用户隔离
 ├── cache/ tmp/    # 下载缓存与原子升级暂存
-└── logs/          # run-{id}.log 运行日志（安装/卸载/升级/脚本）
-data/apps/         # 已安装软件实例（{pkg}/meta.yaml），卸载 = 删除目录
+└── logs/          # run-{id}.log 运行日志
 ```
 
-### 包格式（`{category}/{name}/`）
+**包格式**（`{category}/{name}/app.yaml`）：
 
 ```yaml
-# app.yaml
 name: mariadb
 version: "11.4.4"
 category: database        # infra | application | webapps | database | library
 title: MariaDB
 description: ...
-deps: []                  # 依赖包
+deps: []
 default_port: 3306
-scripts:                  # 可选，缺省走约定文件名
+scripts:
   install: install.sh
   uninstall: uninstall.sh
   upgrade: upgrade.sh
 ```
 
-脚本由 `zapexec` 以 root 运行，注入环境变量：`ZAP_PATH` / `ZAPCTL` / `APPS_DIR` / `PKG_PATH` / `APP_ID` / `APP_VERSION`（升级另有 `APP_OLD_VERSION`）。无 `upgrade.sh` 时升级缺省 = 先 `uninstall.sh` 再 `install.sh`。
+安装脚本由 `zapexec` 以 root 运行，注入环境变量 `ZAP_PATH` / `ZAPCTL` / `APPS_DIR` / `PKG_PATH` / `APP_ID` / `APP_VERSION`。
 
-### Git 源管理（多源）
+包冲突优先级：**内置源 < 后添加的源 < `custom/`**。
 
-- 内置源 `zap-appstore`（`https://github.com/zapj/zap-appstore.git`）内容由独立 git 仓库管理：构建时 `git pull` 同步进发行包（离线可用），安装/运行时若目录缺失可再次 `git clone` 拉取
-- 管理员可在面板中添加 / 删除自己的 Git 源：添加时 `git clone --depth 1` 到 `repos/<id>/`，更新时 `git fetch + reset --hard`
-- 内置源不可删除；所有源同步均不触碰 `custom/`
-- 包冲突优先级：内置源 < 后添加的源 < `custom/`（custom 最高）
+---
 
-### 运行与安全
+## 路线图
 
-- 每次操作生成 `run_id`，日志写入 `logs/run-{id}.log`，结束追加 `__ZAP_DONE__ <code>`；前端通过 WebSocket `/appstore/ws/{run_id}` 实时查看（xterm，可停止）
-- 权限：软件库更新 / 自定义包安装仅管理员；普通用户仅能操作 `custom/scripts/{用户名}/`；脚本路径白名单 + 目录穿越防护集中在 `zapexec`
-- 关键操作均写入审计日志（`audit_logs`）
-- 菜单：`/appstore`（应用商店）+ `/appstore/scripts`（脚本管理），由数据库迁移自动创建
+- [x] 站点管理、SSL 证书、应用商店
+- [x] Web SSH 终端、文件管理、计划任务
+- [x] 防火墙、服务配置、系统监控
+- [x] 多用户 / 角色 / 套餐 / 分销体系
+- [x] 在线升级与备份还原
+- [x] TOTP 两步验证、审计日志
+- [ ] **Docker 容器管理**：镜像、容器、网络、卷、Compose 编排与容器化站点托管
+- [ ] 集群管理：多机统一纳管与批量运维
+- [ ] 应用市场商业化插件生态
+- [ ] 多语言（i18n）与移动端适配
+
+---
+
+## 授权与商业模式
+
+| | **开源版** | **商业版** |
+| --- | --- | --- |
+| 核心功能（站点 / SSL / 商店 / 终端 / 监控等） | ✅ | ✅ |
+| 商用部署 | ✅ | ✅ |
+| 源码获取与二次开发 | ✅ | ✅ |
+| 品牌定制（Logo / 名称 / 域名） | ❌ | ✅ |
+| 商业分发与转售授权 | ❌ | ✅ |
+| 优先技术支持与 SLA | ❌ | ✅ |
+| 商业专属插件 | ❌ | ✅ |
+
+商业授权与定制合作请联系：<z@zap.cn>
+
+---
+
+## 参与贡献
+
+欢迎提交 Issue 与 Pull Request。
+
+```bash
+# 提交前请执行
+cargo fmt --all && cargo clippy --all-targets
+cd web && npm run type-check
+```
+
+- 遵循现有代码风格，新增接口请补充审计日志与权限校验
+- 涉及系统变更的能力请通过 `zapexec` 白名单动词实现，不要在业务进程内直接提权
+
+---
+
+## 许可证
+
+ZAP 采用 **开源协议 + 商业授权** 双许可模式。核心代码遵循开源协议发布，商业授权详情见 LICENSE 与官网授权页面。
