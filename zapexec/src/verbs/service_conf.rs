@@ -1,5 +1,5 @@
 //! 通用服务配置（root 执行）：「服务配置」大类下 Nginx 之外的各服务
-//! （php / mysql / mariadb / docker …）的配置页后端能力。
+//! （php / mysql(MySQL/MariaDB 合一，按实例自动识别) / docker …）的配置页后端能力。
 //!
 //! 设计目标：新增一个服务 = 在 `supported()` 中注册一条 `ServiceDef`，
 //! 即获得「状态探测 / 启停控制 / 配置文件读写 / 关键项可视化」四件套，
@@ -308,31 +308,17 @@ fn supported(key: &str) -> Option<&'static ServiceDef> {
     }
     Some(match key {
         "php" => &PHP_DEF,
+        // MySQL / MariaDB 合一（svc=mysql）：应用商店同时只允许安装其中一个
+        // （mysql 或 mariadb 应用），两者都软链 /usr/local/mysql、共用
+        // /etc/mysql/my.cnf 与 mysql.service unit；引擎由 status 按登记/版本自动识别。
         "mysql" => &ServiceDef {
             key: "mysql",
-            label: "MySQL",
+            label: "MySQL / MariaDB",
             unit_candidates: &["mysql", "mysqld"],
             bin_candidates: &["mysqld", "mysql"],
             version_args: &["--version"],
             version_in_stderr: false,
             main_candidates: &["/etc/mysql/my.cnf", "/etc/my.cnf"],
-            exts: &["cnf", "conf"],
-            format: ConfFormat::Ini,
-            ini_comment: "#",
-            fields: MYSQL_FIELDS,
-        },
-        "mariadb" => &ServiceDef {
-            key: "mariadb",
-            label: "MariaDB",
-            unit_candidates: &["mariadb", "mysql"],
-            bin_candidates: &["mariadbd", "mysqld", "mysql"],
-            version_args: &["--version"],
-            version_in_stderr: false,
-            main_candidates: &[
-                "/etc/mysql/mariadb.conf.d/99-zap.cnf",
-                "/etc/mysql/my.cnf",
-                "/etc/my.cnf",
-            ],
             exts: &["cnf", "conf"],
             format: ConfFormat::Ini,
             ini_comment: "#",
@@ -1149,6 +1135,26 @@ fn installed_info(d: &ServiceDef, svc: &str) -> InstalledInfo {
     (bin, unit, main)
 }
 
+/// 数据库引擎识别（svc=mysql 同时覆盖 MySQL / MariaDB 两种安装）：
+/// 优先以应用商店登记为准（info.yaml 的 instance 形如 `mysql-8.0` / `mariadb-10.11`，
+/// 安装目录也因此不同：mysql-* 或 mariadb-*）；兜底看版本输出
+/// （MariaDB 的客户端/服务端版本输出均含 "MariaDB" 字样）。
+fn db_engine(version: &str) -> Option<&'static str> {
+    for a in super::appstore::registered_apps() {
+        let inst = a.instance.as_str();
+        if inst == "mysql" || inst.starts_with("mysql-") {
+            return Some("mysql");
+        }
+        if inst == "mariadb" || inst.starts_with("mariadb-") {
+            return Some("mariadb");
+        }
+    }
+    if version.contains("MariaDB") {
+        return Some("mariadb");
+    }
+    (!version.is_empty()).then_some("mysql")
+}
+
 /// service_conf.status
 pub async fn status(svc: &str) -> Response {
     let svc = svc.to_string();
@@ -1175,6 +1181,7 @@ pub async fn status(svc: &str) -> Response {
             ),
             None => (None, None, false),
         };
+        let engine = db_engine(&version);
         let running = service_running(d, &svc, bin.as_deref());
         let bin_path = bin.as_deref().map(|b| b.display().to_string());
         // 探测失败时把尝试过的候选路径一起回传，便于定位"没检测到配置文件"的原因
@@ -1191,6 +1198,7 @@ pub async fn status(svc: &str) -> Response {
                 "service": svc,
                 "label": d.label,
                 "bin": bin_path,
+                "engine": engine,
                 "version": version,
                 "unit": unit,
                 "running": running,

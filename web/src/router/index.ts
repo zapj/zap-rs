@@ -191,13 +191,12 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         path: 'mysql',
         name: 'ServiceMysql',
         component: () => import('@/views/services/mysql/index.vue'),
-        meta: { title: 'MySQL 数据库', icon: 'ep:data-analysis', affix: true },
+        meta: { title: 'MySQL / MariaDB', icon: 'ep:data-analysis', affix: true },
       },
+      // 旧入口 /services/mariadb 保留跳转（页面已合并为 MySQL / MariaDB）
       {
         path: 'mariadb',
-        name: 'ServiceMariadb',
-        component: () => import('@/views/services/mariadb/index.vue'),
-        meta: { title: 'MariaDB 配置', icon: 'ep:data-board', affix: true },
+        redirect: '/services/mysql',
       },
       {
         path: 'docker',

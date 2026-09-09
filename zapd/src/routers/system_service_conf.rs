@@ -1,4 +1,4 @@
-//! 通用服务配置端点（「服务配置」大类：php / mysql / mariadb / docker …）。
+//! 通用服务配置端点（「服务配置」大类：php / mysql(MySQL/MariaDB 合一) / docker …）。
 //!
 //! 端点（均需管理员，均透传 zapexec 返回）：
 //! - GET  /system/service-conf/status           状态探测（Query: service）
@@ -44,7 +44,7 @@ async fn exec(req: Request) -> Result<Json<serde_json::Value>, ZapError> {
 }
 
 fn validate_service(service: &str) -> Result<String, ZapError> {
-    let known = matches!(service, "php" | "mysql" | "mariadb" | "docker");
+    let known = matches!(service, "php" | "mysql" | "docker");
     // PHP 多版本实例 svc：php74 / php81 …（zapexec 按实例定位配置/unit）
     let php_inst = service
         .strip_prefix("php")

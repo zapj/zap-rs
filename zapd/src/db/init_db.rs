@@ -304,9 +304,7 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (132, 13, 'service-php', 'php', 'services/php/index', 'menu', 'PHP 配置', 'ep:coin', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (133, 13, 'service-mysql', 'mysql', 'services/mysql/index', 'menu', 'MySQL 数据库', 'ep:data-analysis', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
-    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (134, 13, 'service-mariadb', 'mariadb', 'services/mariadb/index', 'menu', 'MariaDB 配置', 'ep:data-board', 1, 'admin', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (133, 13, 'service-mysql', 'mysql', 'services/mysql/index', 'menu', 'MySQL / MariaDB', 'ep:data-analysis', 1, 'admin', 3, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (135, 13, 'service-docker', 'docker', 'services/docker/index', 'menu', 'Docker 服务', 'ep:box', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
 
@@ -481,12 +479,11 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 111);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 11);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 111);
-    -- 服务配置（Nginx/PHP/MySQL/MariaDB/Docker）：仅 admin
+    -- 服务配置（Nginx/PHP/MySQL 与 MariaDB 合一/Docker）：仅 admin
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 13);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 131);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 132);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 133);
-    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 134);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 135);
     -- 已安装应用：admin / user / reseller
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 62);

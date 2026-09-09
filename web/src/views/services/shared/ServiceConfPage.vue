@@ -5,6 +5,7 @@
       <div class="top-row">
         <div class="title">
           <span class="t-name">{{ label }}</span>
+          <el-tag v-if="engineName" size="small" type="warning">{{ engineName }}</el-tag>
           <el-tag v-if="status.installed" size="small" :type="running ? 'success' : 'danger'">
             {{ running ? '运行中' : '未运行' }}
           </el-tag>
@@ -235,9 +236,13 @@ const version = computed(() => {
   const v = status.value.version || ''
   if (!v) return ''
   // docker/php/mysql 输出首行含版本号，压缩显示
-  const m = v.match(/(?:PHP\s+)?([\d]+\.[\d]+(?:\.[\d]+)?(?:-MariaDB)?(?:-MySQL)?|Docker\s+version\s+[\d.]+)/i)
+  const m = v.match(/(?:PHP\s+)?([\d]+\.[\d]+(?:\.[\d]+)?|Docker\s+version\s+[\d.]+)/i)
   return m ? m[1] : v
 })
+/** 自动识别的数据库引擎显示名（MySQL / MariaDB 服务：mysql | mariadb） */
+const engineName = computed(() =>
+  status.value.engine === 'mariadb' ? 'MariaDB' : status.value.engine === 'mysql' ? 'MySQL' : '',
+)
 
 // ── 关键配置表单 ──────────────────────────────
 const visual = reactive<Record<string, string>>({})

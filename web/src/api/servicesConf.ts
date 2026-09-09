@@ -7,6 +7,8 @@ export interface ServiceConfStatus {
   label?: string
   bin?: string
   version?: string
+  /** 数据库引擎（仅 MySQL / MariaDB 服务返回：mysql / mariadb），由系统按安装自动识别 */
+  engine?: 'mysql' | 'mariadb'
   unit?: string | null
   running?: boolean
   systemd?: boolean

@@ -77,16 +77,16 @@
               保存修改
             </el-button>
           </div>
-          <el-input
-            v-model="fileContent"
-            type="textarea"
-            class="snap-textarea"
-            :disabled="!currentPath || fileLoading"
-            :placeholder="
-              currentPath ? '此处可修改脚本内容，保存后点击「重跑」生效' : '请先在左侧选择要编辑的文件'
-            "
-            spellcheck="false"
-          />
+          <div class="snap-code-wrap">
+            <CodeEditor
+              v-model="fileContent"
+              :path="currentPath"
+              :readonly="!currentPath || fileLoading"
+              :placeholder="
+                currentPath ? '此处可修改脚本内容，保存后点击「重跑」生效' : '请先在左侧选择要编辑的文件'
+              "
+            />
+          </div>
         </div>
       </div>
       <div class="snap-editor-tip">
@@ -114,6 +114,7 @@ import {
   type RunFileItem,
 } from '@/api/appstore'
 import { useUserStore } from '@/stores/user'
+import CodeEditor from '@/components/CodeEditor.vue'
 
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
@@ -177,6 +178,9 @@ function initTerminal() {
     fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(termRef.value)
+    // 纯日志终端没有输入通道，xterm 也不内置复制快捷键；
+    // 在捕获阶段接管 keydown，让 Ctrl/Cmd+C 与 Ctrl+Shift+C 都能复制选区
+    term.element?.addEventListener('keydown', handleTermCopy, true)
   }
   term.clear()
   fitAddon?.fit()
@@ -273,6 +277,44 @@ async function handleStop() {
 
 function handleScrollBottom() {
   term?.scrollToBottom()
+}
+
+// ── 复制选中：xterm 日志终端的 Ctrl/Cmd+C 与 Ctrl+Shift+C ─────────
+// disableStdin 的日志视图里 Ctrl+C 不会被消费成中断；
+// xterm 画布渲染的选区不在 DOM 中，浏览器默认复制拿不到内容，
+// 因此这里把选中文本显式写入剪贴板（无选区时放行，不拦截按键）。
+function handleTermCopy(e: KeyboardEvent) {
+  if (!term) return
+  if (!(e.ctrlKey || e.metaKey)) return
+  if (e.key.toLowerCase() !== 'c') return
+  if (!term.hasSelection()) return
+  e.preventDefault()
+  e.stopPropagation()
+  const selected = term.getSelection()
+  if (typeof navigator.clipboard?.writeText === 'function') {
+    navigator.clipboard.writeText(selected).then(
+      () => ElMessage.success('已复制选中内容'),
+      () => ElMessage.warning('复制失败，请手动复制'),
+    )
+    return
+  }
+  // 非安全上下文（纯 http）兜底：同一用户手势内 execCommand 同步复制
+  const ta = document.createElement('textarea')
+  ta.value = selected
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.top = '-9999px'
+  document.body.appendChild(ta)
+  ta.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  document.body.removeChild(ta)
+  if (ok) ElMessage.success('已复制选中内容')
+  else ElMessage.warning('复制失败，请手动复制')
 }
 
 // ── 运行快照（失败后编辑/重跑）────────────────────────────────
@@ -392,6 +434,7 @@ watch(visible, (v) => {
 
 onBeforeUnmount(() => {
   closeWs()
+  term?.element?.removeEventListener('keydown', handleTermCopy, true)
   term?.dispose()
   term = null
 })
@@ -517,16 +560,12 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.snap-textarea {
+.snap-code-wrap {
   flex: 1;
-}
-
-.snap-textarea :deep(textarea) {
-  height: 100% !important;
-  font-family: Menlo, Monaco, 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  resize: none;
+  min-height: 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  overflow: hidden;
 }
 
 .snap-editor-tip {
