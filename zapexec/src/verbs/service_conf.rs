@@ -1075,7 +1075,10 @@ fn installed_info(d: &ServiceDef, svc: &str) -> InstalledInfo {
         let root = p.parent().unwrap_or(Path::new("/")).to_path_buf();
         let exists = p.is_file();
         if exists {
-            tracing::info!("service_conf: php 主配置由 `php --ini` 定位到 {}", p.display());
+            tracing::info!(
+                "service_conf: php 主配置由 `php --ini` 定位到 {}",
+                p.display()
+            );
         } else {
             // 常见原因：php.ini 未随安装脚本拷贝（PHP 会退回内置默认值仍能运行）
             tracing::warn!(
@@ -1144,6 +1147,40 @@ pub async fn status(svc: &str) -> Response {
     .await
 }
 
+/// 主配置置首 + 目录扫描结果按路径去重。
+///
+/// 旧实现先 push 主配置、再对整个列表 `retain(seen.insert)` —— 主配置的路径
+/// 已在集合里，`insert` 返回 false，**主配置自己被当成重复项删掉了**，
+/// 表现为列表里唯独没有 php.ini（截图实锤）。
+fn merge_main_and_scanned(
+    main: &Path,
+    root: &Path,
+    main_exists: bool,
+    scanned: Vec<Value>,
+) -> Vec<Value> {
+    let mut files = vec![file_entry(
+        main,
+        root,
+        true,
+        std::fs::metadata(main).map(|m| m.len()).unwrap_or(0),
+        main_exists,
+    )];
+    let mut seen: std::collections::HashSet<String> = Default::default();
+    seen.insert(main.display().to_string());
+    for f in scanned {
+        let p = f
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        // 扫描再次命中主配置时丢弃该条（主配置已在首位且带 is_main 标记）
+        if seen.insert(p) {
+            files.push(f);
+        }
+    }
+    files
+}
+
 /// service_conf.list
 pub async fn conf_list(svc: &str) -> Response {
     let svc = svc.to_string();
@@ -1170,24 +1207,14 @@ pub async fn conf_list(svc: &str) -> Response {
                 })),
             ));
         };
-        let mut files: Vec<Value> = Vec::new();
-        let mut seen: std::collections::HashSet<String> = Default::default();
-        let size = std::fs::metadata(&main).map(|m| m.len()).unwrap_or(0);
-        let main_path = main.display().to_string();
-        files.push(file_entry(&main, &root, true, size, main_exists));
-        seen.insert(main_path);
-        if root.is_dir() {
-            collect_files(service_exts(d, &root), &root, &mut files);
-            // 目录扫描可能再次命中主配置文件，去重
-            files.retain(|f| {
-                let p = f
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                seen.insert(p)
-            });
-        }
+        let scanned = if root.is_dir() {
+            let mut scanned: Vec<Value> = Vec::new();
+            collect_files(service_exts(d, &root), &root, &mut scanned);
+            scanned
+        } else {
+            Vec::new()
+        };
+        let files = merge_main_and_scanned(&main, &root, main_exists, scanned);
         Ok(Response::ok(
             "ok",
             Some(json!({
@@ -1762,6 +1789,65 @@ mod tests {
             glob_first(&pattern).as_deref(),
             Some(base.join("php-81/php.ini").as_path())
         );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// 主配置必须保留在列表首位；扫描到的重复条目被去掉（旧实现相反，
+    /// 把主配置删了、列表里唯独没有 php.ini）。
+    #[test]
+    fn merge_keeps_main_and_dedups_scanned() {
+        let base = fixture_root("merge");
+        fs::create_dir_all(&base).unwrap();
+        let main = base.join("php.ini");
+        fs::write(&main, "; ini").unwrap();
+        fs::write(base.join("pear.conf"), "# pear").unwrap();
+
+        let scanned = vec![
+            file_entry(&base.join("pear.conf"), &base, false, 7, true),
+            file_entry(&main, &base, false, 5, true), // 扫描再次命中主配置
+        ];
+        let files = merge_main_and_scanned(&main, &base, true, scanned);
+
+        assert_eq!(
+            files.len(),
+            2,
+            "主配置 + pear.conf，扫描到的主配置条目应去重"
+        );
+        assert_eq!(
+            files[0]["path"].as_str(),
+            Some(main.display().to_string()).as_deref(),
+            "主配置必须排在首位"
+        );
+        assert_eq!(files[0]["is_main"], Value::Bool(true));
+        assert_eq!(
+            files[1]["path"].as_str(),
+            Some(base.join("pear.conf").to_string_lossy()).as_deref()
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// 主配置不存在（探测失败回退的预期路径）时仍要出现在列表里，标 exists=false。
+    #[test]
+    fn merge_keeps_missing_main_visible() {
+        let base = fixture_root("merge-missing");
+        fs::create_dir_all(&base).unwrap();
+        let main = base.join("php.ini"); // 不创建
+        fs::write(base.join("php-fpm.conf"), "# fpm").unwrap();
+
+        let scanned = vec![file_entry(
+            &base.join("php-fpm.conf"),
+            &base,
+            false,
+            6,
+            true,
+        )];
+        let files = merge_main_and_scanned(&main, &base, false, scanned);
+
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0]["is_main"], Value::Bool(true));
+        assert_eq!(files[0]["exists"], Value::Bool(false));
 
         let _ = fs::remove_dir_all(&base);
     }
