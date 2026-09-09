@@ -9,6 +9,8 @@ export interface ServiceConfStatus {
   version?: string
   /** 数据库引擎（仅 MySQL / MariaDB 服务返回：mysql / mariadb），由系统按安装自动识别 */
   engine?: 'mysql' | 'mariadb'
+  /** 安装目录（仅 MySQL / MariaDB 服务返回，引擎不同目录不同，如 …/mysql-8.0 或 …/mariadb-10.11） */
+  dir?: string | null
   unit?: string | null
   running?: boolean
   systemd?: boolean

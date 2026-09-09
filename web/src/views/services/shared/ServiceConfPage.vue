@@ -42,6 +42,7 @@
         </div>
       </div>
       <div v-if="desc && status.installed" class="desc">{{ desc }}</div>
+      <div v-if="details" class="desc details">{{ details }}</div>
     </el-card>
 
     <!-- 未安装引导 -->
@@ -243,6 +244,18 @@ const version = computed(() => {
 const engineName = computed(() =>
   status.value.engine === 'mariadb' ? 'MariaDB' : status.value.engine === 'mysql' ? 'MySQL' : '',
 )
+/**
+ * 安装信息明细（仅后端返回 dir 的服务展示，目前即 MySQL / MariaDB）：
+ * 安装目录 / 主配置 / systemd 单元 + 保存生效提示，与 PHP 实例页 desc 风格一致。
+ */
+const details = computed(() => {
+  const dir = status.value.dir
+  if (!dir || !status.value.installed) return ''
+  const parts = [`安装目录 ${dir}`]
+  if (status.value.conf_file) parts.push(`主配置 ${status.value.conf_file}`)
+  if (status.value.unit) parts.push(`systemd 单元 ${status.value.unit}`)
+  return `${parts.join('；')}。保存配置后请「重载 / 重启」服务生效。`
+})
 
 // ── 关键配置表单 ──────────────────────────────
 const visual = reactive<Record<string, string>>({})

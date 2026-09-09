@@ -1155,6 +1155,30 @@ fn db_engine(version: &str) -> Option<&'static str> {
     (!version.is_empty()).then_some("mysql")
 }
 
+/// MySQL / MariaDB 安装目录：引擎不同目录不同（`${APPS_DIR}/mysql-<ver>` 或
+/// `${APPS_DIR}/mariadb-<ver>`）。优先应用商店登记（info.yaml 的 install_dir），
+/// 兜底按实际二进制（/usr/local/mysql/bin/mysql 软链）回溯到安装目录。
+fn db_install_dir(bin: Option<&Path>) -> Option<PathBuf> {
+    for a in super::appstore::registered_apps() {
+        let inst = a.instance.as_str();
+        let is_db = inst == "mysql"
+            || inst.starts_with("mysql-")
+            || inst == "mariadb"
+            || inst.starts_with("mariadb-");
+        if is_db
+            && let Some(dir) = a.install_dir
+            && dir.is_dir()
+        {
+            return Some(dir);
+        }
+    }
+    let b = bin?.canonicalize().ok()?;
+    let dir = b.parent()?.parent()?;
+    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    (dir.is_dir() && (name.starts_with("mysql-") || name.starts_with("mariadb-")))
+        .then(|| dir.to_path_buf())
+}
+
 /// service_conf.status
 pub async fn status(svc: &str) -> Response {
     let svc = svc.to_string();
@@ -1182,6 +1206,11 @@ pub async fn status(svc: &str) -> Response {
             None => (None, None, false),
         };
         let engine = db_engine(&version);
+        let dir = engine
+            .is_some()
+            .then(|| db_install_dir(bin.as_deref()))
+            .flatten()
+            .map(|d| d.display().to_string());
         let running = service_running(d, &svc, bin.as_deref());
         let bin_path = bin.as_deref().map(|b| b.display().to_string());
         // 探测失败时把尝试过的候选路径一起回传，便于定位"没检测到配置文件"的原因
@@ -1199,6 +1228,7 @@ pub async fn status(svc: &str) -> Response {
                 "label": d.label,
                 "bin": bin_path,
                 "engine": engine,
+                "dir": dir,
                 "version": version,
                 "unit": unit,
                 "running": running,
