@@ -2,6 +2,11 @@ use sqlx::Executor;
 
 use super::get_db_pool;
 
+/// 建表与种子数据入口。
+///
+/// **约定（开发阶段）**：数据库通过 `--reset-db` 重建，因此这里**不做任何老库兼容迁移**
+/// —— 没有 `ALTER TABLE ... ADD COLUMN` 兜底、没有数据搬运、没有版本水位表。
+/// 改字段请直接改对应的 `CREATE TABLE`，然后重置数据库。
 pub async fn init_schema() {
     init_system_user_table_schema().await;
     init_system_monitor_table_schema().await;
@@ -21,9 +26,9 @@ pub async fn init_schema() {
     init_cron_jobs_table().await;
     // IP 池管理表
     init_ip_pool_table().await;
-    // 用户站点管理表（列定义见 init_site_table，开发期直接 reset-db，无需补列迁移）
+    // 用户站点管理表
     init_site_table().await;
-    // 站点扩展档案（类型/伪静态/upstream/location/自定义目录）；独立建表，老库无需补列迁移
+    // 站点扩展档案（类型/伪静态/upstream/location/自定义目录 + TLS 高级设置）
     init_site_profile_table().await;
     // PHP-FPM 规格模板表（user.fpm_spec_ref 已在 user 表中定义）
     init_fpm_spec_table().await;
@@ -33,18 +38,16 @@ pub async fn init_schema() {
     init_notice_message_table().await;
     // 全局运行环境状态表（scope=auto 自动探测快照 / scope=conf 面板默认配置）
     init_server_env_table().await;
-    // 老库升级：packages 补站点能力列，并把原「站点全局功能开关」平滑迁移为默认套餐字段
-    migrate_package_site_capabilities().await;
     // API Token 管理表
     init_api_token_table().await;
     // SSL/TLS 证书管理表
     init_ssl_cert_table().await;
     // 系统更新：自动更新配置表
     init_update_config_table().await;
-    // 菜单（menus/role_menus）为静态基础数据：SSL/TLS、应用商店（含已安装应用）、
-    // 服务器状态、脚本/自动化（自定义脚本+计划任务）、系统设置（含审计日志、
-    // Zap 设置、系统更新）、服务器配置、开发 —— 均由 init_menus_table /
-    // init_role_menus_table 一次 seed，开发期直接 reset-db，不再做运行时补插。
+    // 菜单（menus/role_menus）与角色权限（role_permissions）为静态基础数据：
+    // SSL/TLS、应用商店（含已安装应用）、服务器状态、脚本/自动化（自定义脚本+计划任务）、
+    // 系统设置（含审计日志、Zap 设置、系统更新）、服务器配置、开发 —— 一次 seed 到位，
+    // 不做运行时补插；重置数据库后回到初始状态。
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -152,38 +155,6 @@ async fn init_packages_table() {
     VALUES ('默认套餐', '不限磁盘、不限站点、不限域名、允许 SSH 终端（反向代理默认关闭，可在「编辑套餐」中开启；自定义目录已全量开放）', 0, 0, 0, '', 1, 0, 0, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-}
-
-/// 老库升级（幂等）：
-/// 1. packages 补 `allow_proxy` 列（旧版无该列）；
-/// 2. 移除 `allow_custom_dir` 列 ——「自定义目录」能力已并入全量开放；
-///    （SQLite < 3.35 不支持 DROP COLUMN，失败时保留列但业务代码不再读写，无碍）
-/// 3. 旧版「站点全局功能开关」（server_env scope='conf' 的 site.user_proxy /
-///    site.user_custom_dir）迁移：allow_proxy 同步给全部现有套餐后清理旧配置键。
-async fn migrate_package_site_capabilities() {
-    let pool = get_db_pool().await;
-    // 列已存在时 SQLite 报 duplicate column name，忽略即可（幂等）
-    let _ = pool
-        .execute("ALTER TABLE packages ADD COLUMN allow_proxy INTEGER NOT NULL DEFAULT 0")
-        .await;
-    // 移除已无业务意义的 allow_custom_dir 列
-    let _ = pool
-        .execute("ALTER TABLE packages DROP COLUMN allow_custom_dir")
-        .await;
-    // 旧全局开关 = 对所有普通用户统一放行 → 迁移时同步给全部现有套餐，
-    // 使升级后既有客户能力不变；此后管理员可按套餐差异化调整。
-    let _ = pool
-        .execute(
-            "UPDATE packages SET allow_proxy = 1 WHERE \
-             (SELECT v FROM server_env WHERE scope = 'conf' AND k = 'site.user_proxy') = '1'",
-        )
-        .await;
-    let _ = pool
-        .execute(
-            "DELETE FROM server_env WHERE scope = 'conf' \
-             AND k IN ('site.user_proxy', 'site.user_custom_dir')",
-        )
-        .await;
 }
 
 // ── monitor ────────────────────────────────────────────────
@@ -808,15 +779,6 @@ async fn init_site_profile_table() {
     );
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-    // 老库升级（幂等）：为存量 site_profile 补充 TLS 高级设置列；缺省行取默认值
-    for alter in [
-        "ALTER TABLE site_profile ADD COLUMN ssl_http2 INTEGER NOT NULL DEFAULT 1",
-        "ALTER TABLE site_profile ADD COLUMN ssl_prefer_server_ciphers INTEGER NOT NULL DEFAULT 1",
-        "ALTER TABLE site_profile ADD COLUMN ssl_protocols TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE site_profile ADD COLUMN ssl_ciphers TEXT NOT NULL DEFAULT ''",
-    ] {
-        let _ = get_db_pool().await.execute(alter).await;
-    }
 }
 
 // ── api_token（API Token 管理）──────────────────────────────
@@ -866,11 +828,6 @@ async fn init_ssl_cert_table() {
     CREATE INDEX IF NOT EXISTS idx_ssl_cert_user ON ssl_cert(user_id);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
-    // 老库升级（幂等）：为存量 ssl_cert 表补充归属列；历史证书 user_id = 0（系统级）
-    let _ = get_db_pool()
-        .await
-        .execute("ALTER TABLE ssl_cert ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")
-        .await;
 }
 
 // ── fpm_spec（PHP-FPM 规格模板库，仅 admin 维护）────────────────

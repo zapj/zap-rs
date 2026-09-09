@@ -51,6 +51,36 @@ pub struct CreateUserPayload {
     pub fpm_spec_ref: Option<String>,
     /// 套餐 id（0 / None = 不绑定套餐）
     pub package_id: Option<i64>,
+    /// 个人附加权限点（逗号分隔或数组；**只做加法**，在角色权限之外临时开小灶）
+    #[serde(default)]
+    pub permissions: Option<PermissionInput>,
+}
+
+/// 附加权限入参：兼容数组与逗号分隔字符串两种写法。
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum PermissionInput {
+    List(Vec<String>),
+    Csv(String),
+}
+
+impl PermissionInput {
+    /// 归一化并过滤非法权限点（只保留权限目录里存在的 key）。
+    fn normalize(&self) -> String {
+        let valid = crate::routers::access::all_perm_keys();
+        let raw: Vec<String> = match self {
+            PermissionInput::List(v) => v.clone(),
+            PermissionInput::Csv(s) => s.split(',').map(|x| x.to_string()).collect(),
+        };
+        let mut keys: Vec<String> = raw
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| valid.contains(s))
+            .collect();
+        keys.sort();
+        keys.dedup();
+        keys.join(",")
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,11 +99,29 @@ pub struct UpdateUserPayload {
     pub fpm_spec_ref: Option<String>,
     /// 套餐 id（0 = 解除套餐绑定）
     pub package_id: Option<i64>,
+    /// 个人附加权限点（不传 = 不改动；传空数组/空串 = 清空附加权限）
+    #[serde(default)]
+    pub permissions: Option<PermissionInput>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct DeleteUserPayload {
     pub id: i64,
+}
+
+/// 权限变更单独记一条审计：权限是敏感变更，需要能追溯「谁在什么时候给谁开了什么」。
+///
+/// `user_update` 只记一条笼统的 `user_update`，无法回答"附加权限被谁改过"，
+/// 因此附加权限变更额外落一条 `user_permissions_set`。
+async fn audit_permissions_set(claims: &jwt::Claims, ip: &str, uid: i64, keys: &str) {
+    audit::log(
+        Some(claims),
+        Some(ip),
+        "user_permissions_set",
+        &format!("id={uid}"),
+        keys,
+    )
+    .await;
 }
 
 /// Require admin role; return error if not admin
@@ -515,6 +563,13 @@ pub async fn user_add(
         .unwrap_or_else(|| "/home".to_string());
     let home_dir = format!("{home_root}/{lu}");
 
+    // 附加权限：预先归一化（只保留权限目录内合法 key），供写入与审计共用
+    let granted_perms = payload
+        .permissions
+        .as_ref()
+        .map(|p| p.normalize())
+        .unwrap_or_default();
+
     let result = sqlx::query(
         "INSERT INTO user (username, home_dir, linux_user, fpm_pool, fpm_spec_ref, password, email, phone, nickname, roles, permissions, owner_id, package_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
     )
@@ -528,7 +583,7 @@ pub async fn user_add(
     .bind(phone)
     .bind(&nickname)
     .bind(&roles)
-    .bind("")
+    .bind(&granted_perms)
     .bind(owner_id)
     .bind(package_id)
     .bind(now)
@@ -546,6 +601,17 @@ pub async fn user_add(
                 &format!("username={}", payload.username),
             )
             .await;
+            // 建号即带附加权限 → 单独审计 + 权限缓存立即失效
+            if payload.permissions.is_some() {
+                crate::routers::access::invalidate_user_perm_cache();
+                audit_permissions_set(
+                    &claims,
+                    client_addr.ip().to_string().as_str(),
+                    r.last_insert_rowid(),
+                    &granted_perms,
+                )
+                .await;
+            }
             info!(
                 "User created: {} (id: {})",
                 payload.username,
@@ -674,7 +740,8 @@ pub async fn user_update(
         || payload.password.is_some()
         || payload.fpm_pool.is_some()
         || payload.fpm_spec_ref.is_some()
-        || payload.package_id.is_some();
+        || payload.package_id.is_some()
+        || payload.permissions.is_some();
 
     if !has_any_field {
         return Err(ZapError::New(-1, "没有需要更新的字段".to_string()));
@@ -704,6 +771,11 @@ pub async fn user_update(
     }
     if let Some(ref roles) = payload.roles {
         separated.push("roles = ").push_bind_unseparated(roles);
+    }
+    if let Some(ref perms) = payload.permissions {
+        separated
+            .push("permissions = ")
+            .push_bind_unseparated(perms.normalize());
     }
     if let Some(status) = payload.status {
         separated.push("status = ").push_bind_unseparated(status);
@@ -770,6 +842,18 @@ pub async fn user_update(
         "",
     )
     .await;
+
+    // 附加权限变更：单独审计 + 权限缓存立即失效
+    if let Some(ref perms) = payload.permissions {
+        crate::routers::access::invalidate_user_perm_cache();
+        audit_permissions_set(
+            &claims,
+            client_addr.ip().to_string().as_str(),
+            payload.id,
+            &perms.normalize(),
+        )
+        .await;
+    }
 
     // 套餐变更 → 重新下发磁盘配额（best-effort）
     if payload.package_id.is_some() {
@@ -869,6 +953,8 @@ pub async fn user_delete(
             }
         }
     }
+
+    crate::routers::access::invalidate_user_perm_cache();
 
     audit::log(
         Some(&claims),

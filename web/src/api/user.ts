@@ -89,6 +89,8 @@ export interface CreateUserPayload {
   fpm_spec_ref?: string
   /** 套餐 id；0 / 缺省 = 不绑定套餐（不继承套餐限制） */
   package_id?: number
+  /** 个人附加权限点：在角色权限之外单独授予（只做加法，admin） */
+  permissions?: string[]
 }
 
 /** 新增用户（返回 id / 家目录 / Linux 账号） */
@@ -116,6 +118,8 @@ export interface UpdateUserPayload {
   fpm_spec_ref?: string
   /** 套餐 id；0 = 解除套餐绑定（变更后会重新下发磁盘配额） */
   package_id?: number
+  /** 个人附加权限点；传空数组 = 清空附加权限（admin） */
+  permissions?: string[]
 }
 
 /** 更新用户结果（首次改密成功后返回 must_relogin） */

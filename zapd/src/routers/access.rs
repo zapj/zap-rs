@@ -65,97 +65,541 @@ impl Required {
     }
 }
 
-/// 权限矩阵：`(路径前缀, 所需角色下限, 动作级权限命名空间)`。
+/// 权限点声明：命名空间 + 动作。
 ///
-/// - 第三列为 `None` 表示只受角色下限约束（个人接口，无运营配置项）；
-/// - 为 `Some(ns)` 时，请求还需通过 `{ns}:view` / `{ns}:edit` 权限点校验。
+/// - `Perm::module(ns)`：动作由 HTTP 方法派生（GET/HEAD → `view`，其余 → `edit`）；
+/// - `Perm::action(ns, act)`：固定动作，忽略方法。用于
+///   · 语义明确的写操作（`site:delete`、`ssl:create`）
+///   · 用 GET 做状态变更的历史端点（`/system/job/start` → `system.job:edit`）
+///   · POST 但只读的端点（`/ssl/cert/parse`、`/site/dirs` → `view`）
+#[derive(Debug, Clone, Copy)]
+pub struct Perm {
+    pub ns: &'static str,
+    pub action: Option<&'static str>,
+}
+
+impl Perm {
+    const fn module(ns: &'static str) -> Self {
+        Self { ns, action: None }
+    }
+    const fn action(ns: &'static str, action: &'static str) -> Self {
+        Self {
+            ns,
+            action: Some(action),
+        }
+    }
+}
+
+/// 权限矩阵：`(路径前缀, 所需角色下限, 权限点声明)`。
 ///
-/// admin-only 的条目即使与默认值相同也显式列出：它们同时是权限点的登记处，
-/// 漏登记等于该接口绕过权限点校验（仅剩角色下限）。
-const RULES: &[(&str, Required, Option<&str>)] = &[
+/// - 第三列 `None` 表示只受角色下限约束（个人接口，无运营配置项）；
+/// - admin-only 的条目即使与默认值相同也显式列出：它们同时是权限点的登记处，
+///   漏登记等于该接口绕过权限点校验（仅剩角色下限）。
+///
+/// 拆到动作级后**不再给模块留兜底条目**（如没有裸 `/site` 规则）：
+/// 新增接口必须显式登记，否则落到默认 `Admin` 下限（fail-closed）。
+const RULES: &[(&str, Required, Option<Perm>)] = &[
     // ── 免鉴权 ───────────────────────────────────────────────
     ("/health", Required::Public, None),
     ("/auth/login", Required::Public, None),
     // ── 登录态即可访问的个人接口 ─────────────────────────────
     ("/auth", Required::User, None),
     ("/user", Required::User, None),
-    // 菜单树：所有角色渲染侧边栏都要读
-    ("/system/menus/tree", Required::User, Some("system.menu")),
-    // 文件管理：handler 内已把非管理员限制在自己的 home 与私有 tmp
-    ("/system/files", Required::User, Some("system.file")),
-    // 仪表盘：普通用户首页（cpanel 视图）会读取 /system/info
-    ("/system/info", Required::User, Some("system.monitor")),
-    ("/system/status", Required::Admin, Some("system.monitor")),
-    ("/system/overview", Required::Admin, Some("system.monitor")),
-    // ── reseller 可管理名下客户 ──────────────────────────────
-    ("/system/user", Required::Reseller, Some("system.user")),
+    // ── 站点：view / create / update / delete / state / sync ──
     (
-        "/system/user/resellers",
-        Required::Admin,
-        Some("system.user"),
+        "/site/list",
+        Required::User,
+        Some(Perm::action("site", "view")),
     ),
     (
-        "/system/user/home_sync",
-        Required::Admin,
-        Some("system.user"),
-    ),
-    (
-        "/system/package",
+        "/site/users",
         Required::Reseller,
-        Some("system.package"),
+        Some(Perm::action("site", "view")),
     ),
     (
-        "/system/fpm-specs/list",
-        Required::Reseller,
-        Some("system.fpm_spec"),
+        "/site/feature",
+        Required::User,
+        Some(Perm::action("site", "view")),
     ),
-    ("/site/users", Required::Reseller, Some("site")),
-    ("/site/sync_all", Required::Reseller, Some("site")),
-    // ── 业务对象：handler 按 owner / reseller 归属收敛可见范围 ─
-    ("/site", Required::User, Some("site")),
-    ("/ssl", Required::User, Some("ssl")),
-    ("/terminal", Required::User, Some("terminal")),
-    // ── 应用商店：源码与脚本管理仅管理员，其余按 handler 内规则 ─
+    // POST 但只做目录浏览，按读取授权
+    (
+        "/site/dirs",
+        Required::User,
+        Some(Perm::action("site", "view")),
+    ),
+    (
+        "/site/add",
+        Required::User,
+        Some(Perm::action("site", "create")),
+    ),
+    (
+        "/site/update",
+        Required::User,
+        Some(Perm::action("site", "update")),
+    ),
+    (
+        "/site/delete",
+        Required::User,
+        Some(Perm::action("site", "delete")),
+    ),
+    (
+        "/site/state",
+        Required::User,
+        Some(Perm::action("site", "state")),
+    ),
+    (
+        "/site/sync",
+        Required::User,
+        Some(Perm::action("site", "sync")),
+    ),
+    (
+        "/site/sync_all",
+        Required::Reseller,
+        Some(Perm::action("site", "sync")),
+    ),
+    // ── SSL 证书：view / create / update / delete ────────────
+    (
+        "/ssl/cert/list",
+        Required::User,
+        Some(Perm::action("ssl", "view")),
+    ),
+    (
+        "/ssl/cert/detail",
+        Required::User,
+        Some(Perm::action("ssl", "view")),
+    ),
+    // POST 但只解析证书内容，按读取授权
+    (
+        "/ssl/cert/parse",
+        Required::User,
+        Some(Perm::action("ssl", "view")),
+    ),
+    (
+        "/ssl/cert/add",
+        Required::User,
+        Some(Perm::action("ssl", "create")),
+    ),
+    (
+        "/ssl/cert/self-sign",
+        Required::User,
+        Some(Perm::action("ssl", "create")),
+    ),
+    (
+        "/ssl/cert/letsencrypt",
+        Required::User,
+        Some(Perm::action("ssl", "create")),
+    ),
+    (
+        "/ssl/cert/update",
+        Required::User,
+        Some(Perm::action("ssl", "update")),
+    ),
+    (
+        "/ssl/cert/delete",
+        Required::User,
+        Some(Perm::action("ssl", "delete")),
+    ),
+    // ── 文件管理：view / write / delete（handler 内按 home 收敛）──
+    (
+        "/system/files/list",
+        Required::User,
+        Some(Perm::action("system.file", "view")),
+    ),
+    (
+        "/system/files/read",
+        Required::User,
+        Some(Perm::action("system.file", "view")),
+    ),
+    (
+        "/system/files/download",
+        Required::User,
+        Some(Perm::action("system.file", "view")),
+    ),
+    (
+        "/system/files/info",
+        Required::User,
+        Some(Perm::action("system.file", "view")),
+    ),
+    (
+        "/system/files/write",
+        Required::User,
+        Some(Perm::action("system.file", "write")),
+    ),
+    (
+        "/system/files/mkdir",
+        Required::User,
+        Some(Perm::action("system.file", "write")),
+    ),
+    (
+        "/system/files/upload",
+        Required::User,
+        Some(Perm::action("system.file", "write")),
+    ),
+    (
+        "/system/files/rename",
+        Required::User,
+        Some(Perm::action("system.file", "write")),
+    ),
+    (
+        "/system/files/delete",
+        Required::User,
+        Some(Perm::action("system.file", "delete")),
+    ),
+    // ── 应用商店：view / install / uninstall / upgrade / manage / log / retry ──
+    (
+        "/appstore/install",
+        Required::User,
+        Some(Perm::action("appstore", "install")),
+    ),
+    (
+        "/appstore/uninstall",
+        Required::User,
+        Some(Perm::action("appstore", "uninstall")),
+    ),
+    (
+        "/appstore/upgrade",
+        Required::User,
+        Some(Perm::action("appstore", "upgrade")),
+    ),
+    (
+        "/appstore/instance",
+        Required::User,
+        Some(Perm::action("appstore", "manage")),
+    ),
+    (
+        "/appstore/runs",
+        Required::User,
+        Some(Perm::action("appstore", "log")),
+    ),
+    (
+        "/appstore/log",
+        Required::User,
+        Some(Perm::action("appstore", "log")),
+    ),
+    (
+        "/appstore/ws",
+        Required::User,
+        Some(Perm::action("appstore", "log")),
+    ),
+    (
+        "/appstore/run/files",
+        Required::User,
+        Some(Perm::action("appstore", "log")),
+    ),
+    (
+        "/appstore/run/file/read",
+        Required::User,
+        Some(Perm::action("appstore", "log")),
+    ),
+    (
+        "/appstore/run/file/write",
+        Required::Admin,
+        Some(Perm::action("appstore", "retry")),
+    ),
+    (
+        "/appstore/run/retry",
+        Required::Admin,
+        Some(Perm::action("appstore", "retry")),
+    ),
     (
         "/appstore/repos/add",
         Required::Admin,
-        Some("appstore.repo"),
+        Some(Perm::action("appstore.repo", "create")),
     ),
     (
         "/appstore/repos/remove",
         Required::Admin,
-        Some("appstore.repo"),
+        Some(Perm::action("appstore.repo", "delete")),
     ),
     (
         "/appstore/repos/update",
         Required::Admin,
-        Some("appstore.repo"),
+        Some(Perm::action("appstore.repo", "update")),
     ),
-    ("/appstore/script", Required::Admin, Some("appstore.script")),
     (
         "/appstore/scripts/tree",
         Required::Admin,
-        Some("appstore.script"),
+        Some(Perm::action("appstore.script", "view")),
     ),
-    ("/appstore", Required::User, Some("appstore")),
-    // ── 其余 admin-only 接口：显式登记权限点 ─────────────────
-    ("/system/config", Required::Admin, Some("system.config")),
-    ("/system/nginx", Required::Admin, Some("service.nginx")),
+    (
+        "/appstore/script/read",
+        Required::Admin,
+        Some(Perm::action("appstore.script", "view")),
+    ),
+    (
+        "/appstore/script/write",
+        Required::Admin,
+        Some(Perm::action("appstore.script", "write")),
+    ),
+    (
+        "/appstore/script/run",
+        Required::Admin,
+        Some(Perm::action("appstore.script", "run")),
+    ),
+    (
+        "/appstore/script/stop",
+        Required::Admin,
+        Some(Perm::action("appstore.script", "run")),
+    ),
+    (
+        "/appstore/packages",
+        Required::User,
+        Some(Perm::action("appstore", "view")),
+    ),
+    (
+        "/appstore/installed",
+        Required::User,
+        Some(Perm::action("appstore", "view")),
+    ),
+    (
+        "/appstore/repos",
+        Required::User,
+        Some(Perm::action("appstore", "view")),
+    ),
+    // ── 用户 / 角色 / 菜单 / IP：增删改查拆开 ────────────────
+    (
+        "/system/user/list",
+        Required::Reseller,
+        Some(Perm::action("system.user", "view")),
+    ),
+    (
+        "/system/user/resellers",
+        Required::Admin,
+        Some(Perm::action("system.user", "view")),
+    ),
+    (
+        "/system/user/add",
+        Required::Reseller,
+        Some(Perm::action("system.user", "create")),
+    ),
+    (
+        "/system/user/update",
+        Required::Reseller,
+        Some(Perm::action("system.user", "update")),
+    ),
+    (
+        "/system/user/delete",
+        Required::Reseller,
+        Some(Perm::action("system.user", "delete")),
+    ),
+    (
+        "/system/user/home_sync",
+        Required::Admin,
+        Some(Perm::action("system.user", "sync")),
+    ),
+    (
+        "/system/role/list",
+        Required::Admin,
+        Some(Perm::action("system.role", "view")),
+    ),
+    (
+        "/system/role/permissions",
+        Required::Admin,
+        Some(Perm::action("system.role", "view")),
+    ),
+    (
+        "/system/role/add",
+        Required::Admin,
+        Some(Perm::action("system.role", "create")),
+    ),
+    (
+        "/system/role/update",
+        Required::Admin,
+        Some(Perm::action("system.role", "update")),
+    ),
+    (
+        "/system/role/delete",
+        Required::Admin,
+        Some(Perm::action("system.role", "delete")),
+    ),
+    (
+        "/system/menus/tree",
+        Required::User,
+        Some(Perm::action("system.menu", "view")),
+    ),
+    (
+        "/system/menus/list",
+        Required::Admin,
+        Some(Perm::action("system.menu", "view")),
+    ),
+    (
+        "/system/menus/add",
+        Required::Admin,
+        Some(Perm::action("system.menu", "create")),
+    ),
+    (
+        "/system/menus/update",
+        Required::Admin,
+        Some(Perm::action("system.menu", "update")),
+    ),
+    (
+        "/system/menus/status",
+        Required::Admin,
+        Some(Perm::action("system.menu", "update")),
+    ),
+    (
+        "/system/menus/delete",
+        Required::Admin,
+        Some(Perm::action("system.menu", "delete")),
+    ),
+    (
+        "/system/ip/list",
+        Required::Admin,
+        Some(Perm::action("system.ip", "view")),
+    ),
+    (
+        "/system/ip/add",
+        Required::Admin,
+        Some(Perm::action("system.ip", "create")),
+    ),
+    (
+        "/system/ip/update",
+        Required::Admin,
+        Some(Perm::action("system.ip", "update")),
+    ),
+    (
+        "/system/ip/batch-reserved",
+        Required::Admin,
+        Some(Perm::action("system.ip", "update")),
+    ),
+    (
+        "/system/ip/delete",
+        Required::Admin,
+        Some(Perm::action("system.ip", "delete")),
+    ),
+    // ── 开发者接口（API Token）───────────────────────────────
+    (
+        "/dev/api-token/list",
+        Required::Admin,
+        Some(Perm::action("dev", "view")),
+    ),
+    (
+        "/dev/api-docs",
+        Required::Admin,
+        Some(Perm::action("dev", "view")),
+    ),
+    (
+        "/dev/api-token/create",
+        Required::Admin,
+        Some(Perm::action("dev", "create")),
+    ),
+    (
+        "/dev/api-token/update",
+        Required::Admin,
+        Some(Perm::action("dev", "update")),
+    ),
+    (
+        "/dev/api-token/delete",
+        Required::Admin,
+        Some(Perm::action("dev", "delete")),
+    ),
+    // ── 服务器配置：view / edit + 高危动作单独拆出 ───────────
+    (
+        "/system/config/services/action",
+        Required::Admin,
+        Some(Perm::action("system.config", "service")),
+    ),
+    (
+        "/system/config/processes/kill",
+        Required::Admin,
+        Some(Perm::action("system.config", "process")),
+    ),
+    (
+        "/system/config/ssh/restart",
+        Required::Admin,
+        Some(Perm::action("system.config", "ssh")),
+    ),
+    (
+        "/system/config/ssh/install",
+        Required::Admin,
+        Some(Perm::action("system.config", "ssh")),
+    ),
+    (
+        "/system/config/firewall",
+        Required::Admin,
+        Some(Perm::action("system.config", "firewall")),
+    ),
+    (
+        "/system/config",
+        Required::Admin,
+        Some(Perm::module("system.config")),
+    ),
+    // ── 只读监控 / 审计 ──────────────────────────────────────
+    (
+        "/system/info",
+        Required::User,
+        Some(Perm::action("system.monitor", "view")),
+    ),
+    (
+        "/system/status",
+        Required::Admin,
+        Some(Perm::action("system.monitor", "view")),
+    ),
+    (
+        "/system/overview",
+        Required::Admin,
+        Some(Perm::action("system.monitor", "view")),
+    ),
+    (
+        "/system/audit",
+        Required::Admin,
+        Some(Perm::action("system.audit", "view")),
+    ),
+    // ── 全局任务：GET 做状态变更，显式标记 edit ──────────────
+    (
+        "/system/job",
+        Required::Admin,
+        Some(Perm::action("system.job", "edit")),
+    ),
+    // ── 终端与密钥：路径含动态 id，按方法派生 view / edit ────
+    ("/terminal", Required::User, Some(Perm::module("terminal"))),
+    // ── 其余 admin-only 模块：按方法派生 view / edit ─────────
+    (
+        "/system/nginx",
+        Required::Admin,
+        Some(Perm::module("service.nginx")),
+    ),
     (
         "/system/service-conf",
         Required::Admin,
-        Some("service.conf"),
+        Some(Perm::module("service.conf")),
     ),
-    ("/system/ip", Required::Admin, Some("system.ip")),
-    ("/system/role", Required::Admin, Some("system.role")),
-    ("/system/menus", Required::Admin, Some("system.menu")),
-    ("/system/audit", Required::Admin, Some("system.audit")),
-    ("/system/update", Required::Admin, Some("system.update")),
-    ("/system/migrate", Required::Admin, Some("system.migrate")),
-    ("/system/env", Required::Admin, Some("system.env")),
-    ("/system/cron", Required::Admin, Some("system.cron")),
-    ("/system/job", Required::Admin, Some("system.job")),
-    ("/dev", Required::Admin, Some("dev")),
+    (
+        "/system/package",
+        Required::Reseller,
+        Some(Perm::module("system.package")),
+    ),
+    // 规格模板：reseller 可读（自己名下 + 全局模板），写入仅 admin
+    (
+        "/system/fpm-specs/list",
+        Required::Reseller,
+        Some(Perm::module("system.fpm_spec")),
+    ),
+    (
+        "/system/fpm-specs",
+        Required::Admin,
+        Some(Perm::module("system.fpm_spec")),
+    ),
+    (
+        "/system/update",
+        Required::Admin,
+        Some(Perm::module("system.update")),
+    ),
+    (
+        "/system/migrate",
+        Required::Admin,
+        Some(Perm::module("system.migrate")),
+    ),
+    (
+        "/system/env",
+        Required::Admin,
+        Some(Perm::module("system.env")),
+    ),
+    (
+        "/system/cron",
+        Required::Admin,
+        Some(Perm::module("system.cron")),
+    ),
 ];
 
 /// 权限点命名空间的中文名（用于角色权限配置页与权限目录接口）。
@@ -185,6 +629,38 @@ const NS_LABELS: &[(&str, &str)] = &[
     ("appstore.script", "自定义脚本"),
     ("dev", "开发者接口"),
 ];
+
+/// 动作的中文名（角色权限配置页展示）。
+const ACTION_LABELS: &[(&str, &str)] = &[
+    ("view", "查看"),
+    ("edit", "编辑"),
+    ("create", "创建"),
+    ("update", "修改"),
+    ("delete", "删除"),
+    ("write", "写入"),
+    ("sync", "同步"),
+    ("state", "启停/维护"),
+    ("install", "安装"),
+    ("uninstall", "卸载"),
+    ("upgrade", "升级"),
+    ("manage", "实例管理"),
+    ("log", "运行日志"),
+    ("retry", "重跑"),
+    ("run", "执行"),
+    ("service", "服务启停"),
+    ("process", "进程管理"),
+    ("ssh", "SSH 服务"),
+    ("firewall", "防火墙"),
+];
+
+/// 未知动作用原样兜底（新增动作忘了登记中文名时，界面至少能看清是什么）。
+fn action_label(action: &str) -> String {
+    ACTION_LABELS
+        .iter()
+        .find(|(k, _)| *k == action)
+        .map(|(_, l)| (*l).to_string())
+        .unwrap_or_else(|| action.to_string())
+}
 
 /// 剥离 URL 前缀（`server.url_prefix`）与 `/api`，得到与 `RULES` 对齐的路径。
 ///
@@ -227,17 +703,17 @@ fn prefix_hit(path: &str, prefix: &str) -> bool {
 }
 
 /// 查询路径的命中项：最长前缀命中；未命中 → `(Admin, None)`（默认拒绝）。
-fn lookup(path: &str) -> (Required, Option<&'static str>) {
-    let mut best: Option<(usize, Required, Option<&'static str>)> = None;
-    for (prefix, req, ns) in RULES {
+fn lookup(path: &str) -> (Required, Option<Perm>) {
+    let mut best: Option<(usize, Required, Option<Perm>)> = None;
+    for (prefix, req, perm) in RULES {
         if !prefix_hit(path, prefix) {
             continue;
         }
         if best.is_none_or(|(len, _, _)| prefix.len() > len) {
-            best = Some((prefix.len(), *req, *ns));
+            best = Some((prefix.len(), *req, *perm));
         }
     }
-    best.map(|(_, r, ns)| (r, ns))
+    best.map(|(_, r, perm)| (r, perm))
         .unwrap_or((Required::Admin, None))
 }
 
@@ -246,62 +722,81 @@ fn required_for(path: &str) -> Required {
     lookup(path).0
 }
 
-/// 请求实际需要的权限点：`{ns}:view`（GET/HEAD）或 `{ns}:edit`（其余方法）。
+/// 请求实际需要的权限点：`{ns}:{action}`。
 ///
+/// 动作来源：规则显式指定，或按 HTTP 方法派生（GET/HEAD → `view`，其余 → `edit`）。
 /// 未登记权限点的接口返回 `None`，此时只有角色下限生效（如 `/user/*`、`/auth/*`）。
 pub fn perm_key_for(path: &str, method: &Method) -> Option<String> {
-    let ns = lookup(path).1?;
-    let action = if method == Method::GET || method == Method::HEAD {
-        "view"
-    } else {
-        "edit"
+    let perm = lookup(path).1?;
+    let action = match perm.action {
+        Some(a) => a,
+        None if method == Method::GET || method == Method::HEAD => "view",
+        None => "edit",
     };
-    Some(format!("{ns}:{action}"))
+    Some(format!("{}:{action}", perm.ns))
 }
 
-/// 权限目录项：一个命名空间 = 一个可勾选的模块，含 view / edit 两个动作。
+/// 权限目录项：一个命名空间 = 一个可勾选的模块，含其全部动作。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PermGroup {
     pub ns: &'static str,
     pub label: &'static str,
-    /// 该模块的动作列表：`[view, edit]`
+    /// 该模块的动作列表（如 `view` / `create` / `update` / `delete`）
     pub actions: Vec<PermAction>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PermAction {
     pub key: String,
-    pub label: &'static str,
+    pub label: String,
 }
 
 /// 权限目录（角色权限配置页的数据源）：去重自 `RULES`，顺序与矩阵一致。
+///
+/// 动作集合 = 规则里显式声明的动作 ∪ （若存在按方法派生的规则，则加 view / edit）。
 pub fn permission_catalog() -> Vec<PermGroup> {
     let mut out: Vec<PermGroup> = Vec::new();
-    for (_, _, ns_opt) in RULES {
-        let Some(ns) = ns_opt else { continue };
-        let ns: &'static str = ns;
-        if out.iter().any(|g| g.ns == ns) {
-            continue;
-        }
-        let label = NS_LABELS
-            .iter()
-            .find(|(k, _)| *k == ns)
-            .map(|(_, l)| *l)
-            .unwrap_or(ns);
-        out.push(PermGroup {
-            ns,
-            label,
-            actions: vec![
-                PermAction {
+    for (_, _, perm_opt) in RULES {
+        let Some(perm) = perm_opt else { continue };
+        let ns: &'static str = perm.ns;
+        let group = match out.iter_mut().find(|g| g.ns == ns) {
+            Some(g) => g,
+            None => {
+                let label = NS_LABELS
+                    .iter()
+                    .find(|(k, _)| *k == ns)
+                    .map(|(_, l)| *l)
+                    .unwrap_or(ns);
+                out.push(PermGroup {
+                    ns,
+                    label,
+                    actions: Vec::new(),
+                });
+                out.last_mut().unwrap()
+            }
+        };
+        match perm.action {
+            Some(a) => group.actions.push(PermAction {
+                key: format!("{ns}:{a}"),
+                label: action_label(a),
+            }),
+            None => {
+                group.actions.push(PermAction {
                     key: format!("{ns}:view"),
-                    label: "查看",
-                },
-                PermAction {
+                    label: action_label("view"),
+                });
+                group.actions.push(PermAction {
                     key: format!("{ns}:edit"),
-                    label: "操作",
-                },
-            ],
-        });
+                    label: action_label("edit"),
+                });
+            }
+        }
+    }
+
+    // 去重（同一动作可能由多条规则声明）
+    for g in &mut out {
+        let mut seen: HashSet<String> = HashSet::new();
+        g.actions.retain(|a| seen.insert(a.key.clone()));
     }
     out
 }
@@ -314,43 +809,41 @@ pub fn all_perm_keys() -> HashSet<String> {
         .collect()
 }
 
-/// 命名空间的最低角色下限（同 ns 多条规则取最宽松的一条，代表"该模块对谁开放"）。
-fn ns_min_required(ns: &str) -> Required {
-    let mut min = Required::Admin;
-    for (_, req, rns) in RULES {
-        if *rns == Some(ns) && rank(*req) < rank(min) {
-            min = *req;
-        }
-    }
-    min
-}
-
-fn rank(r: Required) -> u8 {
-    match r {
-        Required::Public => 0,
-        Required::User => 1,
-        Required::Reseller => 2,
-        Required::Admin => 3,
-    }
-}
-
-/// 内置角色的默认权限点：由权限矩阵推导，保证「升级前后行为一致」。
+/// 内置角色的默认权限点：**逐条规则**推导，保证「升级前后行为一致」。
 ///
+/// 规则：角色能满足该条规则的角色下限，就获得这条规则对应的权限点。
 /// - admin：全部（且运行时恒直通，避免配置失误把自己锁死）
-/// - reseller：开放给 User 与 Reseller 的模块
-/// - 其它内置角色（user / demo）：仅开放给 User 的模块
+/// - reseller：下限为 User / Reseller 的规则
+/// - 其它内置角色（user / demo）：仅下限为 User 的规则
+///
+/// 逐条推导（而非按模块整包）可以避免给普通用户塞入用不上的动作：
+/// 例如 `appstore:retry` 对应的是 admin-only 规则，普通用户不该出现在他的清单里。
 pub fn default_permissions_for(role_key: &str) -> Vec<String> {
     let is_admin = role_key == "admin";
     let is_reseller = role_key == "reseller";
-    permission_catalog()
-        .into_iter()
-        .filter(|g| {
-            is_admin
-                || ns_min_required(g.ns) == Required::User
-                || (is_reseller && ns_min_required(g.ns) == Required::Reseller)
-        })
-        .flat_map(|g| g.actions.into_iter().map(|a| a.key))
-        .collect()
+
+    let mut set: HashSet<String> = HashSet::new();
+    for (_, req, perm_opt) in RULES {
+        let Some(perm) = perm_opt else { continue };
+        let reachable =
+            is_admin || *req == Required::User || (is_reseller && *req == Required::Reseller);
+        if !reachable {
+            continue;
+        }
+        match perm.action {
+            Some(a) => {
+                set.insert(format!("{}:{a}", perm.ns));
+            }
+            None => {
+                set.insert(format!("{}:view", perm.ns));
+                set.insert(format!("{}:edit", perm.ns));
+            }
+        }
+    }
+
+    let mut out: Vec<String> = set.into_iter().collect();
+    out.sort();
+    out
 }
 
 // ── 角色权限缓存 ───────────────────────────────────────────
@@ -428,6 +921,65 @@ pub async fn permissions_of_roles(roles: &str) -> Vec<String> {
     let mut out: Vec<String> = set.into_iter().collect();
     out.sort();
     out
+}
+
+// ── 个人附加权限缓存 ───────────────────────────────────────
+
+/// `user.id → 附加权限点集合`（取自 `user.permissions`，逗号分隔）。
+type UserPermMap = HashMap<i64, HashSet<String>>;
+static USER_PERM_CACHE: OnceLock<RwLock<Option<Arc<UserPermMap>>>> = OnceLock::new();
+
+fn user_cache_slot() -> &'static RwLock<Option<Arc<UserPermMap>>> {
+    USER_PERM_CACHE.get_or_init(|| RwLock::new(None))
+}
+
+/// 用户新增 / 修改 / 删除后调用。
+pub fn invalidate_user_perm_cache() {
+    if let Ok(mut guard) = user_cache_slot().write() {
+        *guard = None;
+    }
+}
+
+async fn load_user_perm_map() -> UserPermMap {
+    let Some(pool) = crate::db::get_db_pool_opt().await else {
+        return UserPermMap::new();
+    };
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, permissions FROM user WHERE permissions IS NOT NULL AND permissions != ''",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut map = UserPermMap::new();
+    for (uid, perms) in rows {
+        let set = map.entry(uid).or_default();
+        for p in perms.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            set.insert(p.to_string());
+        }
+    }
+    map
+}
+
+pub async fn user_perm_map() -> Arc<UserPermMap> {
+    if let Ok(guard) = user_cache_slot().read()
+        && let Some(cached) = guard.as_ref()
+    {
+        return cached.clone();
+    }
+    let map = Arc::new(load_user_perm_map().await);
+    if let Ok(mut guard) = user_cache_slot().write() {
+        *guard = Some(map.clone());
+    }
+    map
+}
+
+/// 个人附加权限命中。
+///
+/// 语义：**只做加法**——给某个用户临时开小灶（如让某个 reseller 单独能改服务器配置）。
+/// 它不能用来"收回"角色已授予的权限，因此角色依然是权限的主体来源。
+pub fn user_has_perm(map: &UserPermMap, uid: u64, key: &str) -> bool {
+    map.get(&(uid as i64)).is_some_and(|set| set.contains(key))
 }
 
 /// 用户（其任一角色）是否持有该权限点。
@@ -511,19 +1063,23 @@ pub async fn guard(req: Request, next: Next) -> Result<Response, Response> {
         ));
     }
 
-    // 第二层：动作级权限点（`role_permissions`）。admin 恒直通，避免配置失误锁死内置管理员。
-    if let Some(key) = perm_key_for(&path, &method)
-        && !jwt::is_admin(&claims)
-        && !role_has_perm(perm_map().await.as_ref(), &claims, &key)
+    // 第二层：动作级权限点。admin 恒直通，避免配置失误锁死内置管理员。
+    if !jwt::is_admin(&claims)
+        && let Some(key) = perm_key_for(&path, &method)
     {
-        warn!(
-            "permission denied: user={} path={} required={}",
-            claims.sub, path, key
-        );
-        return Err(deny(
-            StatusCode::FORBIDDEN,
-            &format!("权限不足，需要权限点：{key}"),
-        ));
+        // 角色授予 ∪ 个人附加权限（附加权限只做加法）
+        let allowed = role_has_perm(perm_map().await.as_ref(), &claims, &key)
+            || user_has_perm(user_perm_map().await.as_ref(), claims.id, &key);
+        if !allowed {
+            warn!(
+                "permission denied: user={} path={} required={}",
+                claims.sub, path, key
+            );
+            return Err(deny(
+                StatusCode::FORBIDDEN,
+                &format!("权限不足，需要权限点：{key}"),
+            ));
+        }
     }
 
     Ok(next.run(req).await)
@@ -548,6 +1104,7 @@ mod tests {
             .route("/appstore/ws/{run_id}", get(|| async { "ok" }))
             .route("/site/list", get(|| async { "ok" }))
             .route("/site/add", post(|| async { "ok" }))
+            .route("/site/delete", post(|| async { "ok" }))
             .layer(middleware::from_fn(guard))
     }
 
@@ -568,7 +1125,11 @@ mod tests {
     }
 
     fn token(roles: &str) -> String {
-        jwt::generate_jwt_token("tester".to_string(), 9, roles, false).unwrap()
+        token_with(9, roles)
+    }
+
+    fn token_with(uid: u64, roles: &str) -> String {
+        jwt::generate_jwt_token("tester".to_string(), uid, roles, false).unwrap()
     }
 
     /// 预置权限缓存（测试进程内共享；内容固定，重复写入等价，不会互相干扰）。
@@ -576,7 +1137,7 @@ mod tests {
         let mut map = PermMap::new();
         map.insert(
             "user".to_string(),
-            ["site:view", "site:edit", "appstore:view"]
+            ["site:view", "site:create", "appstore:log"]
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
@@ -588,8 +1149,13 @@ mod tests {
                 .map(|s| s.to_string())
                 .collect(),
         );
+        // uid=100 是"个人附加权限"用例：角色没有任何权限，仅靠附加权限放行
+        let mut users = UserPermMap::new();
+        users.insert(100, ["site:delete"].iter().map(|s| s.to_string()).collect());
+
         // 固定内容，直接覆盖：保证并发测试读到的是同一份数据
         *cache_slot().write().unwrap() = Some(Arc::new(map));
+        *user_cache_slot().write().unwrap() = Some(Arc::new(users));
     }
 
     #[tokio::test]
@@ -610,13 +1176,30 @@ mod tests {
             StatusCode::FORBIDDEN
         );
 
-        // 写操作按 :edit 校验：user 有 edit，reseller 只有 view
+        // 写操作按具体动作校验：user 有 site:create，reseller 只有 site:view
         assert_eq!(
             send(Method::POST, "/site/add", Some(&user)).await,
             StatusCode::OK
         );
         assert_eq!(
             send(Method::POST, "/site/add", Some(&reseller)).await,
+            StatusCode::FORBIDDEN
+        );
+        // 同一模块的不同动作互不影响：有 create 不等于有 delete
+        assert_eq!(
+            send(Method::POST, "/site/delete", Some(&user)).await,
+            StatusCode::FORBIDDEN
+        );
+
+        // 个人附加权限：demo 角色本身无任何权限，靠 user.permissions 单独放行
+        let granted = token_with(100, "demo");
+        assert_eq!(
+            send(Method::POST, "/site/delete", Some(&granted)).await,
+            StatusCode::OK
+        );
+        // 附加权限只覆盖已授予的那一个动作
+        assert_eq!(
+            send(Method::POST, "/site/add", Some(&granted)).await,
             StatusCode::FORBIDDEN
         );
     }
@@ -769,18 +1352,63 @@ mod tests {
     }
 
     #[test]
-    fn perm_key_splits_view_and_edit() {
+    fn perm_key_maps_to_action() {
+        // 站点：读 / 建 / 改 / 删 / 启停 / 同步 各自独立
         assert_eq!(
             perm_key_for("/site/list", &Method::GET).as_deref(),
             Some("site:view")
         );
         assert_eq!(
             perm_key_for("/site/add", &Method::POST).as_deref(),
-            Some("site:edit")
+            Some("site:create")
         );
         assert_eq!(
-            perm_key_for("/site/delete", &Method::DELETE).as_deref(),
-            Some("site:edit")
+            perm_key_for("/site/update", &Method::POST).as_deref(),
+            Some("site:update")
+        );
+        assert_eq!(
+            perm_key_for("/site/delete", &Method::POST).as_deref(),
+            Some("site:delete")
+        );
+        assert_eq!(
+            perm_key_for("/site/state", &Method::POST).as_deref(),
+            Some("site:state")
+        );
+        assert_eq!(
+            perm_key_for("/site/sync_all", &Method::POST).as_deref(),
+            Some("site:sync")
+        );
+        // POST 但只读的端点按 view 授权
+        assert_eq!(
+            perm_key_for("/ssl/cert/parse", &Method::POST).as_deref(),
+            Some("ssl:view")
+        );
+        assert_eq!(
+            perm_key_for("/site/dirs", &Method::POST).as_deref(),
+            Some("site:view")
+        );
+        // GET 但会改系统状态的端点显式声明为 edit
+        assert_eq!(
+            perm_key_for("/system/job/start", &Method::GET).as_deref(),
+            Some("system.job:edit")
+        );
+        // 高危动作从 edit 中拆出
+        assert_eq!(
+            perm_key_for("/system/config/processes/kill", &Method::POST).as_deref(),
+            Some("system.config:process")
+        );
+        assert_eq!(
+            perm_key_for("/system/config/ssh/restart", &Method::POST).as_deref(),
+            Some("system.config:ssh")
+        );
+        // 未拆动作的模块仍按方法派生
+        assert_eq!(
+            perm_key_for("/system/cron/list", &Method::GET).as_deref(),
+            Some("system.cron:view")
+        );
+        assert_eq!(
+            perm_key_for("/system/cron/add", &Method::POST).as_deref(),
+            Some("system.cron:edit")
         );
         // 个人接口不设权限点
         assert_eq!(perm_key_for("/user/info", &Method::GET), None);
@@ -798,12 +1426,17 @@ mod tests {
         assert!(admin.contains(&"system.config:edit".to_string()));
         assert_eq!(admin.len(), all_perm_keys().len());
 
-        // 普通用户：站点/文件/商店可用，服务器配置不可用
+        // 普通用户：站点全部动作 / 文件 / 商店可用，服务器配置不可用
         assert!(user.contains(&"site:view".to_string()));
+        assert!(user.contains(&"site:create".to_string()));
+        assert!(user.contains(&"site:delete".to_string()));
         assert!(user.contains(&"system.file:view".to_string()));
         assert!(!user.contains(&"system.config:view".to_string()));
         assert!(!user.contains(&"system.user:view".to_string()));
         assert_eq!(user, demo);
+        // admin-only 动作不会出现在普通用户清单里（逐条规则推导，而非整包授予）
+        assert!(!user.contains(&"appstore:retry".to_string()));
+        assert!(!user.contains(&"system.menu:create".to_string()));
 
         // reseller：在普通用户之上追加用户/套餐管理
         assert!(reseller.contains(&"site:view".to_string()));
@@ -815,17 +1448,31 @@ mod tests {
     #[test]
     fn catalog_covers_all_namespaces() {
         let groups = permission_catalog();
-        assert!(
-            groups
-                .iter()
-                .any(|g| g.ns == "site" && g.label == "站点管理")
-        );
+        let site = groups
+            .iter()
+            .find(|g| g.ns == "site")
+            .expect("缺少 site 模块");
+        assert_eq!(site.label, "站点管理");
+        // 站点已拆到动作级
+        let keys: Vec<&str> = site.actions.iter().map(|a| a.key.as_str()).collect();
+        for k in [
+            "site:view",
+            "site:create",
+            "site:update",
+            "site:delete",
+            "site:state",
+            "site:sync",
+        ] {
+            assert!(keys.contains(&k), "site 缺少动作 {k}");
+        }
         assert!(groups.iter().any(|g| g.ns == "system.config"));
-        // 每个模块含 view / edit 两个动作
+        // 动作 key 唯一且都带中文名
+        let mut seen: HashSet<String> = HashSet::new();
         for g in &groups {
-            assert_eq!(g.actions.len(), 2);
-            assert!(g.actions.iter().any(|a| a.key.ends_with(":view")));
-            assert!(g.actions.iter().any(|a| a.key.ends_with(":edit")));
+            for a in &g.actions {
+                assert!(seen.insert(a.key.clone()), "重复动作 {}", a.key);
+                assert!(!a.label.is_empty());
+            }
         }
     }
 

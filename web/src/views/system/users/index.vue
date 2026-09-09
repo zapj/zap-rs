@@ -144,6 +144,28 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="isAdmin" label="附加权限">
+          <el-select
+            v-model="form.permissions"
+            multiple
+            filterable
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="在角色权限之外单独授予（可选）"
+            style="width: 100%"
+          >
+            <el-option-group v-for="g in permCatalog" :key="g.ns" :label="g.label">
+              <el-option
+                v-for="a in g.actions"
+                :key="a.key"
+                :label="`${g.label} · ${a.label}`"
+                :value="a.key"
+              />
+            </el-option-group>
+          </el-select>
+          <div class="form-tip">只做加法：不能收回角色已授予的权限，建议仅用于临时授权</div>
+        </el-form-item>
         <el-form-item v-if="isAdmin && dialogType === 'add'" label="归属">
           <el-select v-model="form.owner_id" @change="onOwnerChange">
             <el-option label="系统直属" :value="0" />
@@ -246,6 +268,10 @@ import { roleLabel, ROLE_OPTIONS } from '@/utils/role'
 import { useUserStore } from '@/stores/user'
 import { getFpmSpecs, type FpmSpecItem } from '@/api/serverEnv'
 import { getPackageList, type PackageItem } from '@/api/package'
+import { getPermissionCatalog, type PermGroupItem } from '@/api/role'
+
+/** 权限点目录：附加权限下拉用（admin 才加载） */
+const permCatalog = ref<PermGroupItem[]>([])
 
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
@@ -479,6 +505,8 @@ interface FormData {
   fpm_pool: string
   /** 套餐 id；0 = 不绑定套餐 */
   package_id: number
+  /** 个人附加权限点：在角色权限之外单独授予（只做加法） */
+  permissions: string[]
 }
 
 const defaultForm = (): FormData => ({
@@ -491,6 +519,7 @@ const defaultForm = (): FormData => ({
   status: 1,
   fpm_pool: '',
   package_id: 0,
+  permissions: [],
 })
 
 const form = reactive<FormData>(defaultForm())
@@ -533,6 +562,7 @@ function handleEdit(row: UserListItem) {
     status: row.status,
     fpm_pool: row.fpm_pool ?? '',
     package_id: row.package_id ?? 0,
+    permissions: (row.permissions ?? []).filter(Boolean),
   })
   fpmMode.value = fpmEditInitial(row)
   fpmCustomJson.value =
@@ -584,6 +614,7 @@ async function submitForm() {
       if (isAdmin.value) {
         payload.roles = form.roles
         payload.owner_id = form.owner_id || 0
+        payload.permissions = form.permissions
       }
       payload.package_id = form.package_id || 0
       if (fpmPayload.fpm_spec_ref !== undefined) {
@@ -602,7 +633,10 @@ async function submitForm() {
         nickname: form.nickname,
         status: form.status,
       }
-      if (isAdmin.value) payload.roles = form.roles
+      if (isAdmin.value) {
+        payload.roles = form.roles
+        payload.permissions = form.permissions
+      }
       payload.package_id = form.package_id || 0
       if (fpmPayload.fpm_spec_ref !== undefined) {
         payload.fpm_spec_ref = fpmPayload.fpm_spec_ref
@@ -667,11 +701,20 @@ function fmtTime(ts: number) {
   return new Date(ts * 1000).toLocaleString('zh-CN')
 }
 
+async function loadPermCatalog() {
+  if (!isAdmin.value || permCatalog.value.length) return
+  try {
+    const res = await getPermissionCatalog()
+    permCatalog.value = res.data?.groups ?? []
+  } catch { /* handled by interceptor */ }
+}
+
 onMounted(() => {
   loadList()
   loadResellers()
   loadSpecs()
   loadPackages()
+  loadPermCatalog()
 })
 </script>
 
