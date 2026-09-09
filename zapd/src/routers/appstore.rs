@@ -871,8 +871,10 @@ pub struct RunsQuery {
     pub page_size: Option<i64>,
 }
 
-pub async fn runs(_claims: ValidatedClaims, Query(q): Query<RunsQuery>) -> ZapJsonResult {
-    let (rows, total) = ast::list_runs(q.page.unwrap_or(1), q.page_size.unwrap_or(20)).await?;
+pub async fn runs(claims: ValidatedClaims, Query(q): Query<RunsQuery>) -> ZapJsonResult {
+    // 运行日志按归属用户隔离：非管理员只看得到自己（reseller 含名下客户）的记录
+    let (rows, total) =
+        ast::list_runs_for(&claims, q.page.unwrap_or(1), q.page_size.unwrap_or(20)).await?;
     let items: Vec<Value> = rows
         .iter()
         .map(|r| {
@@ -900,13 +902,12 @@ pub struct LogQuery {
 }
 
 pub async fn log(
-    _claims: ValidatedClaims,
+    claims: ValidatedClaims,
     Path(run_id): Path<String>,
     Query(q): Query<LogQuery>,
 ) -> ZapJsonResult {
-    let run = ast::get_run(&run_id)
-        .await?
-        .ok_or_else(|| ZapError::New(-1, "任务不存在".to_string()))?;
+    // 归属校验：越权读取他人安装日志一律拒绝
+    let run = ast::ensure_run_access(&claims, &run_id).await?;
     let (content, exit_code, done) = ast::read_log(&run.log_path, q.offset.unwrap_or(0)).await?;
     Ok(Json(json!({
         "code": 0,
@@ -922,29 +923,35 @@ pub async fn ws_log(
     Path(run_id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let token = match params.get("token") {
-        Some(t) => t.clone(),
-        None => {
-            return axum::response::Response::builder()
-                .status(StatusCode::UNAUTHORIZED)
-                .body(axum::body::Body::from("Missing token"))
-                .unwrap();
-        }
+    let Some(token) = params.get("token").cloned() else {
+        return unauthorized("Missing token");
     };
-    let secure_key = &config::get_config().read().unwrap().jwt.jwt_secure;
-    if decode::<Claims>(
+    // 克隆密钥后立即释放锁：RwLockReadGuard 非 Send，跨 await 会让 handler future 非 Send
+    let secure_key = config::get_config().read().unwrap().jwt.jwt_secure.clone();
+    let claims = match decode::<Claims>(
         &token,
-        &DecodingKey::from_secret(secure_key.as_ref()),
+        &DecodingKey::from_secret(secure_key.as_bytes()),
         &Validation::default(),
-    )
-    .is_err()
-    {
+    ) {
+        Ok(data) => data.claims,
+        Err(_) => return unauthorized("Invalid token"),
+    };
+    // 归属校验：实时日志同样按归属用户隔离，不能凭 run_id 串看他人安装输出
+    if let Err(e) = ast::ensure_run_access(&claims, &run_id).await {
         return axum::response::Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .body(axum::body::Body::from("Invalid token"))
+            .status(StatusCode::FORBIDDEN)
+            .body(axum::body::Body::from(e.to_string()))
             .unwrap();
     }
     ws.on_upgrade(move |socket| handle_ws_log(socket, run_id))
+}
+
+/// WebSocket 握手失败的统一响应（升级前返回，前端表现为连接失败）。
+fn unauthorized(message: &str) -> axum::response::Response {
+    axum::response::Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .body(axum::body::Body::from(message.to_string()))
+        .unwrap()
 }
 
 // ── 已安装应用（实例管理）───────────────────────────────────

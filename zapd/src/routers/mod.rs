@@ -39,6 +39,7 @@ async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Respo
     Ok(next.run(req).await)
 }
 
+pub mod access;
 pub mod appstore;
 pub mod auth;
 pub mod dev;
@@ -577,7 +578,10 @@ fn api_routers() -> Router {
         .route("/dev/api-token/update", post(dev::api_token_update))
         .route("/dev/api-token/delete", post(dev::api_token_delete))
         .route("/dev/api-docs", get(dev::api_docs))
+        // 统一角色门禁（最后添加的 layer 最外层、最先执行）：
+        // 路径 → 所需角色见 `access::RULES`，未登记的接口默认要求 admin。
         .layer(middleware::from_fn(demo_readonly_guard))
+        .layer(middleware::from_fn(access::guard))
 }
 
 #[cfg(test)]
@@ -652,6 +656,51 @@ mod tests {
             status_of(build_routers("a/b"), "/a/b/api/health").await,
             StatusCode::OK
         );
+    }
+
+    /// 真实路由必须被 `access::guard` 覆盖：
+    /// 无凭据 → 401，普通用户 → 403（而非落到 handler 返回 400/200）。
+    #[tokio::test]
+    async fn api_routes_are_role_guarded() {
+        let app = build_routers("");
+
+        async fn call_with(app: &Router, uri: &str, token: Option<&str>) -> StatusCode {
+            let mut req = axum::http::Request::builder().uri(uri);
+            if let Some(t) = token {
+                req = req.header(header::AUTHORIZATION, format!("Bearer {t}"));
+            }
+            let res = app
+                .clone()
+                .oneshot(req.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            res.status()
+        }
+
+        let user = crate::zap::jwt::generate_jwt_token("tester".to_string(), 9, "user", false)
+            .expect("生成测试 token 失败");
+
+        // 原先完全无门禁的系统配置端点
+        for path in [
+            "/api/system/config/time",
+            "/api/system/config/ssh/restart",
+            "/api/system/config/processes/kill",
+            "/api/system/job/start",
+        ] {
+            assert_eq!(
+                call_with(&app, path, None).await,
+                StatusCode::UNAUTHORIZED,
+                "{path} 未登录应拒绝"
+            );
+            assert_eq!(
+                call_with(&app, path, Some(&user)).await,
+                StatusCode::FORBIDDEN,
+                "{path} 普通用户应拒绝"
+            );
+        }
+
+        // 免鉴权接口不受影响
+        assert_eq!(call_with(&app, "/api/health", None).await, StatusCode::OK);
     }
 
     #[test]

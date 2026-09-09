@@ -1,6 +1,7 @@
 [package]
 name = "zapupgrade"
 version.workspace = true
+license.workspace = true
 edition = "2024"
 description = "ZAP 系统升级器：校验/备份/原子替换/重启 zapd 与 zapexec（一次性进程，root 运行）"
 

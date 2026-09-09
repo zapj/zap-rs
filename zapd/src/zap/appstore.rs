@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-use crate::{config, db, zap::ZapError};
+use crate::{
+    config, db,
+    zap::{ZapError, jwt},
+};
 
 /// 日志结束标记：`__ZAP_DONE__ <exit_code>`（zapexec 写入）
 pub const DONE_MARKER: &str = "__ZAP_DONE__";
@@ -126,6 +129,128 @@ pub async fn list_runs(page: i64, page_size: i64) -> Result<(Vec<AppstoreRun>, i
     .fetch_all(pool)
     .await?;
     Ok((rows, total))
+}
+
+// ── 运行记录归属 / 可见性 ─────────────────────────────────
+
+/// 运行日志含脚本输出、绝对路径、配置片段甚至凭据回显，必须按归属用户隔离：
+/// admin → 全部；reseller → 自己 + 名下客户；普通用户 → 仅自己。
+///
+/// 越权一律返回错误，且**不区分"任务不存在"与"无权访问"以外的细节**。
+pub async fn ensure_run_access(
+    claims: &jwt::Claims,
+    run_id: &str,
+) -> Result<AppstoreRun, ZapError> {
+    let run = get_run(run_id)
+        .await?
+        .ok_or_else(|| ZapError::New(-1, "任务不存在".to_string()))?;
+    if !run_user_visible(claims, &run.username).await? {
+        return Err(ZapError::New(
+            -1,
+            "无权访问该任务：运行日志按归属用户隔离".to_string(),
+        ));
+    }
+    Ok(run)
+}
+
+/// `username` 是否落在 claims 的可见范围内（与站点 / 证书归属同一套规则）。
+async fn run_user_visible(claims: &jwt::Claims, username: &str) -> Result<bool, ZapError> {
+    if jwt::is_admin(claims) {
+        return Ok(true);
+    }
+    if username == claims.sub {
+        return Ok(true);
+    }
+    if jwt::is_reseller(claims) {
+        let pool = db::get_db_pool().await;
+        let (cnt,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM user WHERE username = ? AND owner_id = ?")
+                .bind(username)
+                .bind(claims.id as i64)
+                .fetch_one(pool)
+                .await?;
+        return Ok(cnt > 0);
+    }
+    Ok(false)
+}
+
+/// 按可见范围分页列出运行记录：非管理员只看得到自己（reseller 含名下客户）的记录。
+pub async fn list_runs_for(
+    claims: &jwt::Claims,
+    page: i64,
+    page_size: i64,
+) -> Result<(Vec<AppstoreRun>, i64), sqlx::Error> {
+    if jwt::is_admin(claims) {
+        return list_runs(page, page_size).await;
+    }
+
+    let pool = db::get_db_pool().await;
+    let page = page.max(1);
+    let page_size = page_size.clamp(1, 100);
+    let offset = (page - 1) * page_size;
+
+    if jwt::is_reseller(claims) {
+        let scope = "username = ? OR username IN (SELECT username FROM user WHERE owner_id = ?)";
+        let (total,): (i64,) =
+            sqlx::query_as(&format!("SELECT COUNT(*) FROM appstore_runs WHERE {scope}"))
+                .bind(&claims.sub)
+                .bind(claims.id as i64)
+                .fetch_one(pool)
+                .await?;
+        let rows = sqlx::query_as::<_, AppstoreRun>(&format!(
+            "SELECT * FROM appstore_runs WHERE {scope} ORDER BY id DESC LIMIT ? OFFSET ?"
+        ))
+        .bind(&claims.sub)
+        .bind(claims.id as i64)
+        .bind(page_size)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
+        return Ok((rows, total));
+    }
+
+    let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM appstore_runs WHERE username = ?")
+        .bind(&claims.sub)
+        .fetch_one(pool)
+        .await?;
+    let rows = sqlx::query_as::<_, AppstoreRun>(
+        "SELECT * FROM appstore_runs WHERE username = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+    )
+    .bind(&claims.sub)
+    .bind(page_size)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    Ok((rows, total))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn claims(sub: &str, roles: &str) -> jwt::Claims {
+        jwt::Claims {
+            id: 1,
+            iat: 0,
+            sub: sub.to_string(),
+            iss: "Zap".to_string(),
+            exp: u64::MAX,
+            roles: roles.to_string(),
+            pwd_is_default: false,
+        }
+    }
+
+    /// 不依赖数据库的可见性分支：admin 全部 / 本人 / 其他用户拒绝。
+    /// （reseller 分支需查 `user.owner_id`，由集成环境覆盖。）
+    #[tokio::test]
+    async fn run_visibility_rules() {
+        let admin = claims("admin", "admin");
+        let alice = claims("alice", "user");
+
+        assert!(run_user_visible(&admin, "alice").await.unwrap());
+        assert!(run_user_visible(&alice, "alice").await.unwrap());
+        assert!(!run_user_visible(&alice, "bob").await.unwrap());
+    }
 }
 
 /// 后台监控日志直到出现 `__ZAP_DONE__ <code>`，随后更新运行状态。
