@@ -1,4 +1,5 @@
 mod appstore;
+mod cred;
 mod env;
 mod file;
 mod firewall;
@@ -315,6 +316,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::ServiceConfDefault { service, enable } => {
             service_conf::set_default(&service, enable).await
         }
+        Request::CredRead { service, user } => cred::read(&service, &user).await,
     }
 }
 

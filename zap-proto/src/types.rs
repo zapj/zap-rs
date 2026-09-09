@@ -630,6 +630,11 @@ pub enum Request {
     /// 通用服务配置·设置 / 取消某实例的「全局默认访问」（注册到 /usr/local/bin）
     #[serde(rename = "service_conf.default")]
     ServiceConfDefault { service: String, enable: bool },
+    /// 读取已加密保存的服务凭据（由 `zapctl cred gen <服务> <用户>` 生成）。
+    /// zapexec 以 root 读取 `/etc/zap/credentials/{service}_{user}.cred` 并用面板主密钥解密，
+    /// 用于创建数据库 / 初始化服务时取回密码。仅回传明文，不做任何写操作。
+    #[serde(rename = "cred.read")]
+    CredRead { service: String, user: String },
 }
 
 /// `zapexec` -> `zapd` 的响应。

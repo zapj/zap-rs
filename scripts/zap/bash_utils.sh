@@ -15,7 +15,8 @@
 #   * 若未运行在 root 下,请自行调用 assert_root 做前置校验。
 #
 # 函数清单:
-#   assert_root ensure_dir ensure_user log_info/log_ok/log_warn/log_error
+#   assert_root ensure_dir ensure_user ensure_group ensure_usergroup
+#   log_info/log_ok/log_warn/log_error
 #   os_detect is_os normalize_arch cpu_count
 #   fetch_file download_file http_fetch download_extract extract_archive
 #   MakeInstall version_compare version_ge version_lt version_gt
@@ -61,10 +62,102 @@ ensure_dir() {
   done
 }
 
+# ── 用户 / 组 ─────────────────────────────────────────────────────────────
+# 组是否存在(优先 getent,缺失时回退解析 /etc/group,兼容 Alpine/BusyBox)
+_group_exists() {
+  local g="${1:-}"
+  [ -n "$g" ] || return 1
+  if command -v getent >/dev/null 2>&1; then
+    getent group "${g}" >/dev/null 2>&1
+  else
+    grep -q "^${g}:" /etc/group 2>/dev/null
+  fi
+}
+
+# 用户是否已属于某组(附加组 / 主组均算)
+_user_in_group() {
+  local u="${1:-}" g="${2:-}"
+  [ -n "$u" ] && [ -n "$g" ] || return 1
+  id -nG "${u}" 2>/dev/null | tr ' ' '\n' | grep -qx "${g}"
+}
+
+# 确保运行组存在(系统组);已存在直接成功
+# 用法: ensure_group <group>
+ensure_group() {
+  local group="${1:-}"
+  if [ -z "$group" ]; then
+    log_error "ensure_group: 缺少组名"
+    return 1
+  fi
+  if _group_exists "${group}"; then
+    return 0
+  fi
+  if command -v groupadd >/dev/null 2>&1; then
+    # -r 系统组;个别发行版不支持时退回普通组
+    groupadd -r "${group}" >/dev/null 2>&1 \
+      || groupadd "${group}" >/dev/null 2>&1 \
+      || { log_error "创建组 ${group} 失败(groupadd)"; return 1; }
+  elif command -v addgroup >/dev/null 2>&1; then
+    addgroup -S "${group}" >/dev/null 2>&1 \
+      || addgroup "${group}" >/dev/null 2>&1 \
+      || { log_error "创建组 ${group} 失败(addgroup)"; return 1; }
+  else
+    log_error "系统缺少 groupadd/addgroup,无法创建组 ${group}"
+    return 1
+  fi
+  log_ok "已创建运行组: ${group}"
+}
+
+# 确保用户属于指定组:组不存在先创建,已是成员则跳过(幂等)
+# 用法: ensure_usergroup <user> <group> [group2 ...]
+ensure_usergroup() {
+  local user="${1:-}" group
+  if [ -z "$user" ]; then
+    log_error "ensure_usergroup: 缺少用户名"
+    return 1
+  fi
+  shift
+  if [ "$#" -eq 0 ]; then
+    log_error "ensure_usergroup: 至少需要一个组名(用法: ensure_usergroup <user> <group> [group2 ...])"
+    return 1
+  fi
+  # 用户必须已存在:请先 ensure_user,避免拼错用户名被静默创建
+  if ! id "${user}" >/dev/null 2>&1; then
+    log_error "ensure_usergroup: 用户 ${user} 不存在(请先调用 ensure_user)"
+    return 1
+  fi
+
+  for group in "$@"; do
+    [ -n "$group" ] || continue
+    ensure_group "${group}" || return 1
+    if _user_in_group "${user}" "${group}"; then
+      continue
+    fi
+    if command -v usermod >/dev/null 2>&1; then
+      # -aG 追加附加组,不动主组
+      usermod -aG "${group}" "${user}" >/dev/null 2>&1 \
+        || { log_error "将用户 ${user} 加入组 ${group} 失败(usermod)"; return 1; }
+    elif command -v addgroup >/dev/null 2>&1; then
+      addgroup "${user}" "${group}" >/dev/null 2>&1 \
+        || { log_error "将用户 ${user} 加入组 ${group} 失败(addgroup)"; return 1; }
+    else
+      log_error "系统缺少 usermod/addgroup,无法将用户 ${user} 加入组 ${group}"
+      return 1
+    fi
+    log_ok "已将用户 ${user} 加入组: ${group}"
+  done
+}
+
 # 创建运行用户(默认 www);已存在直接成功;无 useradd 时退回 adduser(Alpine)
+# 可选附加组: ensure_user www www / ensure_user php-fpm www zap
+#   —— 组不存在会自动创建,用户会被加进去(用户已存在时也会补齐附加组)
 ensure_user() {
   local user="${1:-www}"
+  [ "$#" -gt 0 ] && shift
   if id "${user}" >/dev/null 2>&1; then
+    if [ "$#" -gt 0 ]; then
+      ensure_usergroup "${user}" "$@" || return 1
+    fi
     return 0
   fi
   if command -v useradd >/dev/null 2>&1; then
@@ -79,6 +172,9 @@ ensure_user() {
     return 1
   fi
   log_ok "已创建运行用户: ${user}"
+  if [ "$#" -gt 0 ]; then
+    ensure_usergroup "${user}" "$@" || return 1
+  fi
 }
 
 # ── 系统 / 架构探测 ───────────────────────────────────────────────────────
@@ -141,17 +237,19 @@ cpu_count() {
 
 # ── 下载 ──────────────────────────────────────────────────────────────────
 # 私有下载器:curl 优先,回退 wget;自动重试;成功返回 0
+# 进度输出:curl --progress-bar / wget --show-progress 强制在非 TTY(日志文件)下
+# 也以 `\r` 刷新同一行进度,面板日志(xterm 渲染)中表现为一条实时进度条。
 fetch_file() {
   # fetch_file <url> <dest> [重试次数,默认3]
   local url="$1" dest="$2" retries="${3:-3}" i=0
   if command -v curl >/dev/null 2>&1; then
     while [ "$i" -lt "$retries" ]; do
-      if curl -fsSL --connect-timeout 15 -4 -o "$dest" "$url"; then return 0; fi
+      if curl -fL --progress-bar --connect-timeout 15 -4 -o "$dest" "$url"; then return 0; fi
       i=$((i + 1)); [ "$i" -lt "$retries" ] && sleep 1
     done
   elif command -v wget >/dev/null 2>&1; then
     while [ "$i" -lt "$retries" ]; do
-      if wget -q -4 --timeout=60 --tries=2 -O "$dest" "$url"; then return 0; fi
+      if wget -q --show-progress -4 --timeout=60 --tries=2 -O "$dest" "$url"; then return 0; fi
       i=$((i + 1)); [ "$i" -lt "$retries" ] && sleep 1
     done
   else
@@ -345,7 +443,8 @@ install_system_deps() {
 # ── preInstallation(兼容旧接口):用户 + 目录 + 首次系统依赖 ────────────────
 # 说明:系统依赖仅在首次(无 preinstall.lock)时安装;www 用户与关键目录每次保证
 preInstallation() {
-  ensure_user www || return 1
+  # www 用户 + www 组(组缺省已随 useradd 建同名组,这里保证跨发行版/历史环境一致)
+  ensure_user www www || return 1
 
   ensure_dir "${PKG_PATH:-/tmp/pkg}" "${BUILD_PATH:-/tmp/build}" "${ZAP_DATA_PATH:-/tmp}/tmp" \
     || log_warn "部分运行目录创建失败(PKG_PATH/BUILD_PATH 由执行器确保)"

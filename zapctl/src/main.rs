@@ -8,6 +8,7 @@
 
 mod backup;
 mod config;
+mod cred;
 mod user;
 
 use std::collections::HashMap;
@@ -108,6 +109,11 @@ enum Command {
         /// 用户名
         username: String,
     },
+    /// 密码生成与服务凭据（加密存储于 /etc/zap/credentials，权限 0400）
+    Cred {
+        #[command(subcommand)]
+        cmd: cred::CredCommand,
+    },
     /// 查看 / 新增 / 修改 / 删除配置文件（zap.yaml）键值（不带子命令时等价于 `config get`，打印全部配置）
     Config {
         /// 目标配置文件（默认：ZAP_CONFIG > /etc/zap/zap.yaml > conf/zap.yaml）
@@ -168,6 +174,7 @@ fn main() {
         Command::Backup { cmd } => backup::dispatch(cmd, &db_path),
         Command::User { cmd } => user::dispatch(cmd, &db_path),
         Command::Passwd { username } => user::cmd_self_passwd(&db_path, &username),
+        Command::Cred { cmd } => cred::dispatch(cmd),
         Command::Config { file, cmd } => {
             // 缺省子命令时等价于 `config get`（打印整个配置文件）
             let cmd = cmd.unwrap_or(config::ConfigCommand::Get { key: None });

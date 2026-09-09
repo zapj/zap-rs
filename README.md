@@ -150,7 +150,28 @@ zapctl logs                                  # 查看运行日志
 zapctl backup | restore                      # 备份与还原
 zapctl user add|list|passwd                  # 面板用户管理
 zapctl config get|set <key>                  # 读写 zap.yaml
+zapctl cred gen [service] [user]             # 生成密码：无参数仅打印；带参加密存入凭据库
+zapctl cred set <service> <user> [password]  # 录入服务侧既有密码（缺省经 stdin）；存在则覆盖
+zapctl cred show|exists|ls|rm <service> <user>  # 凭据读取 / 判断 / 列表 / 删除
 ```
+
+#### 服务凭据（密码加密存储）
+
+应用安装产生的服务密码（如 MySQL 的 `root` / `zapadm`）统一由 `zapctl cred` 托管：
+
+```bash
+zapctl cred gen mysql root        # 生成并加密保存 → /etc/zap/credentials/mysql_root.cred
+zapctl cred gen mysql zapadm
+zapctl cred show mysql root       # 解密输出（root，脚本可直接取值）
+zapctl cred set mysql root '<现有密码>'   # 录入服务侧已有密码（如管理员手动建库 / 改密后同步）
+zapctl cred ls                    # 列出已保存凭据
+```
+
+- 凭据目录 `/etc/zap/credentials`（目录 `0700`、文件 `0400`，仅 root 可读写）；
+- 内容为单行 AES-256-GCM 密文（`v1:nonce:cipher`），密钥复用面板主密钥 `/etc/zap/secret.key`；
+- `zapd` / `zapexec` / `zapctl` 共用同一把密钥，可互通解密 —— 安装脚本通过 `zapctl cred show` 取回密码，`zapexec` 提供 `cred.read` 动词供面板调用；
+- 卸载对应应用时（`uninstall.sh`）会一并删除其凭据；
+- `zapctl backup zap` 归档内含主密钥 `secret.key` 与凭据目录，支持整机迁移；还原时以归档密钥覆盖本机密钥（还原前自动备份当前状态，可回滚）。
 
 ### 本地开发
 

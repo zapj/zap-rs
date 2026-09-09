@@ -11,7 +11,7 @@ mod verbs;
 use server::ClientIdentity;
 
 #[derive(Parser)]
-#[command(name = "zapexec", about = "ZAP 特权执行守护进程（以 root 运行）")]
+#[command(name = "zapexec", about = "ZAP Executor Daemon (run as root)")]
 struct Cli {
     /// zapd <-> zapexec 的 Unix socket 路径
     #[clap(long, env = "ZAP_EXEC_SOCKET", default_value = "/run/zap/exec.sock")]

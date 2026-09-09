@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["zapd","zapctl","zap-proto","zapexec","zapupgrade"]
+members = ["zapd","zapctl","zap-proto","zapexec","zapupgrade","zap-crypto"]
 
 [workspace.package]
 version = "1.0.3"

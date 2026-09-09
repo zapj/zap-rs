@@ -4248,6 +4248,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-crypto"
+version = "1.0.3"
+dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
+ "getrandom 0.2.16",
+ "once_cell",
+]
+
+[[package]]
 name = "zap-proto"
 version = "1.0.3"
 dependencies = [
@@ -4275,6 +4285,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "zap-crypto",
 ]
 
 [[package]]
@@ -4331,6 +4342,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "x509-parser",
+ "zap-crypto",
  "zap-proto",
 ]
 
@@ -4347,6 +4359,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zap-crypto",
  "zap-proto",
 ]
 

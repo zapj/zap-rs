@@ -1,7 +1,8 @@
 //! `zapctl backup` 子命令：备份 / 还原 / 管理 zap 数据。
 //!
 //! 备份产物为 tar.gz 归档（仅 root 可读，0600），默认目录 `/usr/local/zap/backup`（`--path` 覆盖）：
-//! - `backup zap`          → `zap-backup-<时间戳>.tar.gz`，内含 zap.db（VACUUM INTO 一致性快照）与 zap.yaml
+//! - `backup zap`          → `zap-backup-<时间戳>.tar.gz`，内含 zap.db（VACUUM INTO 一致性快照）、zap.yaml、
+//!                            主密钥 secret.key 与凭据目录 credentials/（随库携带，换机/迁移还原后加密数据仍可解密）
 //! - `backup user <用户>`  → `user-<用户名>-<时间戳>.tar.gz`，内含 user.json（user 表记录）与 home/（家目录）
 //! - `backup users`        → `users-<时间戳>.tar.gz`，全部用户归档于 users/<用户名>/ 下
 //! - `backup restore <归档>` → 按归档内容自动识别类型并还原（还原前自动备份当前状态，必要时自动停/启服务）
@@ -23,13 +24,17 @@ pub const DEFAULT_BACKUP_DIR: &str = "/usr/local/zap/backup";
 
 const DB_FILE: &str = "zap.db";
 const CONFIG_FILE: &str = "zap.yaml";
+/// 归档内主密钥文件名（顶层，对应生产路径 /etc/zap/secret.key）
+const KEY_FILE: &str = "secret.key";
+/// 归档内凭据目录名（顶层，对应 /etc/zap/credentials 的整目录拷贝）
+const CRED_DIR_ARCHIVE: &str = "credentials";
 
 const UNIT_ZAPD: &str = "zapd.service";
 const UNIT_ZAPEXEC: &str = "zapexec.service";
 
 #[derive(Subcommand)]
 pub enum BackupCommand {
-    /// 备份 zap：数据库一致性快照 + 配置文件 zap.yaml
+    /// 备份 zap：数据库一致性快照 + zap.yaml + 主密钥 secret.key 与凭据 credentials/
     Zap {
         /// 备份输出目录（默认 /usr/local/zap/backup）
         #[arg(long)]
@@ -391,7 +396,7 @@ fn backup_zap(db_path: &str, output: Option<&str>) -> Result<(), String> {
     if !Path::new(db_path).exists() {
         return Err(format!("数据库不存在: {db_path}"));
     }
-    info("备份 zap 数据库与配置 ...");
+    info("备份 zap 数据库、配置、主密钥与凭据 ...");
 
     let staging = make_staging(&root, "zap")?;
     vacuum_into(db_path, &staging.join(DB_FILE))?;
@@ -405,10 +410,28 @@ fn backup_zap(db_path: &str, output: Option<&str>) -> Result<(), String> {
         warn("未找到配置文件，仅备份数据库");
     }
 
+    // 主密钥：随库一起携带，保证换机/迁移还原后 zap.db 加密列与凭据仍可解密
+    if let Some(key) = zap_crypto::active_key_path() {
+        std::fs::copy(&key, staging.join(KEY_FILE))
+            .map_err(|e| format!("备份主密钥失败 {}: {e}", key.display()))?;
+        ok(&format!("已纳入主密钥: {}", key.display()));
+    } else {
+        warn("未找到主密钥文件（/etc/zap/secret.key）：加密数据将无法在还原后解密");
+    }
+
+    // 凭据目录（/etc/zap/credentials，目录 0700 / 文件 0400，cp -a 保留权限）
+    let cred_dir = Path::new(zap_crypto::CRED_DIR);
+    if cred_dir.is_dir() {
+        copy_tree(cred_dir, &staging.join(CRED_DIR_ARCHIVE))?;
+        ok(&format!("已纳入凭据目录: {}", cred_dir.display()));
+    } else {
+        info("无凭据目录，跳过");
+    }
+
     let out = root.join(format!("zap-backup-{}.tar.gz", timestamp()));
     pack(&out, &staging)?;
     cleanup(&staging);
-    ok(&format!("备份完成: {}", out.display()));
+    ok(&format!("备份完成（含主密钥与凭据，可整机迁移）: {}", out.display()));
     Ok(())
 }
 
@@ -712,14 +735,18 @@ fn restore_zap(db_path: &str, staging: &Path, output: Option<&str>) -> Result<()
     info(&format!("正在还原数据库 {db_path} ..."));
     let restore = do_zap_restore(db_path, staging);
 
-    // 4. 恢复服务原状态（无论还原成败）
+    // 4. 恢复服务原状态（无论还原成败）。
+    // 先 zapexec 后 zapd，与 zapd.service 的 After=zapexec.service 保持一致：
+    // 全新机器上 exec.key 由 zapexec 首启生成（缺则自建），zapd 随后才能读到。
     let restart = (|| -> Result<(), String> {
         if was_active.is_empty() {
             return Ok(());
         }
         info(&format!("启动服务：{}", was_active.join(" ")));
-        for unit in &was_active {
-            systemctl("start", unit)?;
+        for unit in [UNIT_ZAPEXEC, UNIT_ZAPD] {
+            if was_active.contains(&unit) {
+                systemctl("start", unit)?;
+            }
         }
         Ok(())
     })();
@@ -766,6 +793,42 @@ fn do_zap_restore(db_path: &str, staging: &Path) -> Result<(), String> {
         ok(&format!("已还原配置文件 {}", cfg.display()));
     } else {
         warn("归档未包含 zap.yaml，仅还原数据库");
+    }
+
+    // 主密钥：归档含 secret.key 时以归档密钥覆盖本机密钥（0600），
+    // 保证还原后的 zap.db 加密列与凭据可用同一密钥解密（全量还原语义）
+    if staging.join(KEY_FILE).is_file() {
+        let key_path = Path::new("/etc/zap/secret.key");
+        if let Some(parent) = key_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建目录失败 {}: {e}", parent.display()))?;
+        }
+        std::fs::copy(staging.join(KEY_FILE), key_path)
+            .map_err(|e| format!("还原主密钥失败 {}: {e}", key_path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(key_path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("设置主密钥权限失败: {e}"))?;
+        }
+        ok(&format!("已还原主密钥: {}", key_path.display()));
+    } else {
+        warn("归档未包含 secret.key（旧版备份？）：若本机密钥与归档不一致，加密数据将无法解密");
+    }
+
+    // 凭据目录：整目录替换（先清旧，避免归档之外的凭据残留）
+    if staging.join(CRED_DIR_ARCHIVE).is_dir() {
+        let cred_dir = Path::new(zap_crypto::CRED_DIR);
+        if cred_dir.exists() {
+            std::fs::remove_dir_all(cred_dir)
+                .map_err(|e| format!("清理旧凭据目录失败: {e}"))?;
+        }
+        copy_tree(&staging.join(CRED_DIR_ARCHIVE), cred_dir)?;
+        ok(&format!("已还原凭据目录: {}", cred_dir.display()));
+    } else {
+        warn("归档未包含 credentials/（旧版备份？）：跳过凭据还原");
     }
     Ok(())
 }

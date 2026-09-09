@@ -37,6 +37,27 @@ fn zap_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/usr/local/zap"))
 }
 
+/// 定位 zapctl 可执行文件并返回其绝对路径（注入给脚本的 `ZAPCTL`）。
+/// 生产布局为 `${ZAP_PATH}/zapctl`；开发布局（ZAP_PATH 指向源码根，如
+/// rundev 注入的仓库目录）下该路径是 zapctl 源码目录而非二进制，
+/// 需回退到 `target/{debug,release}/zapctl`。
+fn zapctl_bin() -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    fn executable_file(p: &PathBuf) -> bool {
+        p.is_file()
+            && std::fs::metadata(p)
+                .map(|m| m.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false)
+    }
+
+    let base = zap_path();
+    [base.join("zapctl"), base.join("target/debug/zapctl"), base.join("target/release/zapctl")]
+        .into_iter()
+        .find(executable_file)
+        .unwrap_or_else(|| base.join("zapctl"))
+}
+
 fn appstore_dir() -> PathBuf {
     zap_path().join("data/appstore")
 }
@@ -72,7 +93,6 @@ pub(crate) fn registered_apps() -> Vec<AppRegistration> {
         if !cat_path.is_dir() {
             continue;
         }
-        let category = cat.file_name().to_string_lossy().to_string();
         let Ok(apps) = std::fs::read_dir(&cat_path) else {
             continue;
         };
@@ -636,7 +656,7 @@ fn spawn_background(
             let mut cmd = root_cmd("/bin/bash");
             cmd.arg(&step.script)
                 .env("ZAP_PATH", zap_path())
-                .env("ZAPCTL", zap_path().join("zapctl"))
+                .env("ZAPCTL", zapctl_bin())
                 .env("APPS_DIR", super::install_root())
                 .env("LOG_FILE", &log_path)
                 .env("CPU_NUM", &cpu_num)
@@ -696,7 +716,7 @@ fn base_env() -> Vec<(String, String)> {
         ("ZAP_PATH".into(), zap_path().to_string_lossy().into_owned()),
         (
             "ZAPCTL".into(),
-            zap_path().join("zapctl").to_string_lossy().into_owned(),
+            zapctl_bin().to_string_lossy().into_owned(),
         ),
         (
             "APPS_DIR".into(),

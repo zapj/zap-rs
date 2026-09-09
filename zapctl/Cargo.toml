@@ -15,3 +15,4 @@ serde_yaml = "0.9"
 serde_json = "1"
 rpassword = "7"
 chrono = "0.4"
+zap-crypto = { path = "../zap-crypto" }

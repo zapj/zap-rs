@@ -101,8 +101,8 @@ fi
 if [ "$SKIP_BUILD" = true ]; then
   warn "跳过后端构建"
 else
-  info "构建后端 (cargo build ${CARGO_FLAGS[*]} --bin zapd --bin zapexec --bin zapupgrade) ..."
-  cargo build "${CARGO_FLAGS[@]}" --bin zapd --bin zapexec --bin zapupgrade || die "后端构建失败"
+  info "构建后端 (cargo build ${CARGO_FLAGS[*]} --bin zapd --bin zapexec --bin zapctl --bin zapupgrade) ..."
+  cargo build "${CARGO_FLAGS[@]}" --bin zapd --bin zapexec --bin zapctl --bin zapupgrade || die "后端构建失败"
   ok "后端构建完成 -> $BIN_DIR"
 fi
 

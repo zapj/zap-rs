@@ -1,0 +1,12 @@
+[package]
+name = "zap-crypto"
+version.workspace = true
+license.workspace = true
+edition = "2024"
+description = "ZAP 统一加密库（AES-256-GCM）与服务凭据文件存储"
+
+[dependencies]
+aes-gcm = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+once_cell = "1.21"
