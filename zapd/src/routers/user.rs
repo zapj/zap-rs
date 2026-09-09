@@ -223,6 +223,16 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
             Some(p) => Some(p),
             None => crate::routers::package::default_package().await,
         };
+        // 生效权限点：角色权限（role_permissions）∪ 用户个人附加权限（user.permissions）。
+        // 仅用于前端 v-permission 做按钮级体验控制，请求级拦截在 access::guard。
+        let mut perms = crate::routers::access::permissions_of_roles(&user.roles).await;
+        for p in user.permissions.split(',').map(str::trim) {
+            if !p.is_empty() && !perms.iter().any(|x| x == p) {
+                perms.push(p.to_string());
+            }
+        }
+        perms.sort();
+
         return Json(json!({
             "code": 0,
             "message": "OK",
@@ -239,7 +249,7 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
                 "roles": user.roles.split(',').collect::<Vec<&str>>(),
-                "permissions": user.permissions.split(',').collect::<Vec<&str>>(),
+                "permissions": perms,
                 // 套餐信息：package_bound 标记是否绑定自己的套餐（false = 回退全局默认）
                 "package_bound": bound,
                 "package": pkg.map(|p| json!({

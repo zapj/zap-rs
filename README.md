@@ -83,6 +83,10 @@ ZAP 以 **[LGPL-3.0](./LICENSE)** 开源许可发布：个人与企业均可免�
 - JWT 鉴权 + 密钥轮换，密码 bcrypt 加盐存储
 - 演示账号只读守卫，防止越权写入
 - 支持 URL 前缀部署（`url_prefix`），便于反向代理与路径隔离
+- **接口两级鉴权**（`zapd/src/routers/access.rs`）：
+  1. **角色下限**：路径前缀 → 最低角色（admin / reseller / user），未登记的接口默认要求 admin（fail-closed）；
+  2. **动作级权限点**：`role_permissions` 表存储 `{模块}:view` / `{模块}:edit`，在路由层强制校验，admin 直通。
+  菜单可见性（`role_menus`）与前端 `v-permission` 只影响展示，**不是安全边界**
 
 ---
 

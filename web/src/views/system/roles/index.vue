@@ -70,7 +70,14 @@
     </el-dialog>
 
     <!-- 权限设置 -->
-    <el-dialog v-model="permVisible" title="权限设置" width="500px">
+    <el-dialog v-model="permVisible" title="权限设置" width="640px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="菜单仅控制侧边栏显示；下方「接口权限」才是请求级鉴权依据（后端强制校验）"
+      />
+      <el-divider content-position="left">菜单可见性</el-divider>
       <el-tree
         ref="treeRef"
         :data="permTree"
@@ -80,6 +87,18 @@
         :default-checked-keys="checkedPerms"
         default-expand-all
       />
+
+      <el-divider content-position="left">接口权限（动作级）</el-divider>
+      <div class="perm-grid">
+        <div v-for="g in permCatalog" :key="g.ns" class="perm-row">
+          <span class="perm-title">{{ g.label }}</span>
+          <el-checkbox-group v-model="checkedActions">
+            <el-checkbox v-for="a in g.actions" :key="a.key" :value="a.key">
+              {{ a.label }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </div>
+      </div>
       <template #footer>
         <el-button @click="permVisible=false">取消</el-button>
         <el-button type="primary" :loading="savingPerms" @click="savePermissions">保存</el-button>
@@ -100,7 +119,9 @@ import {
   deleteRole,
   getRolePermissions,
   setRolePermissions,
+  getPermissionCatalog,
   type RoleItem,
+  type PermGroupItem,
 } from '@/api/role'
 import { getMenuList } from '@/api/menu'
 import { isBuiltinRole } from '@/utils/role'
@@ -182,7 +203,16 @@ const savingPerms = ref(false)
 const treeRef = ref()
 const permTree = ref<any[]>([])
 const checkedPerms = ref<number[]>([])
+/** 动作级权限点（{ns}:view / {ns}:edit） */
+const permCatalog = ref<PermGroupItem[]>([])
+const checkedActions = ref<string[]>([])
 let permRoleId = 0
+
+async function loadCatalog() {
+  if (permCatalog.value.length) return
+  const res = await getPermissionCatalog()
+  permCatalog.value = res.data?.groups ?? []
+}
 
 // 菜单节点文本在 meta.title（显示名），回退到 name（路由名）
 const treeProps = {
@@ -196,9 +226,11 @@ async function handlePermission(row: RoleItem) {
     const [menusRes, permsRes] = await Promise.all([
       getMenuList(),
       getRolePermissions(row.id),
+      loadCatalog(),
     ])
     permTree.value = menusRes.data ?? []
-    checkedPerms.value = permsRes.data ?? []
+    checkedPerms.value = permsRes.data?.menu_ids ?? []
+    checkedActions.value = permsRes.data?.permissions ?? []
     permVisible.value = true
     // dialog 非销毁式，第二次打开需手动同步勾选状态
     await nextTick()
@@ -211,7 +243,7 @@ async function savePermissions() {
   try {
     const keys = treeRef.value?.getCheckedKeys() ?? []
     const half = treeRef.value?.getHalfCheckedKeys() ?? []
-    await setRolePermissions(permRoleId, [...keys, ...half])
+    await setRolePermissions(permRoleId, [...keys, ...half], checkedActions.value)
     ElMessage.success('权限设置成功')
     permVisible.value = false
   } catch { /* handled */ }
@@ -225,4 +257,7 @@ onMounted(loadList)
 
 <style scoped>
 .roles-container { padding: 20px; }
+.perm-grid { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.perm-row { display: flex; align-items: center; gap: 12px; }
+.perm-title { width: 120px; flex-shrink: 0; font-size: 13px; color: var(--el-text-color-regular); }
 </style>

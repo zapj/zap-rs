@@ -9,6 +9,8 @@ pub async fn init_schema() {
     init_roles_table().await;
     init_menus_table().await;
     init_role_menus_table().await;
+    // 动作级权限点（请求级鉴权依据；role_menus 仅用于菜单渲染）
+    init_role_permissions_table().await;
     init_audit_table().await;
     init_login_attempts_table().await;
     init_hourly_stats_tables().await;
@@ -546,6 +548,49 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 123);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
+}
+
+// ── role_permissions（动作级权限点）────────────────────────
+
+/// 角色 → 权限点（`{ns}:view` / `{ns}:edit`）。
+///
+/// 与 `role_menus` 的区别：`role_menus` 只决定**前端菜单渲染**，
+/// 这里才是**请求级鉴权**的依据（见 `routers::access`）。
+///
+/// 种子数据直接由 `access` 的权限矩阵推导：内置角色升级前后的可达范围完全一致，
+/// 不会出现「加了权限校验后普通用户被锁死」的情况。新增自定义角色默认无权限，
+/// 需管理员在「角色权限」中显式勾选（fail-closed）。
+async fn init_role_permissions_table() {
+    if table_exists("role_permissions").await {
+        return;
+    }
+    let sql = r#"
+    CREATE TABLE role_permissions (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        role_id INTEGER NOT NULL,
+        perm_key VARCHAR(64) NOT NULL,
+        UNIQUE(role_id, perm_key)
+    );
+    CREATE INDEX idx_role_permissions_role ON role_permissions(role_id);
+    "#;
+    let _ = get_db_pool().await.execute(sql).await;
+
+    let pool = get_db_pool().await;
+    let roles: Vec<(i64, String)> = sqlx::query_as("SELECT id, role_key FROM roles")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    for (role_id, role_key) in roles {
+        for perm in crate::routers::access::default_permissions_for(&role_key) {
+            let _ = sqlx::query(
+                "INSERT OR IGNORE INTO role_permissions (role_id, perm_key) VALUES (?, ?)",
+            )
+            .bind(role_id)
+            .bind(perm)
+            .execute(pool)
+            .await;
+        }
+    }
 }
 
 // ── audit logs ─────────────────────────────────────────────

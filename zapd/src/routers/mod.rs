@@ -260,6 +260,11 @@ fn api_routers() -> Router {
             "/system/role/permissions/set",
             post(system_role::role_permissions_set),
         )
+        // 动作级权限点目录（角色权限配置页数据源，与 access 权限矩阵同源）
+        .route(
+            "/system/role/permission-catalog",
+            get(system_role::permission_catalog),
+        )
         // Menu management (admin only)
         .route("/system/menus/tree", get(system_menu::get_menus_tree))
         .route("/system/menus/list", get(system_menu::menu_list))

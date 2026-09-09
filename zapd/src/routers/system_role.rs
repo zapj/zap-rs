@@ -44,10 +44,17 @@ pub struct DeleteRolePayload {
     pub id: i64,
 }
 
+/// 设置角色权限：
+/// - `menu_ids`：菜单可见性（仅前端渲染，不是安全边界）
+/// - `permissions`：动作级权限点（`{ns}:view` / `{ns}:edit`），请求级鉴权依据
 #[derive(Debug, Deserialize)]
 pub struct SetRolePermissionsPayload {
     pub role_id: i64,
+    #[serde(default)]
     pub menu_ids: Vec<i64>,
+    /// 缺省 `None` 表示不改动已配置的权限点（前端只改菜单时保持原样）
+    #[serde(default)]
+    pub permissions: Option<Vec<String>>,
 }
 
 fn role_to_value(r: &RoleRow) -> Value {
@@ -223,11 +230,16 @@ pub async fn role_delete(
         return Err(ZapError::New(-1, "角色不存在".to_string()));
     }
 
-    // Also clean up role_menus
+    // Also clean up role_menus / role_permissions
     let _ = sqlx::query("DELETE FROM role_menus WHERE role_id = ?")
         .bind(payload.id)
         .execute(pool)
         .await;
+    let _ = sqlx::query("DELETE FROM role_permissions WHERE role_id = ?")
+        .bind(payload.id)
+        .execute(pool)
+        .await;
+    crate::routers::access::invalidate_perm_cache();
 
     audit::log(
         Some(&claims),
@@ -242,7 +254,7 @@ pub async fn role_delete(
     Ok(Json(json!({ "code": 0, "message": "删除成功" })))
 }
 
-/// Get role permissions (menu IDs)
+/// Get role permissions：菜单可见性 + 动作级权限点
 pub async fn role_permissions_get(
     _claims: ValidatedClaims,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -257,9 +269,29 @@ pub async fn role_permissions_get(
         .bind(role_id)
         .fetch_all(pool)
         .await?;
-
     let menu_ids: Vec<i64> = rows.into_iter().map(|r| r.0).collect();
-    Ok(Json(json!({ "code": 0, "data": menu_ids })))
+
+    let perms: Vec<(String,)> =
+        sqlx::query_as("SELECT perm_key FROM role_permissions WHERE role_id = ?")
+            .bind(role_id)
+            .fetch_all(pool)
+            .await?;
+    let permissions: Vec<String> = perms.into_iter().map(|r| r.0).collect();
+
+    Ok(Json(json!({
+        "code": 0,
+        "data": { "menu_ids": menu_ids, "permissions": permissions },
+    })))
+}
+
+/// 权限点目录（角色权限配置页的数据源）：来自 `routers::access` 的权限矩阵，
+/// 保证「可勾选的权限点」与「实际生效的校验规则」是同一份定义。
+pub async fn permission_catalog(_claims: ValidatedClaims) -> ZapJsonResult {
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": { "groups": crate::routers::access::permission_catalog() },
+    })))
 }
 
 /// Set role permissions
@@ -285,12 +317,38 @@ pub async fn role_permissions_set(
             .await;
     }
 
+    // 动作级权限点：只接受目录内合法 key，避免脏数据与拼写错误
+    let mut granted: Vec<String> = Vec::new();
+    if let Some(perms) = &payload.permissions {
+        let _ = sqlx::query("DELETE FROM role_permissions WHERE role_id = ?")
+            .bind(payload.role_id)
+            .execute(pool)
+            .await;
+        let valid = crate::routers::access::all_perm_keys();
+        for key in perms {
+            let key = key.trim();
+            if !valid.contains(key) {
+                continue;
+            }
+            let _ = sqlx::query(
+                "INSERT OR IGNORE INTO role_permissions (role_id, perm_key) VALUES (?, ?)",
+            )
+            .bind(payload.role_id)
+            .bind(key)
+            .execute(pool)
+            .await;
+            granted.push(key.to_string());
+        }
+        // 权限点变更立即生效（撤销不必等缓存过期）
+        crate::routers::access::invalidate_perm_cache();
+    }
+
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
         "role_permissions_set",
         &format!("role_id={}", payload.role_id),
-        &format!("menu_ids={:?}", payload.menu_ids),
+        &format!("menu_ids={:?} permissions={:?}", payload.menu_ids, granted),
     )
     .await;
 
