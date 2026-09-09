@@ -28,7 +28,7 @@
       <el-result
         icon="warning"
         title="未安装任何 PHP 版本"
-        sub-title="通过应用商店安装 PHP 应用后，本页将按版本标签（php74 / php81 …）逐个实例展示状态、配置 php.ini 与「全局默认访问」开关。"
+        :sub-title="emptyHint"
       >
         <template #extra>
           <el-button type="primary" @click="router.push('/appstore')">前往应用商店</el-button>
@@ -56,7 +56,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import InstancePanel from './InstancePanel.vue'
 import { getServiceConfInstances, type ServiceConfInstance } from '@/api/servicesConf.ts'
@@ -65,12 +65,23 @@ const router = useRouter()
 const instances = ref<ServiceConfInstance[]>([])
 const active = ref('')
 const loading = ref(false)
+/** 后端扫描 php-* 实例用的安装根目录（ZAP_APPS_DIR），用于排查"装了却识别不到" */
+const appsDir = ref('')
+
+const emptyHint = computed(() => {
+  const base =
+    '通过应用商店安装 PHP 应用后，本页将按版本标签（php74 / php81 …）逐个实例展示状态、配置 php.ini 与「全局默认访问」开关。'
+  return appsDir.value
+    ? `${base}\n实例扫描目录：${appsDir.value}（若 PHP 装在别处，请用 ZAP_APPS_DIR 指向该目录后重启 zapexec）`
+    : base
+})
 
 async function load() {
   loading.value = true
   try {
     const res = await getServiceConfInstances('php')
     instances.value = res.data.instances
+    appsDir.value = res.data.apps_dir || ''
     if (active.value && !instances.value.some((i) => i.svc === active.value)) {
       active.value = ''
     }

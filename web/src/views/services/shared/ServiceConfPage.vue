@@ -115,6 +115,15 @@
 
         <!-- 配置文件编辑 -->
         <el-tab-pane label="配置文件" name="files">
+          <el-alert
+            v-if="listData.installed && listData.main_exists === false"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="detect-warn"
+            :title="`未检测到主配置文件：${listData.conf_file || '未定位到路径'}`"
+            :description="detectHint"
+          />
           <div v-if="confFiles.length" class="editor-layout">
             <div class="file-list">
               <div class="list-head">
@@ -145,6 +154,7 @@
               <div v-loading="fileLoading" class="editor-wrap">
                 <div v-if="editorContent !== null" class="editor-head">
                   <span class="mono path">{{ activeFile }}</span>
+                  <el-tag v-if="fileMissing" size="small" type="danger">文件不存在，保存后将创建</el-tag>
                   <div class="editor-actions">
                     <el-button
                       size="small"
@@ -272,6 +282,19 @@ const editorContent = ref<string | null>(null)
 const originalContent = ref('')
 const fileLoading = ref(false)
 const savingFile = ref(false)
+/** 当前选中的配置文件在磁盘上不存在（探测失败或尚未创建） */
+const fileMissing = ref(false)
+
+/** 未检测到主配置时的排查提示：把后端尝试过的候选路径展示出来 */
+const detectHint = computed(() => {
+  const tried = status.value.conf_candidates?.length
+    ? status.value.conf_candidates.join('、')
+    : ''
+  const base = tried
+    ? `已按以下候选探测：${tried}。`
+    : ''
+  return `${base}常见原因：服务由系统包安装且路径不在候选内、或安装未完成。可在下方编辑器中填写内容后保存以创建该文件，或通过应用商店重新安装。`
+})
 
 const dirty = computed(() => editorContent.value !== null && editorContent.value !== originalContent.value)
 const editorLang = computed(() => {
@@ -296,6 +319,7 @@ async function selectFile(path: string, force = false) {
     const res = await getServiceConfRead(props.service, path)
     editorContent.value = res.data.content
     originalContent.value = res.data.content
+    fileMissing.value = !!res.data.missing
   } catch {
     editorContent.value = null
     originalContent.value = ''
@@ -469,6 +493,9 @@ onMounted(refreshAll)
   color: var(--el-text-color-secondary);
 }
 .mt-3 {
+  margin-top: 12px;
+}
+.detect-warn {
   margin-top: 12px;
 }
 /* 关键配置表单 */

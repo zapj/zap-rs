@@ -13,6 +13,8 @@ export interface ServiceConfStatus {
   conf_file?: string | null
   conf_dir?: string | null
   main_exists?: boolean
+  /** 探测主配置时尝试过的候选路径（用于排查"未检测到配置文件"） */
+  conf_candidates?: string[]
 }
 
 export interface ServiceConfFile {
@@ -138,10 +140,11 @@ export interface ServiceConfInstance {
 }
 
 export function getServiceConfInstances(service: string) {
-  return http.get<{ code: number; message: string; data: { instances: ServiceConfInstance[] } }>(
-    '/system/service-conf/instances',
-    { params: { service } },
-  )
+  return http.get<{
+    code: number
+    message: string
+    data: { instances: ServiceConfInstance[]; apps_dir?: string }
+  }>('/system/service-conf/instances', { params: { service } })
 }
 
 export interface ServiceConfDefaultResult {

@@ -271,7 +271,16 @@ const PHP_DEF: ServiceDef = ServiceDef {
     bin_candidates: &["php-fpm", "php"],
     version_args: &["-v"],
     version_in_stderr: false,
-    main_candidates: &["/etc/php/*/fpm/php.ini", "/etc/php.ini"],
+    // 覆盖常见布局：Debian/Ubuntu（/etc/php/<ver>/fpm/php.ini）、
+    // Remi 源（/etc/opt/remi/php<ver>/php.ini）、源码安装（/usr/local/etc/php）、
+    // RHEL/CentOS 系统包（/etc/php.ini）。实例安装（php-85 目录）由 php_inst 单独定位。
+    main_candidates: &[
+        "/etc/php/*/fpm/php.ini",
+        "/etc/php/*/cli/php.ini",
+        "/etc/opt/remi/*/php.ini",
+        "/etc/php.ini",
+        "/usr/local/etc/php/php.ini",
+    ],
     exts: &["ini"],
     format: ConfFormat::Ini,
     ini_comment: ";",
@@ -448,7 +457,8 @@ fn systemd_active(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// 主配置探测：候选含一个 `*` 时按首个存在的展开；否则取第一个存在的文件。
+/// 主配置探测：候选含一个 `*` 时按 glob 展开（多命中取版本号最大者）；
+/// 否则取第一个存在的文件；全部不存在时回退首个普通候选（允许从 UI 新建）。
 fn probe_main(d: &ServiceDef) -> Option<(PathBuf, PathBuf, bool)> {
     let mut first_plain: Option<&str> = None;
     for cand in d.main_candidates {
@@ -485,25 +495,112 @@ fn probe_main(d: &ServiceDef) -> Option<(PathBuf, PathBuf, bool)> {
     None
 }
 
-/// 支持单个 `*` 的极简 glob：展开目录名匹配 `base/*/suffix`。
+/// 支持单个 `*` 的极简 glob：`*` 匹配**一层目录名**。
+///
+/// - `/etc/php/*/fpm/php.ini` → 在 `/etc/php` 下遍历版本目录（7.4 / 8.1 / 8.2 …），
+///   取 `<版本目录>/fpm/php.ini`；多个命中时取**版本号最大**的一个。
+/// - 兼容 `*` 前带目录名前缀的写法（如 `/etc/php-*/x.ini`）：前缀参与过滤。
+///
+/// 注意：`*` 前必须以 `/` 结尾才是"遍历该目录下的子目录"，否则最后一个路径段
+/// 视为目录名前缀（旧实现把 `/etc/php/` 的最后一段当成前缀、去扫 `/etc`，
+/// 导致 Debian/Ubuntu 的 `/etc/php/8.1/fpm/php.ini` 永远探测不到）。
 fn glob_first(pattern: &str) -> Option<PathBuf> {
     let (head, tail) = pattern.split_once('*')?;
-    let base = Path::new(head);
-    let dir = base.parent().unwrap_or(Path::new("/"));
-    let prefix = base.file_name()?.to_string_lossy().to_string();
-    let mut rd = std::fs::read_dir(dir).ok()?;
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    while let Some(Ok(e)) = rd.next() {
-        let name = e.file_name().to_string_lossy().to_string();
-        if name.starts_with(&prefix) && e.path().is_dir() {
-            let p = e.path().join(tail.trim_start_matches('/'));
-            if p.is_file() {
-                candidates.push(p);
-            }
+    let tail = tail.trim_start_matches('/');
+    let (dir, prefix): (PathBuf, String) = if head.ends_with('/') {
+        (PathBuf::from(head), String::new())
+    } else {
+        let base = Path::new(head);
+        (
+            base.parent().unwrap_or(Path::new("/")).to_path_buf(),
+            base.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+        )
+    };
+
+    let rd = std::fs::read_dir(&dir).ok()?;
+    let mut hits: Vec<(PathBuf, String)> = Vec::new();
+    for entry in rd.flatten() {
+        let sub = entry.path();
+        if !sub.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let target = sub.join(tail);
+        if target.is_file() {
+            hits.push((target, name));
         }
     }
-    candidates.sort();
-    candidates.into_iter().next()
+    // 版本号最大的优先；无法解析为数字的目录名退化为字典序
+    hits.sort_by(|a, b| version_key(&a.1).cmp(&version_key(&b.1)));
+    hits.pop().map(|(p, _)| p)
+}
+
+/// 兜底探测：用 `php --ini` 自报的 `Loaded Configuration File` 定位 php.ini。
+///
+/// 静态候选无法覆盖所有布局（Remi 源 `/etc/opt/remi/php81`、源码安装、
+/// 应用商店装到 `/usr/local/apps/php-74` 却未被识别为实例等），
+/// 而 `php --ini` 是权威答案——它直接给出该二进制实际加载的 ini。
+/// 仅在静态候选全部落空时使用，避免与「优先 fpm 配置」的顺序冲突。
+fn php_ini_from_bin(bin: &Path) -> Option<PathBuf> {
+    let o = root_cmd(bin.to_str()?).args(["--ini"]).output().ok()?;
+    let out = String::from_utf8_lossy(&o.stdout);
+
+    let mut loaded: Option<PathBuf> = None;
+    let mut conf_dir: Option<PathBuf> = None;
+    for line in out.lines() {
+        let Some((key, val)) = line.split_once(':') else {
+            continue;
+        };
+        let val = val.trim();
+        if val.is_empty() {
+            continue;
+        }
+        match key.trim() {
+            "Loaded Configuration File" if val != "(none)" => loaded = Some(PathBuf::from(val)),
+            "Configuration File (php.ini) Path" => conf_dir = Some(PathBuf::from(val)),
+            _ => {}
+        }
+    }
+
+    // 已加载：直接返回（即使文件被删也返回原名，由调用方标 exists=false 提示"缺少"）
+    // 未加载（(none)）：返回"预期路径"= 配置目录/php.ini，UI 提示可保存创建
+    loaded.or_else(|| conf_dir.map(|d| d.join("php.ini")))
+}
+
+/// 系统级配置目录：主配置直接落在这里时**只放通 `.ini`**。
+///
+/// 否则把 `.conf` 也放开会扫出大量与 PHP 无关的文件（/etc/sysctl.conf、
+/// /etc/security/*.conf …），等于把整个 /etc 暴露给在线编辑器。
+const SYSTEM_CONF_DIRS: &[&str] = &["/", "/etc", "/usr/local/etc", "/etc/opt"];
+
+/// PHP 可编辑扩展名：按主配置所在目录收窄。
+///
+/// - 应用商店实例（`/usr/local/apps/php-74/etc`）或版本目录（`/etc/php/8.1/fpm`）：
+///   放通 `php-fpm.conf` 与 `php-fpm.d/*.conf`（FPM 池配置确实需要改）；
+/// - 主配置直接在 /etc 等系统目录（`/etc/php.ini`）：仅 `.ini`。
+fn service_exts(d: &ServiceDef, root: &Path) -> &'static [&'static str] {
+    if d.key != "php" {
+        return d.exts;
+    }
+    let p = root.to_string_lossy().to_string();
+    if SYSTEM_CONF_DIRS.iter().any(|x| p == *x) {
+        &["ini"]
+    } else {
+        &["ini", "conf"]
+    }
+}
+
+/// 目录名 → 可比较的版本键：`8.1` → `(8, 1, "8.1")`，非数字 → `(0, 0, name)`。
+fn version_key(name: &str) -> (u64, u64, &str) {
+    let mut parts = name.split(['.', '-', '_']);
+    let major = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    (major, minor, name)
 }
 
 /// 通过 /proc 扫描判断是否存在 cmdline 包含二进制名的进程。
@@ -614,8 +711,10 @@ fn backup_file(svc: &str, path: &Path) -> Result<PathBuf, String> {
 }
 
 /// 校验待编辑路径：必须位于主配置目录树内且扩展名白名单。
+#[allow(clippy::too_many_arguments)]
 fn validate_path(
     d: &ServiceDef,
+    exts: &[&str],
     main: &Path,
     root: &Path,
     raw: &str,
@@ -636,12 +735,11 @@ fn validate_path(
         .and_then(|n| n.to_str())
         .unwrap_or_default()
         .to_string();
-    let ok_ext = d.exts.iter().any(|e| fname.ends_with(&format!(".{e}")));
+    let ok_ext = exts.iter().any(|e| fname.ends_with(&format!(".{e}")));
     if !ok_ext {
         return Err(format!(
             "仅支持编辑 {}",
-            d.exts
-                .iter()
+            exts.iter()
                 .map(|e| format!(".{e}"))
                 .collect::<Vec<_>>()
                 .join(" / ")
@@ -679,8 +777,8 @@ fn file_entry(path: &Path, base: &Path, is_main: bool, size: u64, exists: bool) 
     })
 }
 
-fn collect_files(d: &ServiceDef, root: &Path, out: &mut Vec<Value>) {
-    fn walk(d: &ServiceDef, dir: &Path, base: &Path, depth: usize, out: &mut Vec<Value>) {
+fn collect_files(exts: &[&str], root: &Path, out: &mut Vec<Value>) {
+    fn walk(exts: &[&str], dir: &Path, base: &Path, depth: usize, out: &mut Vec<Value>) {
         if depth > SCAN_DEPTH {
             return;
         }
@@ -698,7 +796,7 @@ fn collect_files(d: &ServiceDef, root: &Path, out: &mut Vec<Value>) {
         entries.sort();
         for p in entries {
             if p.is_dir() {
-                walk(d, &p, base, depth + 1, out);
+                walk(exts, &p, base, depth + 1, out);
                 continue;
             }
             let fname = p
@@ -706,7 +804,7 @@ fn collect_files(d: &ServiceDef, root: &Path, out: &mut Vec<Value>) {
                 .and_then(|n| n.to_str())
                 .unwrap_or_default()
                 .to_string();
-            let ok_ext = d.exts.iter().any(|e| fname.ends_with(&format!(".{e}")));
+            let ok_ext = exts.iter().any(|e| fname.ends_with(&format!(".{e}")));
             if !ok_ext
                 || fname.starts_with("zap-")
                 || fname.ends_with(".bak")
@@ -723,7 +821,7 @@ fn collect_files(d: &ServiceDef, root: &Path, out: &mut Vec<Value>) {
             }
         }
     }
-    walk(d, root, root, 0, out);
+    walk(exts, root, root, 0, out);
 }
 
 // ── ini 关键项托管 ───────────────────────────────────────────
@@ -967,7 +1065,26 @@ fn installed_info(d: &ServiceDef, svc: &str) -> InstalledInfo {
     let bin = find_bin(d);
     let unit = active_unit(d);
     let installed = bin.is_some() || unit.is_some();
-    let main = if installed { probe_main(d) } else { None };
+    let mut main = if installed { probe_main(d) } else { None };
+    // PHP 兜底：静态候选一个都没命中（main_exists=false）时，改用二进制自报的 php.ini
+    if d.key == "php"
+        && let Some(b) = bin.as_deref()
+        && main.as_ref().is_some_and(|(_, _, exists)| !exists)
+        && let Some(p) = php_ini_from_bin(b)
+    {
+        let root = p.parent().unwrap_or(Path::new("/")).to_path_buf();
+        let exists = p.is_file();
+        if exists {
+            tracing::info!("service_conf: php 主配置由 `php --ini` 定位到 {}", p.display());
+        } else {
+            // 常见原因：php.ini 未随安装脚本拷贝（PHP 会退回内置默认值仍能运行）
+            tracing::warn!(
+                "service_conf: php 已安装但主配置缺失：{}（PHP 正使用内置默认值）",
+                p.display()
+            );
+        }
+        main = Some((p, root, exists));
+    }
     (bin, unit, main)
 }
 
@@ -999,6 +1116,13 @@ pub async fn status(svc: &str) -> Response {
         };
         let running = service_running(d, &svc, bin.as_deref());
         let bin_path = bin.as_deref().map(|b| b.display().to_string());
+        // 探测失败时把尝试过的候选路径一起回传，便于定位"没检测到配置文件"的原因
+        // （实例安装走固定路径，静态候选不适用，故仅在非实例时返回）
+        let conf_candidates: Option<Vec<&str>> = if php_inst(&svc).is_some() {
+            None
+        } else {
+            Some(d.main_candidates.to_vec())
+        };
         Ok(Response::ok(
             "ok",
             Some(json!({
@@ -1013,6 +1137,7 @@ pub async fn status(svc: &str) -> Response {
                 "conf_file": conf_file,
                 "conf_dir": conf_dir,
                 "main_exists": main_exists,
+                "conf_candidates": conf_candidates,
             })),
         ))
     })
@@ -1052,7 +1177,7 @@ pub async fn conf_list(svc: &str) -> Response {
         files.push(file_entry(&main, &root, true, size, main_exists));
         seen.insert(main_path);
         if root.is_dir() {
-            collect_files(d, &root, &mut files);
+            collect_files(service_exts(d, &root), &root, &mut files);
             // 目录扫描可能再次命中主配置文件，去重
             files.retain(|f| {
                 let p = f
@@ -1087,7 +1212,7 @@ pub async fn conf_read(svc: &str, path: String) -> Response {
         let (_, _, Some((main, root, _))) = installed_info(d, &svc) else {
             return Err(format!("{} 未安装或未探测到配置，请先在应用商店安装", d.label));
         };
-        let (canon, is_main) = validate_path(d, &main, &root, &path)?;
+        let (canon, is_main) = validate_path(d, service_exts(d, &root), &main, &root, &path)?;
         if !canon.exists() {
             return Ok(Response::ok(
                 "ok",
@@ -1133,7 +1258,7 @@ pub async fn conf_save(svc: &str, path: String, content: String) -> Response {
         let (_, _, Some((main, root, _))) = installed_info(d, &svc) else {
             return Err(format!("{} 未安装或未探测到配置", d.label));
         };
-        let (canon, is_main) = validate_path(d, &main, &root, &path)?;
+        let (canon, is_main) = validate_path(d, service_exts(d, &root), &main, &root, &path)?;
         if d.format == ConfFormat::Json && !content.trim().is_empty() {
             serde_json::from_str::<Value>(&content)
                 .map_err(|e| format!("JSON 语法错误，未保存：{e}"))?;
@@ -1423,9 +1548,9 @@ fn instance_summary(svc: &str) -> Result<Value, String> {
     } else {
         String::new()
     };
-    let is_default = bin.as_deref().is_some_and(|b| {
-        global_default_bin().is_some_and(|t| paths_equal(&t, b))
-    });
+    let is_default = bin
+        .as_deref()
+        .is_some_and(|b| global_default_bin().is_some_and(|t| paths_equal(&t, b)));
     let dir = php_inst(svc).map(|i| i.dir.display().to_string());
     Ok(json!({
         "svc": svc,
@@ -1479,7 +1604,9 @@ pub async fn instances(svc: &str) -> Response {
                 }
                 let s = format!("php{digits}");
                 if let Ok(v) = instance_summary(&s)
-                    && v.get("installed").and_then(|x| x.as_bool()).unwrap_or(false)
+                    && v.get("installed")
+                        .and_then(|x| x.as_bool())
+                        .unwrap_or(false)
                 {
                     list.push(v);
                 }
@@ -1488,11 +1615,20 @@ pub async fn instances(svc: &str) -> Response {
         // 未发现目录实例（非应用商店安装）时，兼容系统包 PHP
         if list.is_empty()
             && let Ok(v) = instance_summary("php")
-            && v.get("installed").and_then(|x| x.as_bool()).unwrap_or(false)
+            && v.get("installed")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false)
         {
             list.push(v);
         }
-        Ok(Response::ok("ok", Some(json!({ "instances": list }))))
+        // 回传实例扫描根目录：php-* 没被识别时，可一眼看出是否装到了别的 APPS_DIR
+        Ok(Response::ok(
+            "ok",
+            Some(json!({
+                "instances": list,
+                "apps_dir": super::install_root().display().to_string(),
+            })),
+        ))
     })
     .await
 }
@@ -1569,4 +1705,71 @@ pub async fn set_default(svc: &str, enable: bool) -> Response {
         }
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn fixture_root(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("zap-svcconf-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        p
+    }
+
+    /// 旧实现会把 `/etc/php/` 的末段当目录名前缀去扫 `/etc`，
+    /// 导致 `/etc/php/<ver>/fpm/php.ini` 永远探测不到（PHP 配置页空白）。
+    #[test]
+    fn glob_matches_version_dir_and_prefers_highest() {
+        let base = fixture_root("php");
+        fs::create_dir_all(base.join("7.4/fpm")).unwrap();
+        fs::create_dir_all(base.join("8.1/fpm")).unwrap();
+        fs::create_dir_all(base.join("8.2/fpm")).unwrap();
+        fs::write(base.join("7.4/fpm/php.ini"), "; 7.4").unwrap();
+        fs::write(base.join("8.1/fpm/php.ini"), "; 8.1").unwrap();
+        fs::write(base.join("8.2/fpm/php.ini"), "; 8.2").unwrap();
+
+        let pattern = format!("{}/*/fpm/php.ini", base.display());
+        assert_eq!(
+            glob_first(&pattern).as_deref(),
+            Some(base.join("8.2/fpm/php.ini").as_path())
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn glob_returns_none_when_tail_missing() {
+        let base = fixture_root("missing");
+        fs::create_dir_all(base.join("8.1/cli")).unwrap();
+        fs::write(base.join("8.1/cli/other.ini"), "x").unwrap();
+
+        let pattern = format!("{}/*/fpm/php.ini", base.display());
+        assert!(glob_first(&pattern).is_none());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn glob_supports_dir_name_prefix() {
+        let base = fixture_root("prefix");
+        fs::create_dir_all(base.join("php-81")).unwrap();
+        fs::write(base.join("php-81/php.ini"), "; remi").unwrap();
+
+        let pattern = format!("{}/php-*/php.ini", base.display());
+        assert_eq!(
+            glob_first(&pattern).as_deref(),
+            Some(base.join("php-81/php.ini").as_path())
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn php_def_covers_common_layouts() {
+        assert!(PHP_DEF.main_candidates.contains(&"/etc/php/*/fpm/php.ini"));
+        assert!(PHP_DEF.main_candidates.contains(&"/etc/php.ini"));
+        assert!(PHP_DEF.main_candidates.contains(&"/etc/opt/remi/*/php.ini"));
+    }
 }
