@@ -39,6 +39,13 @@ export interface AppChoice {
   value: string
 }
 
+/** version_meta 中单个版本的元数据（family 用于合并入口的下拉分组与标注） */
+export interface VersionMeta {
+  family?: 'mysql' | 'mariadb'
+  label?: string
+  [key: string]: unknown
+}
+
 export interface AppPackage {
   pkg_path: string
   category: string
@@ -48,6 +55,8 @@ export interface AppPackage {
   version: string
   /** 全部可安装版本（来自 app.yaml version 数组），默认取首个 */
   versions: string[]
+  /** 版本 → 附加元数据（app.yaml version_meta，如 MySQL / MariaDB 合并入口） */
+  version_meta?: Record<string, VersionMeta> | null
   deps: string[]
   /** 依赖：映射（name: 版本/要求）或旧式数组 */
   dependencies: Record<string, string> | string[]

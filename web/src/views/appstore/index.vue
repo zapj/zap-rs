@@ -59,8 +59,8 @@
         <el-radio-button value="all">全部</el-radio-button>
         <el-radio-button value="infra">基础设施</el-radio-button>
         <el-radio-button value="application">应用程序</el-radio-button>
-        <el-radio-button value="webapps">Web 应用程序</el-radio-button>
-        <el-radio-button value="database">数据层</el-radio-button>
+        <el-radio-button value="webapps">Web 应用</el-radio-button>
+        <el-radio-button value="database">数据库</el-radio-button>
         <el-radio-button value="library">基础库</el-radio-button>
       </el-radio-group>
       <el-input
@@ -101,12 +101,35 @@
             版本:
             <el-select
               size="small"
-              style="width: 130px"
+              :style="{ width: versionGroups(pkg).length ? '210px' : '130px' }"
               :model-value="selVersion[pkg.pkg_path] || pkg.version"
               @change="onSelVersion(pkg, $event)"
             >
-              <el-option v-for="ver in pkg.versions" :key="ver" :label="ver" :value="ver" />
+              <template v-if="versionGroups(pkg).length">
+                <el-option-group
+                  v-for="g in versionGroups(pkg)"
+                  :key="g.family"
+                  :label="g.label"
+                >
+                  <el-option v-for="ver in g.versions" :key="ver" :label="ver" :value="ver">
+                    <div class="ver-opt-row">
+                      <span>{{ ver }}</span>
+                      <el-tag :type="familyTagType(g.family)" size="small" effect="plain">
+                        {{ familyShort(g.family) }}
+                      </el-tag>
+                    </div>
+                  </el-option>
+                </el-option-group>
+              </template>
+              <el-option v-else v-for="ver in pkg.versions" :key="ver" :label="ver" :value="ver" />
             </el-select>
+            <el-tag
+              v-if="familyOf(pkg, curVersion(pkg))"
+              class="ver-fam-tag"
+              :type="familyTagType(familyOf(pkg, curVersion(pkg)))"
+              size="small"
+              effect="light"
+            >{{ familyShort(familyOf(pkg, curVersion(pkg))) }}</el-tag>
           </span>
           <span v-else>版本: <b>{{ pkg.version || '-' }}</b></span>
           <span v-if="depList(pkg).length" class="pkg-deps">依赖: {{ depList(pkg).join('、') }}</span>
@@ -115,6 +138,12 @@
         <div v-if="pkg.installed" class="pkg-installed-meta">
           已安装版本:
           <b>{{ pkg.installed_version || '-' }}</b>
+          <el-tag
+            v-if="familyOf(pkg, pkg.installed_version)"
+            size="small"
+            :type="familyTagType(familyOf(pkg, pkg.installed_version))"
+            effect="plain"
+          >{{ familyShort(familyOf(pkg, pkg.installed_version)) }}</el-tag>
           <span v-if="pkg.upgraded_from">（升级自 {{ pkg.upgraded_from }}）</span>
         </div>
         <div class="pkg-actions">
@@ -501,6 +530,55 @@ function curVersion(pkg: AppPackage): string {
   return selVersion.value[pkg.pkg_path] || pkg.version || ''
 }
 
+// ── 版本家族元数据（MySQL / MariaDB 合并入口的 version_meta）────────
+
+/** 某版本的家族；未声明 version_meta 或版本不在其中时返回空串 */
+function familyOf(pkg: AppPackage, ver?: string | null): '' | 'mysql' | 'mariadb' {
+  if (!ver || !pkg.version_meta) return ''
+  const f = pkg.version_meta[ver]?.family
+  return f === 'mysql' || f === 'mariadb' ? f : ''
+}
+
+const FAMILY_SHORT: Record<string, string> = { mysql: 'MySQL', mariadb: 'MariaDB' }
+const FAMILY_GROUP: Record<string, string> = {
+  mysql: 'MySQL Community Server',
+  mariadb: 'MariaDB Server',
+}
+
+function familyShort(f: string): string {
+  return FAMILY_SHORT[f] || f
+}
+
+/** 家族在标签 / 选中态里的配色：mysql 蓝、mariadb 绿，一眼区分 */
+function familyTagType(f: string): 'primary' | 'success' {
+  return f === 'mariadb' ? 'success' : 'primary'
+}
+
+/** 确认文案用：家族在则 “MySQL 8.0.46”，否则回退 “v8.0.46” */
+function verLabel(pkg: AppPackage, ver: string): string {
+  const f = familyOf(pkg, ver)
+  return f ? `${familyShort(f)} ${ver}` : `v${ver}`
+}
+
+/**
+ * 合并入口（多个家族共享一个下拉）时按家族分组；保持 versions 原顺序。
+ * 元数据缺失 / 只有一个家族时返回空（回退普通扁平下拉）。
+ */
+function versionGroups(
+  pkg: AppPackage,
+): Array<{ family: string; label: string; versions: string[] }> {
+  if (!pkg.version_meta) return []
+  const groups: Array<{ family: string; label: string; versions: string[] }> = []
+  for (const ver of pkg.versions || []) {
+    const f = familyOf(pkg, ver)
+    if (!f) return [] // 某个版本缺家族元数据 → 整组回退扁平，避免误标
+    const last = groups[groups.length - 1]
+    if (last && last.family === f) last.versions.push(ver)
+    else groups.push({ family: f, label: FAMILY_GROUP[f] || f, versions: [ver] })
+  }
+  return groups.length > 1 ? groups : []
+}
+
 /** app.yaml actions 的动作键 -> 按钮文案（键值与文案均去空格兜底） */
 function actionEntries(pkg: AppPackage): Array<[string, string]> {
   const a = pkg.actions
@@ -670,7 +748,7 @@ async function doInstall(pkg: AppPackage, actionKey?: string, options?: FormOpti
         ? '（允许多版本共存，如需安装其他版本请先在卡片上选择）'
         : ''
     await ElMessageBox.confirm(
-      `确定${actName} ${pkg.title || pkg.name} ${ver ? `(v${ver})` : ''}${actionKey ? `，操作: ${label}` : ''}？${hint}`,
+      `确定${actName} ${pkg.title || pkg.name} ${ver ? `(${verLabel(pkg, ver)})` : ''}${actionKey ? `，操作: ${label}` : ''}？${hint}`,
       `${actName}确认`,
       { type: 'info' },
     )
@@ -723,9 +801,18 @@ async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolea
     ElMessage.warning(`已安装 v${ver}，无需重复升级（如需重装请使用「再次安装」）`)
     return false
   }
+  // MySQL / MariaDB 合并入口：跨家族不能升级（mariadb → mysql 等），须先卸载再装目标版本
+  const instFam = familyOf(pkg, pkg.installed_version)
+  const tgtFam = familyOf(pkg, ver)
+  if (instFam && tgtFam && instFam !== tgtFam) {
+    ElMessage.warning(
+      `${familyShort(instFam)} 与 ${familyShort(tgtFam)} 不能互相升级，请先卸载后重新安装目标版本`,
+    )
+    return false
+  }
   try {
     await ElMessageBox.confirm(
-      `确定升级 ${pkg.title || pkg.name} 到 v${ver || pkg.version}？当前已安装 v${pkg.installed_version}`,
+      `确定升级 ${pkg.title || pkg.name} 到 ${verLabel(pkg, ver || pkg.version)}？当前已安装 ${verLabel(pkg, pkg.installed_version || '')}`,
       '升级确认',
       { type: 'warning' },
     )
@@ -1045,10 +1132,25 @@ onMounted(() => {
   margin-bottom: 6px;
 }
 
+.ver-opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ver-fam-tag {
+  margin-left: 6px;
+}
+
 .pkg-installed-meta {
   font-size: 12px;
   color: #67c23a;
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .pkg-actions {

@@ -329,6 +329,10 @@ struct AppYaml {
     /// dependencies 映射：依赖库名 -> 版本/要求（如 openssl: 1.1.1w）
     #[serde(default)]
     dependencies: Option<Value>,
+    /// 版本 → 附加元数据（如 `"8.0.46": {family: mysql}`），
+    /// 合并入口（MySQL / MariaDB 等）据此在版本下拉中分组 / 标注家族。
+    #[serde(default)]
+    version_meta: Option<Value>,
     /// 自定义操作按钮：动作键 -> 按钮文案（如 build: 编译安装 / bin: 安装）
     #[serde(default)]
     actions: Option<Value>,
@@ -539,6 +543,7 @@ fn scan_source_dir(
                     "description": app_yaml.description.clone().unwrap_or_default(),
                     "version": app_yaml.version.default.clone(),
                     "versions": app_yaml.version.all.clone(),
+                    "version_meta": app_yaml.version_meta.clone().unwrap_or(Value::Null),
                     "deps": app_yaml.deps.clone().unwrap_or_default(),
                     "dependencies": dependencies,
                     "actions": actions,
