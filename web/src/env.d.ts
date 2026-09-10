@@ -7,9 +7,10 @@ interface ImportMetaEnv {
   /** 应用基础路径；留空表示部署在根路径，对应 zap.yaml 的 server.url_prefix */
   readonly VITE_BASE_URL?: string
   readonly VITE_USE_PROXY?: string
-  /** zap 版本（构建时从根 Cargo.toml 的 [workspace.package] 读取，各 crate 统一继承） */
+  /** zap 版本（workspace 统一版本：根 Cargo.toml [workspace.package]；
+   *  发布时由 build.sh 解析后通过 ZAP_VERSION 传入，单独构建时由 vite 自行解析） */
   readonly VITE_APP_VERSION?: string
-  /** 前端 web 包版本（web/package.json） */
+  /** Web 版本：前端包自身版本（web/package.json），与 Zap 版本相互独立 */
   readonly VITE_WEB_VERSION?: string
 }
 

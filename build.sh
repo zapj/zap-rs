@@ -43,6 +43,20 @@ VERSION=$(awk -F'"' '/^\[workspace\.package\]/{f=1} f&&/^version/{print $2; exit
 [ -n "$VERSION" ] || die "无法从 Cargo.toml 解析 workspace 版本号"
 info "版本: ${VERSION}"
 
+# ── 前端产物（zapd 通过 rust-embed 内嵌 ../web/dist）────────────
+# 必须在 cargo build **之前**构建：否则二进制内嵌的是上一次的前端产物，
+# 页脚 / 系统更新页展示的 Web 版本就会落后于本次发布版本。
+WEB_DIR="$CUR_DIR/web"
+if [ -f "$WEB_DIR/package.json" ] && command -v npm >/dev/null 2>&1; then
+    info "构建前端产物（web/dist）..."
+    # 版本唯一来源：上面从根 Cargo.toml 解析出的 $VERSION，显式传给前端构建
+    # （web/vite.config.ts 读取 ZAP_VERSION 注入；缺失时回退自行解析 Cargo.toml）
+    (cd "$WEB_DIR" && ZAP_VERSION="$VERSION" npm run build:prod) || die "前端构建失败"
+    ok "前端产物构建完成（v${VERSION}）"
+else
+    warn "跳过前端构建（缺少 web/package.json 或 npm）：二进制将内嵌现有 web/dist，页面展示的 Web 版本可能落后于本次发布"
+fi
+
 # ── 构建 ────────────────────────────────────────────────────
 info "构建 release 二进制（${TARGET}）..."
 cargo build --release --target "$TARGET" || die "构建失败"

@@ -12,11 +12,21 @@ import Icons from 'unplugin-icons/vite'
 import IconsResolver from 'unplugin-icons/resolver'
 
 /**
- * 读取 workspace 统一版本：解析根 Cargo.toml [workspace.package] 的 version。
- * zapd / zapctl / zap-proto / zapexec / zapupgrade 均通过 version.workspace 继承该版本。
- * 前端 web/package.json 的 version 仅代表前端产物本身（VITE_WEB_VERSION）。
+ * Zap 版本（唯一来源）：根 Cargo.toml [workspace.package] 的 version。
+ * zapd / zapctl / zap-proto / zapexec / zapupgrade 均通过 version.workspace 继承该版本，
+ * 前端的 VITE_APP_VERSION 也用它。
+ *
+ * 取值顺序：
+ * 1) 环境变量 ZAP_VERSION —— build.sh 解析 Cargo.toml 后显式传入（发布路径，推荐）；
+ * 2) 自行解析根 Cargo.toml  —— 单独执行 `npm run build*` 时的回退路径。
+ *
+ * 注意：Web 版本（VITE_WEB_VERSION）是前端包自身版本，来自 web/package.json，
+ * 与本函数无关 —— 两个版本号各自独立展示。
  */
-function readWorkspaceVersion(): string {
+function workspaceVersion(): string {
+  const fromEnv = process.env.ZAP_VERSION?.trim()
+  if (fromEnv) return fromEnv
+  // 注：不再回退到 package.json 版本 —— Zap 版本与 Web 版本来源不同，不能混用
   try {
     const cargo = readFileSync(
       fileURLToPath(new URL('../Cargo.toml', import.meta.url)),
@@ -27,6 +37,8 @@ function readWorkspaceVersion(): string {
     return ''
   }
 }
+
+const APP_VERSION = workspaceVersion()
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -102,9 +114,10 @@ export default defineConfig(({ mode }) => {
         : undefined,
     },
     define: {
-      // 主版本以 workspace 统一版本（根 Cargo.toml [workspace.package]）为准；读不到时退回前端包版本
-      "import.meta.env.VITE_APP_VERSION": JSON.stringify(readWorkspaceVersion() || process.env.npm_package_version),
-      // 前端 web 包版本
+      // Zap 版本：workspace 统一版本（根 Cargo.toml [workspace.package]），
+      // 由 build.sh 通过 ZAP_VERSION 传入（单独构建时自行解析 Cargo.toml）
+      "import.meta.env.VITE_APP_VERSION": JSON.stringify(APP_VERSION),
+      // Web 版本：前端包自身版本（web/package.json），与 Zap 版本相互独立
       "import.meta.env.VITE_WEB_VERSION": JSON.stringify(process.env.npm_package_version),
     },
    

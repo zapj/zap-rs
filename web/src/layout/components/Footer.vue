@@ -26,13 +26,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { getUpdateStatus } from '@/api/systemUpdate'
 
-// zap 版本：workspace 统一版本（构建时从根 Cargo.toml 的 [workspace.package] 注入 VITE_APP_VERSION）
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || ''
-// web 包自身版本（构建时从 web/package.json 注入 VITE_WEB_VERSION）
+// zap 版本：优先展示**运行时**版本（zapd 实际运行的二进制版本），
+// 取不到时回退到构建时注入的 VITE_APP_VERSION（根 Cargo.toml [workspace.package]）。
+// 原因：前端产物由 zapd 通过 rust-embed 内嵌（../web/dist），
+// 若发布时未重新构建前端，构建版本号会落后于本次发布的二进制版本。
+const BUILD_VERSION = import.meta.env.VITE_APP_VERSION || ''
+const runtimeVersion = ref('')
+const APP_VERSION = computed(() => runtimeVersion.value || BUILD_VERSION)
+// Web 版本：前端包自身版本（构建时从 web/package.json 注入），与 Zap 版本独立
 const WEB_VERSION = import.meta.env.VITE_WEB_VERSION || ''
 
 const year = new Date().getFullYear()
@@ -42,6 +48,18 @@ const userStore = useUserStore()
 
 /** 系统更新页仅 admin 可见：非管理员不提供跳转 */
 const canGoUpdate = computed(() => userStore.roles.includes('admin'))
+
+onMounted(async () => {
+  // /system/update/status 仅 admin 可访问：非管理员直接用构建时版本，避免 403 噪音
+  if (!canGoUpdate.value) return
+  try {
+    const res = await getUpdateStatus()
+    const v = res.data?.zapd_version
+    if (v) runtimeVersion.value = v
+  } catch {
+    // 忽略：保留构建时注入的版本
+  }
+})
 
 function goUpdate() {
   if (canGoUpdate.value) router.push('/system/update')
