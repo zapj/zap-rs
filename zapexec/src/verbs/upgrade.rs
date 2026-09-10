@@ -72,13 +72,12 @@ pub async fn run(run_id: String, stage_dir: String, log_path: String) -> Respons
     if !runner.is_file() {
         return Response::err(-1, format!("升级包缺少 zapupgrade: {}", runner.display()));
     }
+    let runner_path = runner.to_string_lossy().into_owned();
 
-    // 开发/容器环境（rundev.sh / docker）没有 systemd：直接以当前权限拉起
-    // 独立 zapupgrade 子进程（stdout/stderr 汇入升级日志），不依赖 systemd。
-    // 生产环境走 systemd-run，保证重启 zapd/zapexec 不中断升级流程。
+    // 注意：zapupgrade 的 CLI 是扁平参数（--stage / --dir / --log），**没有子命令**。
+    // 不能额外传 "apply"，否则 clap 直接解析失败、升级器启动即退出（表现为日志一直为空）。
+    // 参数列表不含程序自身，避免再用下标取日志路径（此前 args[7] 依赖参数个数）。
     let args: Vec<String> = vec![
-        runner.to_string_lossy().into_owned(),
-        "apply".to_string(),
         "--stage".to_string(),
         stage_dir.clone(),
         "--dir".to_string(),
@@ -88,14 +87,17 @@ pub async fn run(run_id: String, stage_dir: String, log_path: String) -> Respons
     ];
 
     if !systemd_available() {
+        let runner_path = runner_path.clone();
+        let args = args.clone();
+        let log_for_spawn = log_path.clone();
         let out = tokio::task::spawn_blocking(move || {
             let log_file = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&args[7])
+                .open(&log_for_spawn)
                 .ok();
-            let mut c = root_cmd(&args[0]);
-            let mut spawn = c.args(&args[1..]).stdin(std::process::Stdio::null());
+            let mut c = root_cmd(&runner_path);
+            let mut spawn = c.args(&args).stdin(std::process::Stdio::null());
             if let Some(f) = log_file {
                 let stdout = f.try_clone().ok();
                 let stderr = Some(f);
@@ -128,6 +130,7 @@ pub async fn run(run_id: String, stage_dir: String, log_path: String) -> Respons
             .arg("--collect")
             .arg("--property=Type=oneshot")
             .arg("--")
+            .arg(&runner_path)
             .args(&args)
             .output()
     })

@@ -3,5 +3,5 @@ resolver = "3"
 members = ["zapd","zapctl","zap-proto","zapexec","zapupgrade","zap-crypto"]
 
 [workspace.package]
-version = "1.0.7"
+version = "1.0.8"
 license = "LGPL-3.0-or-later"

@@ -69,8 +69,29 @@ fn unit_managed(unit: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 从 argv 中取出 `--log` 的值（供参数解析失败时兜底写日志）。
+fn log_from_argv() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    args.windows(2)
+        .find(|w| w[0] == "--log")
+        .map(|w| w[1].clone())
+}
+
 fn main() {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(c) => c,
+        Err(e) => {
+            // 参数解析失败也必须落到升级日志并写入结束标记：
+            // 否则面板只能看到空日志，且运行记录一直停留在「运行中」。
+            let msg = format!("升级器参数解析失败: {e}");
+            if let Some(log) = log_from_argv() {
+                log_line(&log, &msg);
+                log_line(&log, &format!("{DONE_MARKER} 1"));
+            }
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+    };
     log_line(&cli.log, "==== ZAP 系统升级开始 ====");
     let code = run_upgrade(&cli);
     log_line(&cli.log, &format!("{DONE_MARKER} {code}"));
