@@ -595,6 +595,7 @@ onMounted(() => {
               </template>
             </el-table-column>
             <el-table-column prop="version" label="版本" />
+            <el-table-column prop="binary" label="路径" show-overflow-tooltip />
             <el-table-column label="状态" width="110">
               <template #default="{ row }">
                 <el-tag :type="row.running ? 'success' : 'info'" size="small">

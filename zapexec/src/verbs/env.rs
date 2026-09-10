@@ -377,22 +377,106 @@ fn normalize_version_token(t: &str) -> String {
 
 fn detect_databases() -> Value {
     let mut out = Vec::new();
-    for (name, bin) in [
-        ("mysql", "mysqld"),
-        ("mariadb", "mariadbd"),
-        ("postgresql", "postgres"),
-        ("redis", "redis-server"),
-        ("mongodb", "mongod"),
+    for (name, bins, prefixes) in [
+        ("mysql", &["mysqld"][..], &["mysql"][..]),
+        ("mariadb", &["mariadbd", "mysqld"][..], &["mariadb"][..]),
+        ("postgresql", &["postgres"][..], &["postgres", "pgsql"][..]),
+        ("redis", &["redis-server"][..], &["redis"][..]),
+        ("mongodb", &["mongod"][..], &["mongo"][..]),
     ] {
-        if let Some(line) = probe_first_line(bin, &["--version"]) {
+        if let Some((binary, line)) = probe_database(bins, prefixes) {
+            let proc = Path::new(&binary)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| bins[0].to_string());
             out.push(json!({
                 "name": name,
                 "version": db_version(name, &line),
-                "running": proc_running(bin),
+                "binary": binary,
+                "running": proc_running(&proc),
             }));
         }
     }
     json!(out)
+}
+
+/// 探测数据库守护进程：安装根（AppStore，含版本目录）优先，其次 PATH。
+/// 返回 (二进制路径, 版本首行)。
+fn probe_database(bins: &[&str], prefixes: &[&str]) -> Option<(String, String)> {
+    for bin in bins {
+        for cand in db_bin_candidates(bin, prefixes) {
+            let path = cand.to_string_lossy().into_owned();
+            if let Some(line) = probe_first_line(&path, &["--version"]) {
+                return Some((path, line));
+            }
+        }
+    }
+    // 系统包管理器安装（在 PATH 上）
+    for bin in bins {
+        if let Some(line) = probe_first_line(bin, &["--version"]) {
+            return Some((bin.to_string(), line));
+        }
+    }
+    None
+}
+
+/// 安装根（默认 /usr/local/apps，`ZAP_APPS_DIR` 可覆盖）下查找守护进程：
+/// 兼容 `<root>/mysql-8.4` 与 `<root>/<分类>/mysql-8.4` 两种布局，
+/// 多个版本时优先版本号高者。
+fn db_bin_candidates(bin: &str, prefixes: &[&str]) -> Vec<PathBuf> {
+    let root = super::install_root();
+    let matched = |name: &str| prefixes.iter().any(|pre| name.starts_with(pre));
+
+    let Ok(top) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for e in top.flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
+        }
+        if matched(&e.file_name().to_string_lossy()) {
+            dirs.push(p.clone());
+        }
+        // 分类二级目录（database / server / ...）
+        if let Ok(sub) = std::fs::read_dir(&p) {
+            for e2 in sub.flatten() {
+                let q = e2.path();
+                if q.is_dir() && matched(&e2.file_name().to_string_lossy()) {
+                    dirs.push(q);
+                }
+            }
+        }
+    }
+
+    dirs.sort_by_key(|d| {
+        d.file_name()
+            .map(|n| dir_version_segments(&n.to_string_lossy()))
+            .unwrap_or_default()
+    });
+    dirs.reverse();
+    dirs.dedup();
+
+    let mut out = Vec::new();
+    for d in dirs {
+        for sub in ["bin", "sbin"] {
+            let c = d.join(sub).join(bin);
+            if c.is_file() {
+                out.push(c);
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// 提取目录名中的数字段（`mysql-8.4` → `[8, 4]`），用于版本排序。
+fn dir_version_segments(name: &str) -> Vec<u64> {
+    name.split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<u64>().ok())
+        .collect()
 }
 
 fn db_version(name: &str, line: &str) -> String {
@@ -423,6 +507,7 @@ fn detect_tools() -> Value {
         ("docker", &["--version"][..]),
         ("python3", &["--version"][..]),
         ("composer", &["--version"][..]),
+        ("php", &["--version"][..]),
     ] {
         if let Some(line) = probe_first_line(name, args) {
             out.push(json!({ "name": name, "version": line }));
@@ -480,5 +565,41 @@ mod tests {
         // 无版本 token 的 socket 文件名返回 None → 归一化空串（调用方跳过）
         assert!(socket_version_token(Path::new("/var/run/php-fpm.sock")).is_none());
         assert_eq!(normalize_version_token(""), "");
+    }
+
+    #[test]
+    fn dir_version_ordering() {
+        assert_eq!(dir_version_segments("mysql-8.4"), vec![8, 4]);
+        assert_eq!(dir_version_segments("php-74"), vec![74]);
+        assert!(dir_version_segments("nginx").is_empty());
+        // 数值比较：10.0 高于 9.0（字符串排序会判反）
+        assert!(dir_version_segments("mysql-10.0") > dir_version_segments("mysql-9.0"));
+    }
+
+    #[test]
+    fn db_version_parsing() {
+        assert_eq!(
+            db_version(
+                "mysql",
+                "mysqld  Ver 8.4.0 for Linux on x86_64 (MySQL Community Server - GPL)"
+            ),
+            "8.4.0"
+        );
+        assert_eq!(
+            db_version(
+                "mariadb",
+                "mariadbd  Ver 10.11.6-MariaDB for Linux on x86_64"
+            ),
+            "10.11.6"
+        );
+        assert_eq!(
+            db_version("postgresql", "postgres (PostgreSQL) 16.2"),
+            "16.2"
+        );
+        assert_eq!(
+            db_version("redis", "Redis server v=7.2.4 sha=00000000:0"),
+            "7.2.4"
+        );
+        assert_eq!(db_version("mongodb", "db version v7.0.5"), "7.0.5");
     }
 }

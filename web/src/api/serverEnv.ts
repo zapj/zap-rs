@@ -28,7 +28,7 @@ export interface EnvPayload {
       default: boolean
     }>
   }
-  databases: Array<{ name: string; version: string; running: boolean }>
+  databases: Array<{ name: string; version: string; binary: string; running: boolean }>
   tools: Array<{ name: string; version: string }>
 }
 
