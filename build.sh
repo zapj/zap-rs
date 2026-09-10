@@ -53,10 +53,16 @@ rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 BIN_DIR="$CUR_DIR/target/$TARGET/release"
+# 发行包统一为「单层 zap/ 目录」布局：
+#   zap/{zapd, zapctl, zapexec, zapupgrade} + zap/scripts + zap/data
+# 二进制与资源同级，install.sh 直接以 zap/ 作为唯一内容根；
+# zapupgrade 的 normalize_stage 同样从 zap/ 里取二进制，无需额外适配。
+DIST_ZAP="$DIST_DIR/zap"
+mkdir -p "$DIST_ZAP"
 for bin in zapd zapctl zapexec zapupgrade; do
-    cp -f "$BIN_DIR/$bin" "$DIST_DIR/" || die "复制 $bin 失败"
+    cp -f "$BIN_DIR/$bin" "$DIST_ZAP/" || die "复制 $bin 失败"
 done
-ok "二进制复制完成: zapd / zapctl / zapexec / zapupgrade"
+ok "二进制复制完成: zap/{zapd, zapctl, zapexec, zapupgrade}"
 
 # ── 内置 AppStore 源（git 仓库位于 data/appstore/repos/zap-appstore）──────
 # 源内容由独立 git 仓库管理并随构建机维护在此目录；打包前若有 .git 则 pull 到最新，
@@ -82,16 +88,17 @@ else
 fi
 
 # 脚本、数据模板与配置（data/ 仅打包发行需要的内容，剔除运行时产物）
-cp -Rf "$CUR_DIR/scripts" "$DIST_DIR/"
+# 与二进制同级，统一放进 zap/ 目录
+cp -Rf "$CUR_DIR/scripts" "$DIST_ZAP/"
 
 # data/ 打包白名单：
 #   appstore/repos/zap-appstore/          内置 AppStore 种子源
 #   appstore/repos.yaml、custom/README.md 安装脚本(install.sh)依赖的模板
 #   apps/README.md                        APPS_DIR 占位说明（apps 下其它为运行时安装实例，不打包）
-# 说明：systemd 服务模板、运维脚本、zap 共享工具与 conf 模板统一由 scripts/ 提供（第 85 行），
+# 说明：systemd 服务模板、运维脚本、zap 共享工具与 conf 模板统一由 scripts/ 提供，
 #       不重复打进 data/；安装后 data/ 是运行时数据区（zap.db、apps、appstore、run/ 等）
 # 不打包：zap.db、run/、tmp/、apps/library、appstore 的 cache/logs/runs/tmp/custom/scripts
-DIST_DATA="$DIST_DIR/data"
+DIST_DATA="$DIST_ZAP/data"
 mkdir -p "$DIST_DATA/apps"
 mkdir -p "$DIST_DATA/appstore/repos" "$DIST_DATA/appstore/custom"
 cp -Rf "$CUR_DIR/data/appstore/repos/zap-appstore" "$DIST_DATA/appstore/repos/" 2>/dev/null || true

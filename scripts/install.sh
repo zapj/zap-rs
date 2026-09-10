@@ -4,17 +4,24 @@ set -euo pipefail
 
 # ── 终端颜色 ────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
-info() { echo -e "${BLUE}[*]${NC} $*"; }
-ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
-warn() { echo -e "${YELLOW}[!]${NC} $*"; }
-die()  { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
+# 用 printf 而非 `echo -e`：dash/sh 的 echo 不解析 -e，会原样输出 "-e [✗] ..."
+info() { printf "${BLUE}[*]${NC} %s\n" "$*"; }
+ok()   { printf "${GREEN}[✓]${NC} %s\n" "$*"; }
+warn() { printf "${YELLOW}[!]${NC} %s\n" "$*"; }
+die()  { printf "${RED}[✗]${NC} %s\n" "$*" >&2; exit 1; }
+
+# ── 解释器检查（脚本用到 bash 数组等特性，sh/dash 下行为异常）──
+if [ -z "${BASH_VERSION:-}" ]; then
+    printf "${RED}[✗]${NC} %s\n" "请使用 bash 执行：sudo bash $0" >&2
+    exit 1
+fi
 
 # ── 权限检查 ────────────────────────────────────────────────
 [ "$(id -u)" -eq 0 ] || die "请以 root 身份运行：sudo bash $0"
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}   ZAP 服务器/VPS 管理系统 · 安装程序${NC}"
-echo -e "${GREEN}========================================${NC}"
+printf "${GREEN}========================================${NC}\n"
+printf "${GREEN}   ZAP 服务器/VPS 管理系统 · 安装程序${NC}\n"
+printf "${GREEN}========================================${NC}\n"
 
 # ── 解析版本与架构 ─────────────────────────────────────────
 VERSION="${1:-latest}"
@@ -114,10 +121,10 @@ WORK_DIR=$(mktemp -d /tmp/zap-install.XXXXXX) || die "无法创建临时目录"
 trap 'rm -rf "$WORK_DIR"' EXIT
 tar zxf "$ZAP_FILENAME" -C "$WORK_DIR" || die "解压失败，安装包可能已损坏"
 
-# 发行包布局兼容：当前包为平铺结构（zapd / zapctl / scripts / data 在包根），
-# 旧包多一层 zap/ 目录。统一解析出真实内容根，后续部署一律用 $SRC 取文件。
-SRC="$WORK_DIR"
-[ -f "$WORK_DIR/zap/zapd" ] && SRC="$WORK_DIR/zap"
+# 发行包布局（唯一，由 build.sh 保证）：整包内容都在 zap/ 下，
+# 二进制与 scripts / data 同级，因此二进制与资源共用同一个内容根。
+SRC="$WORK_DIR/zap"
+[ -d "$SRC" ] || die "安装包格式不正确：缺少 zap/ 目录"
 info "安装包内容目录: ${SRC}"
 
 # ── AppStore 官方仓库地址 ──────────────────────────────────
@@ -179,12 +186,17 @@ fi
 
 # 安装 / 升级共用同一段逻辑（幂等）：二进制 + 脚本 + 权限 + /usr/local/bin 软链
 for bin in zapd zapctl zapexec zapupgrade; do
-    [ -f "$SRC/$bin" ] || die "安装包缺少 ${bin}"
+    [ -f "$SRC/$bin" ] || die "安装包缺少 ${bin}（查找目录: ${SRC}）"
     cp -f "$SRC/$bin" "$ZAP_DIR/$bin" || die "部署 ${bin} 失败"
     chmod 0755 "$ZAP_DIR/$bin"
     ln -sf "$ZAP_DIR/$bin" "/usr/local/bin/$bin"
 done
-cp -Rf "$SRC/scripts" "$ZAP_DIR/" 2>/dev/null || true
+# scripts 是必需资源（systemd 服务文件等）：缺失要显式报错，不能静默继续
+if [ -d "$SRC/scripts" ]; then
+    cp -Rf "$SRC/scripts" "$ZAP_DIR/" || die "部署 scripts 失败"
+else
+    warn "安装包未包含 scripts 目录（查找目录: ${SRC}），systemd 服务文件将缺失"
+fi
 # 幂等部署 AppStore（升级不覆盖 git/.git 与 custom/）
 deploy_appstore
 ok "程序部署完成"
@@ -278,15 +290,15 @@ ok "systemd 服务已启用"
 rm -f "$ZAP_FILENAME"
 
 # ── 完成总结 ────────────────────────────────────────────────
-echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}           ZAP 安装完成${NC}"
-echo -e "${GREEN}========================================${NC}"
+printf "\n"
+printf "${GREEN}========================================${NC}\n"
+printf "${GREEN}           ZAP 安装完成${NC}\n"
+printf "${GREEN}========================================${NC}\n"
 echo "  版本:      ${VERSION}"
 echo "  程序目录:  /usr/local/zap"
 echo "  配置目录:  /etc/zap"
 echo "  访问地址:  https://<服务器IP>:2600"
 echo "  默认账号:  admin"
 echo "  默认密码:  123456"
-echo ""
-echo -e "${YELLOW}  ⚠ 首次登录后请立即修改默认密码！${NC}"
+printf "\n"
+printf "${YELLOW}  ⚠ 首次登录后请立即修改默认密码！${NC}\n"
