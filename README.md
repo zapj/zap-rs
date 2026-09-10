@@ -150,6 +150,7 @@ zapctl logs                                  # 查看运行日志
 zapctl backup | restore                      # 备份与还原
 zapctl user add|list|passwd                  # 面板用户管理
 zapctl config get|set <key>                  # 读写 zap.yaml
+zapctl env list|get|set|unset|import         # 运行环境键值（server_env 表，写操作需 root）
 zapctl cred gen [service] [user]             # 生成密码：无参数仅打印；带参加密存入凭据库
 zapctl cred set <service> <user> [password]  # 录入服务侧既有密码（缺省经 stdin）；存在则覆盖
 zapctl cred show|exists|ls|rm <service> <user>  # 凭据读取 / 判断 / 列表 / 删除

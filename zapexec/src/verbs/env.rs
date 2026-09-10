@@ -192,8 +192,8 @@ fn detect_php() -> Value {
     // key: 短版本号（如 8.3）
     let mut instances: BTreeMap<String, Value> = BTreeMap::new();
 
-    // 1) 前缀安装：/usr/local/php* / 下的 bin/php（含 /usr/local/php、/usr/local/php83 等）
-    if let Ok(rd) = std::fs::read_dir("/usr/local") {
+    // 1) AppStore 安装：/usr/local/apps/php* 
+    if let Ok(rd) = std::fs::read_dir("/usr/local/apps") {
         let mut dirs: Vec<PathBuf> = rd
             .flatten()
             .map(|e| e.path())

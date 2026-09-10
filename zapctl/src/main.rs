@@ -9,6 +9,7 @@
 mod backup;
 mod config;
 mod cred;
+mod env;
 mod user;
 
 use std::collections::HashMap;
@@ -122,6 +123,11 @@ enum Command {
         #[command(subcommand)]
         cmd: Option<config::ConfigCommand>,
     },
+    /// 运行环境键值（server_env 表）：列出（list）、读取（get）、设置（set）、删除（unset）、导入（import）
+    Env {
+        #[command(subcommand)]
+        cmd: Option<env::EnvCommand>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -179,6 +185,14 @@ fn main() {
             // 缺省子命令时等价于 `config get`（打印整个配置文件）
             let cmd = cmd.unwrap_or(config::ConfigCommand::Get { key: None });
             config::dispatch(cmd, file.as_deref())
+        }
+        Command::Env { cmd } => {
+            // 缺省子命令时等价于 `env list`（列出全部 scope）
+            let cmd = cmd.unwrap_or(env::EnvCommand::List {
+                scope: None,
+                json: false,
+            });
+            env::dispatch(cmd, &db_path)
         }
     };
 
