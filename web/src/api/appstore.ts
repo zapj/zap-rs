@@ -83,6 +83,8 @@ export interface AppPackage {
   allow_multiple_instances: boolean
   default_port: number | null
   scripts: any
+  /** 是否提供升级脚本（无则升级按「卸载 → 安装」兜底执行，前端需提示数据备份） */
+  has_upgrade?: boolean
   /** 可浏览/安装此包的角色白名单（app.yaml roles）；空/缺省 = 所有角色开放 */
   roles?: string[]
   source: 'official' | 'custom'

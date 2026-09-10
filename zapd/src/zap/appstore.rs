@@ -533,10 +533,22 @@ fn scan_source_dir(
                 },
             };
             let actions = app_yaml.actions.clone().unwrap_or_else(|| json!({}));
+            // 是否提供升级脚本：`scripts.upgrade` 可覆盖缺省文件名（与 zapexec 的 script_file 一致）。
+            // 未提供时升级按「uninstall → install」兜底执行，前端据此提示风险。
+            let has_upgrade = {
+                let file = app_yaml
+                    .scripts
+                    .as_ref()
+                    .and_then(|s| s.get("upgrade"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("upgrade.sh");
+                pkg_dir.join(file).is_file()
+            };
             by_path.insert(
                 pkg_path.clone(),
                 json!({
                     "pkg_path": pkg_path,
+                    "has_upgrade": has_upgrade,
                     "category": app_yaml.category.clone().unwrap_or_else(|| category.to_string()),
                     "name": app_yaml.name.clone().unwrap_or(name),
                     "title": app_yaml.title.clone().unwrap_or_default(),

@@ -168,6 +168,14 @@
           </template>
           <template v-else>
             <el-button
+              v-if="!pkg.allow_multiple_instances && !actionEntries(pkg).length"
+              size="small"
+              type="primary"
+              plain
+              :disabled="!canOperatePkg(pkg)"
+              @click="handleInstall(pkg)"
+            >重装</el-button>
+            <el-button
               v-if="pkg.allow_multiple_instances && !actionEntries(pkg).length"
               size="small"
               type="primary"
@@ -628,11 +636,12 @@ const optSubmitting = ref(false)
 /** 整组介绍（app.yaml options.<动作>.intro，展示在选项表单最下方） */
 const optIntro = ref('')
 
-/** 对话框动作中文名（随包是否已安装区分再次安装 / 安装） */
+/** 对话框动作中文名（已安装时：多版本=再次安装，单版本=重装） */
 function optModeName(m: OptMode, pkg: AppPackage): string {
   if (m === 'upgrade') return '升级'
   if (m === 'uninstall') return '卸载'
-  return pkg.installed ? '再次安装' : '安装'
+  if (!pkg.installed) return '安装'
+  return pkg.allow_multiple_instances ? '再次安装' : '重装'
 }
 
 const optDialogTitle = computed(() => {
@@ -720,10 +729,14 @@ function optDefault(o: AppOption): any {
 }
 
 function openOptionsDialog(pkg: AppPackage, actionKey: string | undefined, mode: OptMode) {
+  // 未指定动作键时按模式取键：upgrade/uninstall 用同名键（缺省回退 options.install），
+  // install 保持空键（由 actionOptions 回退到 options.install）。
+  // 注意：不能把 undefined 传给卸载——strict 模式下会被判为「无卸载选项」而直接返回。
+  const key = actionKey || (mode === 'install' ? undefined : mode)
   // 卸载不默认复用安装选项：仅在声明了 options.uninstall（或顶层数组）时弹出
   const strict = mode === 'uninstall'
-  const defs = optionsFor(pkg, actionKey, strict)
-  const intro = optionsIntro(pkg, actionKey, strict)
+  const defs = optionsFor(pkg, key, strict)
+  const intro = optionsIntro(pkg, key, strict)
   if (!defs.length && !intro) return
   optMode.value = mode
   optPkg.value = pkg
@@ -802,10 +815,12 @@ async function doInstall(pkg: AppPackage, actionKey?: string, options?: FormOpti
   const label = actionLabel(pkg, actionKey)
   const actName = pkg.installed ? '重新安装' : '安装'
   try {
-    const hint =
-      pkg.installed && pkg.allow_multiple_instances && pkg.versions && pkg.versions.length > 1
+    // 已安装时区分提示：多版本强调选版本；单版本「重装」会覆盖当前安装
+    const hint = !pkg.installed
+      ? ''
+      : pkg.allow_multiple_instances && pkg.versions && pkg.versions.length > 1
         ? '（允许多版本共存，如需安装其他版本请先在卡片上选择）'
-        : ''
+        : '（将重新执行安装脚本并覆盖当前安装，请确认数据已备份）'
     await ElMessageBox.confirm(
       `确定${actName} ${pkg.title || pkg.name} ${ver ? `(${verLabel(pkg, ver)})` : ''}${actionKey ? `，操作: ${label}` : ''}？${hint}`,
       `${actName}确认`,
@@ -869,7 +884,9 @@ async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolea
   const ver = curVersion(pkg)
   // 升级目标与当前已装版本一致时直接拦截(后端亦拒绝),避免无意义的重复执行
   if (pkg.installed && ver && ver === pkg.installed_version) {
-    ElMessage.warning(`已安装 v${ver}，无需重复升级（如需重装请使用「再次安装」）`)
+    // 多版本包提供「再次安装」，单版本包提供「重装」
+    const redo = pkg.allow_multiple_instances ? '再次安装' : '重装'
+    ElMessage.warning(`已安装 v${ver}，无需重复升级（如需重装请使用「${redo}」）`)
     return false
   }
   // 合并入口（version_meta 声明家族）：跨家族不能升级（mariadb → mysql 等），须先卸载再装目标版本
@@ -882,8 +899,13 @@ async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolea
     return false
   }
   try {
+    // 未提供 upgrade.sh 时后端按「uninstall → install」兜底执行，需提示数据备份
+    const fallbackHint =
+      pkg.has_upgrade === false
+        ? '。该包未提供 upgrade.sh，将按「卸载 → 安装」方式升级，请确认 uninstall.sh 已自带数据备份'
+        : ''
     await ElMessageBox.confirm(
-      `确定升级 ${pkg.title || pkg.name} 到 ${verLabel(pkg, ver || pkg.version)}？当前已安装 ${verLabel(pkg, pkg.installed_version || '')}`,
+      `确定升级 ${pkg.title || pkg.name} 到 ${verLabel(pkg, ver || pkg.version)}？当前已安装 ${verLabel(pkg, pkg.installed_version || '')}${fallbackHint}`,
       '升级确认',
       { type: 'warning' },
     )
