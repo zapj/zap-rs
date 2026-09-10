@@ -101,7 +101,7 @@ service.interceptors.response.use(
           break
 
         case 403:
-          ElMessage({ message: data?.message || '请先修改默认密码后再操作', type: 'error', duration: 5000 })
+          ElMessage({ message: data?.message || '无权限执行该操作', type: 'error', duration: 5000 })
           break
 
         case 404:

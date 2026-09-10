@@ -13,11 +13,6 @@ use tracing::warn;
 use crate::db;
 use crate::zap::{self, ZapError, ZapJsonResult, audit, jwt::ValidatedClaims, totp};
 
-/// Check if the stored password hash is for the default password "123456"
-fn is_default_password(stored_hash: &str) -> bool {
-    bcrypt::verify("123456", stored_hash).unwrap_or(false)
-}
-
 /// Rate limiter state: Maps IP -> (attempt_count, window_start)
 static LOGIN_RATE_LIMITER: Lazy<Mutex<HashMap<IpAddr, (u32, Instant)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -179,11 +174,8 @@ pub async fn login(
             }
         }
 
-        // Check if using default password
-        let is_default = is_default_password(&row.password);
-
         if let Ok(token) =
-            zap::jwt::generate_jwt_token(row.username.clone(), row.id, &row.roles, is_default)
+            zap::jwt::generate_jwt_token(row.username.clone(), row.id, &row.roles, false)
         {
             clear_login_attempts(&ip, &username).await;
             // 更新最后登录信息
@@ -204,7 +196,6 @@ pub async fn login(
                 "token_type": "Bearer",
                 "message": "登陆成功",
                 "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire,
-                "must_change_password": is_default,
             })));
         }
     }
@@ -310,9 +301,7 @@ pub async fn change_password(
 }
 
 pub async fn reflash_token(claims: zap::jwt::Claims) -> ZapJsonResult {
-    if let Ok(token) =
-        zap::jwt::generate_jwt_token(claims.sub, claims.id, &claims.roles, claims.pwd_is_default)
-    {
+    if let Ok(token) = zap::jwt::generate_jwt_token(claims.sub, claims.id, &claims.roles, false) {
         return Ok(Json(json!({
             "code": 0,
             "access_token": token,

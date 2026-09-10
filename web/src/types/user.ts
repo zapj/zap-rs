@@ -20,7 +20,6 @@ export interface LoginResponse {
   message: string
   token_type: string
   expire_in: number
-  must_change_password?: boolean
 }
 
 /**

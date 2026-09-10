@@ -29,12 +29,12 @@ pub struct Claims {
     pub iss: String,   // 发布者
     pub exp: u64,      // 过期时间
     pub roles: String, // 用户角色，逗号分隔
-    #[serde(default)]
-    pub pwd_is_default: bool, // 是否仍在使用默认密码
+    /// 是否仍在使用默认密码（当前恒为 false：登录与换发 token 均不再计算）。
+    /// 字段保留备用（例如面板提示「仍在使用初始密码」），服务端不再据此拦截任何请求。
+    pub pwd_is_default: bool,
 }
 
-/// Wrapper around Claims that rejects requests if password hasn't been changed
-/// from the default. Use this for all endpoints except login/logout/health/change-password.
+/// Wrapper around Claims：校验通过即放行（不再因「仍使用默认密码」拦截请求）。
 pub struct ValidatedClaims(pub Claims);
 
 impl std::ops::Deref for ValidatedClaims {
@@ -51,7 +51,6 @@ pub enum AuthError {
     MissingCredentials,
     TokenCreation,
     InvalidToken,
-    MustChangePassword,
 }
 
 #[derive(Debug, Serialize)]
@@ -142,7 +141,7 @@ where
     }
 }
 
-// ── ValidatedClaims extractor (rejects default-password users) ─────────────
+// ── ValidatedClaims extractor ───────────────────────────────
 
 impl<S> FromRequestParts<S> for ValidatedClaims
 where
@@ -152,11 +151,6 @@ where
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let claims = extract_claims(parts).await?;
-
-        if claims.pwd_is_default {
-            return Err(AuthError::MustChangePassword);
-        }
-
         Ok(ValidatedClaims(claims))
     }
 }
@@ -201,9 +195,6 @@ impl IntoResponse for AuthError {
             AuthError::TokenCreation => (StatusCode::INTERNAL_SERVER_ERROR, "Token creation error"),
             AuthError::InvalidToken => (StatusCode::BAD_REQUEST, "Invalid token"),
             AuthError::ExpiredSignature => (StatusCode::UNAUTHORIZED, "Token 已过期，请重新登录"),
-            AuthError::MustChangePassword => {
-                (StatusCode::FORBIDDEN, "请先修改默认密码后再进行操作")
-            }
         };
         let body = Json(json!({
             "code": -1,

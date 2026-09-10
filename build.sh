@@ -117,9 +117,9 @@ ok "打包完成"
 
 # 上传 install.sh 和 uninstall.sh（zapd 升级下载时使用）
 info "上传 install.sh ..."
-zapfile upload zap/ "$CUR_DIR/install.sh" || die "上传 install.sh 失败"
+zapfile upload zap/ "$CUR_DIR/scripts/install.sh" || die "上传 install.sh 失败"
 info "上传 uninstall.sh ..."
-zapfile upload zap/ "$CUR_DIR/uninstall.sh" || die "上传 uninstall.sh 失败"
+zapfile upload zap/ "$CUR_DIR/scripts/uninstall.sh" || die "上传 uninstall.sh 失败"
 
 # ── 上传 ────────────────────────────────────────────────────
 info "上传 ${ZAP_FILE_NAME} ..."

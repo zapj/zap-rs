@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import QRCode from 'qrcode'
 import { useUserStore } from '@/stores/user'
@@ -17,7 +16,6 @@ import type { NoticePrefs } from '@/api/user'
 import { roleLabel } from '@/utils/role'
 
 const userStore = useUserStore()
-const router = useRouter()
 const { userInfo } = userStore
 
 const activeTab = ref('info')
@@ -81,14 +79,7 @@ async function changePassword() {
 
   pwdLoading.value = true
   try {
-    const res = await updateUser({ id: userInfo.id, password: pwdForm.newPassword })
-    if (res.must_relogin) {
-      // 首次修改默认密码成功：退出并跳回登录页，使用新密码重新登录
-      ElMessage.success('密码修改成功，请使用新密码重新登录')
-      await userStore.resetToken()
-      router.push('/login')
-      return
-    }
+    await updateUser({ id: userInfo.id, password: pwdForm.newPassword })
     ElMessage.success('密码修改成功，下次登录请使用新密码')
     pwdForm.newPassword = ''
     pwdForm.confirmPassword = ''

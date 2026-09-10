@@ -72,13 +72,11 @@ export const constantRoutes: Array<RouteRecordRaw> = [
 ]
 
 // 动态路由，基于用户权限动态加载
+//
+// 注意：仪表盘不再在此定义 —— constantRoutes 的 `/` 已用 Layout 包裹并提供
+// `/dashboard` 子路由。此处若再顶格定义 `/dashboard`（无 Layout），
+// 菜单接口失败回退到本表时会匹配到它，登录后只剩裸 dashboard（无顶栏/侧边栏）。
 export const asyncRoutes: Array<RouteRecordRaw> = [
-  {
-    path: '/dashboard',
-    name: 'Dashboard',
-    component: () => import('@/views/dashboard/index.vue'),
-    meta: { title: '仪表盘', icon: 'House', affix: true, roles: ['admin', 'user'] },
-  },
   {
     path: '/system',
     component: Layout,

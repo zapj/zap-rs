@@ -52,11 +52,7 @@ export const useUserStore = defineStore('user', () => {
         token.value = res.access_token
         setToken(res.access_token)
         setTokenExpire(res.expire_in)
-        // Pass through must_change_password flag
-        return Promise.resolve({
-          ...res,
-          must_change_password: res.must_change_password || false,
-        })
+        return Promise.resolve(res)
       }
       return Promise.reject(new Error('登录失败'))
     } catch (error) {

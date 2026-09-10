@@ -30,7 +30,7 @@
         { "method": "POST", "path": "/auth/reflash_token", "summary": "用现有 JWT 换取新的 JWT" },
         { "method": "POST", "path": "/auth/change_password", "summary": "修改当前账号密码", "params": [
           { "name": "old_password", "type": "string", "required": true, "desc": "原密码" },
-          { "name": "new_password", "type": "string", "required": true, "desc": "新密码（不可为默认密码）" }
+          { "name": "new_password", "type": "string", "required": true, "desc": "新密码（长度至少 6 位）" }
         ] },
         { "method": "GET", "path": "/auth/totp/setup", "summary": "获取 TOTP 密钥、二维码 URI 与人工输入密钥" },
         { "method": "POST", "path": "/auth/totp/verify", "summary": "校验验证码并开启两步验证", "params": [

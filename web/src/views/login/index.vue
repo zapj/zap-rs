@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import type { FormInstance, FormRules } from 'element-plus'
 import type { LoginForm } from '@/types/user'
@@ -83,30 +83,13 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
     if (valid) {
       loading.value = true
       try {
-        const res = await userStore.login(loginForm)
-        
-        // 检测是否使用默认密码
-        if (res.must_change_password) {
-          ElNotification({
-            title: '安全警告',
-            message: '您正在使用默认密码登录，请立即修改密码以确保服务器安全！',
-            type: 'warning',
-            duration: 0,
-            position: 'top-right',
-          })
-        }
+        await userStore.login(loginForm)
 
         // 获取用户信息（包含角色和权限）
         await userStore.getInfoAction()
 
         ElMessage.success('登录成功')
-
-        // 如果需要修改密码，跳转到个人中心
-        if (res.must_change_password) {
-          router.push({ path: '/profile' })
-        } else {
-          router.push({ path: '/' })
-        }
+        router.push({ path: '/' })
       } catch (error: any) {
         // 密码正确但账号已启用两步验证 → 展示验证码输入框进入第二步
         if (error?.code === 1002) {

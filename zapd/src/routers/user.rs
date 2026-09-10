@@ -658,33 +658,11 @@ pub async fn user_add(
 /// Update an existing user.
 /// - admin: any user
 /// - reseller: own customers only, and cannot change roles
-/// - default-password users: only their own password
 pub async fn user_update(
     claims: Claims,
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<UpdateUserPayload>,
 ) -> ZapJsonResult {
-    // Default-password users: only allow changing their own password
-    if claims.pwd_is_default {
-        if payload.id != claims.id as i64 {
-            return Err(ZapError::New(-1, "请先修改默认密码".to_string()));
-        }
-        // Only allow password updates for default-password users
-        if payload.email.is_some()
-            || payload.phone.is_some()
-            || payload.nickname.is_some()
-            || payload.roles.is_some()
-            || payload.status.is_some()
-            || payload.fpm_pool.is_some()
-            || payload.fpm_spec_ref.is_some()
-        {
-            return Err(ZapError::New(
-                -1,
-                "请先修改默认密码，当前只能修改密码".to_string(),
-            ));
-        }
-    }
-
     // 非管理员不能修改角色（防止提权，admin 除外）
     if !jwt::is_admin(&claims) && payload.roles.is_some() {
         return Err(ZapError::New(-1, "权限不足，不能修改角色".to_string()));
@@ -712,7 +690,7 @@ pub async fn user_update(
     }
 
     // 更新他人时的归属/权限校验
-    if !claims.pwd_is_default && payload.id != claims.id as i64 {
+    if payload.id != claims.id as i64 {
         if jwt::is_admin(&claims) {
             // admin: full access
         } else if jwt::is_reseller(&claims) {
@@ -860,12 +838,7 @@ pub async fn user_update(
         sync_package_quota(payload.id).await;
     }
 
-    // First-time password change (was still using the default password):
-    // tell the frontend to log out and require re-login with the new password.
-    let mut resp = json!({ "code": 0, "message": "用户更新成功" });
-    if payload.password.is_some() && claims.pwd_is_default {
-        resp["must_relogin"] = json!(true);
-    }
+    let resp = json!({ "code": 0, "message": "用户更新成功" });
     // 密码被修改（本人或管理员/经销商改密）→ 向目标用户发站内信（受其通知偏好控制）
     if payload.password.is_some() {
         crate::zap::notify::password_changed(payload.id, &claims.sub).await;

@@ -122,11 +122,8 @@ export interface UpdateUserPayload {
   permissions?: string[]
 }
 
-/** 更新用户结果（首次改密成功后返回 must_relogin） */
-export interface UpdateUserResult extends ApiResponse {
-  /** 首次修改默认密码成功，需退出并使用新密码重新登录 */
-  must_relogin?: boolean
-}
+/** 更新用户结果 */
+export interface UpdateUserResult extends ApiResponse {}
 
 /** 更新用户（管理员编辑或用户自己改密码） */
 export function updateUser(data: UpdateUserPayload) {
