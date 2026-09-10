@@ -74,9 +74,10 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::SshKeyInstallLocal { username, key_name } => {
             ssh_key::install_local(username, key_name).await
         }
-        Request::SshKeyInstallPub { username, public_key } => {
-            ssh_key::install_pub(username, public_key).await
-        }
+        Request::SshKeyInstallPub {
+            username,
+            public_key,
+        } => ssh_key::install_pub(username, public_key).await,
         Request::SshUserKeyGenerate {
             linux_user,
             name,
@@ -129,15 +130,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             run_id,
         } => {
             appstore::install(
-                pkg_path,
-                source,
-                repo_id,
-                version,
-                action,
-                options,
-                user,
-                run_mode,
-                run_id,
+                pkg_path, source, repo_id, version, action, options, user, run_mode, run_id,
             )
             .await
         }

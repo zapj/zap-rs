@@ -2,7 +2,7 @@
 //!
 //! 备份产物为 tar.gz 归档（仅 root 可读，0600），默认目录 `/usr/local/zap/backup`（`--path` 覆盖）：
 //! - `backup zap`          → `zap-backup-<时间戳>.tar.gz`，内含 zap.db（VACUUM INTO 一致性快照）、zap.yaml、
-//!                            主密钥 secret.key 与凭据目录 credentials/（随库携带，换机/迁移还原后加密数据仍可解密）
+//!   主密钥 secret.key 与凭据目录 credentials/（随库携带，换机/迁移还原后加密数据仍可解密）
 //! - `backup user <用户>`  → `user-<用户名>-<时间戳>.tar.gz`，内含 user.json（user 表记录）与 home/（家目录）
 //! - `backup users`        → `users-<时间戳>.tar.gz`，全部用户归档于 users/<用户名>/ 下
 //! - `backup restore <归档>` → 按归档内容自动识别类型并还原（还原前自动备份当前状态，必要时自动停/启服务）
@@ -431,7 +431,10 @@ fn backup_zap(db_path: &str, output: Option<&str>) -> Result<(), String> {
     let out = root.join(format!("zap-backup-{}.tar.gz", timestamp()));
     pack(&out, &staging)?;
     cleanup(&staging);
-    ok(&format!("备份完成（含主密钥与凭据，可整机迁移）: {}", out.display()));
+    ok(&format!(
+        "备份完成（含主密钥与凭据，可整机迁移）: {}",
+        out.display()
+    ));
     Ok(())
 }
 
@@ -822,8 +825,7 @@ fn do_zap_restore(db_path: &str, staging: &Path) -> Result<(), String> {
     if staging.join(CRED_DIR_ARCHIVE).is_dir() {
         let cred_dir = Path::new(zap_crypto::CRED_DIR);
         if cred_dir.exists() {
-            std::fs::remove_dir_all(cred_dir)
-                .map_err(|e| format!("清理旧凭据目录失败: {e}"))?;
+            std::fs::remove_dir_all(cred_dir).map_err(|e| format!("清理旧凭据目录失败: {e}"))?;
         }
         copy_tree(&staging.join(CRED_DIR_ARCHIVE), cred_dir)?;
         ok(&format!("已还原凭据目录: {}", cred_dir.display()));

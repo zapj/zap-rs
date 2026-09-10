@@ -87,7 +87,9 @@ fn load_or_create_key() -> Result<[u8; KEY_LEN], String> {
         .iter()
         .find(|p| {
             let parent = p.parent().unwrap_or(Path::new("."));
-            fs::create_dir_all(parent).is_ok() && fs::write(p, key).is_ok() && set_key_permissions(p)
+            fs::create_dir_all(parent).is_ok()
+                && fs::write(p, key).is_ok()
+                && set_key_permissions(p)
         })
         .ok_or_else(|| "无法创建密钥文件（/etc/zap 与 conf 均不可写）".to_string())?;
 
@@ -170,9 +172,7 @@ pub fn sanitize_name(name: &str) -> Result<String, String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
     {
-        return Err(format!(
-            "名称只能包含字母、数字、点、下划线、短横线: '{n}'"
-        ));
+        return Err(format!("名称只能包含字母、数字、点、下划线、短横线: '{n}'"));
     }
     if n == "." || n == ".." {
         return Err(format!("非法名称: '{n}'"));

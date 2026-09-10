@@ -49,10 +49,11 @@ fn valid_key_name(name: &str) -> bool {
         return false;
     }
     let mut chars = name.chars();
-    let first_ok = chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphanumeric());
-    first_ok && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphanumeric());
+    first_ok
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn key_path(home: &Path, name: &str) -> PathBuf {
@@ -131,10 +132,7 @@ fn account(home_owner: &str, name: &str) -> Result<(PathBuf, u32, u32), Response
     }
     match user_info(home_owner) {
         Some((uid, gid, home)) => Ok((home, uid, gid)),
-        None => Err(Response::err(
-            -1,
-            format!("系统用户 '{home_owner}' 不存在"),
-        )),
+        None => Err(Response::err(-1, format!("系统用户 '{home_owner}' 不存在"))),
     }
 }
 
@@ -148,7 +146,11 @@ fn finish_json(
     let fingerprint = fingerprint_of(pub_path);
     let public_key = read_pub_line(pub_path).unwrap_or_default();
     let mut key_size: u32 = 0;
-    if let Some(size) = fingerprint.split_whitespace().next().and_then(|s| s.parse().ok()) {
+    if let Some(size) = fingerprint
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse().ok())
+    {
         key_size = size;
     }
     Response::ok(
@@ -340,10 +342,7 @@ pub async fn private_get(linux_user: String, name: String) -> Response {
         };
         let priv_path = key_path(&home, &name);
         match std::fs::read_to_string(&priv_path) {
-            Ok(c) => Response::ok(
-                "ok",
-                Some(json!({ "name": name, "private_key": c })),
-            ),
+            Ok(c) => Response::ok("ok", Some(json!({ "name": name, "private_key": c }))),
             Err(_) => Response::err(-1, format!("密钥 'zap_{name}' 不存在")),
         }
     })
@@ -360,10 +359,9 @@ pub async fn public_get(linux_user: String, name: String) -> Response {
         };
         let pub_path = pub_key_path(&home, &name);
         match read_pub_line(&pub_path) {
-            Some(pub_line) => Response::ok(
-                "ok",
-                Some(json!({ "name": name, "public_key": pub_line })),
-            ),
+            Some(pub_line) => {
+                Response::ok("ok", Some(json!({ "name": name, "public_key": pub_line })))
+            }
             None => Response::err(-1, format!("公钥 'zap_{name}.pub' 不存在")),
         }
     })

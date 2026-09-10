@@ -429,7 +429,9 @@ where
     let v = serde_yaml::Value::deserialize(d)?;
     Ok(match v {
         serde_yaml::Value::String(s) => Some(vec![s.trim().to_string()]),
-        serde_yaml::Value::Sequence(seq) => Some(seq.iter().filter_map(yaml_scalar_to_string).collect()),
+        serde_yaml::Value::Sequence(seq) => {
+            Some(seq.iter().filter_map(yaml_scalar_to_string).collect())
+        }
         _ => None,
     })
 }
@@ -438,9 +440,7 @@ where
 /// 优先级与 scan_packages 一致：custom 覆盖同名 Git 源包。
 /// 找不到包 / 未声明 roles → None（= 默认仅 admin 可操作，由调用方判定）。
 pub async fn package_roles_of(pkg_path: &str) -> Option<Vec<String>> {
-    let Some((cat, name)) = pkg_path.split_once('/') else {
-        return None;
-    };
+    let (cat, name) = pkg_path.split_once('/')?;
     if cat.is_empty() || name.is_empty() {
         return None;
     }

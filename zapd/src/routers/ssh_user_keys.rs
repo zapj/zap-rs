@@ -6,8 +6,8 @@
 //! 可见性规则与连接一致（严格隔离）：任何角色只管理自己名下的密钥。
 //! admin 额外可见/可选旧的系统级密钥（`/etc/zap/ssh`，服务器侧），保证历史连接可用。
 
-use axum::extract::Query;
 use axum::Json;
+use axum::extract::Query;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -24,7 +24,10 @@ fn valid_key_name(name: &str) -> bool {
     }
     let mut chars = name.chars();
     let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphanumeric());
-    first_ok && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    first_ok
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// 「我的密钥」依赖独立 Linux 系统账号承载家目录密钥文件（~/.ssh）：
@@ -73,8 +76,7 @@ async fn own_key_row(
     .bind(name)
     .fetch_optional(pool)
     .await?;
-    row.map(|(p, c, f)| (p, c, f))
-        .ok_or_else(|| ZapError::New(-1, format!("SSH 密钥 '{name}' 不存在")))
+    row.ok_or_else(|| ZapError::New(-1, format!("SSH 密钥 '{name}' 不存在")))
 }
 
 // ── GET /terminal/keys ─────────────────────────────────────
@@ -113,34 +115,33 @@ pub async fn list_keys(claims: ValidatedClaims) -> ZapJsonResult {
 
     // admin 额外展示系统级密钥（/etc/zap/ssh，服务器侧），仅名称/指纹等元数据；
     // 与运行模式无关：本机回环授权 / 历史连接 / 推送公钥仍可引用
-    if is_admin(&claims) {
-        if let Ok(resp) = crate::zapexec::call(Request::SshKeyList).await
-            && resp.code == 0
-            && let Some(arr) = resp.data.as_ref().and_then(|d| d.as_array())
-        {
-            for v in arr {
-                let name = v.get("name").and_then(|x| x.as_str()).unwrap_or_default();
-                if name.is_empty() {
-                    continue;
-                }
-                let comment = v
-                    .get("comment")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("系统级密钥")
-                    .to_string();
-                let fingerprint = v
-                    .get("fingerprint")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                items.push(json!({
-                    "name": name,
-                    "scope": "system",
-                    "comment": comment,
-                    "fingerprint": fingerprint,
-                    "created_at": 0,
-                }));
+    if is_admin(&claims)
+        && let Ok(resp) = crate::zapexec::call(Request::SshKeyList).await
+        && resp.code == 0
+        && let Some(arr) = resp.data.as_ref().and_then(|d| d.as_array())
+    {
+        for v in arr {
+            let name = v.get("name").and_then(|x| x.as_str()).unwrap_or_default();
+            if name.is_empty() {
+                continue;
             }
+            let comment = v
+                .get("comment")
+                .and_then(|x| x.as_str())
+                .unwrap_or("系统级密钥")
+                .to_string();
+            let fingerprint = v
+                .get("fingerprint")
+                .and_then(|x| x.as_str())
+                .unwrap_or_default()
+                .to_string();
+            items.push(json!({
+                "name": name,
+                "scope": "system",
+                "comment": comment,
+                "fingerprint": fingerprint,
+                "created_at": 0,
+            }));
         }
     }
 
@@ -167,7 +168,10 @@ pub struct GeneratePayload {
     pub comment: Option<String>,
 }
 
-pub async fn generate_key(claims: ValidatedClaims, Json(payload): Json<GeneratePayload>) -> ZapJsonResult {
+pub async fn generate_key(
+    claims: ValidatedClaims,
+    Json(payload): Json<GeneratePayload>,
+) -> ZapJsonResult {
     ensure_user_keys_enabled().await?;
     let name = payload.name.trim().to_string();
     if !valid_key_name(&name) {
@@ -178,13 +182,12 @@ pub async fn generate_key(claims: ValidatedClaims, Json(payload): Json<GenerateP
     }
     let linux_user = require_linux_user(&claims).await?;
     let pool = db::get_db_pool().await;
-    let exists: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM user_ssh_keys WHERE user_id = ? AND name = ?",
-    )
-    .bind(claims.id as i64)
-    .bind(&name)
-    .fetch_optional(pool)
-    .await?;
+    let exists: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM user_ssh_keys WHERE user_id = ? AND name = ?")
+            .bind(claims.id as i64)
+            .bind(&name)
+            .fetch_optional(pool)
+            .await?;
     if exists.is_some() {
         return Err(ZapError::New(-1, format!("同名密钥 '{name}' 已存在")));
     }
@@ -231,7 +234,12 @@ pub async fn generate_key(claims: ValidatedClaims, Json(payload): Json<GenerateP
     .execute(pool)
     .await?;
 
-    audit_log(&claims, "ssh_user_key_generate", &format!("生成密钥 {name}（{linux_user}）")).await;
+    audit_log(
+        &claims,
+        "ssh_user_key_generate",
+        &format!("生成密钥 {name}（{linux_user}）"),
+    )
+    .await;
     Ok(Json(
         json!({ "code": 0, "message": "密钥已生成并保存到我的家目录 ~/.ssh" }),
     ))
@@ -249,7 +257,10 @@ pub struct ImportPayload {
     pub comment: Option<String>,
 }
 
-pub async fn import_key(claims: ValidatedClaims, Json(payload): Json<ImportPayload>) -> ZapJsonResult {
+pub async fn import_key(
+    claims: ValidatedClaims,
+    Json(payload): Json<ImportPayload>,
+) -> ZapJsonResult {
     ensure_user_keys_enabled().await?;
     let name = payload.name.trim().to_string();
     if !valid_key_name(&name) {
@@ -260,13 +271,12 @@ pub async fn import_key(claims: ValidatedClaims, Json(payload): Json<ImportPaylo
     }
     let linux_user = require_linux_user(&claims).await?;
     let pool = db::get_db_pool().await;
-    let exists: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM user_ssh_keys WHERE user_id = ? AND name = ?",
-    )
-    .bind(claims.id as i64)
-    .bind(&name)
-    .fetch_optional(pool)
-    .await?;
+    let exists: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM user_ssh_keys WHERE user_id = ? AND name = ?")
+            .bind(claims.id as i64)
+            .bind(&name)
+            .fetch_optional(pool)
+            .await?;
     if exists.is_some() {
         return Err(ZapError::New(-1, format!("同名密钥 '{name}' 已存在")));
     }
@@ -312,7 +322,12 @@ pub async fn import_key(claims: ValidatedClaims, Json(payload): Json<ImportPaylo
     .execute(pool)
     .await?;
 
-    audit_log(&claims, "ssh_user_key_import", &format!("导入密钥 {name}（{linux_user}）")).await;
+    audit_log(
+        &claims,
+        "ssh_user_key_import",
+        &format!("导入密钥 {name}（{linux_user}）"),
+    )
+    .await;
     Ok(Json(
         json!({ "code": 0, "message": "密钥已导入并保存到我的家目录 ~/.ssh" }),
     ))
@@ -325,7 +340,10 @@ pub struct DeletePayload {
     pub name: String,
 }
 
-pub async fn delete_key(claims: ValidatedClaims, Json(payload): Json<DeletePayload>) -> ZapJsonResult {
+pub async fn delete_key(
+    claims: ValidatedClaims,
+    Json(payload): Json<DeletePayload>,
+) -> ZapJsonResult {
     ensure_user_keys_enabled().await?;
     let name = payload.name.trim().to_string();
     own_key_row(&claims, &name).await?; // 归属校验 + 存在性

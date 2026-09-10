@@ -470,9 +470,11 @@ pub async fn install_local(username: String, key_name: String) -> Response {
 /// 用于「用户自己的家目录密钥」的本地回环授权：zapd 完成归属校验后下发公钥内容，
 /// 由 root 写入目标系统用户，避免 zapd（zapadm）直接读取用户家目录。
 pub async fn install_pub(username: String, public_key: String) -> Response {
-    tokio::task::spawn_blocking(move || match append_pub_to_local_user(&username, public_key.trim()) {
-        Ok(msg) => Response::ok(msg, None),
-        Err(e) => Response::err(-1, e),
+    tokio::task::spawn_blocking(move || {
+        match append_pub_to_local_user(&username, public_key.trim()) {
+            Ok(msg) => Response::ok(msg, None),
+            Err(e) => Response::err(-1, e),
+        }
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
@@ -491,8 +493,7 @@ fn append_pub_to_local_user(username: &str, pub_line: &str) -> Result<String, St
 
     let ssh_dir = home.join(".ssh");
     if ssh_dir.exists() {
-        let meta =
-            std::fs::metadata(&ssh_dir).map_err(|e| format!("读取 ~/.ssh 失败: {e}"))?;
+        let meta = std::fs::metadata(&ssh_dir).map_err(|e| format!("读取 ~/.ssh 失败: {e}"))?;
         if !meta.is_dir() {
             return Err("~/.ssh 不是目录".to_string());
         }
@@ -528,5 +529,7 @@ fn append_pub_to_local_user(username: &str, pub_line: &str) -> Result<String, St
             libc::chown(c.as_ptr(), uid, gid);
         }
     }
-    Ok(format!("公钥已写入本机 {username} 的 ~/.ssh/authorized_keys"))
+    Ok(format!(
+        "公钥已写入本机 {username} 的 ~/.ssh/authorized_keys"
+    ))
 }

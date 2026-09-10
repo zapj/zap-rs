@@ -453,7 +453,12 @@ pub async fn uninstall(
         &payload
             .options
             .as_ref()
-            .map(|o| format!("options=[{}]", o.keys().cloned().collect::<Vec<_>>().join(",")))
+            .map(|o| {
+                format!(
+                    "options=[{}]",
+                    o.keys().cloned().collect::<Vec<_>>().join(",")
+                )
+            })
             .unwrap_or_default(),
     )
     .await;

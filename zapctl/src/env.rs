@@ -209,26 +209,20 @@ fn validate_value(value: &str) -> Result<(), String> {
 /// 对少数「写错即功能异常」的键做轻量校验（与面板写入规则保持一致）。
 fn validate_known_key(key: &str, value: &str) -> Result<(), String> {
     match key {
-        "vhost_mode" => {
-            if !["www", "system"].contains(&value) {
-                return Err("vhost_mode 仅支持 www / system".to_string());
-            }
+        "vhost_mode" if !["www", "system"].contains(&value) => {
+            Err("vhost_mode 仅支持 www / system".to_string())
         }
-        "fpm_pool_defaults" => {
+        "fpm_pool_defaults"
             if !value.is_empty()
-                && !matches!(serde_json::from_str::<Value>(value), Ok(Value::Object(_)))
-            {
-                return Err("fpm_pool_defaults 必须是 JSON 对象".to_string());
-            }
+                && !matches!(serde_json::from_str::<Value>(value), Ok(Value::Object(_))) =>
+        {
+            Err("fpm_pool_defaults 必须是 JSON 对象".to_string())
         }
-        "basic_mail_encryption" => {
-            if !["ssl", "tls", "none"].contains(&value) {
-                return Err("basic_mail_encryption 仅支持 ssl / tls / none".to_string());
-            }
+        "basic_mail_encryption" if !["ssl", "tls", "none"].contains(&value) => {
+            Err("basic_mail_encryption 仅支持 ssl / tls / none".to_string())
         }
-        _ => {}
+        _ => Ok(()),
     }
-    Ok(())
 }
 
 /// 写操作前的公共检查：禁止写 auto 快照。
@@ -348,7 +342,11 @@ fn cmd_set(
     ensure_writable(scope)?;
     validate_key(key)?;
 
-    let value = if value == "-" { read_stdin()? } else { value.to_string() };
+    let value = if value == "-" {
+        read_stdin()?
+    } else {
+        value.to_string()
+    };
     validate_value(&value)?;
     validate_known_key(key, value.trim())?;
 
@@ -472,7 +470,10 @@ fn cmd_import(
             });
             println!("{}", to_json(&out)?);
         } else {
-            println!("{YELLOW}[!]{NC} 预览模式，未写入任何数据（共 {} 条）", items.len());
+            println!(
+                "{YELLOW}[!]{NC} 预览模式，未写入任何数据（共 {} 条）",
+                items.len()
+            );
         }
         return Ok(());
     }

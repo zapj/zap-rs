@@ -52,10 +52,14 @@ fn zapctl_bin() -> PathBuf {
     }
 
     let base = zap_path();
-    [base.join("zapctl"), base.join("target/debug/zapctl"), base.join("target/release/zapctl")]
-        .into_iter()
-        .find(executable_file)
-        .unwrap_or_else(|| base.join("zapctl"))
+    [
+        base.join("zapctl"),
+        base.join("target/debug/zapctl"),
+        base.join("target/release/zapctl"),
+    ]
+    .into_iter()
+    .find(executable_file)
+    .unwrap_or_else(|| base.join("zapctl"))
 }
 
 fn appstore_dir() -> PathBuf {
@@ -714,10 +718,7 @@ fn spawn_background(
 fn base_env() -> Vec<(String, String)> {
     vec![
         ("ZAP_PATH".into(), zap_path().to_string_lossy().into_owned()),
-        (
-            "ZAPCTL".into(),
-            zapctl_bin().to_string_lossy().into_owned(),
-        ),
+        ("ZAPCTL".into(), zapctl_bin().to_string_lossy().into_owned()),
         (
             "APPS_DIR".into(),
             super::install_root().to_string_lossy().into_owned(),
@@ -1006,6 +1007,7 @@ fn repo_update_inner(id: &str) -> Result<String, String> {
     Ok(format!("commit={short}"))
 }
 
+#[allow(clippy::too_many_arguments)] // 安装需携带完整包描述与选项，参数固定
 pub async fn install(
     pkg_path: String,
     source: String,

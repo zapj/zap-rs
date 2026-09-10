@@ -280,11 +280,12 @@ pub async fn list_connections(claims: ValidatedClaims) -> ZapJsonResult {
         "SELECT {CONN_SEL_COLS}, u.username AS owner_name \
          FROM ssh_connections s LEFT JOIN user u ON u.id = s.user_id"
     );
-    let rows: Vec<sqlx::sqlite::SqliteRow> =
-        sqlx::query(&format!("{sel} WHERE s.user_id = ? ORDER BY s.sort_order, s.id"))
-            .bind(claims.id as i64)
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<sqlx::sqlite::SqliteRow> = sqlx::query(&format!(
+        "{sel} WHERE s.user_id = ? ORDER BY s.sort_order, s.id"
+    ))
+    .bind(claims.id as i64)
+    .fetch_all(pool)
+    .await?;
 
     let connections: Vec<SshConnection> = rows.iter().map(row_to_conn).collect();
     Ok(Json(json!({ "code": 0, "data": connections })))
@@ -1007,13 +1008,12 @@ async fn resolve_key_material(
     allow_system_fallback: bool,
 ) -> Result<(String, String), ZapError> {
     let pool = db::get_db_pool().await;
-    let own_pub: Option<String> = sqlx::query_scalar(
-        "SELECT public_key FROM user_ssh_keys WHERE user_id = ? AND name = ?",
-    )
-    .bind(owner_id)
-    .bind(key_name)
-    .fetch_optional(pool)
-    .await?;
+    let own_pub: Option<String> =
+        sqlx::query_scalar("SELECT public_key FROM user_ssh_keys WHERE user_id = ? AND name = ?")
+            .bind(owner_id)
+            .bind(key_name)
+            .fetch_optional(pool)
+            .await?;
     if let Some(pub_content) = own_pub {
         if linux_user.is_empty() {
             return Err(ZapError::New(
@@ -1058,9 +1058,7 @@ async fn resolve_key_material(
         }
         return Ok((private_key, pub_content));
     }
-    if allow_system_fallback
-        && let Some(key_path) = get_key_path(key_name)
-    {
+    if allow_system_fallback && let Some(key_path) = get_key_path(key_name) {
         let key_content = std::fs::read_to_string(&key_path)
             .map_err(|e| ZapError::Error(format!("读取系统密钥失败: {e}")))?;
         if let Some(pub_content) = get_pub_key_content(key_name) {
@@ -1081,13 +1079,12 @@ async fn resolve_pub_for_push(
     key_name: &str,
 ) -> Result<String, ZapError> {
     let pool = db::get_db_pool().await;
-    let own_pub: Option<String> = sqlx::query_scalar(
-        "SELECT public_key FROM user_ssh_keys WHERE user_id = ? AND name = ?",
-    )
-    .bind(claims.id as i64)
-    .bind(key_name)
-    .fetch_optional(pool)
-    .await?;
+    let own_pub: Option<String> =
+        sqlx::query_scalar("SELECT public_key FROM user_ssh_keys WHERE user_id = ? AND name = ?")
+            .bind(claims.id as i64)
+            .bind(key_name)
+            .fetch_optional(pool)
+            .await?;
     if let Some(p) = own_pub {
         return Ok(p);
     }

@@ -144,7 +144,7 @@ pub async fn get_menus_tree(claims: ValidatedClaims) -> ZapJsonResult {
         .map(|r| r.trim())
         .filter(|r| !r.is_empty())
         .collect();
-    let is_admin = my_keys.iter().any(|r| *r == "admin");
+    let is_admin = my_keys.contains(&"admin");
 
     let rows: Vec<MenuRow> = if is_admin {
         sqlx::query_as("SELECT * FROM menus WHERE status = 1 ORDER BY sort_order, id")
@@ -154,8 +154,7 @@ pub async fn get_menus_tree(claims: ValidatedClaims) -> ZapJsonResult {
         Vec::new()
     } else {
         // 角色 key → 角色 id
-        let mut qb =
-            sqlx::QueryBuilder::<Sqlite>::new("SELECT id FROM roles WHERE role_key IN (");
+        let mut qb = sqlx::QueryBuilder::<Sqlite>::new("SELECT id FROM roles WHERE role_key IN (");
         let mut sep = qb.separated(", ");
         for k in &my_keys {
             sep.push_bind(*k);

@@ -101,6 +101,10 @@ fi
 if [ "$SKIP_BUILD" = true ]; then
   warn "跳过后端构建"
 else
+  info "格式化代码 (cargo fmt --all) ..."
+  cargo fmt --all
+  info "检查代码 (cargo clippy --all-targets --all-features -- -D warnings) ..."
+  cargo clippy --all-targets --all-features -- -D warnings || die "代码检查失败"
   info "构建后端 (cargo build ${CARGO_FLAGS[*]} --bin zapd --bin zapexec --bin zapctl --bin zapupgrade) ..."
   cargo build "${CARGO_FLAGS[@]}" --bin zapd --bin zapexec --bin zapctl --bin zapupgrade || die "后端构建失败"
   ok "后端构建完成 -> $BIN_DIR"

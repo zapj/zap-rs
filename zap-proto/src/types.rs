@@ -182,7 +182,10 @@ pub enum Request {
     /// 把指定的公钥内容写入本机系统用户的 ~/.ssh/authorized_keys（root 特权，
     /// 支持「用户自己的家目录密钥」做本地回环授权，公钥内容由 zapd 鉴权后下发）
     #[serde(rename = "ssh_key.install_pub")]
-    SshKeyInstallPub { username: String, public_key: String },
+    SshKeyInstallPub {
+        username: String,
+        public_key: String,
+    },
     /// 生成面板用户自己的 SSH 密钥（存于该用户家目录 `~/.ssh/zap_<name>`，属主为用户本人）
     #[serde(rename = "ssh_user_key.generate")]
     SshUserKeyGenerate {

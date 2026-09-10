@@ -94,6 +94,7 @@ pub fn dispatch(cmd: CredCommand) -> Result<(), String> {
 /// 生成密码。
 /// - 无 service/user：只输出明文密码（供人看或脚本取用）
 /// - 有 service/user：加密落盘，明文仍输出到 stdout
+///
 /// 注意：`gen` 是 Rust 2024 保留字，故函数名用 `cmd_gen`。
 fn cmd_gen(
     service: Option<String>,
@@ -108,7 +109,7 @@ fn cmd_gen(
         (None, None) => {
             // 仅生成，不落盘
             println!("{password}");
-            return Ok(());
+            Ok(())
         }
         (Some(s), Some(u)) => {
             crate::ensure_root()?;
@@ -154,7 +155,7 @@ fn ls() -> Result<(), String> {
         info(&format!("暂无凭据（目录: {}）", zap_crypto::CRED_DIR));
         return Ok(());
     }
-    println!("{:<32} {:<10} {}", "CREDENTIAL", "SIZE", "PATH");
+    println!("{:<32} {:<10} PATH", "CREDENTIAL", "SIZE");
     println!("{}", "-".repeat(32 + 1 + 10 + 1 + 40));
     for (name, path) in items {
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
@@ -188,7 +189,7 @@ fn set(service: &str, user: &str, password: Option<String>) -> Result<(), String
                 .lock()
                 .read_line(&mut line)
                 .map_err(|e| format!("读取 stdin 失败: {e}"))?;
-            let p = line.trim_end_matches(|c| c == '\r' || c == '\n');
+            let p = line.trim_end_matches(['\r', '\n']);
             if p.is_empty() {
                 return Err(
                     "密码不能为空：请以参数提供（注意会留在 shell 历史），或经管道传入 stdin"
