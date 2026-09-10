@@ -197,7 +197,7 @@ if [ -d "$SRC/scripts" ]; then
 else
     warn "安装包未包含 scripts 目录（查找目录: ${SRC}），systemd 服务文件将缺失"
 fi
-# 幂等部署 AppStore（升级不覆盖 git/.git 与 custom/）
+# 部署 AppStore（升级不覆盖 git/.git 与 custom/）
 deploy_appstore
 ok "程序部署完成"
 
@@ -232,17 +232,6 @@ EOF
 fi
 chown root:zapadm /etc/zap/zap.yaml
 chmod 0660 /etc/zap/zap.yaml
-
-# if [ ! -f /etc/zap/zap.crt ] || [ ! -f /etc/zap/zap.key ]; then
-#     info "生成自签名 TLS 证书..."
-#     if ! openssl req -x509 -newkey rsa:4096 -keyout /etc/zap/zap.key -out /etc/zap/zap.crt \
-#         -days 3650 -nodes -subj "/CN=zap-local" \
-#         -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null; then
-#         warn "openssl 不可用，证书将在 zapd 首次启动时生成"
-#     fi
-# fi
-# chown root:zapadm /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
-# chmod 0640 /etc/zap/zap.crt /etc/zap/zap.key 2>/dev/null || true
 
 # ── 站点配置目录（由 zapexec/root 写入，zapd 只读）──────────
 # 与 webserver 安装位置（/usr/local/apps/...）解耦：
