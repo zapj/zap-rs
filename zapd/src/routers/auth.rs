@@ -3,6 +3,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::{Extension, Json};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,48 @@ use tracing::warn;
 
 use crate::db;
 use crate::zap::{self, ZapError, ZapJsonResult, audit, jwt::ValidatedClaims, totp};
+
+/// 面板会话 Cookie 名。
+///
+/// 前端把 token 存在 sessionStorage（见 `web/src/utils/auth.ts`），
+/// 浏览器直接打开 `/webapps/*` 这类页面时不会携带任何凭据，
+/// 因此登录/续期时同步下发一个 HttpOnly Cookie 作为**页面级**登录态。
+/// 它只用于页面路由鉴权；`/api/*` 仍以 Authorization 头为主。
+pub const SESSION_COOKIE: &str = "zap_token";
+
+/// Web 应用（`/webapps/*`）页面会话有效期（24 小时）。
+///
+/// 面板 JWT 默认只有 1 小时，而页面会话若用同一个有效期，
+/// 用户登录一小时后新开标签页时 Cookie 已过期（浏览器不再发送），
+/// 就会被提示「需要登录」。`/webapps/*` 每次成功访问都会滑动续期。
+pub const WEBAPP_SESSION_SECS: u64 = 24 * 3600;
+
+/// 生成会话 Cookie（HttpOnly + SameSite=Lax，有效期与 Cookie 内 JWT 一致）。
+pub fn session_cookie(token: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    let value = format!(
+        "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={WEBAPP_SESSION_SECS}"
+    );
+    if let Ok(v) = HeaderValue::from_str(&value) {
+        headers.insert(header::SET_COOKIE, v);
+    }
+    headers
+}
+
+/// 为页面会话签发长有效期 JWT（仅供 Cookie 使用；面板 access_token 不受影响）。
+fn webapp_session_token(username: String, id: u64, roles: &str) -> Option<String> {
+    zap::jwt::generate_jwt_token_with_expire(username, id, roles, false, WEBAPP_SESSION_SECS).ok()
+}
+
+/// 清除会话 Cookie（登出 / 改密后失效）。
+fn clear_session_cookie() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::SET_COOKIE,
+        HeaderValue::from_static("zap_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"),
+    );
+    headers
+}
 
 /// Rate limiter state: Maps IP -> (attempt_count, window_start)
 static LOGIN_RATE_LIMITER: Lazy<Mutex<HashMap<IpAddr, (u32, Instant)>>> =
@@ -133,7 +176,7 @@ async fn clear_login_attempts(ip: &str, username: &str) {
 pub async fn login(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<UserLoginData>,
-) -> ZapJsonResult {
+) -> Result<(HeaderMap, Json<serde_json::Value>), ZapError> {
     // 第一道防线：内存滑动窗口限流
     check_rate_limit(client_addr.ip())?;
 
@@ -190,13 +233,20 @@ pub async fn login(
             audit::log(None, Some(&ip), "login_success", &row.username, "").await;
             // 登录成功站内信（是否发送取决于该用户通知偏好，默认不发送）
             crate::zap::notify::login_success(row.id as i64, &row.username, &ip).await;
-            return Ok(Json(json!({
-                "code": 0,
-                "access_token": token,
-                "token_type": "Bearer",
-                "message": "登陆成功",
-                "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire,
-            })));
+            // Cookie 使用更长有效期的 JWT（面板 access_token 仍为 1 小时）
+            let cookie_token = webapp_session_token(row.username.clone(), row.id, &row.roles)
+                .unwrap_or_else(|| token.clone());
+            let headers = session_cookie(&cookie_token);
+            return Ok((
+                headers,
+                Json(json!({
+                    "code": 0,
+                    "access_token": token,
+                    "token_type": "Bearer",
+                    "message": "登陆成功",
+                    "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire,
+                })),
+            ));
         }
     }
     record_failed_login(&ip, &username).await;
@@ -204,11 +254,14 @@ pub async fn login(
     Err(ZapError::New(-1, "用户名或密码错误".to_string()))
 }
 
-pub async fn logout() -> ZapJsonResult {
-    Ok(Json(json!({
-        "code": 0,
-        "message": "退出成功"
-    })))
+pub async fn logout() -> Result<(HeaderMap, Json<serde_json::Value>), ZapError> {
+    Ok((
+        clear_session_cookie(),
+        Json(json!({
+            "code": 0,
+            "message": "退出成功"
+        })),
+    ))
 }
 
 /// Change password — uses `Claims` (not `ValidatedClaims`) so it works even
@@ -300,15 +353,24 @@ pub async fn change_password(
     })))
 }
 
-pub async fn reflash_token(claims: zap::jwt::Claims) -> ZapJsonResult {
+pub async fn reflash_token(
+    claims: zap::jwt::Claims,
+) -> Result<(HeaderMap, Json<serde_json::Value>), ZapError> {
+    // 页面会话（长有效期）先算好：claims 随后会被 move 进 JWT 生成
+    let cookie_token = webapp_session_token(claims.sub.clone(), claims.id, &claims.roles);
     if let Ok(token) = zap::jwt::generate_jwt_token(claims.sub, claims.id, &claims.roles, false) {
-        return Ok(Json(json!({
-            "code": 0,
-            "access_token": token,
-            "token_type": "Bearer",
-            "message": "刷新成功",
-            "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire
-        })));
+        let cookie = cookie_token.unwrap_or_else(|| token.clone());
+        let headers = session_cookie(&cookie);
+        return Ok((
+            headers,
+            Json(json!({
+                "code": 0,
+                "access_token": token,
+                "token_type": "Bearer",
+                "message": "刷新成功",
+                "expire_in": crate::config::get_config().read().unwrap().jwt.jwt_expire
+            })),
+        ));
     }
     Err(ZapError::New(-1, "刷新失败".to_string()))
 }

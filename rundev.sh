@@ -50,13 +50,20 @@ EXEC_SECRET="$RUN_DIR/exec.key"
 DEV_CONF="$RUN_DIR/zap.dev.yaml"
 DEV_USER="$(id -un)"
 
-# URL 前缀沿用 conf/zap.yaml 的配置（server.url_prefix）。
-# 开发配置是独立文件，不同步的话改 conf/zap.yaml 不会生效。
+# URL 前缀：优先沿用已有开发配置里的值；仅首次生成时才从 conf/zap.yaml 带入。
+# 开发配置是自洽的（配置与证书都在 data/run/ 下），运行期不依赖 conf/ 目录。
 CONF_URL_PREFIX=""
-if [ -f "$ROOT_DIR/conf/zap.yaml" ]; then
+if [ -f "$DEV_CONF" ]; then
+  CONF_URL_PREFIX=$(sed -n 's/^[[:space:]]*url_prefix:[[:space:]]*"\{0,1\}\([^"#]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+    "$DEV_CONF" | head -1 | sed 's/[[:space:]]*$//')
+elif [ -f "$ROOT_DIR/conf/zap.yaml" ]; then
   CONF_URL_PREFIX=$(sed -n 's/^[[:space:]]*url_prefix:[[:space:]]*"\{0,1\}\([^"#]*\)"\{0,1\}[[:space:]]*$/\1/p' \
     "$ROOT_DIR/conf/zap.yaml" | head -1 | sed 's/[[:space:]]*$//')
 fi
+
+# 开发用自签证书（与配置同目录，首次启动自动生成，不进 git）
+DEV_CRT="$RUN_DIR/zap.crt"
+DEV_KEY="$RUN_DIR/zap.key"
 
 if [ "$RELEASE" = true ]; then
   BIN_DIR="$ROOT_DIR/target/release"
@@ -112,14 +119,30 @@ fi
 
 # ── 3. 准备开发运行时目录与配置 ─────────────────────────────
 mkdir -p "$RUN_DIR"
+
+# 开发用自签证书：与配置一样落在 data/run/ 下，首次启动自动生成。
+if [ ! -f "$DEV_CRT" ] || [ ! -f "$DEV_KEY" ]; then
+  info "生成开发用自签证书 $DEV_CRT"
+  if ! openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+      -keyout "$DEV_KEY" -out "$DEV_CRT" -subj "/CN=Zap Dev" \
+      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null; then
+    # 旧版 openssl 不支持 -addext，退化为不带 SAN 的证书
+    openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+      -keyout "$DEV_KEY" -out "$DEV_CRT" -subj "/CN=Zap Dev" 2>/dev/null \
+      || die "生成自签证书失败（请先安装 openssl）"
+  fi
+  chmod 0600 "$DEV_KEY"
+  ok "自签证书已生成"
+fi
+
 if [ ! -f "$DEV_CONF" ]; then
   info "生成开发配置 $DEV_CONF"
   cat > "$DEV_CONF" <<EOF
 server:
   address: 0.0.0.0
   port: 2600
-  cert_file: $ROOT_DIR/conf/zap.crt
-  key_file: $ROOT_DIR/conf/zap.key
+  cert_file: $DEV_CRT
+  key_file: $DEV_KEY
   url_prefix: "$CONF_URL_PREFIX"
 jwt:
   jwt_secure: zap-dev-insecure-secret
@@ -142,8 +165,12 @@ if [ -f "$DEV_CONF" ]; then
     sed -i "0,\|^[[:space:]]*key_file:.*|s||&\n  url_prefix: \"$CONF_URL_PREFIX\"|" "$DEV_CONF"
   fi
   if [ -n "$CONF_URL_PREFIX" ]; then
-    ok "URL 前缀: /$CONF_URL_PREFIX/ （同步自 conf/zap.yaml）"
+    ok "URL 前缀: /$CONF_URL_PREFIX/"
   fi
+
+  # 老的开发配置可能还指向 conf/ 下的证书，统一改到 data/run/
+  sed -i "s|^[[:space:]]*cert_file:.*|  cert_file: $DEV_CRT|" "$DEV_CONF"
+  sed -i "s|^[[:space:]]*key_file:.*|  key_file: $DEV_KEY|" "$DEV_CONF"
 fi
 
 # ── 3.5 删除数据库（--reset-db）──────────────────────────────

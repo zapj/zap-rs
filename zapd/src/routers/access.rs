@@ -600,6 +600,13 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
         Required::Admin,
         Some(Perm::module("system.cron")),
     ),
+    // Web 应用（/webapps/*，页面级路由）：登录用户即可，是否可访问由
+    // `webapp.phpmyadmin:view` 权限点控制，可在「角色权限」中按角色分配。
+    (
+        "/webapps",
+        Required::User,
+        Some(Perm::action("webapp.phpmyadmin", "view")),
+    ),
 ];
 
 /// 权限点命名空间的中文名（用于角色权限配置页与权限目录接口）。
@@ -628,6 +635,7 @@ const NS_LABELS: &[(&str, &str)] = &[
     ("appstore.repo", "应用源管理"),
     ("appstore.script", "自定义脚本"),
     ("dev", "开发者接口"),
+    ("webapp.phpmyadmin", "phpMyAdmin"),
 ];
 
 /// 动作的中文名（角色权限配置页展示）。
@@ -1083,6 +1091,52 @@ pub async fn guard(req: Request, next: Next) -> Result<Response, Response> {
     }
 
     Ok(next.run(req).await)
+}
+
+/// 页面级路由（`/webapps/*`）鉴权：复用同一张规则表与权限点机制。
+///
+/// 这类页面不挂在 `api_routers()` 上（没有 `guard` 中间件），由 handler 主动调用，
+/// 以取得与接口一致的两层校验（角色下限 + 动作级权限点）与 fail-closed 行为。
+pub async fn authorize_page(
+    claims: &Claims,
+    path: &str,
+    method: &Method,
+) -> Result<(), (StatusCode, String)> {
+    let (required, _) = lookup(path);
+    if !satisfies(claims, required) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!("权限不足，该页面需要 {} 角色", required.label()),
+        ));
+    }
+    if !jwt::is_admin(claims)
+        && let Some(key) = perm_key_for(path, method)
+    {
+        let allowed = role_has_perm(perm_map().await.as_ref(), claims, &key)
+            || user_has_perm(user_perm_map().await.as_ref(), claims.id, &key);
+        if !allowed {
+            return Err((
+                StatusCode::FORBIDDEN,
+                format!("权限不足，需要权限点：{key}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 取页面请求的凭据：`Authorization: Bearer` → 会话 Cookie → 查询串 `?token=`。
+///
+/// 前端把 token 存在 sessionStorage，直接新开页面不会自动带凭据；
+/// 登录接口同时下发会话 Cookie（`auth::SESSION_COOKIE`），页面据此鉴权。
+pub fn token_from_page_request(req: &Request) -> Option<String> {
+    if let Some(t) = token_from_request(req) {
+        return Some(t);
+    }
+    let cookie = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    cookie.split(';').find_map(|part| {
+        let (k, v) = part.split_once('=')?;
+        (k.trim() == crate::routers::auth::SESSION_COOKIE).then(|| v.trim().to_string())
+    })
 }
 
 #[cfg(test)]

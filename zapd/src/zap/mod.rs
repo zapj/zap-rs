@@ -10,6 +10,7 @@ pub mod audit;
 pub mod auto_update;
 pub mod certmgr;
 pub mod crypto;
+pub mod fastcgi;
 pub mod global;
 pub mod job;
 pub mod jwt;

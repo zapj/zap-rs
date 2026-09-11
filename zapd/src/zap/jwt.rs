@@ -65,7 +65,22 @@ pub fn generate_jwt_token(
     roles: &str,
     pwd_is_default: bool,
 ) -> Result<String, Error> {
-    let expire = &config::get_config().read().unwrap().jwt.jwt_expire;
+    let expire = config::get_config().read().unwrap().jwt.jwt_expire;
+    generate_jwt_token_with_expire(username, id, roles, pwd_is_default, expire)
+}
+
+/// 指定有效期的签发。
+///
+/// 用于 Web 应用（`/webapps/*`）会话 Cookie 这类需要比面板 JWT 更长生命周期的场景：
+/// 面板 token 保持短有效期（如 1 小时），而页面级会话可以更长，
+/// 否则用户登录一小时后再打开页面就会提示需要重新登录。
+pub fn generate_jwt_token_with_expire(
+    username: String,
+    id: u64,
+    roles: &str,
+    pwd_is_default: bool,
+    expire: u64,
+) -> Result<String, Error> {
     let now_secs = time::SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -75,7 +90,7 @@ pub fn generate_jwt_token(
         sub: username,
         iss: "Zap".to_string(),
         id,
-        exp: now_secs + *expire,
+        exp: now_secs + expire,
         roles: roles.to_string(),
         pwd_is_default,
     };

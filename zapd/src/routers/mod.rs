@@ -69,6 +69,7 @@ pub mod system_service_conf;
 pub mod system_update;
 pub mod system_zap;
 pub mod user;
+pub mod webapps;
 
 #[derive(RustEmbed)]
 #[folder = "../web/dist/"]
@@ -191,6 +192,8 @@ pub fn routers() -> Router {
 /// 未配置前缀时行为与之前完全一致（`/api/*` + 根路径 SPA）。
 fn build_routers(prefix: &str) -> Router {
     let inner = Router::new()
+        // Web 应用（/webapps/*，页面级路由，自带鉴权）
+        .nest("/webapps", webapps::routers())
         .fallback(static_handler)
         .nest("/api", api_routers());
 
