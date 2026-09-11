@@ -1150,15 +1150,22 @@ pub fn all_cookies(headers: &axum::http::HeaderMap) -> Option<String> {
 }
 
 /// 登录接口同时下发会话 Cookie（`auth::SESSION_COOKIE`），页面据此鉴权。
-pub fn token_from_page_request(req: &Request) -> Option<String> {
+pub fn token_candidates_from_page_request(req: &Request) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
     if let Some(t) = token_from_request(req) {
-        return Some(t);
+        out.push(t);
     }
-    let cookie = all_cookies(req.headers())?;
-    cookie.split(';').find_map(|part| {
-        let (k, v) = part.split_once('=')?;
-        (k.trim() == crate::routers::auth::SESSION_COOKIE).then(|| v.trim().to_string())
-    })
+    if let Some(cookie) = all_cookies(req.headers()) {
+        for part in cookie.split(';') {
+            if let Some((k, v)) = part.split_once('=') {
+                let v = v.trim();
+                if !v.is_empty() && k.trim() == crate::routers::auth::SESSION_COOKIE {
+                    out.push(v.to_string());
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

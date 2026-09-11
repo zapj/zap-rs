@@ -70,11 +70,17 @@ async fn handle(original: &Uri, req: Request) -> Result<Response, (StatusCode, S
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| "(未知)".to_string());
-    let token = crate::routers::access::token_from_page_request(&req);
-    let claims = match token.as_deref() {
-        Some(t) => jwt::claims_from_token(t).await,
-        None => None,
-    };
+    // 同名 Cookie 可能因 Path 不同而重复（历史遗留 + 新会话），浏览器会一并发出。
+    // 逐个验证并取第一个有效的，避免被先出现的失效值误判为未登录。
+    let candidates = crate::routers::access::token_candidates_from_page_request(&req);
+    let token = candidates.first().cloned();
+    let mut claims = None;
+    for t in &candidates {
+        if let Some(c) = jwt::claims_from_token(t).await {
+            claims = Some(c);
+            break;
+        }
+    }
     let Some(claims) = claims else {
         // 区分「没带 Cookie」「带了但没有 zap_token」「带了但失效」三种情况
         let reason = match token {
