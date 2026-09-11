@@ -71,19 +71,6 @@ async fn handle(original: &Uri, req: Request) -> Result<Response, (StatusCode, S
         })
         .unwrap_or_else(|| "(未知)".to_string());
     let token = crate::routers::access::token_from_page_request(&req);
-    tracing::warn!(
-        "DEBUG webapp uri={} cookie={:?} has_auth={} query_has_token={}",
-        full,
-        req.headers()
-            .get(header::COOKIE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("<无 Cookie 头>"),
-        req.headers().contains_key(header::AUTHORIZATION),
-        original
-            .query()
-            .map(|q| q.contains("token"))
-            .unwrap_or(false),
-    );
     let claims = match token.as_deref() {
         Some(t) => jwt::claims_from_token(t).await,
         None => None,
@@ -236,9 +223,12 @@ async fn serve_pma(
 fn with_session(resp: Response, token: Option<&str>) -> Response {
     let Some(token) = token else { return resp };
     let (mut parts, body) = resp.into_parts();
-    parts
-        .headers
-        .extend(crate::routers::auth::session_cookie(token));
+    // 必须用 append，不能用 extend：HeaderMap::extend 对同名键是「替换」，
+    // 写入 zap_token 时会把 Web 应用（phpMyAdmin 等）自己的 Set-Cookie 全部清掉，
+    // 表现为会话永远建立不起来（Failed to set session cookie）。
+    if let Some(value) = crate::routers::auth::session_cookie(token).get(header::SET_COOKIE) {
+        parts.headers.append(header::SET_COOKIE, value.clone());
+    }
     Response::from_parts(parts, body)
 }
 
@@ -332,16 +322,13 @@ fn login_required_page(
 
 /// 服务端实际收到的 Cookie 头原文（仅用于诊断页展示；没有则给出占位说明）。
 fn raw_cookie(req: &Request) -> String {
-    req.headers()
-        .get(header::COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
+    crate::routers::access::all_cookies(req.headers())
         .unwrap_or_else(|| "(没有 Cookie 头)".to_string())
 }
 
 /// 取请求 Cookie 头中的键名列表（不含值，仅用于诊断展示）。
 fn cookie_names(req: &Request) -> Option<Vec<String>> {
-    let raw = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    let raw = crate::routers::access::all_cookies(req.headers())?;
     let names = raw
         .split(';')
         .filter_map(|p| p.split_once('=').map(|(k, _)| k.trim().to_string()))
@@ -507,8 +494,12 @@ fn build_params(
         ("SERVER_NAME".into(), server_name),
         (
             "SERVER_PORT".into(),
-            server_port.unwrap_or_else(|| "443".into()),
+            server_port.clone().unwrap_or_else(|| "443".into()),
         ),
+        // 必须与客户端实际协议保持一致，否则 phpMyAdmin 会报
+        // “mismatch between HTTPS indicated on server and client”。
+        // 代价：phpMyAdmin 会改用 `__Secure-` 前缀的会话 Cookie，
+        // 该前缀要求浏览器把站点视为「安全来源」，自签证书需先导入信任库。
         ("REQUEST_SCHEME".into(), "https".into()),
         ("HTTPS".into(), "on".into()),
     ];
@@ -517,6 +508,18 @@ fn build_params(
     // （PHP 程序普遍用它判断域名，缺失会导致生成的链接/Cookie 域出错）
     if !headers.contains_key(header::HOST) {
         params.push(("HTTP_HOST".into(), host.clone()));
+    }
+
+    // 标准反向代理头：告知后端应用真实的协议与端口（PHP 侧为
+    // $_SERVER['HTTP_X_FORWARDED_PROTO'] / ['HTTP_X_FORWARDED_PORT']）。
+    // 客户端自带同名头时不覆盖，避免被伪造。
+    if !headers.contains_key("x-forwarded-proto") {
+        params.push(("HTTP_X_FORWARDED_PROTO".into(), "https".into()));
+    }
+    if !headers.contains_key("x-forwarded-port")
+        && let Some(p) = server_port.as_ref()
+    {
+        params.push(("HTTP_X_FORWARDED_PORT".into(), p.clone()));
     }
 
     // HTTP_*：除 Authorization 外逐头透传；Cookie 需剔除面板会话 Cookie
@@ -542,7 +545,7 @@ fn build_params(
 
 /// 去掉面板会话 Cookie 后的 Cookie 头（其余原样透传给 PHP）。
 fn filtered_cookie(headers: &HeaderMap) -> Option<String> {
-    let raw = headers.get(header::COOKIE)?.to_str().ok()?;
+    let raw = crate::routers::access::all_cookies(headers)?;
     let prefix = format!("{SESSION_COOKIE}=");
     let kept: Vec<&str> = raw
         .split(';')
@@ -567,11 +570,22 @@ fn build_response(fcgi: fastcgi::FcgiResponse) -> Result<Response, (StatusCode, 
             continue;
         }
         let Ok(name) = HeaderName::from_bytes(k.as_bytes()) else {
+            tracing::warn!("丢弃 FastCGI 响应头：头名非法 {k:?}");
             continue;
         };
         let Ok(value) = HeaderValue::from_str(&v) else {
+            // Set-Cookie 里是会话令牌，只记长度不记内容，避免写进日志
+            if name == header::SET_COOKIE {
+                tracing::warn!(
+                    "丢弃 FastCGI 响应头：Set-Cookie 的值非法（长度 {}）",
+                    v.len()
+                );
+            } else {
+                tracing::warn!("丢弃 FastCGI 响应头：{k} 的值非法（长度 {}）", v.len());
+            }
             continue;
         };
+        // header() 是追加语义，多个 Set-Cookie 会各自保留，不会互相覆盖
         builder = builder.header(name, value);
     }
     builder

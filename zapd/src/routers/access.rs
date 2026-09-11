@@ -1127,12 +1127,34 @@ pub async fn authorize_page(
 /// 取页面请求的凭据：`Authorization: Bearer` → 会话 Cookie → 查询串 `?token=`。
 ///
 /// 前端把 token 存在 sessionStorage，直接新开页面不会自动带凭据；
+/// 合并请求中所有 `Cookie` 头字段。
+///
+/// HTTP/2（RFC 7540 §8.1.2.5）允许把 Cookie 拆成多个 `cookie` 头字段，
+/// 而 `headers.get(COOKIE)` 只能拿到第一个，其余 Cookie 会被整体忽略。
+/// 典型表现：浏览器 Cookie 列表里明明有 `zap_token`，服务端却报告「没有 Cookie」，
+/// 且 Web 应用自身的会话 Cookie 也传不进 PHP（表现为会话无法建立）。
+pub fn all_cookies(headers: &axum::http::HeaderMap) -> Option<String> {
+    let mut out: Option<String> = None;
+    for value in headers.get_all(header::COOKIE) {
+        if let Ok(s) = value.to_str() {
+            match &mut out {
+                Some(buf) => {
+                    buf.push_str("; ");
+                    buf.push_str(s);
+                }
+                None => out = Some(s.to_string()),
+            }
+        }
+    }
+    out
+}
+
 /// 登录接口同时下发会话 Cookie（`auth::SESSION_COOKIE`），页面据此鉴权。
 pub fn token_from_page_request(req: &Request) -> Option<String> {
     if let Some(t) = token_from_request(req) {
         return Some(t);
     }
-    let cookie = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    let cookie = all_cookies(req.headers())?;
     cookie.split(';').find_map(|part| {
         let (k, v) = part.split_once('=')?;
         (k.trim() == crate::routers::auth::SESSION_COOKIE).then(|| v.trim().to_string())

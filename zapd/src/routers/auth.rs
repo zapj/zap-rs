@@ -34,8 +34,12 @@ pub fn session_cookie(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     // 不设 SameSite：个别浏览器/版本对 Lax 的判定存在差异（新标签直接打开可能不发送），
     // 去掉后回到最宽松的兼容行为（同站请求一律携带）。
-    let value =
-        format!("{SESSION_COOKIE}={token}; Path=/; HttpOnly; Max-Age={WEBAPP_SESSION_SECS}");
+    // 刻意不加 Secure：面板常以自签证书 + IP 访问，浏览器不把这类站点视为
+    // 「安全来源」，带 Secure 的 Cookie 会被保存但永不回传（实测：请求里只出现
+    // 不带 Secure 的 Cookie），导致 Web 应用始终判定为未登录。链路仍是 HTTPS。
+    let value = format!(
+        "{SESSION_COOKIE}={token}; Path=/webapps/; HttpOnly; SameSite=Lax; Max-Age={WEBAPP_SESSION_SECS}"
+    );
     if let Ok(v) = HeaderValue::from_str(&value) {
         headers.insert(header::SET_COOKIE, v);
     }
@@ -50,10 +54,14 @@ fn webapp_session_token(username: String, id: u64, roles: &str) -> Option<String
 /// 清除会话 Cookie（登出 / 改密后失效）。
 fn clear_session_cookie() -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::SET_COOKIE,
-        HeaderValue::from_static("zap_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"),
-    );
+    // 同时清两个 Path：历史版本用的是 Path=/，而浏览器按
+    // (域名, 路径, 名称) 三元组区分 Cookie，只清一个会留下另一个残留。
+    for path in ["/", "/webapps/"] {
+        let value = format!("{SESSION_COOKIE}=; Path={path}; HttpOnly; SameSite=Lax; Max-Age=0");
+        if let Ok(v) = HeaderValue::from_str(&value) {
+            headers.append(header::SET_COOKIE, v);
+        }
+    }
     headers
 }
 
