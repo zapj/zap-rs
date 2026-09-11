@@ -62,7 +62,7 @@ interface SiteItem {
 
 // PHP 运行通道（按全局 vhost 模式 + 站点归属用户派生，仅用于展示）
 interface ChannelInfo {
-  kind: 'system' | 'www' | 'pending'
+  kind: 'system' | 'pending'
   text: string
   tip: string
 }
@@ -200,9 +200,6 @@ const currentUserName = computed(
 
 const list = ref<SiteItem[]>([])
 const stats = reactive({ total: 0, running: 0, stopped: 0, failed: 0 })
-// 虚拟主机运行模式：'www' 统一 www 用户 / 'system' 每面板用户独立 Linux 账号（取自 site/list 返回）
-const vhostMode = ref<'www' | 'system'>('www')
-const systemMode = computed(() => vhostMode.value === 'system')
 const loading = ref(false)
 const selection = ref<SiteItem[]>([])
 
@@ -342,7 +339,6 @@ async function load() {
         running: number
         stopped: number
         failed?: number
-        vhost_mode?: 'www' | 'system'
         rows: SiteItem[]
       }
     }>('/site/list')
@@ -351,7 +347,6 @@ async function load() {
     stats.running = res.data?.running || 0
       stats.stopped = res.data?.stopped || 0
     stats.failed = res.data?.failed || 0
-    if (res.data?.vhost_mode) vhostMode.value = res.data.vhost_mode
   } catch {
     /* handled */
   } finally {
@@ -361,31 +356,24 @@ async function load() {
 
 const fmtTime = (ts: number) => (ts ? new Date(ts * 1000).toLocaleString() : '-')
 
-// PHP 通道展示：system → 用户专属 pool（socket = /var/run/php-fpm-{账号}-{版本}.sock）；www → 统一实例
+// PHP 通道展示：归属用户的专属 pool（socket = /var/run/php-fpm-{账号}-{版本}.sock）
 const phpSuffix = (instance: string) => instance.replace(/^php/i, '')
 function phpChannel(row: SiteItem): ChannelInfo | null {
   const ins = row.php_instance || ''
   if (!ins) return null
-  if (systemMode.value) {
-    const lu = row.linux_user || ''
-    if (!lu) {
-      return {
-        kind: 'pending',
-        text: '待同步',
-        tip: 'system 模式需先对该站点执行“同步”，生成归属用户的 Linux 账号与专属 PHP-FPM pool',
-      }
-    }
-    const suffix = phpSuffix(ins) || ins
+  const lu = row.linux_user || ''
+  if (!lu) {
     return {
-      kind: 'system',
-      text: `${lu} 专属 pool`,
-      tip: `PHP-FPM 独立 pool：/var/run/php-fpm-${lu}-${suffix}.sock\npool worker 与站点文件属主均为 ${lu}（nologin 系统账号）`,
+      kind: 'pending',
+      text: '待同步',
+      tip: '请先对该站点执行“同步”，为归属用户创建 Linux 账号并生成专属 PHP-FPM pool',
     }
   }
+  const suffix = phpSuffix(ins) || ins
   return {
-    kind: 'www',
-    text: 'www 统一实例',
-    tip: '站点与 PHP 统一以 www 用户运行，PHP 走该实例全局 socket（由实例安装配置决定）',
+    kind: 'system',
+    text: `${lu} 专属 pool`,
+    tip: `PHP-FPM 独立 pool：/var/run/php-fpm-${lu}-${suffix}.sock\npool worker 与站点文件属主均为 ${lu}（nologin 系统账号）`,
   }
 }
 const channelMap = computed<Record<number, ChannelInfo | null>>(() => {
@@ -1116,16 +1104,15 @@ onMounted(() => {
   <div>
     <!-- 运行模式说明 -->
     <el-alert
-      v-if="systemMode"
       type="warning"
       :closable="false"
       show-icon
       class="mode-alert"
-      title="当前为「系统用户隔离」模式：每个面板用户对应一个 Linux 系统账号（nologin），站点文件属主为该账号，PHP-FPM 按「用户 × PHP 版本」生成独立 pool"
+      title="「系统用户隔离」模式：每个面板用户对应一个 Linux 系统账号（nologin），站点文件属主为该账号，PHP-FPM 按「用户 × PHP 版本」生成独立 pool"
     >
       <template #default>
         运行通道形如
-        <code>/var/run/php-fpm-{账号}-{版本}.sock</code>，在「运行环境 → 默认配置」中可切换回「统一 www 用户」模式
+        <code>/var/run/php-fpm-{账号}-{版本}.sock</code>
       </template>
     </el-alert>
 
@@ -1297,9 +1284,6 @@ onMounted(() => {
             <template v-if="channelOf(row)">
               <el-tooltip :content="channelOf(row)!.tip" placement="top">
                 <el-tag v-if="channelOf(row)!.kind === 'system'" size="small" type="warning" effect="plain">
-                  {{ channelOf(row)!.text }}
-                </el-tag>
-                <el-tag v-else-if="channelOf(row)!.kind === 'www'" size="small" type="success" effect="plain">
                   {{ channelOf(row)!.text }}
                 </el-tag>
                 <el-tag v-else size="small" type="info" effect="plain">{{ channelOf(row)!.text }}</el-tag>

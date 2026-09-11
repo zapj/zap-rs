@@ -6,10 +6,9 @@
 //! - `{home_dir}/logs/{sanitize(site)}-{site_id}` —— 站点 access/error 日志（log tree）
 //! - `{home_dir}/tmp` —— PHP session / 上传临时目录（open_basedir 白名单）
 //!
-//! 两种虚拟主机运行模式：
-//! - `owner = None`（统一 www）：web tree 归 `www:www`，PHP-FPM 全局 www pool 运行
-//! - `owner = Some(linux_user)`（独立系统用户）：web tree 归 `{u}:www`
-//!   （nginx worker 以组 www 读取静态文件），PHP-FPM 每用户 pool 以 `{u}` 运行
+//! 运行账号 `owner` 为该面板用户对应的 Linux 系统账号（nologin）：
+//! web tree 归 `{u}:www`（nginx worker 以组 www 读取静态文件），
+//! PHP-FPM 以「该用户 × 该 PHP 版本」独立 pool 运行。
 //!
 //! 安全边界：家目录只接受 `/home/` 下绝对路径；禁止 `..`；Linux 账号名白名单校验。
 
@@ -41,6 +40,55 @@ fn linux_user_ok(u: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// 账号实际主组名（`id -gn`）。
+///
+/// 账号主组不再假设与账号同名：同名组被系统占用时账号会落在 `zap_<user>` 专属组，
+/// 故一律以系统记录为准。账号不存在 / 查询失败时回退同名组。
+pub(crate) fn run_group_of(linux_user: &str) -> String {
+    root_cmd("id")
+        .args(["-gn", linux_user])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| linux_user.to_string())
+}
+
+fn group_exists(name: &str) -> bool {
+    root_cmd("getent")
+        .args(["group", name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// 同名组已被系统占用（如发行版预置的 admin / sudo 组）时使用的专属组名。
+/// 不把面板账号并入系统组以避免继承额外权限；组名长度上限 32。
+fn dedicated_group_name(linux_user: &str) -> String {
+    let mut g = format!("zap_{linux_user}");
+    g.truncate(32);
+    g
+}
+
+/// 账号移除后清理其运行组：仅当该组是普通组（gid ≥ 1000）且已无附加成员时才删。
+/// 系统组（gid < 1000，如预置的 admin / sudo）绝不触碰。
+fn remove_run_group(name: &str) {
+    let Ok(o) = root_cmd("getent").args(["group", name]).output() else {
+        return;
+    };
+    if !o.status.success() {
+        return;
+    }
+    let line = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    let mut fields = line.split(':');
+    let gid: u32 = fields.nth(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let members = fields.next().unwrap_or("").trim();
+    if gid >= 1000 && members.is_empty() {
+        let _ = root_cmd("groupdel").arg(name).output();
+    }
+}
+
 fn cmd_err(o: &std::process::Output, fallback: &str) -> String {
     let text = String::from_utf8_lossy(&o.stderr).trim().to_string();
     let text = if text.is_empty() {
@@ -61,10 +109,10 @@ fn sh_quote(s: &str) -> String {
 
 // ── user.home_init ──────────────────────────────────────────
 
-pub async fn home_init(home_dir: &str, owner: Option<&str>) -> Response {
+pub async fn home_init(home_dir: &str, owner: &str) -> Response {
     let home_dir = home_dir.to_string();
-    let owner = owner.map(|s| s.to_string());
-    tokio::task::spawn_blocking(move || home_init_inner(&home_dir, owner.as_deref()))
+    let owner = owner.to_string();
+    tokio::task::spawn_blocking(move || home_init_inner(&home_dir, &owner))
         .await
         .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
         .unwrap_or_else(|e| Response::err(-1, e))
@@ -82,7 +130,7 @@ fn run_bash(script: &str) -> Result<(), String> {
     }
 }
 
-fn home_init_inner(home_dir: &str, owner: Option<&str>) -> Result<Response, String> {
+fn home_init_inner(home_dir: &str, owner: &str) -> Result<Response, String> {
     let home = home_dir.trim();
     if home.is_empty() {
         return Err("home_dir 不能为空".to_string());
@@ -92,14 +140,13 @@ fn home_init_inner(home_dir: &str, owner: Option<&str>) -> Result<Response, Stri
             "home_dir 非法（必须为挂载点下的绝对路径，不含 ..）: {home}"
         ));
     }
-    if let Some(u) = owner
-        && !linux_user_ok(u)
-    {
-        return Err(format!("非法的 Linux 账号名: {u}"));
+    if !linux_user_ok(owner) {
+        return Err(format!("非法的 Linux 账号名: {owner}"));
     }
-    let run = owner.unwrap_or("www");
-    // 进程主组：system 模式用账号独立组（不放进 www 组，避免跨用户读 php 源码）
-    let run_group = if owner.is_some() { run } else { "www" };
+    let run = owner;
+    // 进程主组：账号独立组（不放进 www 组，避免跨用户读 php 源码）；
+    // 以系统实际主组为准（同名组被系统占用时账号落在 zap_<user> 专属组）
+    let run_group = run_group_of(run);
     let home_p = PathBuf::from(home);
     std::fs::create_dir_all(&home_p).map_err(|e| format!("创建家目录失败 {home_p:?}: {e}"))?;
     let mut created: Vec<String> = Vec::new();
@@ -124,23 +171,17 @@ fn home_init_inner(home_dir: &str, owner: Option<&str>) -> Result<Response, Stri
     run_bash(&format!(
         "chown -R {}:{} {}",
         q(run),
-        q(run_group),
+        q(&run_group),
         q(&format!("{home}/tmp"))
     ))?;
     run_bash(&format!("chmod 700 {}", q(&format!("{home}/tmp"))))?;
-    // 家目录顶层：system 模式独立归属 + o+x（nginx 可进入但不可列），www 模式归 www
-    if owner.is_some() {
-        run_bash(&format!("chown {}:{} {}", q(run), q(run_group), q(home)))?;
-        run_bash(&format!("chmod 711 {}", q(home)))?;
-    } else {
-        run_bash(&format!("chown www:www {}", q(home)))?;
-        run_bash(&format!("chmod 750 {}", q(home)))?;
-    }
+    // 家目录顶层：归该账号，o+x（nginx 可进入但不可列）
+    run_bash(&format!("chown {}:{} {}", q(run), q(&run_group), q(home)))?;
+    run_bash(&format!("chmod 711 {}", q(home)))?;
 
-    let mode = if owner.is_some() { "system" } else { "www" };
     Ok(Response::ok(
-        format!("家目录已就绪：{home}（运行模式 {mode}）"),
-        Some(json!({ "home_dir": home, "dirs": created, "mode": mode })),
+        format!("家目录已就绪：{home}（运行账号 {run}）"),
+        Some(json!({ "home_dir": home, "dirs": created, "owner": run, "mode": "system" })),
     ))
 }
 
@@ -186,9 +227,29 @@ fn system_init_inner(linux_user: &str, home_dir: &str) -> Result<Response, Strin
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "/usr/sbin/nologin".to_string());
+    // 账号主组：优先同名组；同名组已被系统占用（如发行版预置的 admin / sudo 组）时
+    // 改用专属组 zap_<user>，避免把面板账号并入系统管理组而继承额外权限。
+    // 后续家目录属组与 PHP-FPM pool 的 group 都按账号实际主组解析（id -gn）。
+    let gname = if group_exists(linux_user) {
+        dedicated_group_name(linux_user)
+    } else {
+        linux_user.to_string()
+    };
+    if !group_exists(&gname) {
+        let g = root_cmd("groupadd")
+            .arg(&gname)
+            .output()
+            .map_err(|e| format!("执行 groupadd 失败: {e}"))?;
+        if !g.status.success() {
+            return Err(format!(
+                "创建运行组失败：{}",
+                cmd_err(&g, "groupadd 返回非零")
+            ));
+        }
+    }
     // -M：不自动创建家目录（目录由 user.home_init 建好并赋权）
     let o = root_cmd("useradd")
-        .args(["-M", "-s", &shell, "-d", home_dir, linux_user])
+        .args(["-M", "-s", &shell, "-d", home_dir, "-g", &gname, linux_user])
         .output()
         .map_err(|e| format!("执行 useradd 失败: {e}"))?;
     if !o.status.success() {
@@ -198,8 +259,13 @@ fn system_init_inner(linux_user: &str, home_dir: &str) -> Result<Response, Strin
         ));
     }
     Ok(Response::ok(
-        format!("Linux 账号 {linux_user} 已创建（home={home_dir}）"),
-        Some(json!({ "linux_user": linux_user, "home_dir": home_dir, "shell": shell })),
+        format!("Linux 账号 {linux_user} 已创建（home={home_dir}, group={gname}）"),
+        Some(json!({
+            "linux_user": linux_user,
+            "home_dir": home_dir,
+            "shell": shell,
+            "run_group": gname,
+        })),
     ))
 }
 
@@ -242,6 +308,9 @@ fn system_remove_inner(linux_user: &str) -> Result<Response, String> {
             cmd_err(&o, "userdel 返回非零")
         ));
     }
+    // 账号运行组随之清理（系统预置组 / 仍被引用的组由 remove_run_group 自动跳过）
+    remove_run_group(linux_user);
+    remove_run_group(&dedicated_group_name(linux_user));
     Ok(Response::ok(
         format!("Linux 账号 {linux_user} 已移除"),
         None,
@@ -250,21 +319,17 @@ fn system_remove_inner(linux_user: &str) -> Result<Response, String> {
 
 // ── user.home_migrate（家目录跨挂载点迁移）──────────────────
 
-pub async fn migrate_home(src_home: &str, dest_home: &str, owner: Option<&str>) -> Response {
+pub async fn migrate_home(src_home: &str, dest_home: &str, owner: &str) -> Response {
     let src_home = src_home.to_string();
     let dest_home = dest_home.to_string();
-    let owner = owner.map(|s| s.to_string());
-    tokio::task::spawn_blocking(move || migrate_home_inner(&src_home, &dest_home, owner.as_deref()))
+    let owner = owner.to_string();
+    tokio::task::spawn_blocking(move || migrate_home_inner(&src_home, &dest_home, &owner))
         .await
         .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
         .unwrap_or_else(|e| Response::err(-1, e))
 }
 
-fn migrate_home_inner(
-    src_home: &str,
-    dest_home: &str,
-    owner: Option<&str>,
-) -> Result<Response, String> {
+fn migrate_home_inner(src_home: &str, dest_home: &str, owner: &str) -> Result<Response, String> {
     let src = src_home.trim().trim_end_matches('/').to_string();
     let dest = dest_home.trim().trim_end_matches('/').to_string();
     for (name, p) in [("源家目录", src.as_str()), ("目标家目录", dest.as_str())] {
@@ -323,21 +388,19 @@ fn migrate_home_inner(
         q(&src),
     ))?;
 
-    // 按当前运行模式重置家目录骨架属主/权限（幂等），并补全 www/logs/tmp 子目录。
+    // 按运行账号重置家目录骨架属主/权限（幂等），并补全 www/logs/tmp 子目录。
     // 文件搬移已成功，权限重置失败仅追加提示、不阻断迁移结果（避免数据与记录状态不一致）。
     let mut warn_msg = String::new();
     if let Err(e) = home_init_inner(&dest, owner) {
         warn_msg = format!("（权限重置提示：{e}）");
     }
 
-    // system 模式：同步 Linux 系统账号家目录指针（账号可能不存在，失败不阻断）
-    if let Some(u) = owner {
-        let _ = run_bash(&format!(
-            "usermod -d {} {} 2>/dev/null || true",
-            q(&dest),
-            q(u)
-        ));
-    }
+    // 同步 Linux 系统账号家目录指针（账号可能不存在，失败不阻断）
+    let _ = run_bash(&format!(
+        "usermod -d {} {} 2>/dev/null || true",
+        q(&dest),
+        q(owner)
+    ));
 
     Ok(Response::ok(
         format!("数据迁移完成：{src} → {dest}{warn_msg}"),

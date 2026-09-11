@@ -1021,17 +1021,6 @@ async fn resolve_key_material(
                 format!("密钥 '{key_name}' 的归属账号未绑定系统用户，无法读取私钥"),
             ));
         }
-        // www 共享模式：无独立系统账号（/etc/passwd 无该名义用户），家目录密钥文件
-        // 必然不存在（passwd 解析失败）。在此拦截并给出可读指引，而不是抛「系统用户不存在」。
-        if crate::routers::system_env::vhost_mode().await != "system" {
-            return Err(ZapError::New(
-                -1,
-                format!(
-                    "连接绑定的「我的密钥」'{key_name}' 当前不可用：系统为「统一 www」共享模式（无独立 Linux 账号）。\
-                     请在「服务器 → 运行环境」切换为独立系统用户模式后重试，或将连接改为密码认证"
-                ),
-            ));
-        }
         let resp = crate::zapexec::call(Request::SshUserKeyPrivateGet {
             linux_user: linux_user.to_string(),
             name: key_name.to_string(),

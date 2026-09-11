@@ -110,12 +110,12 @@ export interface UserSshKey {
   created_at: number
 }
 
-/** 我的密钥列表响应：items + 能力门禁信息（仅「独立系统用户」模式支持家目录密钥） */
+/** 我的密钥列表响应：items + 兼容字段（运行模式固定为独立系统用户） */
 export interface SshKeysPayload {
   items: UserSshKey[]
-  /** 虚拟主机运行模式：www=统一 www 用户 / system=每用户独立 Linux 账号 */
-  vhost_mode: 'www' | 'system'
-  /** 是否支持个人家目录密钥（www 共享模式无独立 Linux 账号 → false） */
+  /** 虚拟主机运行模式：固定 system（每个面板用户一个独立 Linux 账号） */
+  vhost_mode: 'system'
+  /** 是否支持个人家目录密钥（恒 true：每个用户都有独立 Linux 账号承载 ~/.ssh） */
   user_keys_enabled: boolean
 }
 

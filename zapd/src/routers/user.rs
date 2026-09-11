@@ -155,11 +155,12 @@ fn normalize_fpm_spec(raw: Option<String>) -> Result<Option<String>, ZapError> {
     }
 }
 
-/// 按全局虚拟主机运行模式补齐「面板用户 → 运行实体」（幂等）：
-/// - system：确保 user.linux_user 有值，创建 Linux 系统账号（useradd，nologin），
-///   家目录按独立用户模式赋权（owner = linux_user）
-/// - www：仅按统一 www 模式补家目录骨架
+/// 补齐「面板用户 → 运行实体」（幂等）：
+/// 1. 确保 user.linux_user 有值（空则按用户名派生并落库）；
+/// 2. 创建 Linux 系统账号（useradd -M -s nologin -d {home_dir}）；
+/// 3. 初始化家目录骨架（www/logs/tmp）并归该账号所有。
 ///
+/// 每个面板用户对应一个独立 Linux 账号，站点与 PHP-FPM pool 均以该账号运行。
 /// 站点同步 / 用户同步 / 新增用户均调用；失败返回 Err 描述。
 pub async fn ensure_user_runtime(uid: i64) -> Result<(), String> {
     let pool = db::get_db_pool().await;
@@ -184,26 +185,20 @@ pub async fn ensure_user_runtime(uid: i64) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())?;
     }
-    let mode = crate::routers::system_env::vhost_mode().await;
-    if mode == "system" {
-        let resp = crate::zapexec::call(zap_proto::types::Request::UserSystemInit {
-            linux_user: linux_user.clone(),
-            home_dir: home_dir.clone(),
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        if resp.code != 0 {
-            return Err(format!("创建 Linux 账号失败: {}", resp.message));
-        }
+    // 1) Linux 系统账号（nologin）
+    let resp = crate::zapexec::call(zap_proto::types::Request::UserSystemInit {
+        linux_user: linux_user.clone(),
+        home_dir: home_dir.clone(),
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if resp.code != 0 {
+        return Err(format!("创建 Linux 账号失败: {}", resp.message));
     }
-    let owner = if mode == "system" {
-        Some(linux_user)
-    } else {
-        None
-    };
+    // 2) 家目录骨架归该账号所有
     let resp = crate::zapexec::call(zap_proto::types::Request::UserHomeInit {
         home_dir: home_dir.clone(),
-        owner,
+        owner: linux_user,
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -214,7 +209,7 @@ pub async fn ensure_user_runtime(uid: i64) -> Result<(), String> {
 }
 
 /// 按用户当前套餐下发磁盘配额（best-effort：失败仅写日志，不阻断用户创建/编辑）。
-/// 未绑定套餐、套餐未提供配额字段或用户无 Linux 系统账号（www 统一模式）时跳过。
+/// 未绑定套餐、套餐未提供配额字段或用户无 Linux 系统账号时跳过。
 pub async fn sync_package_quota(user_id: i64) {
     let Some(pkg) = crate::routers::package::package_of_user(user_id).await else {
         return;
@@ -872,13 +867,27 @@ pub async fn user_delete(
     }
 
     let pool = db::get_db_pool().await;
-    // 独立系统用户模式下，先记录待清理的 Linux 账号
+
+    // 独立系统用户模式下，站点的 vhost / FPM pool / 目录都绑定归属用户的 Linux 账号，
+    // 直接删除会让这些配置全部悬空且无法回收，因此要求先处理站点
+    let site_cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM site WHERE user_id = ?")
+        .bind(payload.id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    if site_cnt > 0 {
+        return Err(ZapError::New(
+            -1,
+            format!("该用户名下还有 {site_cnt} 个站点，请先删除或转移站点后再删除用户"),
+        ));
+    }
+
+    // 先记录待清理的 Linux 账号（删除用户后按它清 pool + userdel）
     let linux_user: Option<String> = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
         .bind(payload.id)
         .fetch_optional(pool)
         .await?
         .filter(|s: &String| !s.is_empty());
-    let was_system = crate::routers::system_env::vhost_mode().await == "system";
 
     let result = sqlx::query("DELETE FROM user WHERE id = ?")
         .bind(payload.id)
@@ -908,8 +917,8 @@ pub async fn user_delete(
             .await;
     }
 
-    // 删除用户后清理运行实体（system 模式：清 pool + userdel）
-    if was_system && let Some(lu) = linux_user {
+    // 删除用户后清理运行实体：清掉该账号在所有 PHP 实例中的 pool 并 userdel
+    if let Some(lu) = linux_user {
         match crate::zapexec::call(zap_proto::types::Request::UserSystemRemove {
             linux_user: lu.clone(),
         })
@@ -965,8 +974,8 @@ pub async fn reseller_list(claims: ValidatedClaims) -> ZapJsonResult {
     })))
 }
 
-/// 批量补齐所有用户运行实体（admin only）：按全局虚拟主机运行模式
-/// 为每个用户补家目录骨架（www 模式）或 Linux 账号 + 独立用户家目录（system 模式）。
+/// 批量补齐所有用户运行实体（admin only）：
+/// 为每个用户创建 Linux 系统账号（nologin）并初始化其家目录骨架。
 /// 个别失败不影响整体（结果里给出失败清单）。
 pub async fn user_home_sync(
     claims: ValidatedClaims,
@@ -974,7 +983,6 @@ pub async fn user_home_sync(
 ) -> ZapJsonResult {
     require_admin(&claims)?;
 
-    let mode = crate::routers::system_env::vhost_mode().await;
     let pool = db::get_db_pool().await;
     let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
         "SELECT id, username, home_dir, linux_user FROM user WHERE home_dir != '' ORDER BY id",
@@ -992,7 +1000,7 @@ pub async fn user_home_sync(
                     "username": username,
                     "home_dir": home_dir,
                     "linux_user": linux_user,
-                    "mode": mode,
+                    "mode": "system",
                 }));
             }
             Err(e) => {
@@ -1001,7 +1009,7 @@ pub async fn user_home_sync(
                     "username": username,
                     "home_dir": home_dir,
                     "linux_user": linux_user,
-                    "mode": mode,
+                    "mode": "system",
                     "error": e,
                 }));
             }
@@ -1013,18 +1021,13 @@ pub async fn user_home_sync(
         Some(client_addr.ip().to_string().as_str()),
         "user_home_sync",
         &format!("ok={} fail={}", ok_items.len(), fail_items.len()),
-        &format!("mode={mode}"),
+        "mode=system",
     )
     .await;
 
-    let action = if mode == "system" {
-        "运行实体"
-    } else {
-        "家目录"
-    };
     Ok(Json(json!({
         "code": 0,
-        "message": format!("{action}同步完成：成功 {}，失败 {}", ok_items.len(), fail_items.len()),
-        "data": { "ok": ok_items, "fail": fail_items, "mode": mode }
+        "message": format!("运行实体同步完成：成功 {}，失败 {}", ok_items.len(), fail_items.len()),
+        "data": { "ok": ok_items, "fail": fail_items, "mode": "system" }
     })))
 }

@@ -178,9 +178,6 @@
                 本地主机连接：写入本机用户 authorized_keys（需 admin 角色）
               </span>
               <span v-else-if="form.ssh_key_name">密钥需已添加到主机 ~/.ssh/authorized_keys 才能登录</span>
-              <span v-else-if="!canUseUserKeys && !isAdmin">
-                当前为「统一 www」共享模式（无独立 Linux 账号），暂不支持个人密钥，请改用密码认证
-              </span>
               <span v-else>暂无可用密钥，请先在「我的密钥」中生成/导入</span>
               <el-button
                 v-if="canUseUserKeys || isAdmin"
@@ -453,7 +450,7 @@ const sshKeys = ref<{ name: string; scope: 'user' | 'system' }[]>([])
 const activeConnId = ref<number | null>(null)
 
 // 「我的密钥」能力门禁：仅「独立系统用户」(system) 模式支持家目录密钥（取自 /terminal/keys 响应）
-const vhostMode = ref<'www' | 'system'>('www')
+const vhostMode = ref<'system'>('system')
 const userKeysEnabled = ref(true)
 const canUseUserKeys = computed(() => userKeysEnabled.value && vhostMode.value === 'system')
 
@@ -636,7 +633,7 @@ async function loadSshKeys() {
   try {
     const resp = await getUserSshKeys()
     const d = resp.data
-    vhostMode.value = d?.vhost_mode ?? 'www'
+    vhostMode.value = d?.vhost_mode ?? 'system'
     userKeysEnabled.value = d?.user_keys_enabled ?? true
     sshKeys.value = d?.items || []
   } catch {
@@ -661,7 +658,7 @@ async function loadMyKeys() {
   try {
     const resp = await getUserSshKeys()
     const d = resp.data
-    vhostMode.value = d?.vhost_mode ?? 'www'
+    vhostMode.value = d?.vhost_mode ?? 'system'
     userKeysEnabled.value = d?.user_keys_enabled ?? true
     myKeys.value = d?.items || []
   } catch (e: any) {

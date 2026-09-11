@@ -22,7 +22,7 @@ const form = reactive<EnvConf>({
   webserver: '',
   php_default: '',
   database: '',
-  vhost_mode: 'www',
+  vhost_mode: 'system',
   fpm_pool_defaults: '',
   user_home_root: '/home',
 })
@@ -103,7 +103,7 @@ function openDefaultsDialog() {
   form.webserver = c?.webserver ?? ''
   form.php_default = c?.php_default ?? ''
   form.database = c?.database ?? ''
-  form.vhost_mode = c?.vhost_mode === 'system' ? 'system' : 'www'
+  form.vhost_mode = 'system'
   form.user_home_root = c?.user_home_root || '/home'
   // 回填 fpm 默认规格（先重置再覆盖）
   resetFpmForm()
@@ -141,30 +141,12 @@ function fpmSpecJson(): string {
 }
 
 async function saveDefaults() {
-  const prevMode = conf.value?.vhost_mode ?? 'www'
-  const nextMode = form.vhost_mode
-  if (prevMode !== nextMode) {
-    const tip =
-      nextMode === 'system'
-        ? '切换到「独立系统用户」后：\n· 新用户创建/同步时会自动 useradd（nologin）并把 web 目录归该账号；\n· 存量站点请到「虚拟主机 → 全部再同步」按新模式重建（自动生成每用户 PHP-FPM pool）。'
-        : '切换到「统一 www 用户」后：\n· 站点同步时 web 目录属主与 PHP pool 会回到 www / 全局实例；\n· 此前已创建的 Linux 系统账号与专属 pool 不会被自动删除（保留为孤儿账号），如不再使用请手动清理。'
-    try {
-      await ElMessageBox.confirm(
-        `${tip}\n\n是否继续保存？`,
-        '切换虚拟主机运行模式',
-        { type: 'warning', confirmButtonText: '保存并切换' }
-      )
-    } catch {
-      return
-    }
-  }
   saving.value = true
   try {
     const res = await saveServerEnvDefaults({
       webserver: form.webserver,
       php_default: form.php_default,
       database: form.database,
-      vhost_mode: form.vhost_mode,
       fpm_pool_defaults: fpmSpecJson(),
       user_home_root: form.user_home_root.trim(),
     })
@@ -871,22 +853,15 @@ onMounted(() => {
 
         <el-divider content-position="left">虚拟主机运行模式</el-divider>
         <el-form-item label="运行模式">
-          <el-radio-group v-model="form.vhost_mode" class="mode-radio-group">
-            <el-radio value="www">
-              统一 www 用户
-              <div class="mode-sub">所有站点文件与 PHP 均以 www 运行，简单易维护</div>
-            </el-radio>
-            <el-radio value="system">
-              独立系统用户
-              <div class="mode-sub">每个面板用户分配一个专属 Linux 账号，网站与 PHP-FPM 均以该账号运行，用户间互相隔离</div>
-            </el-radio>
-          </el-radio-group>
+          <el-tag type="success" size="large">独立系统用户</el-tag>
+          <div class="form-tip">
+            每个面板用户对应一个专属 Linux 账号（nologin）：站点文件归该账号，
+            PHP-FPM 以「该用户 × 该 PHP 版本」独立 pool 运行，用户之间完全隔离。
+          </div>
         </el-form-item>
         <el-form-item label=" ">
           <el-alert
-            :title="form.vhost_mode === 'system'
-              ? '切换后：新建用户将自动生成专属 Linux 账号（nologin）并 chown 家目录；存量用户请到「服务器配置 → 同步运行环境」点击「一键修复/同步」补齐（幂等、不影响已有站点），网站同步后自动生成每用户每 PHP 版本的独立 PHP-FPM pool。'
-              : '统一 www 模式：站点文件与 PHP-FPM 均归 www 用户，站点使用全局 PHP socket。存量用户如需回退，请到「服务器配置 → 同步运行环境」一键修复/同步。'"
+            title="系统固定使用独立系统用户模式（已移除「统一 www 用户」模式）。新建用户会自动生成专属 Linux 账号（nologin）并赋权家目录；存量用户请到「服务器配置 → 同步运行环境」点击「一键修复/同步」补齐（幂等、不影响已有站点）；站点同步后自动生成每用户每 PHP 版本的独立 PHP-FPM pool。"
             type="info"
             :closable="false"
             show-icon
@@ -1086,29 +1061,5 @@ onMounted(() => {
   line-height: 1.6;
   white-space: normal;
   word-break: break-word;
-}
-.mode-radio-group {
-  display: flex;
-  gap: 12px;
-}
-.mode-radio-group :deep(.el-radio) {
-  height: auto;
-  line-height: 1;
-}
-.mode-radio-group :deep(.el-radio__input) {
-  margin-top: 2px;
-}
-.mode-radio-group :deep(.el-radio__label) {
-  display: inline-flex;
-  flex-direction: column;
-  vertical-align: top;
-  padding-left: 8px;
-  white-space: normal;
-}
-.mode-sub {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  line-height: 1.5;
-  margin-top: 2px;
 }
 </style>

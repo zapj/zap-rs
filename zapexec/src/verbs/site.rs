@@ -3,7 +3,8 @@
 //! 契约（与 appstore 安装的 Nginx 应用配合）：
 //! - vhost 文件写入 `<nginx prefix>/conf/sites-enabled/zap-site-{id}.conf`
 //!   （目录由 nginx.conf 中的 `include sites-enabled/*.conf` / `conf.d/*.conf` 自动探测）
-//! - 站点文档根：`{ZAP_PATH}/data/www/{sanitize(name)}-{id}/`，首次同步自动创建并写占位 index.html
+//! - 站点文档根：`{home_dir}/www/{sanitize(name)}-{id}/`（归属用户家目录下），
+//!   首次同步自动创建并写占位 index.html
 //! - 配置写入后先执行 `nginx -t` 校验，失败即回滚删除文件，绝不带着坏配置 reload
 //! - PHP 联动：`php_socket` 形如 `unix:/path` 或 `host:port`；为 None 时不生成 PHP location
 //!
@@ -178,34 +179,6 @@ fn output_err(o: &std::process::Output, fallback: &str) -> String {
 }
 
 // ── 文档根 ───────────────────────────────────────────────────
-
-fn sanitize_name(name: &str) -> String {
-    let mut out: String = name
-        .chars()
-        .map(|c| {
-            // 保留字母/数字/_/-，其余（含 . 与空格等）统一转 '-'，避免隐藏目录/路径穿越
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-') {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    out = out.trim_matches('-').to_string();
-    if out.is_empty() {
-        out = "site".to_string();
-    }
-    if out.chars().count() > 48 {
-        out = out.chars().take(48).collect();
-    }
-    out
-}
-
-fn default_web_root(name: &str, site_id: i64) -> PathBuf {
-    zap_path()
-        .join("data/www")
-        .join(format!("{}-{site_id}", sanitize_name(name)))
-}
 
 /// 站点骨架目录：`{ZAP_PATH}/scripts/zap/skel/`，其中的 index.html 为新站点的默认首页模板。
 /// 运维可直接修改该模板（支持 __SITE_NAME__ / __SITE_ID__ / __SITE_DOMAINS__ /
@@ -1405,8 +1378,7 @@ fn vhost_sync_inner(cfg: SiteConfig) -> Result<Response, String> {
         return Ok(Response::ok("维护页配置已写入并通过校验", None));
     }
 
-    // 文档根：优先采用面板入库的 web_root（位于归属用户家目录下）；
-    // 为空/未提供时回退 {ZAP_PATH}/data/www/{sanitize(name)}-{id}
+    // 文档根：采用面板入库的 web_root（位于归属用户家目录下）。
     // 反向代理（proxy）类型不需要文档根。
     let s_type = norm_site_type(&site_type);
     let is_proxy = s_type == "proxy";
@@ -1420,7 +1392,14 @@ fn vhost_sync_inner(cfg: SiteConfig) -> Result<Response, String> {
                 }
                 PathBuf::from(w)
             }
-            _ => default_web_root(name, site_id),
+            // 独立系统用户模式下站点必须落在归属用户家目录，不再回退共享目录
+            _ => {
+                return Err(
+                    "站点缺少 web_root（必须位于归属用户家目录下，如 /home/{用户}/www/{站点}）：\
+                     请重新保存站点后再次同步"
+                        .to_string(),
+                );
+            }
         })
     };
     // 自定义目录：必须是已存在的目录；自动目录：递归创建 + 占位首页
@@ -1448,15 +1427,17 @@ fn vhost_sync_inner(cfg: SiteConfig) -> Result<Response, String> {
         &locations,
     )?;
     // 站点树属主/权限收敛（自动目录）：
-    // - web tree：owner_user（独立系统用户模式）或 www；组恒为 www，目录 750 / 文件 640
-    //   （nginx worker 以组 www 读静态文件，php-fpm 以 owner 身份读写）
+    // - web tree：归归属用户的 Linux 账号；组恒为 www，目录 750 / 文件 640
+    //   （nginx worker 以组 www 读静态文件，php-fpm 以该账号身份读写）
     // - log tree：恒归 www:www，目录 770 / 文件 660（nginx 写 access/error.log）
     // 自定义目录不递归改动用户已有文件属主/权限（由用户自管，nginx 需可读其文件）。
     if let Some(r) = &root {
         let web_owner = owner_user
             .as_deref()
             .filter(|u| !u.is_empty())
-            .unwrap_or("www");
+            .ok_or_else(|| {
+                "站点未绑定运行账号（归属面板用户缺失），无法收敛站点文件属主".to_string()
+            })?;
         if !web_root_custom {
             fix_tree_owner(r, web_owner, false)?;
         }
@@ -1802,14 +1783,6 @@ mod tests {
         assert!(s.contains("root /home/u/www/b-7;"));
         assert!(s.contains("access_log /home/u/logs/b-7/access.log;"));
         assert!(s.contains("error_log /home/u/logs/b-7/error.log;"));
-    }
-
-    #[test]
-    fn sanitize_names() {
-        assert_eq!(sanitize_name("我的 博客"), "site"); // 全中文/空格 → 全 '-'，trim 后空 → site
-        assert_eq!(sanitize_name("my blog/x"), "my-blog-x");
-        assert_eq!(sanitize_name(".."), "site");
-        assert_eq!(sanitize_name("ABC_123"), "ABC_123");
     }
 
     #[test]

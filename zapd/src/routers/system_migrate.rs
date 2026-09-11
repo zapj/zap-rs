@@ -112,8 +112,6 @@ pub async fn migrate_home_mv(
     if dest == "/home" {
         return Err(ZapError::New(-1, "目标挂载点不能是默认 /home".to_string()));
     }
-    let mode = crate::routers::system_env::vhost_mode().await;
-
     let pool = db::get_db_pool().await;
     let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
         "SELECT id, username, linux_user, home_dir FROM user
@@ -148,11 +146,12 @@ pub async fn migrate_home_mv(
             .await
             .unwrap_or_default();
 
-        // system 模式：迁移时同步更新 Linux 账号家目录指针
-        let owner = if mode == "system" && !linux_user.is_empty() {
-            Some(linux_user.clone())
+        // 迁移时同步更新 Linux 账号家目录指针（usermod -d）；
+        // 账号名缺失（历史数据）时按用户名派生，随后由用户同步落库。
+        let owner = if linux_user.is_empty() {
+            zap_proto::linux_username(&username)
         } else {
-            None
+            linux_user.clone()
         };
         let resp = match crate::zapexec::call(Request::UserHomeMigrate {
             src_home: old_home.clone(),
@@ -235,6 +234,6 @@ pub async fn migrate_home_mv(
     Ok(Json(json!({
         "code": 0,
         "message": format!("迁移完成：成功 {ok_n}，失败 {fail_n}"),
-        "data": { "src": src, "dest": dest, "mode": mode, "ok": ok_items, "fail": fail_items }
+        "data": { "src": src, "dest": dest, "mode": "system", "ok": ok_items, "fail": fail_items }
     })))
 }

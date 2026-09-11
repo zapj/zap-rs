@@ -26,7 +26,7 @@ export interface UserListItem {
   nickname: string
   /** 用户家目录，如 /home/foo；老库回填前可能为空串 */
   home_dir: string
-  /** Linux 系统账号名（独立系统用户模式）；空 = 未创建/未派生 */
+  /** Linux 系统账号名（每个面板用户一个账号）；空 = 未创建/未派生 */
   linux_user: string
   /** 该用户 PHP-FPM pool 规格 JSON；空 = 使用面板默认规格 */
   fpm_pool: string
@@ -160,7 +160,7 @@ export interface HomeSyncResult {
   mode: string
 }
 
-/** 按全局运行模式批量补齐用户运行实体（www=家目录骨架 / system=Linux 账号+家目录，admin only） */
+/** 批量补齐用户运行实体（每个用户：Linux 账号 nologin + 家目录赋权，admin only） */
 export function userHomeSync() {
   return http.post<ApiResponse<HomeSyncResult>>('/system/user/home_sync', undefined, {
     timeout: 60000,

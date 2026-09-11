@@ -255,14 +255,12 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         }
         Request::FirewallToggle { action } => firewall::toggle(action).await,
         Request::EnvDetect => env::detect().await,
-        Request::UserHomeInit { home_dir, owner } => {
-            user::home_init(&home_dir, owner.as_deref()).await
-        }
+        Request::UserHomeInit { home_dir, owner } => user::home_init(&home_dir, &owner).await,
         Request::UserHomeMigrate {
             src_home,
             dest_home,
             owner,
-        } => user::migrate_home(&src_home, &dest_home, owner.as_deref()).await,
+        } => user::migrate_home(&src_home, &dest_home, &owner).await,
         Request::UserSystemInit {
             linux_user,
             home_dir,

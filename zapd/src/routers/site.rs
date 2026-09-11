@@ -2450,8 +2450,6 @@ async fn sync_one_site_inner(
     else {
         return Err(ZapError::New(-1, "站点不存在".to_string()));
     };
-    let mode = crate::routers::system_env::vhost_mode().await;
-
     // 域名 → server_name
     let mut domains = Vec::new();
     let dsql = "SELECT domain FROM site_domain WHERE site_id = ? ORDER BY id";
@@ -2470,67 +2468,58 @@ async fn sync_one_site_inner(
         .unwrap_or_else(|_| "php".to_string());
     let is_proxy = s_type == "proxy";
 
-    // 运行实体准备（幂等）：
-    // - system 模式：确保归属用户有 Linux 账号 + 独立用户家目录，文件属主 = linux_user
-    // - www 模式：确保归属用户家目录骨架（www:www），文件属主 = www
-    let mut owner_user: Option<String> = None;
-    if mode == "system" {
-        if let Some(uid) = uid {
-            crate::routers::user::ensure_user_runtime(uid)
-                .await
-                .map_err(|e| ZapError::New(-1, e))?;
-            let lu: Option<String> = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
-                .bind(uid)
-                .fetch_one(pool)
-                .await?;
-            if let Some(lu) = lu.filter(|s| !s.is_empty()) {
-                owner_user = Some(lu);
-            }
-        }
-    } else if let Some(uid) = uid
-        && let Err(e) = crate::routers::user::ensure_user_runtime(uid).await
-    {
-        warn!("初始化用户运行实体失败(id={}): {}", uid, e);
-    }
+    // 运行实体准备（幂等）：站点必须绑定面板用户。
+    // 每个面板用户对应一个 Linux 系统账号（nologin）：站点文件属主 = 该账号，
+    // PHP-FPM pool 也以该账号运行（每用户 × 每 PHP 版本一个 pool）。
+    let uid = uid.ok_or_else(|| {
+        ZapError::New(
+            -1,
+            "站点未绑定面板用户，无法同步（请先为该站点指定归属用户）".to_string(),
+        )
+    })?;
+    crate::routers::user::ensure_user_runtime(uid)
+        .await
+        .map_err(|e| ZapError::New(-1, e))?;
+    let lu: Option<String> = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
+        .bind(uid)
+        .fetch_one(pool)
+        .await?;
+    let linux_user = lu.filter(|s| !s.trim().is_empty()).ok_or_else(|| {
+        ZapError::New(-1, format!("用户 {uid} 缺少 Linux 账号（linux_user 为空）"))
+    })?;
+    let owner_user = Some(linux_user.clone());
 
-    // PHP 通道：
-    // - system 模式：先为归属用户同步专属 pool，通道 = /var/run/php-fpm-{linux_user}-{ver}.sock
-    // - www 模式：全局实例 socket（info.yaml 解析 / 命名推导）
+    // PHP 通道：先为归属用户同步「该用户 × 该 PHP 版本」专属 pool，
+    // 通道固定为 /var/run/php-fpm-{linux_user}-{ver}.sock
     let php_socket = if is_proxy || php_instance.is_empty() {
         // 反向代理站点不绑定 PHP（有 PHP 实例也忽略，避免为不用的 pool 做联动）
         None
-    } else if mode == "system" {
-        match &owner_user {
-            Some(lu) => {
-                // 解析用户最终 pool 规格：存量自定义 fpm_pool → 模板/inherit(继承 reseller) → 全局默认
-                let spec = crate::routers::fpm_spec::resolve_user_spec(
-                    ufpm.as_deref(),
-                    uref.as_deref().unwrap_or(""),
-                    uowner,
-                )
-                .await;
-                let resp = crate::zapexec::call(Request::PhpPoolSync {
-                    php_instance: php_instance.clone(),
-                    linux_user: lu.clone(),
-                    home_dir: uhome.unwrap_or_default(),
-                    spec,
-                })
-                .await?;
-                if resp.code != 0 {
-                    return Err(ZapError::New(
-                        resp.code,
-                        format!("PHP-FPM pool 同步失败：{}", resp.message),
-                    ));
-                }
-                Some(format!(
-                    "/var/run/php-fpm-{lu}-{}.sock",
-                    php_version_suffix(&php_instance)
-                ))
-            }
-            None => Some(resolve_php_socket(&php_instance).await?),
-        }
     } else {
-        Some(resolve_php_socket(&php_instance).await?)
+        // 解析用户最终 pool 规格：存量自定义 fpm_pool → 模板/inherit(继承 reseller) → 全局默认
+        let spec = crate::routers::fpm_spec::resolve_user_spec(
+            ufpm.as_deref(),
+            uref.as_deref().unwrap_or(""),
+            uowner,
+        )
+        .await;
+        let resp = crate::zapexec::call(Request::PhpPoolSync {
+            php_instance: php_instance.clone(),
+            linux_user: linux_user.clone(),
+            home_dir: uhome.unwrap_or_default(),
+            spec,
+        })
+        .await?;
+        if resp.code != 0 {
+            return Err(ZapError::New(
+                resp.code,
+                format!("PHP-FPM pool 同步失败：{}", resp.message),
+            ));
+        }
+        // 前缀 unix: 是 nginx upstream / fastcgi_pass 的必需写法
+        Some(format!(
+            "unix:/var/run/php-fpm-{linux_user}-{}.sock",
+            php_version_suffix(&php_instance)
+        ))
     };
 
     let web_root_opt = (!web_root.trim().is_empty()).then_some(web_root);
@@ -2665,64 +2654,6 @@ pub async fn site_sync_all(
 /// PHP 实例 → 版本后缀：php8.3 → 8.3，php74 → 74
 fn php_version_suffix(php_instance: &str) -> String {
     php_instance.trim_start_matches("php").to_string()
-}
-
-/// 解析 PHP 实例的 FPM 通道：
-/// 1) info.yaml 登记的 php_socket / fpm_socket / expose(unix:/tcp:)；
-/// 2) 否则按官方包命名约定推导（php8.3 → /var/run/php-fpm-8.3.sock，php74 → /var/run/php-fpm-74.sock）
-async fn resolve_php_socket(php_instance: &str) -> Result<String, ZapError> {
-    let resp = crate::zapexec::call(Request::AppstoreInstalled).await?;
-    if resp.code == 0
-        && let Some(data) = &resp.data
-        && let Some(items) = data.get("items").and_then(|v| v.as_array())
-    {
-        for it in items {
-            if it.get("instance").and_then(|v| v.as_str()) != Some(php_instance) {
-                continue;
-            }
-            let info = it.get("info").unwrap_or(&serde_json::Value::Null);
-            for key in ["php_socket", "fpm_socket"] {
-                if let Some(v) = info.get(key).and_then(|v| v.as_str()) {
-                    let v = v.trim();
-                    if !v.is_empty() {
-                        return Ok(v.to_string());
-                    }
-                }
-            }
-            if let Some(v) = info.get("expose").and_then(|v| v.as_str()) {
-                for seg in v.split(['\n', ',']) {
-                    let seg = seg.trim();
-                    if let Some(rest) = seg.strip_prefix("unix:") {
-                        let rest = rest.trim();
-                        if !rest.is_empty() {
-                            return Ok(format!("unix:{rest}"));
-                        }
-                    }
-                    if let Some(rest) = seg.strip_prefix("tcp:") {
-                        let rest = rest.trim();
-                        if !rest.is_empty() {
-                            return Ok(rest.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // 官方包命名推导
-    let ver = php_instance
-        .strip_prefix("php")
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            ZapError::New(
-                -1,
-                format!(
-                    "无法确定 PHP 实例 {php_instance} 的 FPM socket：\
-                     实例未登记 php_socket 且命名不是 php<版本> 形式"
-                ),
-            )
-        })?;
-    Ok(format!("/var/run/php-fpm-{ver}.sock"))
 }
 
 #[cfg(test)]

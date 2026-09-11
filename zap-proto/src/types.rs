@@ -500,30 +500,30 @@ pub enum Request {
     /// 探测服务器运行环境快照（OS / Web 服务器 / PHP / 数据库 / 工具链）
     #[serde(rename = "env.detect")]
     EnvDetect,
-    /// 初始化面板用户家目录骨架：mkdir -p {home_dir}/www {home_dir}/logs（root 特权）。
-    /// owner 为 Some(linux 账号) 时按「独立系统用户」模式设置属主与权限：
-    /// home 711 owner {u}:{u}，www / logs 750 owner {u}:www；
-    /// owner None（默认 www 模式）时 www / logs 归 www:www。
+    /// 初始化面板用户家目录骨架：mkdir -p {home_dir}/www {home_dir}/logs {home_dir}/tmp（root 特权）。
+    /// owner 为该面板用户对应的 Linux 账号：
+    /// home 711 owner {u}:{u}，www 750 owner {u}:www（nginx worker 属组 www 读静态文件），
+    /// logs 770 owner www:www（nginx 写日志），tmp 700 owner {u}:{u}。
     #[serde(rename = "user.home_init")]
     UserHomeInit {
         home_dir: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<String>,
+        /// 运行账号（Linux 系统用户名），家目录树归该账号所有
+        owner: String,
     },
     /// 将用户家目录整体迁移到新挂载点（如 /home → /home2，磁盘扩容场景）。
-    /// 支持跨文件系统（mv 失败自动回退 cp -a + 清理源）；完成后按运行模式重置属主。
-    /// owner Some(linux 账号)（system 模式）时同步更新系统账号家目录指针（usermod -d）。
+    /// 支持跨文件系统（mv 失败自动回退 cp -a + 清理源）；完成后按该账号重置属主，
+    /// 并同步更新系统账号家目录指针（usermod -d）。
     #[serde(rename = "user.home_migrate")]
     UserHomeMigrate {
         /// 源家目录完整路径（绝对路径，不含 `..`）
         src_home: String,
         /// 目标家目录完整路径（须为挂载点下路径，basename 与源一致）
         dest_home: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<String>,
+        /// 运行账号（Linux 系统用户名）
+        owner: String,
     },
     /// 为面板用户创建 Linux 系统账号（useradd，nologin，home 指向 home_dir），幂等。
-    /// 虚拟主机运行模式为「独立系统用户」时，面板用户在 user.add / 站点同步前调用。
+    /// 每个面板用户对应一个 Linux 账号（nologin），在 user.add / 站点同步前调用。
     #[serde(rename = "user.system_init")]
     UserSystemInit {
         /// Linux 账号名（须通过 zap_proto::linux_username 派生，调用方已校验）
@@ -531,7 +531,7 @@ pub enum Request {
         /// 账号 home 目录（面板记录的 home_dir）
         home_dir: String,
     },
-    /// 移除 Linux 系统账号（删除面板用户 / 切换回 www 模式时调用）。
+    /// 移除 Linux 系统账号（删除面板用户时调用）。
     /// 会先清掉该用户的 PHP-FPM pool 配置文件并 reload，再 userdel。
     #[serde(rename = "user.system_remove")]
     UserSystemRemove {
@@ -956,15 +956,17 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Request::UserHomeInit {
                 home_dir: "/home/zap".into(),
-                owner: None,
+                owner: "zap".into(),
             })
             .unwrap(),
-            r#"{"verb":"user.home_init","home_dir":"/home/zap"}"#
+            r#"{"verb":"user.home_init","home_dir":"/home/zap","owner":"zap"}"#
         );
-        let back: Request =
-            serde_json::from_str(r#"{"verb":"user.home_init","home_dir":"/home/zap"}"#).unwrap();
+        let back: Request = serde_json::from_str(
+            r#"{"verb":"user.home_init","home_dir":"/home/zap","owner":"zap"}"#,
+        )
+        .unwrap();
         assert!(
-            matches!(back, Request::UserHomeInit { home_dir, owner: None } if home_dir == "/home/zap")
+            matches!(back, Request::UserHomeInit { home_dir, owner } if home_dir == "/home/zap" && owner == "zap")
         );
     }
 
