@@ -32,8 +32,10 @@ pub const WEBAPP_SESSION_SECS: u64 = 24 * 3600;
 /// 生成会话 Cookie（HttpOnly + SameSite=Lax，有效期与 Cookie 内 JWT 一致）。
 pub fn session_cookie(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
+    // 不设 SameSite：个别浏览器/版本对 Lax 的判定存在差异（新标签直接打开可能不发送），
+    // 去掉后回到最宽松的兼容行为（同站请求一律携带）。
     let value = format!(
-        "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={WEBAPP_SESSION_SECS}"
+        "{SESSION_COOKIE}={token}; Path=/; Secure; HttpOnly; Max-Age={WEBAPP_SESSION_SECS}"
     );
     if let Ok(v) = HeaderValue::from_str(&value) {
         headers.insert(header::SET_COOKIE, v);

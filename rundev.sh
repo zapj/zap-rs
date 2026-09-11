@@ -119,30 +119,14 @@ fi
 
 # ── 3. 准备开发运行时目录与配置 ─────────────────────────────
 mkdir -p "$RUN_DIR"
-
-# 开发用自签证书：与配置一样落在 data/run/ 下，首次启动自动生成。
-if [ ! -f "$DEV_CRT" ] || [ ! -f "$DEV_KEY" ]; then
-  info "生成开发用自签证书 $DEV_CRT"
-  if ! openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
-      -keyout "$DEV_KEY" -out "$DEV_CRT" -subj "/CN=Zap Dev" \
-      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null; then
-    # 旧版 openssl 不支持 -addext，退化为不带 SAN 的证书
-    openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
-      -keyout "$DEV_KEY" -out "$DEV_CRT" -subj "/CN=Zap Dev" 2>/dev/null \
-      || die "生成自签证书失败（请先安装 openssl）"
-  fi
-  chmod 0600 "$DEV_KEY"
-  ok "自签证书已生成"
-fi
-
 if [ ! -f "$DEV_CONF" ]; then
   info "生成开发配置 $DEV_CONF"
   cat > "$DEV_CONF" <<EOF
 server:
   address: 0.0.0.0
   port: 2600
-  cert_file: $DEV_CRT
-  key_file: $DEV_KEY
+  cert_file: $ROOT_DIR/conf/zap.crt
+  key_file: $ROOT_DIR/conf/zap.key
   url_prefix: "$CONF_URL_PREFIX"
 jwt:
   jwt_secure: zap-dev-insecure-secret
@@ -165,12 +149,8 @@ if [ -f "$DEV_CONF" ]; then
     sed -i "0,\|^[[:space:]]*key_file:.*|s||&\n  url_prefix: \"$CONF_URL_PREFIX\"|" "$DEV_CONF"
   fi
   if [ -n "$CONF_URL_PREFIX" ]; then
-    ok "URL 前缀: /$CONF_URL_PREFIX/"
+    ok "URL 前缀: /$CONF_URL_PREFIX/ （同步自 conf/zap.yaml）"
   fi
-
-  # 老的开发配置可能还指向 conf/ 下的证书，统一改到 data/run/
-  sed -i "s|^[[:space:]]*cert_file:.*|  cert_file: $DEV_CRT|" "$DEV_CONF"
-  sed -i "s|^[[:space:]]*key_file:.*|  key_file: $DEV_KEY|" "$DEV_CONF"
 fi
 
 # ── 3.5 删除数据库（--reset-db）──────────────────────────────

@@ -57,21 +57,6 @@ async fn handle(original: &Uri, req: Request) -> Result<Response, (StatusCode, S
         .trim_start_matches('/')
         .to_string();
 
-    // 缺少结尾斜杠时重定向补上（等价于 nginx 的目录跳转）：
-    // phpMyAdmin 页面内的资源用相对路径（./themes/…、js/…），
-    // 若停在 `/webapps/phpmyadmin`，它们会被解析到 `/webapps/` 下而全部 404。
-    if full == format!("{base}{PMA_MOUNT}") {
-        let target = match original.query() {
-            Some(q) => format!("{base}{PMA_MOUNT}/?{q}"),
-            None => format!("{base}{PMA_MOUNT}/"),
-        };
-        return Ok(Response::builder()
-            .status(StatusCode::FOUND)
-            .header(header::LOCATION, target)
-            .body(Body::empty())
-            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()));
-    }
-
     // ── 2) 登录态：Bearer / 会话 Cookie / ?token= ─────────────
     // 注意：HTTP/2 下浏览器不发 `Host` 头（用 :authority 伪头），
     // 因此优先取 URI 的 authority，Host 头仅作回退。
@@ -86,6 +71,19 @@ async fn handle(original: &Uri, req: Request) -> Result<Response, (StatusCode, S
         })
         .unwrap_or_else(|| "(未知)".to_string());
     let token = crate::routers::access::token_from_page_request(&req);
+    tracing::warn!(
+        "DEBUG webapp uri={} cookie={:?} has_auth={} query_has_token={}",
+        full,
+        req.headers()
+            .get(header::COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<无 Cookie 头>"),
+        req.headers().contains_key(header::AUTHORIZATION),
+        original
+            .query()
+            .map(|q| q.contains("token"))
+            .unwrap_or(false),
+    );
     let claims = match token.as_deref() {
         Some(t) => jwt::claims_from_token(t).await,
         None => None,
@@ -109,7 +107,13 @@ async fn handle(original: &Uri, req: Request) -> Result<Response, (StatusCode, S
                 ),
             },
         };
-        return Ok(login_required_page(&base, &full, &reason, &host));
+        return Ok(login_required_page(
+            &base,
+            &full,
+            &reason,
+            &host,
+            &raw_cookie(&req),
+        ));
     };
 
     // ── 3) 角色 + 权限点（webapp.phpmyadmin:view）────────────
@@ -232,12 +236,9 @@ async fn serve_pma(
 fn with_session(resp: Response, token: Option<&str>) -> Response {
     let Some(token) = token else { return resp };
     let (mut parts, body) = resp.into_parts();
-    // 必须用 append（不能用 extend）：HeaderMap::extend 对同名键是「替换」，
-    // 会把 phpMyAdmin 自己下发的 Set-Cookie 全部清掉，导致其会话无法建立
-    // （表现为登录后报 “Failed to set session cookie”）。
-    if let Some(value) = crate::routers::auth::session_cookie(token).get(header::SET_COOKIE) {
-        parts.headers.append(header::SET_COOKIE, value.clone());
-    }
+    parts
+        .headers
+        .extend(crate::routers::auth::session_cookie(token));
     Response::from_parts(parts, body)
 }
 
@@ -287,6 +288,7 @@ const LOGIN_REQUIRED_HTML: &str = r#"<!DOCTYPE html>
   <p class="reason">诊断：__REASON__</p>
   <p class="reason">服务端当前时间：__NOWTIME__（UTC）—— 请与 Cookie 的 Expires 对比</p>
   <p class="reason">本次请求 Host：__HOST__（HTTP/2 下通常取不到，属正常现象）</p>
+  <p class="reason">服务端实际收到的 Cookie 原文：__RAWCOOKIE__</p>
   <a href="__BACK__">前往登录</a>
   <a class="home" href="__HOME__">返回面板首页</a>
 </div>
@@ -295,7 +297,13 @@ const LOGIN_REQUIRED_HTML: &str = r#"<!DOCTYPE html>
 "#;
 
 /// 未登录：返回独立提示页（401，含诊断原因、前往登录与返回首页入口）。
-fn login_required_page(base: &str, full: &str, reason: &str, host: &str) -> Response {
+fn login_required_page(
+    base: &str,
+    full: &str,
+    reason: &str,
+    host: &str,
+    raw_cookie: &str,
+) -> Response {
     let back = format!("{base}/login?redirect={}", urlencode(full));
     let home = if base.is_empty() {
         "/".to_string()
@@ -311,7 +319,8 @@ fn login_required_page(base: &str, full: &str, reason: &str, host: &str) -> Resp
             "__NOWTIME__",
             &chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         )
-        .replace("__HOST__", &escape_html(host));
+        .replace("__HOST__", &escape_html(host))
+        .replace("__RAWCOOKIE__", &escape_html(raw_cookie));
 
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
@@ -319,6 +328,15 @@ fn login_required_page(base: &str, full: &str, reason: &str, host: &str) -> Resp
         .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from(html))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// 服务端实际收到的 Cookie 头原文（仅用于诊断页展示；没有则给出占位说明）。
+fn raw_cookie(req: &Request) -> String {
+    req.headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "(没有 Cookie 头)".to_string())
 }
 
 /// 取请求 Cookie 头中的键名列表（不含值，仅用于诊断展示）。

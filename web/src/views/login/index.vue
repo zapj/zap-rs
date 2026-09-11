@@ -1,22 +1,13 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import type { FormInstance, FormRules } from 'element-plus'
 import type { LoginForm } from '@/types/user'
 
 const router = useRouter()
-const route = useRoute()
 const userStore = useUserStore()
-
-// 登录后回跳地址（如从 /webapps/phpmyadmin/ 被拦到登录页时带上）。
-// 只接受站内绝对路径，防止开放重定向。
-const redirectPath = computed(() => {
-  const r = route.query.redirect
-  if (typeof r === 'string' && r.startsWith('/') && !r.startsWith('//')) return r
-  return '/'
-})
 
 // 登录表单
 const loginForm = reactive<LoginForm>({
@@ -98,7 +89,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
         await userStore.getInfoAction()
 
         ElMessage.success('登录成功')
-        router.push({ path: redirectPath.value })
+        router.push({ path: '/' })
       } catch (error: any) {
         // 密码正确但账号已启用两步验证 → 展示验证码输入框进入第二步
         if (error?.code === 1002) {
