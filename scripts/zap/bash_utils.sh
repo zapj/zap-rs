@@ -345,6 +345,35 @@ version_ge() { version_compare "$1" "$2"; [ $? -ne 2 ]; }
 version_gt() { version_compare "$1" "$2"; [ $? -eq 1 ]; }
 version_lt() { version_compare "$1" "$2"; [ $? -eq 2 ]; }
 
+# ── 版本分段解析(与 version_compare 同样忽略字母后缀) ────────────────────
+# 取版本号第 N 段(从 1 开始),自动去掉字母后缀:1.1.1w → 第1段=1 第2段=1 第3段=1
+# 用法: version_field <版本> <段号>
+version_field() {
+  local ver="${1:-}" idx="${2:-1}" parts v
+  [ -n "$ver" ] || return 1
+  case "$idx" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$idx" -ge 1 ] || return 1
+  IFS='.' read -ra parts <<<"$(printf '%s' "$ver" | sed 's/[^0-9.]//g')"
+  v="${parts[$((idx - 1))]:-}"
+  [ -n "$v" ] || return 1
+  printf '%s' "$v"
+}
+
+# 主版本号:version_major 1.1.1w → 1
+version_major() { version_field "${1:-}" 1; }
+
+# 次版本号:version_minor 1.1.1w → 1
+version_minor() { version_field "${1:-}" 2; }
+
+# 一次取出主次版本,输出 "major minor"(缺失的段为空串)
+# 典型用法: read -r MAJOR MINOR <<<"$(version_major_minor "${APP_OLD_VERSION}")"
+version_major_minor() {
+  local major minor
+  major="$(version_field "${1:-}" 1 || printf '')"
+  minor="$(version_field "${1:-}" 2 || printf '')"
+  printf '%s %s\n' "$major" "$minor"
+}
+
 # 生成随机密码(默认 16 位字母数字)
 random_password() {
   local len="${1:-16}"
@@ -371,6 +400,72 @@ getPropsValue() {
   esc="$(printf '%s' "$key" | sed 's/[][\\^$.*]/\\&/g')"
   v="$(grep -m1 "^[[:space:]]*${esc}[[:space:]]*=" "$file" 2>/dev/null | sed 's/^[^=]*=[[:space:]]*//')" || true
   printf '%s' "$v"
+}
+
+# ── YAML 键值读取 / 目录安全校验(应用商店通用) ──────────────────────────
+
+# 读取 yaml 顶层键值(仅支持 `key: value` 简单形式),无匹配返回空
+# 用法: yaml_value <文件> <key>
+yaml_value() {
+  local file="${1:-}" key="${2:-}" v
+  [ -n "$key" ] || return 1
+  [ -f "$file" ] || return 1
+  v="$(sed -n "s/^[[:space:]]*${key}:[[:space:]]*//p" "$file" | head -1 | sed 's/[[:space:]]*$//')" || true
+  printf '%s' "$v"
+}
+
+# 规范化目录:去掉末尾多余斜杠(保留根目录 "/",不解析软链)
+# 用法: normalize_dir <路径>;路径为空返回非 0
+normalize_dir() {
+  local p="${1:-}"
+  [ -n "$p" ] || return 1
+  while [ "${p%/}" != "$p" ] && [ "$p" != "/" ]; do p="${p%/}"; done
+  printf '%s' "$p"
+}
+
+# 确定应用安装目录:info 文件登记优先,软链指向次之;取不到返回空
+# 用法: resolve_install_dir <info文件> <软链路径> [键名(默认 install_dir)]
+# 例:   resolve_install_dir "${APP_PATH}/info.yaml" "${APPS_DIR}/phpmyadmin"
+resolve_install_dir() {
+  local info_file="${1:-}" link_dir="${2:-}" key="${3:-install_dir}" dir
+  dir="$(yaml_value "$info_file" "$key" || true)"
+  if [ -z "$dir" ] && [ -n "$link_dir" ] && [ -L "$link_dir" ]; then
+    dir="$(readlink "$link_dir" || true)"
+  fi
+  normalize_dir "$dir" 2>/dev/null || printf ''
+}
+
+# 校验目录可安全删除:必须是 apps_dir 的**直接子目录**
+# 卸载前调用,防止误删(拒绝空值 / 根 / apps_dir 自身 / 任何越界路径)
+# 用法: assert_under_apps_dir <目标目录> <应用根目录>
+assert_under_apps_dir() {
+  local target="${1:-}" apps="${2:-${APPS_DIR:-}}" parent
+  apps="$(normalize_dir "$apps" || printf '')"
+  if [ -z "$apps" ]; then
+    log_error "应用根目录无效：${2:-（APPS_DIR 为空）}"
+    return 1
+  fi
+
+  target="$(normalize_dir "$target" || printf '')"
+  if [ -z "$target" ]; then
+    log_error "目标目录为空，拒绝执行删除"
+    return 1
+  fi
+  if [ "$target" = "/" ]; then
+    log_error "拒绝删除根目录"
+    return 1
+  fi
+  if [ "$target" = "$apps" ]; then
+    log_error "拒绝删除应用根目录 ${apps}"
+    return 1
+  fi
+
+  parent="$(normalize_dir "$(dirname "$target")" || printf '')"
+  if [ "$parent" != "$apps" ]; then
+    log_error "目录不在 ${apps} 下（实际：${target}），中止以避免误删"
+    return 1
+  fi
+  return 0
 }
 
 # 写 /root/zap.conf 的 key=value(默认文件可用 WZAP_CONF_FILE 覆盖)
