@@ -460,11 +460,19 @@ fn build_params(
         Some(q) => format!("{}?{q}", uri.path()),
         None => uri.path().to_string(),
     };
-    let host = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("localhost")
-        .to_string();
+    // HTTP/2 下浏览器不发 `Host` 头（改用 :authority 伪头），
+    // 因此优先取 URI 的 authority，Host 头仅作回退。
+    // 否则 PHP 会拿到 localhost:443，据此生成的链接与 Cookie 域全部对不上。
+    let host = uri
+        .authority()
+        .map(|a| a.as_str().to_string())
+        .or_else(|| {
+            headers
+                .get(header::HOST)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "localhost".to_string());
     let server_port = host.rsplit_once(':').map(|(_, p)| p.to_string());
     let server_name = host
         .rsplit_once(':')
@@ -504,6 +512,12 @@ fn build_params(
         ("REQUEST_SCHEME".into(), "https".into()),
         ("HTTPS".into(), "on".into()),
     ];
+
+    // HTTP/2 下没有 Host 头，这里给 PHP 补一个 HTTP_HOST
+    // （PHP 程序普遍用它判断域名，缺失会导致生成的链接/Cookie 域出错）
+    if !headers.contains_key(header::HOST) {
+        params.push(("HTTP_HOST".into(), host.clone()));
+    }
 
     // HTTP_*：除 Authorization 外逐头透传；Cookie 需剔除面板会话 Cookie
     let cookie = filtered_cookie(headers);
