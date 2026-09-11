@@ -42,6 +42,7 @@ async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Respo
 pub mod access;
 pub mod appstore;
 pub mod auth;
+pub mod database;
 pub mod dev;
 pub mod fpm_spec;
 pub mod notice;
@@ -249,6 +250,17 @@ fn api_routers() -> Router {
         .route("/system/package/list", get(package::package_list))
         .route("/system/package/add", post(package::package_add))
         .route("/system/package/update", post(package::package_update))
+        // 数据库管理（MySQL / MariaDB，zapadm 凭据 + 本机 mysql 客户端）
+        .route("/database/status", get(database::status))
+        .route("/database/list", get(database::list))
+        .route("/database/create", post(database::create))
+        .route("/database/drop", post(database::drop_db))
+        .route("/database/users", get(database::users))
+        .route("/database/user/create", post(database::user_create))
+        .route("/database/user/drop", post(database::user_drop))
+        .route("/database/remote", get(database::remote_list))
+        .route("/database/remote/grant", post(database::remote_grant))
+        .route("/database/remote/revoke", post(database::remote_revoke))
         .route("/system/package/delete", post(package::package_delete))
         // Role management (admin only)
         .route("/system/role/list", get(system_role::role_list))

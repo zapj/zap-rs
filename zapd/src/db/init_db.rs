@@ -270,6 +270,12 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (91, 9, 'site-index', 'index', 'site/index', 'menu', '站点', 'ep:aim', 1, 'admin,user,reseller', 1, 1, strftime('%s','now'), strftime('%s','now'));
 
+    -- 数据库管理（Layout 包裹 + 一级直链：紧随站点之后；user 仅能管自己前缀的库）
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (14, 0, 'database', '/database', 'Layout', '/database/index', 'menu', '数据库', 'ep:coin', 1, 'admin,user', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (141, 14, 'database-index', 'index', 'database/index', 'menu', '数据库', 'ep:coin', 1, 'admin,user', 1, 1, strftime('%s','now'), strftime('%s','now'));
+
     -- System dir
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (2, 0, 'system', '/system', 'Layout', '/system/user', 'dir', '系统设置', 'ep:setting', 1, 'admin', 12, 1, strftime('%s','now'), strftime('%s','now'));
@@ -474,6 +480,11 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 91);
     INSERT INTO role_menus (role_id, menu_id) VALUES (2, 91);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 91);
+    -- 数据库管理：admin 全部 / user 仅自己前缀的库
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 14);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 14);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 141);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 141);
     -- SSL/TLS：admin / user
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 11);
     INSERT INTO role_menus (role_id, menu_id) VALUES (1, 111);

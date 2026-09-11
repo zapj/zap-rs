@@ -148,9 +148,24 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         name: 'SiteIndex',
         component: () => import('@/views/site/index.vue'),
         meta: { title: '站点', icon: 'ep:aim', affix: true },
-      },
-    ],
-  },
+        },
+        ],
+        },
+        // 数据库管理（菜单实际由后端 /system/menus/tree 下发，这里仅作接口失败时的回退）
+        {
+        path: '/database',
+        component: Layout,
+        redirect: '/database/index',
+        meta: { title: '数据库', icon: 'ep:coin', roles: ['admin', 'user'] },
+        children: [
+        {
+        path: 'index',
+        name: 'DatabaseIndex',
+        component: () => import('@/views/database/index.vue'),
+        meta: { title: '数据库', icon: 'ep:coin', affix: true },
+        },
+        ],
+        },
   // SSL/TLS（Layout 包裹 + 一级直链：admin / user）
   {
     path: '/ssl-tls',
