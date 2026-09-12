@@ -260,6 +260,9 @@ pub enum Request {
     /// 文件信息
     #[serde(rename = "file.info")]
     FileInfo { path: String },
+    /// 修改文件/目录权限（mode 为八进制数值，仅低 12 位有效）
+    #[serde(rename = "file.chmod")]
+    FileChmod { path: String, mode: u32 },
     /// 添加 AppStore Git 源（clone 到 data/appstore/repos/<id>/）
     #[serde(rename = "appstore.repo_add")]
     AppstoreRepoAdd {

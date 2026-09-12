@@ -43,6 +43,13 @@ pub struct DeletePayload {
     path: String,
 }
 
+#[derive(Deserialize)]
+pub struct ChmodPayload {
+    path: String,
+    /// 目标权限：八进制数值（如 0755 传 493），仅低 12 位有效
+    mode: u32,
+}
+
 // ── path helpers ───────────────────────────────────────────
 // 授权（基于 JWT 角色）仍在 zapd 完成；实际文件操作转发给 zapexec（root）。
 
@@ -298,6 +305,52 @@ pub async fn file_rename(
         "",
     )
     .await;
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
+}
+
+/// POST /system/files/chmod
+///
+/// 修改文件/目录权限（cPanel 风格）：mode 为八进制数值（如 0755 → 493），
+/// 仅低 12 位有效（含 setuid/setgid/sticky）。
+pub async fn file_chmod(
+    claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<ChmodPayload>,
+) -> ZapJsonResult {
+    if payload.mode & !0o7777 != 0 {
+        return Err(ZapError::New(
+            -1,
+            "权限值非法：仅支持 0-7777（八进制）".to_string(),
+        ));
+    }
+    let (home, tmp) = user_private_prefixes(&claims).await;
+    let resolved = resolve_path(&payload.path)?;
+    check_write_access(&claims, &resolved, &home, &tmp)?;
+
+    if !resolved.exists() {
+        return Err(ZapError::New(-1, "路径不存在".to_string()));
+    }
+
+    let resp = crate::zapexec::call(Request::FileChmod {
+        path: resolved.to_string_lossy().to_string(),
+        mode: payload.mode,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_chmod",
+        &format!("{} ({:04o})", resolved.to_string_lossy(), payload.mode),
+        "",
+    )
+    .await;
+
     Ok(Json(
         json!({ "code": 0, "message": resp.message, "data": resp.data }),
     ))

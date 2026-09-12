@@ -535,6 +535,7 @@ fn api_routers() -> Router {
         .route("/system/files/delete", post(system_file::file_delete))
         .route("/system/files/mkdir", post(system_file::file_mkdir))
         .route("/system/files/rename", post(system_file::file_rename))
+        .route("/system/files/chmod", post(system_file::file_chmod))
         .route("/system/files/download", get(system_file::file_download))
         .route("/system/files/upload", post(system_file::file_upload))
         .route("/system/files/info", get(system_file::file_info))

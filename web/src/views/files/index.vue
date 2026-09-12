@@ -123,9 +123,17 @@
               {{ row.modified }}
             </template>
           </el-table-column>
-          <el-table-column label="权限" width="120">
+          <el-table-column label="权限" width="110">
             <template #default="{ row }">
-              <span class="mono">{{ row.permissions }}</span>
+              <el-button
+                link
+                type="primary"
+                class="mono fm-perm-btn"
+                title="点击修改权限"
+                @click.stop="showPermDialog(row)"
+              >
+                {{ row.permissions }}
+              </el-button>
             </template>
           </el-table-column>
           <el-table-column label="用户" width="100">
@@ -221,6 +229,83 @@
       </template>
     </el-dialog>
 
+    <!-- 修改权限对话框（cPanel 风格：八进制数字与 rwx 勾选双向联动） -->
+    <el-dialog v-model="permVisible" title="修改权限" width="480px">
+      <div class="fm-perm-target">
+        <el-icon :size="16">
+          <Folder v-if="permTarget?.is_dir" />
+          <Document v-else />
+        </el-icon>
+        <span class="mono">{{ permTarget?.path }}</span>
+      </div>
+
+      <div class="fm-perm-value">
+        <span class="fm-perm-value-label">权限值</span>
+        <el-input
+          v-model="permInput"
+          class="fm-perm-input mono"
+          maxlength="4"
+          placeholder="0755"
+          @keyup.enter="doChmod"
+          @input="onPermInput"
+        />
+        <span class="fm-perm-hint">八进制 1-4 位，如 0755 / 0644 / 1777</span>
+      </div>
+
+      <table class="fm-perm-table">
+        <thead>
+          <tr>
+            <th class="fm-perm-owner"></th>
+            <th>读取</th>
+            <th>写入</th>
+            <th>执行</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="fm-perm-owner">用户</td>
+            <td><el-checkbox v-model="permBits.ur" @change="onPermBitsChange" /></td>
+            <td><el-checkbox v-model="permBits.uw" @change="onPermBitsChange" /></td>
+            <td><el-checkbox v-model="permBits.ux" @change="onPermBitsChange" /></td>
+          </tr>
+          <tr>
+            <td class="fm-perm-owner">用户组</td>
+            <td><el-checkbox v-model="permBits.gr" @change="onPermBitsChange" /></td>
+            <td><el-checkbox v-model="permBits.gw" @change="onPermBitsChange" /></td>
+            <td><el-checkbox v-model="permBits.gx" @change="onPermBitsChange" /></td>
+          </tr>
+          <tr>
+            <td class="fm-perm-owner">其他</td>
+            <td><el-checkbox v-model="permBits.or" @change="onPermBitsChange" /></td>
+            <td><el-checkbox v-model="permBits.ow" @change="onPermBitsChange" /></td>
+            <td><el-checkbox v-model="permBits.ox" @change="onPermBitsChange" /></td>
+          </tr>
+          <tr class="fm-perm-special">
+            <td class="fm-perm-owner">特殊位</td>
+            <td>
+              <el-checkbox v-model="permBits.suid" @change="onPermBitsChange">Set UID</el-checkbox>
+            </td>
+            <td>
+              <el-checkbox v-model="permBits.sgid" @change="onPermBitsChange">Set GID</el-checkbox>
+            </td>
+            <td>
+              <el-checkbox v-model="permBits.sticky" @change="onPermBitsChange">Sticky</el-checkbox>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="fm-perm-preview">
+        预览：<span class="mono">{{ permOct }}</span>
+        <span class="text-muted">（{{ permRwx }}）</span>
+      </div>
+
+      <template #footer>
+        <el-button @click="permVisible = false">取消</el-button>
+        <el-button type="primary" :loading="permSaving" @click="doChmod">确定</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 文件编辑对话框 -->
     <el-dialog
       v-model="editVisible"
@@ -267,6 +352,7 @@ import {
   renameFile,
   downloadFile as downloadFileApi,
   uploadFiles,
+  chmodFile,
   type FileEntry,
 } from '@/api/file'
 import CodeEditor from '@/components/CodeEditor.vue'
@@ -579,6 +665,135 @@ function formatSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i]
 }
 
+// ── 权限修改（cPanel 风格：八进制数字 ↔ rwx 勾选联动）─────
+
+const permVisible = ref(false)
+const permTarget = ref<FileEntry | null>(null)
+const permInput = ref('0755')
+const permSaving = ref(false)
+
+/** 权限位开关：用户/组/其他的 rwx + 三个特殊位 */
+const permBits = reactive({
+  ur: false,
+  uw: false,
+  ux: false,
+  gr: false,
+  gw: false,
+  gx: false,
+  or: false,
+  ow: false,
+  ox: false,
+  suid: false,
+  sgid: false,
+  sticky: false,
+})
+
+type PermBitKey = keyof typeof permBits
+
+/** 位名 → 掩码（顺序即展示顺序） */
+const PERM_BITS: Array<[PermBitKey, number]> = [
+  ['ur', 0o400],
+  ['uw', 0o200],
+  ['ux', 0o100],
+  ['gr', 0o040],
+  ['gw', 0o020],
+  ['gx', 0o010],
+  ['or', 0o004],
+  ['ow', 0o002],
+  ['ox', 0o001],
+  ['suid', 0o4000],
+  ['sgid', 0o2000],
+  ['sticky', 0o1000],
+]
+
+function bitsToMode(): number {
+  return PERM_BITS.reduce((acc, [key, mask]) => (permBits[key] ? acc | mask : acc), 0)
+}
+
+function modeToBits(mode: number) {
+  for (const [key, mask] of PERM_BITS) {
+    permBits[key] = (mode & mask) !== 0
+  }
+}
+
+/** 权限数值 → 八进制 4 位文本（493 → '0755'） */
+function toOct4(mode: number): string {
+  return (mode & 0o7777).toString(8).padStart(4, '0')
+}
+
+/** 权限文本 → 数值（非法输入回退 0755） */
+function fromOct(text: string): number {
+  const digits = (text || '').trim().replace(/^0o/i, '')
+  return /^[0-7]{1,4}$/.test(digits) ? parseInt(digits, 8) : 0o755
+}
+
+const permMode = computed(() => bitsToMode())
+const permOct = computed(() => toOct4(permMode.value))
+const permRwx = computed(() => {
+  const mode = permMode.value
+  const triples: Array<[number, number, number, number, string]> = [
+    [0o400, 0o200, 0o100, 0o4000, 's'],
+    [0o040, 0o020, 0o010, 0o2000, 's'],
+    [0o004, 0o002, 0o001, 0o1000, 't'],
+  ]
+  let out = ''
+  for (const [r, w, x, special, specialChar] of triples) {
+    out += mode & r ? 'r' : '-'
+    out += mode & w ? 'w' : '-'
+    const hasX = (mode & x) !== 0
+    const hasSpecial = (mode & special) !== 0
+    if (hasSpecial) out += hasX ? specialChar : specialChar.toUpperCase()
+    else out += hasX ? 'x' : '-'
+  }
+  return out
+})
+
+function showPermDialog(row: FileEntry) {
+  permTarget.value = row
+  const mode = typeof row.mode === 'number' ? row.mode : fromOct(row.permissions)
+  modeToBits(mode)
+  permInput.value = toOct4(mode)
+  permVisible.value = true
+}
+
+/** 输入框变化：合法则同步勾选框（不回头改写输入框，避免打断输入） */
+function onPermInput(value: string) {
+  const digits = (value || '').trim().replace(/^0o/i, '')
+  if (!/^[0-7]{1,4}$/.test(digits)) return
+  modeToBits(parseInt(digits, 8))
+}
+
+/** 勾选框变化：回写规范化的 4 位八进制文本 */
+function onPermBitsChange() {
+  permInput.value = toOct4(bitsToMode())
+}
+
+async function doChmod() {
+  const target = permTarget.value
+  if (!target) return
+  const digits = (permInput.value || '').trim()
+  if (!/^[0-7]{1,4}$/.test(digits)) {
+    ElMessage.warning('请输入 1-4 位八进制权限值，如 0755')
+    return
+  }
+  permSaving.value = true
+  try {
+    const res = await chmodFile(target.path, parseInt(digits, 8))
+    const info = res.data
+    if (info) {
+      target.permissions = info.permissions
+      target.mode = info.mode
+    }
+    ElMessage.success('权限修改成功')
+    permVisible.value = false
+    loadFileList()
+  } catch {
+    // handled by interceptor
+  } finally {
+    permSaving.value = false
+  }
+}
+
 // ── lifecycle ──────────────────────────────────────────────
 
 onMounted(() => {
@@ -753,5 +968,89 @@ onMounted(() => {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;
   overflow: hidden;
+}
+
+// ── 修改权限（cPanel 风格）──────────────────────────────────
+
+.fm-perm-btn {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
+  vertical-align: baseline;
+}
+
+.fm-perm-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  word-break: break-all;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+}
+
+.fm-perm-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+
+  .fm-perm-value-label {
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+  }
+
+  .fm-perm-input {
+    width: 110px;
+  }
+
+  .fm-perm-hint {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.fm-perm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+
+  th {
+    padding: 0 0 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--el-text-color-secondary);
+    text-align: center;
+  }
+
+  td {
+    padding: 4px 0;
+    text-align: center;
+  }
+
+  .fm-perm-owner {
+    width: 76px;
+    color: var(--el-text-color-regular);
+    text-align: left;
+  }
+
+  .fm-perm-special {
+    td {
+      padding-top: 8px;
+    }
+
+    :deep(.el-checkbox__label) {
+      padding-left: 6px;
+      font-size: 12px;
+    }
+  }
+}
+
+.fm-perm-preview {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
 }
 </style>

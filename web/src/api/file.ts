@@ -9,7 +9,10 @@ export interface FileEntry {
   is_dir: boolean
   size: number
   modified: string
+  /** 权限文本：八进制 4 位（如 0755，含 setuid/setgid/sticky 时为 4755） */
   permissions: string
+  /** 权限原始数值（低 12 位），用于「修改权限」对话框回填（如 0o755 = 493） */
+  mode: number
   owner?: string
   group?: string
 }
@@ -63,6 +66,11 @@ export function renameFile(path: string, newPath: string) {
     '/system/files/rename',
     { path, new_path: newPath, content: '' },
   )
+}
+
+/** Change permissions（mode 为八进制数值，如 0755 传 493） */
+export function chmodFile(path: string, mode: number) {
+  return http.post<ApiResponse<FileEntry>>('/system/files/chmod', { path, mode })
 }
 
 /** Upload file(s) */

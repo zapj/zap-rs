@@ -21,7 +21,10 @@ struct FileInfo {
     is_dir: bool,
     size: u64,
     modified: String,
+    /// 权限文本：八进制 4 位（如 `0755`，含 setuid/setgid/sticky 时为 `4755`）
     permissions: String,
+    /// 权限原始数值（仅低 12 位），供前端「修改权限」对话框回填
+    mode: u32,
     owner: String,
     group: String,
 }
@@ -77,37 +80,10 @@ fn group_name(gid: u32) -> String {
         .unwrap_or_else(|| gid.to_string())
 }
 
-/// 渲染 ls -l 风格权限串：`drwxr-xr-x` / `-rw-r--r--`，含 setuid/setgid/sticky。
-fn mode_string(mode: u32) -> String {
-    let type_char = match mode & 0o170000 {
-        0o040000 => 'd',
-        0o120000 => 'l',
-        0o020000 => 'c',
-        0o060000 => 'b',
-        0o010000 => 'p',
-        0o140000 => 's',
-        _ => '-', // 常规文件（含 0o100000）
-    };
-    let mut s = String::with_capacity(10);
-    s.push(type_char);
-    let triples = [
-        (0o400, 0o200, 0o100, 0o4000, 's'), // user
-        (0o040, 0o020, 0o010, 0o2000, 's'), // group
-        (0o004, 0o002, 0o001, 0o1000, 't'), // other
-    ];
-    for (read, write, exec, special, special_char) in triples {
-        s.push(if mode & read != 0 { 'r' } else { '-' });
-        s.push(if mode & write != 0 { 'w' } else { '-' });
-        let x = mode & exec != 0;
-        let sp = mode & special != 0;
-        s.push(match (x, sp) {
-            (true, true) => special_char,
-            (false, true) => special_char.to_ascii_uppercase(),
-            (true, false) => 'x',
-            (false, false) => '-',
-        });
-    }
-    s
+/// 渲染权限为八进制 4 位文本：`0755` / `0644`，含 setuid/setgid/sticky（`4755` / `1777`）。
+/// 与面板「权限」列展示、「修改权限」对话框回填保持一致（cPanel 风格）。
+fn mode_text(mode: u32) -> String {
+    format!("{:04o}", mode & 0o7777)
 }
 
 fn resolve_path(requested: &str) -> PathBuf {
@@ -135,7 +111,7 @@ fn file_info(path: &Path) -> Option<FileInfo> {
                 .unwrap_or_default()
         })
         .unwrap_or_default();
-    let permissions = mode_string(metadata.permissions().mode());
+    let mode = metadata.permissions().mode() & 0o7777;
     Some(FileInfo {
         name: path
             .file_name()
@@ -145,7 +121,8 @@ fn file_info(path: &Path) -> Option<FileInfo> {
         is_dir: metadata.is_dir(),
         size: metadata.len(),
         modified,
-        permissions,
+        permissions: mode_text(mode),
+        mode,
         owner: owner_name(metadata.uid()),
         group: group_name(metadata.gid()),
     })
@@ -381,6 +358,38 @@ pub async fn info(path: String) -> Response {
         match file_info(&resolved) {
             Some(info) => Response::ok("ok", Some(json!(info))),
             None => Response::err(-1, "文件不存在"),
+        }
+    })
+    .await
+    .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+/// 修改文件/目录权限（八进制，仅低 12 位，含 setuid/setgid/sticky）。
+pub async fn chmod(path: String, mode: u32) -> Response {
+    tokio::task::spawn_blocking(move || {
+        if mode & !0o7777 != 0 {
+            return Response::err(-1, "权限值非法：仅支持 0-7777（八进制）");
+        }
+        let resolved = resolve_path(&path);
+        if is_critical_path(&resolved) {
+            return Response::err(-1, "不能修改系统关键目录的权限");
+        }
+        if !resolved.exists() {
+            return Response::err(-1, "路径不存在");
+        }
+        match std::fs::set_permissions(&resolved, std::fs::Permissions::from_mode(mode)) {
+            Ok(_) => match file_info(&resolved) {
+                Some(info) => Response::ok("权限修改成功", Some(json!(info))),
+                None => Response::ok(
+                    "权限修改成功",
+                    Some(json!({
+                        "path": resolved.to_string_lossy(),
+                        "permissions": mode_text(mode),
+                        "mode": mode,
+                    })),
+                ),
+            },
+            Err(e) => Response::err(-1, format!("修改权限失败: {e}")),
         }
     })
     .await

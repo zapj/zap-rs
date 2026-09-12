@@ -113,6 +113,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             content,
         } => file::upload(path, name, content).await,
         Request::FileInfo { path } => file::info(path).await,
+        Request::FileChmod { path, mode } => file::chmod(path, mode).await,
         Request::AppstoreRepoAdd { name, url, run_id } => {
             appstore::repo_add(name, url, run_id).await
         }

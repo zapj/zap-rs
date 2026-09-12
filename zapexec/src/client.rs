@@ -5,6 +5,18 @@ use tokio::net::UnixStream;
 
 use zap_proto::{Request, auth, frame, types::Message};
 
+/// 解析命令行传入的八进制权限（支持 `755` / `0755` / `0o755`）。
+fn parse_octal_mode(raw: &str) -> u32 {
+    let digits = raw.trim().trim_start_matches("0o").trim_start_matches("0O");
+    match u32::from_str_radix(digits, 8) {
+        Ok(mode) if mode <= 0o7777 => mode,
+        _ => {
+            eprintln!("权限值非法：{raw}（需 0-7777 的八进制数字，如 0755）");
+            std::process::exit(1);
+        }
+    }
+}
+
 #[derive(Args)]
 pub struct ClientArgs {
     #[clap(long, default_value = "/run/zap/exec.sock")]
@@ -22,22 +34,48 @@ enum ClientVerb {
     TimeGet,
     TimeSync,
     TimeListTimezones,
-    TimeSetTimezone { timezone: String },
+    TimeSetTimezone {
+        timezone: String,
+    },
     SshStatus,
     SshRestart,
     SshInstall,
     ServiceList,
-    ServiceAction { name: String, action: String },
+    ServiceAction {
+        name: String,
+        action: String,
+    },
     ProcessList,
-    ProcessKill { pid: u32, signal: Option<String> },
+    ProcessKill {
+        pid: u32,
+        signal: Option<String>,
+    },
     SshKeyList,
-    SshKeyGenerate { name: String },
+    SshKeyGenerate {
+        name: String,
+    },
     SshKeyAuthorizedList,
-    FileList { path: String },
-    FileRead { path: String },
-    FileWrite { path: String, content: String },
-    FileDelete { path: String },
-    FileInfo { path: String },
+    FileList {
+        path: String,
+    },
+    FileRead {
+        path: String,
+    },
+    FileWrite {
+        path: String,
+        content: String,
+    },
+    FileDelete {
+        path: String,
+    },
+    FileInfo {
+        path: String,
+    },
+    /// 修改权限：mode 传八进制写法（755 / 0755 / 0o755 均可）
+    FileChmod {
+        path: String,
+        mode: String,
+    },
 }
 
 pub async fn run(args: ClientArgs) {
@@ -95,6 +133,10 @@ pub async fn run(args: ClientArgs) {
         ClientVerb::FileWrite { path, content } => Request::FileWrite { path, content },
         ClientVerb::FileDelete { path } => Request::FileDelete { path },
         ClientVerb::FileInfo { path } => Request::FileInfo { path },
+        ClientVerb::FileChmod { path, mode } => Request::FileChmod {
+            path,
+            mode: parse_octal_mode(&mode),
+        },
     };
 
     frame::send(&mut wr, &Message::Request(Box::new(req)))
