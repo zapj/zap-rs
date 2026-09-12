@@ -1205,7 +1205,10 @@ pub async fn status(svc: &str) -> Response {
             ),
             None => (None, None, false),
         };
-        let engine = db_engine(&version);
+        // 引擎与安装目录只对数据库服务（svc=mysql，同时覆盖 MySQL / MariaDB）判定；
+        // db_engine/db_install_dir 看的是「系统里装了哪种数据库实例」，
+        // 若不加服务判定，已装 MySQL 时会把它的引擎与目录错误挂到 php 等服务上。
+        let engine = (svc == "mysql").then(|| db_engine(&version)).flatten();
         let dir = engine
             .is_some()
             .then(|| db_install_dir(bin.as_deref()))

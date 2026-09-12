@@ -9,6 +9,7 @@
 #   ./rundev.sh --skip-build    # 跳过 cargo 构建
 #   ./rundev.sh --skip-install  # 缺 node_modules 时不自动 npm install
 #   ./rundev.sh --reset-db      # 删除 data/zap.db 重建全新数据库（admin 初始密码 A123456）
+#   ./rundev.sh --check         # 只检查 Rust 格式(fmt)与代码(clippy)，不构建、不启动服务
 #
 # 注意：zapexec 需要 root 权限，脚本通过 sudo 启动（首次可能提示输入密码）。
 #
@@ -23,10 +24,11 @@ ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 die()  { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 
-usage() { sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'; }
+# 帮助文本取自文件头注释块（# 开头，直到第一行非注释为止）
+usage() { awk 'NR>2 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"; }
 
 # ── 参数解析 ────────────────────────────────────────────────
-RELEASE=false; SKIP_WEB=false; SKIP_BUILD=false; SKIP_INSTALL=false; RESET_DB=false
+RELEASE=false; SKIP_WEB=false; SKIP_BUILD=false; SKIP_INSTALL=false; RESET_DB=false; CHECK=false
 for arg in "$@"; do
   case "$arg" in
     --release)      RELEASE=true ;;
@@ -34,6 +36,7 @@ for arg in "$@"; do
     --skip-build)   SKIP_BUILD=true ;;
     --skip-install) SKIP_INSTALL=true ;;
     --reset-db|--fresh-db) RESET_DB=true ;;
+    --check)        CHECK=true ;;
     -h|--help)      usage; exit 0 ;;
     *)              die "未知参数: $arg（--help 查看用法）" ;;
   esac
@@ -42,6 +45,21 @@ done
 # ── 路径 ────────────────────────────────────────────────────
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
+
+# ── --check：只做静态检查（fmt + clippy），不构建、不启动服务 ──
+# 提交前 / CI 用：纯只读检查（不会自动改写代码），失败以非零码退出。
+if [ "$CHECK" = true ]; then
+  command -v cargo >/dev/null 2>&1 || die "未找到 cargo，请先安装 Rust"
+  info "检查格式 (cargo fmt --all -- --check) ..."
+  if ! cargo fmt --all -- --check; then
+    die "格式检查未通过：执行 cargo fmt --all 自动修复后重试"
+  fi
+  ok "格式检查通过"
+  info "检查代码 (cargo clippy --all-targets --all-features -- -D warnings) ..."
+  cargo clippy --all-targets --all-features -- -D warnings || die "代码检查未通过（详见上方 clippy 输出）"
+  ok "代码检查通过，一切正常"
+  exit 0
+fi
 
 WEB_DIR="$ROOT_DIR/web"
 RUN_DIR="$ROOT_DIR/data/run"
