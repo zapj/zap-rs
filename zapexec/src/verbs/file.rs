@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 
 use serde_json::json;
@@ -54,30 +54,73 @@ fn id_name_map(file: &str, name_idx: usize, id_idx: usize) -> HashMap<u32, Strin
     map
 }
 
-fn passwd_names() -> &'static HashMap<u32, String> {
-    static MAP: OnceLock<HashMap<u32, String>> = OnceLock::new();
-    MAP.get_or_init(|| id_name_map("/etc/passwd", 0, 2))
+/// id → 名称缓存，带「文件指纹」（mtime + 长度）校验。
+/// 常驻进程里 `/etc/passwd`、`/etc/group` 会随新建用户/组而变化，
+/// 指纹变了就重新加载，避免新用户一直显示为数字 uid/gid。
+struct IdNameCache {
+    file: &'static str,
+    name_idx: usize,
+    id_idx: usize,
+    fingerprint: Option<(u64, u32, u64)>,
+    map: HashMap<u32, String>,
 }
 
-fn group_names() -> &'static HashMap<u32, String> {
-    static MAP: OnceLock<HashMap<u32, String>> = OnceLock::new();
-    MAP.get_or_init(|| id_name_map("/etc/group", 0, 2))
+impl IdNameCache {
+    fn new(file: &'static str, name_idx: usize, id_idx: usize) -> Self {
+        Self {
+            file,
+            name_idx,
+            id_idx,
+            fingerprint: None,
+            map: HashMap::new(),
+        }
+    }
+
+    /// 文件指纹：mtime（秒 + 纳秒）+ 文件长度
+    fn current_fingerprint(&self) -> Option<(u64, u32, u64)> {
+        let metadata = std::fs::metadata(self.file).ok()?;
+        let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+        Some((modified.as_secs(), modified.subsec_nanos(), metadata.len()))
+    }
+
+    /// 查 id → 名称；文件有变化时先重载映射。
+    fn get(&mut self, id: u32) -> Option<String> {
+        let fingerprint = self.current_fingerprint();
+        if self.fingerprint != fingerprint {
+            self.map = id_name_map(self.file, self.name_idx, self.id_idx);
+            self.fingerprint = fingerprint;
+        }
+        self.map.get(&id).cloned()
+    }
+}
+
+fn passwd_cache() -> &'static Mutex<IdNameCache> {
+    static CACHE: OnceLock<Mutex<IdNameCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(IdNameCache::new("/etc/passwd", 0, 2)))
+}
+
+fn group_cache() -> &'static Mutex<IdNameCache> {
+    static CACHE: OnceLock<Mutex<IdNameCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(IdNameCache::new("/etc/group", 0, 2)))
+}
+
+/// 查 id → 名称：查不到（或缓存中毒）时回退数字 id
+fn resolve_id(cache: &'static Mutex<IdNameCache>, id: u32) -> String {
+    cache
+        .lock()
+        .ok()
+        .and_then(|mut cache| cache.get(id))
+        .unwrap_or_else(|| id.to_string())
 }
 
 /// uid → 用户名（查不到时回退数字 uid）
 fn owner_name(uid: u32) -> String {
-    passwd_names()
-        .get(&uid)
-        .cloned()
-        .unwrap_or_else(|| uid.to_string())
+    resolve_id(passwd_cache(), uid)
 }
 
 /// gid → 组名（查不到时回退数字 gid）
 fn group_name(gid: u32) -> String {
-    group_names()
-        .get(&gid)
-        .cloned()
-        .unwrap_or_else(|| gid.to_string())
+    resolve_id(group_cache(), gid)
 }
 
 /// 渲染权限为八进制 4 位文本：`0755` / `0644`，含 setuid/setgid/sticky（`4755` / `1777`）。
@@ -394,4 +437,31 @@ pub async fn chmod(path: String, mode: u32) -> Response {
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 缓存必须能感知文件变化：常驻进程里新建用户后应立刻显示用户名，
+    /// 而不是一直回退成数字 uid。
+    #[test]
+    fn id_name_cache_reloads_after_file_change() {
+        let file = "/tmp/zap_id_name_cache_test";
+        std::fs::write(file, "alice:x:1000:1000::/home/alice:/bin/bash\n").unwrap();
+
+        let mut cache = IdNameCache::new(file, 0, 2);
+        assert_eq!(cache.get(1000).as_deref(), Some("alice"));
+        assert_eq!(cache.get(1001), None);
+
+        // 模拟新建用户（追加一行：长度与 mtime 都变化）
+        std::fs::write(
+            file,
+            "alice:x:1000:1000::/home/alice:/bin/bash\nbob:x:1001:1001::/home/bob:/bin/bash\n",
+        )
+        .unwrap();
+
+        assert_eq!(cache.get(1001).as_deref(), Some("bob"));
+        let _ = std::fs::remove_file(file);
+    }
 }
