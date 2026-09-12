@@ -4,6 +4,7 @@ import {
   Delete,
   Edit,
   FolderOpened,
+  Loading,
   Plus,
   Refresh,
   Search,
@@ -301,6 +302,16 @@ const runState = (row: SiteItem): 'running' | 'stopped' | 'maintenance' => {
   if (s === 'stopped') return 'stopped'
   if (s === 'running') return 'running'
   return row.status === 1 ? 'running' : 'stopped'
+}
+
+/** 状态标签文案 / 配色（点击标签即切换启停） */
+const runStateText = (row: SiteItem): string => {
+  const s = runState(row)
+  return s === 'running' ? '运行中' : s === 'maintenance' ? '维护中' : '已停止'
+}
+const runStateTagType = (row: SiteItem): 'success' | 'warning' | 'info' => {
+  const s = runState(row)
+  return s === 'running' ? 'success' : s === 'maintenance' ? 'warning' : 'info'
 }
 
 const ownerLabel = (id: number) => {
@@ -884,11 +895,49 @@ function openEdit(row: SiteItem) {
   formVisible.value = true
 }
 
+/** 域名占用键：`a.com` 与 `www.a.com` 互为同一域名（与后端 domain_match_keys 一致） */
+function domainKeys(d: string): string[] {
+  const s = d.trim().toLowerCase()
+  if (s.startsWith('www.')) return [s, s.slice(4)]
+  if (s.startsWith('*.')) return [s]
+  return [s, `www.${s}`]
+}
+
+/** 域名查重：表单内重复 + 与其他站点已绑定域名冲突，返回提示文案（无冲突返回空串） */
+function domainConflictMsg(domains: string[]): string {
+  const taken = new Map<string, string>() // 占用键 → 占用方域名
+  for (const it of list.value) {
+    if (isEdit.value && it.id === form.id) continue
+    for (const d of it.domains || []) {
+      for (const k of domainKeys(d)) taken.set(k, d)
+    }
+  }
+  const seen = new Map<string, string>() // 本次提交内已出现的键 → 对应域名
+  for (const d of domains) {
+    for (const k of domainKeys(d)) {
+      const self = seen.get(k)
+      if (self) return `域名重复：${d} 与 ${self} 冲突（a.com 与 www.a.com 视为同一域名）`
+      seen.set(k, d)
+      const holder = taken.get(k)
+      if (holder)
+        return `域名 ${d} 已被站点「${holder}」占用（a.com 与 www.a.com 视为同一域名），请更换`
+    }
+  }
+  return ''
+}
+
+/** 域名输入时的实时冲突提示（仅提示，提交仍会再校验一次） */
+const domainConflictHint = computed(() =>
+  domainConflictMsg(form.domains.map((s) => s.trim()).filter((s) => s)),
+)
+
 /** 提交前表单校验，返回错误文案（无错误返回空串） */
 function validateForm(): string {
   const domains = form.domains.map((s) => s.trim()).filter((s) => s)
   if (!form.name.trim() && !domains.length) return '请填写站点名称或至少一个域名（名称留空默认使用域名）'
   if (canManageAll.value && !form.user_id) return '请先选择站点的归属用户'
+  const dup = domainConflictMsg(domains)
+  if (dup) return dup
   if (form.site_type === 'proxy') {
     if (!form.locations.length) return '反向代理站点至少需要一个 location'
     if (!form.locations.some((l) => l.path.trim() === '/'))
@@ -1017,8 +1066,9 @@ async function submitForm() {
     // 新增 / 编辑落库后均自动同步 vhost（新建默认「运行中」：渲染 conf → nginx -t → reload）
     const id = isEdit.value ? form.id : (res.data?.id ?? 0)
     if (id) syncSite(id)
-  } catch {
-    /* handled */
+  } catch (e: any) {
+    // 业务错误（如域名已被占用、超出套餐限制）需要明确提示，不能静默吞掉
+    ElMessage.error(e?.message || '保存失败，请稍后重试')
   } finally {
     formLoading.value = false
   }
@@ -1026,7 +1076,7 @@ async function submitForm() {
 
 // ── vhost 同步：按站点档案（域名/状态/PHP 实例）渲染 Nginx 配置并 reload ──
 const syncingId = ref(0)
-// 正在切换运行状态的站点 id（启停/维护按钮的 loading）
+// 正在切换运行状态的站点 id（状态标签的 loading）
 const stateLoadingId = ref(0)
 async function syncSite(id: number): Promise<boolean> {
   if (syncingId.value) return false
@@ -1062,9 +1112,9 @@ async function setRunState(row: SiteItem, state: 'running' | 'stopped' | 'mainte
   }
 }
 
-// 行内开关：运行 ↔ 停止（维护态时开关显示为停止，切到运行即结束维护）
-function toggleStatus(row: SiteItem, on: boolean) {
-  setRunState(row, on ? 'running' : 'stopped')
+// 点状态标签切换：运行 ↔ 停止（历史维护态点击即恢复运行）
+function toggleStatus(row: SiteItem) {
+  setRunState(row, runState(row) === 'running' ? 'stopped' : 'running')
 }
 
 // ── 删除 ───────────────────────────────────────────────────
@@ -1102,20 +1152,6 @@ onMounted(() => {
 
 <template>
   <div>
-    <!-- 运行模式说明 -->
-    <el-alert
-      type="warning"
-      :closable="false"
-      show-icon
-      class="mode-alert"
-      title="「系统用户隔离」模式：每个面板用户对应一个 Linux 系统账号（nologin），站点文件属主为该账号，PHP-FPM 按「用户 × PHP 版本」生成独立 pool"
-    >
-      <template #default>
-        运行通道形如
-        <code>/var/run/php-fpm-{账号}-{版本}.sock</code>
-      </template>
-    </el-alert>
-
     <el-card shadow="never" class="table-card">
       <!-- 工具栏 -->
       <div class="toolbar">
@@ -1339,25 +1375,25 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="180">
+        <el-table-column label="状态" width="150">
           <template #default="{ row }">
-            <el-switch
-              :model-value="runState(row) === 'running'"
-              :loading="stateLoadingId === row.id"
-              inline-prompt
-              active-text="运行"
-              inactive-text="停止"
-              @change="(v: boolean) => toggleStatus(row, v)"
-            />
-            <el-tag
-              v-if="runState(row) === 'maintenance'"
-              size="small"
-              type="warning"
-              effect="plain"
-              style="margin-left: 6px"
+            <el-tooltip
+              :content="runState(row) === 'running' ? '点击停止站点' : '点击启动站点'"
+              placement="top"
             >
-              维护中
-            </el-tag>
+              <el-tag
+                size="small"
+                :type="runStateTagType(row)"
+                effect="plain"
+                class="status-toggle"
+                @click="toggleStatus(row)"
+              >
+                {{ runStateText(row) }}
+              </el-tag>
+            </el-tooltip>
+            <el-icon v-if="stateLoadingId === row.id" class="status-loading">
+              <Loading />
+            </el-icon>
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip>
@@ -1366,7 +1402,7 @@ onMounted(() => {
         <el-table-column label="创建时间" min-width="150">
           <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -1375,14 +1411,6 @@ onMounted(() => {
               :disabled="syncingId !== 0 && syncingId !== row.id"
               @click="syncSite(row.id)"
             >{{ isSyncFailed(row) ? '重试' : '同步' }}</el-button>
-            <el-button
-              link
-              type="warning"
-              :loading="stateLoadingId === row.id"
-              @click="setRunState(row, runState(row) === 'maintenance' ? 'running' : 'maintenance')"
-            >
-              {{ runState(row) === 'maintenance' ? '结束维护' : '维护' }}
-            </el-button>
             <el-button link type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" :icon="Delete" @click="removeRows([row])">删除</el-button>
           </template>
@@ -1461,7 +1489,10 @@ onMounted(() => {
               >
                 <el-option v-for="d in form.domains" :key="d" :value="d" :label="d" />
               </el-select>
-              <div class="form-tip">第一个域名用于自动生成下方的站点目录名</div>
+              <div v-if="domainConflictHint" class="form-tip domain-dup-tip">
+                {{ domainConflictHint }}
+              </div>
+              <div v-else class="form-tip">第一个域名用于自动生成下方的站点目录名</div>
             </el-form-item>
 
             <el-form-item label="绑定 IP">
@@ -2088,18 +2119,8 @@ onMounted(() => {
   background: #fff;
 }
 
-.mode-alert {
-  margin-top: 0;
-}
-.mode-alert code {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--el-fill-color-light);
-  color: var(--el-color-primary);
-  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
-}
 .table-card {
-  margin-top: 16px;
+  margin-top: 0;
 }
 .toolbar {
   display: flex;
@@ -2133,6 +2154,22 @@ onMounted(() => {
 }
 .cursor-help {
   cursor: help;
+}
+/* 状态标签：点击即切换启停 */
+.status-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+.status-loading {
+  margin-left: 6px;
+  vertical-align: middle;
+  color: var(--el-color-primary);
+  animation: status-spin 1s linear infinite;
+}
+@keyframes status-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .form-tip {
   width: 100%;
@@ -2491,5 +2528,8 @@ onMounted(() => {
 }
 .ssl-miss-tip {
   color: var(--el-color-warning);
+}
+.domain-dup-tip {
+  color: var(--el-color-danger);
 }
 </style>

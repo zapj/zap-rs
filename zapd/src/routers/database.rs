@@ -5,7 +5,7 @@
 //!
 //! - GET  /api/database/status          服务状态与版本
 //! - GET  /api/database/list            库列表（含大小 / 表数 / 字符集）
-//! - POST /api/database/create          创建库
+//! - POST /api/database/create          创建库（可一并创建同名用户并授予该库权限）
 //! - POST /api/database/drop            删除库
 //! - GET  /api/database/users           用户列表（及其授权）
 //! - POST /api/database/user/create     创建用户并授权到指定库
@@ -17,10 +17,12 @@
 //! 多租户：非管理员只能看到并操作以「用户名_」为前缀的库，
 //! 创建库时会自动补上该前缀；管理员不受限制。
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 
 use axum::Json;
+use axum::extract::Query;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -31,6 +33,12 @@ use crate::zap::jwt::{ValidatedClaims, is_admin};
 /// 凭据坐标（与 `zapctl cred show mysql zapadm` 一致）
 const CRED_SERVICE: &str = "mysql";
 const CRED_USER: &str = "zapadm";
+
+/// 面板展示用的连接地址主机位（本机管理走 socket，对外连接统一提示回环地址）
+const DB_HOST: &str = "127.0.0.1";
+
+/// 服务端口取不到时的兜底值
+const DEFAULT_PORT: u16 = 3306;
 
 /// mysql 客户端候选路径（按优先级）
 const MYSQL_BINS: &[&str] = &[
@@ -188,10 +196,41 @@ pub struct SchemaReq {
 }
 
 #[derive(Deserialize)]
+pub struct ListQuery {
+    /// 轻量模式（light=1）：跳过容量 / 表数量统计（大库统计较慢）
+    #[serde(default)]
+    pub light: Option<u8>,
+}
+
+#[derive(Deserialize)]
 pub struct CreateDbReq {
     pub name: String,
     #[serde(default = "default_charset")]
     pub charset: String,
+    /// 是否同时创建「与库同名」的数据库用户并授予该库全部权限（默认 false = 仅建库）
+    #[serde(default)]
+    pub create_user: bool,
+    /// 自定义数据库用户名（不含 `{用户名}_` 前缀）；留空 = 与库名同名
+    #[serde(default)]
+    pub user: Option<String>,
+    /// 自定义密码；留空 = 自动生成 16 位随机密码
+    #[serde(default)]
+    pub password: Option<String>,
+    /// 数据库用户允许连接的主机（默认 localhost）
+    #[serde(default = "default_host")]
+    pub host: String,
+}
+
+/// 生成 16 位随机密码（大小写字母 + 数字，剔除 0/O/1/l/I 等易混淆字符）。
+///
+/// 密码只含字母数字，避免在 SQL 字面量、配置文件、终端里产生转义歧义。
+fn gen_db_password() -> String {
+    use rand::Rng;
+    const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    let mut rng = rand::thread_rng();
+    (0..16)
+        .map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char)
+        .collect()
 }
 
 fn default_charset() -> String {
@@ -247,33 +286,105 @@ pub async fn status(_claims: ValidatedClaims) -> ZapJsonResult {
         .next()
         .unwrap_or_default()
         .to_string();
+    // SQL 模式便于排障（严格模式会拦截隐式截断、非法日期等写法）
+    let sql_mode = run_sql("SELECT @@global.sql_mode")
+        .map(|s| s.trim().lines().next().unwrap_or_default().to_string())
+        .unwrap_or_default();
+    // 监听端口：管理操作走 socket，但客户端连接需要 `host:port`
+    let port: u16 = run_sql("SELECT @@port")
+        .ok()
+        .and_then(|s| s.trim().lines().next()?.trim().parse().ok())
+        .unwrap_or(DEFAULT_PORT);
     ok(json!({
         "ok": true,
         "version": version,
         "user": CRED_USER,
+        "host": DB_HOST,
+        "port": port,
+        "addr": format!("{DB_HOST}:{port}"),
         "socket": socket_path(),
+        "sql_mode": sql_mode,
     }))
 }
 
-/// GET /api/database/list：库列表（含大小、表数、字符集）。
-pub async fn list(claims: ValidatedClaims) -> ZapJsonResult {
-    let sql = "SELECT s.SCHEMA_NAME, \
-               COALESCE(s.DEFAULT_CHARACTER_SET_NAME,''), \
-               COALESCE(s.DEFAULT_COLLATION_NAME,''), \
-               COALESCE(SUM(t.DATA_LENGTH + t.INDEX_LENGTH), 0), \
-               COUNT(t.TABLE_NAME) \
-               FROM information_schema.SCHEMATA s \
-               LEFT JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = s.SCHEMA_NAME \
-               GROUP BY s.SCHEMA_NAME, s.DEFAULT_CHARACTER_SET_NAME, s.DEFAULT_COLLATION_NAME \
-               ORDER BY s.SCHEMA_NAME";
+/// 套餐限制：MySQL / MariaDB 数据库数量（0 = 不限）。
+///
+/// 与站点数限制一致：只对普通用户（有 `{用户名}_` 前缀）生效，管理员不受限；
+/// 未绑定套餐 / 套餐停用时不做拦截。
+async fn ensure_db_quota(claims: &ValidatedClaims) -> Result<(), ZapError> {
+    let Some(prefix) = schema_prefix(claims) else {
+        return Ok(());
+    };
+    let Some(pkg) = crate::routers::package::package_of_user(claims.id as i64).await else {
+        return Ok(());
+    };
+    if pkg.max_mysql_dbs <= 0 {
+        return Ok(());
+    }
+    let out = run_sql("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA")?;
+    let used = out
+        .lines()
+        .filter(|l| l.starts_with(prefix.as_str()))
+        .count() as i64;
+    if used >= pkg.max_mysql_dbs {
+        return Err(ZapError::New(
+            -1,
+            format!(
+                "已达套餐「{}」的数据库上限 {} 个（当前 {} 个），无法继续创建",
+                pkg.name, pkg.max_mysql_dbs, used
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// GET /api/database/list：库列表（含大小、表数、字符集、可访问账号数）。
+///
+/// `light=1` 跳过容量与表数量统计（库多/表大时统计较慢），只返回基础信息。
+pub async fn list(claims: ValidatedClaims, Query(q): Query<ListQuery>) -> ZapJsonResult {
+    let light = q.light.unwrap_or(0) != 0;
+    let sql = if light {
+        "SELECT s.SCHEMA_NAME, \
+         COALESCE(s.DEFAULT_CHARACTER_SET_NAME,''), \
+         COALESCE(s.DEFAULT_COLLATION_NAME,'') \
+         FROM information_schema.SCHEMATA s \
+         ORDER BY s.SCHEMA_NAME"
+    } else {
+        "SELECT s.SCHEMA_NAME, \
+         COALESCE(s.DEFAULT_CHARACTER_SET_NAME,''), \
+         COALESCE(s.DEFAULT_COLLATION_NAME,''), \
+         COALESCE(SUM(t.DATA_LENGTH + t.INDEX_LENGTH), 0), \
+         COUNT(t.TABLE_NAME) \
+         FROM information_schema.SCHEMATA s \
+         LEFT JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = s.SCHEMA_NAME \
+         GROUP BY s.SCHEMA_NAME, s.DEFAULT_CHARACTER_SET_NAME, s.DEFAULT_COLLATION_NAME \
+         ORDER BY s.SCHEMA_NAME"
+    };
 
     let out = run_sql(sql)?;
     let prefix = schema_prefix(&claims);
 
+    // 每库可访问账号数：mysql.db 记录库级授权（读不到就显示 0，不影响主流程）
+    let mut user_counts: HashMap<String, u64> = HashMap::new();
+    if !light
+        && let Ok(privs) = run_sql(
+            "SELECT Db, COUNT(DISTINCT User) FROM mysql.db \
+             WHERE Db NOT IN ('mysql','sys','performance_schema','information_schema') \
+             GROUP BY Db",
+        )
+    {
+        for line in privs.lines() {
+            let mut cols = line.split('\t');
+            if let (Some(db), Some(count)) = (cols.next(), cols.next()) {
+                user_counts.insert(db.to_string(), count.parse().unwrap_or(0));
+            }
+        }
+    }
+
     let mut items: Vec<Value> = Vec::new();
     for line in out.lines() {
         let cols: Vec<&str> = line.split('\t').collect();
-        if cols.len() < 5 {
+        if cols.len() < 3 {
             continue;
         }
         let name = cols[0].to_string();
@@ -285,25 +396,34 @@ pub async fn list(claims: ValidatedClaims) -> ZapJsonResult {
         {
             continue;
         }
-        let size: u64 = cols[3].parse().unwrap_or(0);
-        let tables: u64 = cols[4].parse().unwrap_or(0);
+        let size: u64 = cols.get(3).and_then(|v| v.parse().ok()).unwrap_or(0);
+        let tables: u64 = cols.get(4).and_then(|v| v.parse().ok()).unwrap_or(0);
+        let users = user_counts.get(&name).copied().unwrap_or(0);
         items.push(json!({
             "name": name,
             "charset": cols[1],
             "collation": cols[2],
             "size": size,
             "tables": tables,
+            "users": users,
         }));
     }
 
-    ok(json!({ "ok": true, "list": items, "prefix": prefix }))
+    ok(json!({ "ok": true, "list": items, "prefix": prefix, "light": light }))
 }
 
 /// POST /api/database/create：创建数据库。
+///
+/// 非管理员的库名 / 用户名一律自动补 `{用户名}_` 前缀；`create_user=true` 时
+/// 一并创建「与库同名」的用户并授予该库全部权限（密码留空则随机生成，
+/// 明文密码仅在本次响应中返回一次）。建用户失败会回滚刚建的库，避免半成品。
 pub async fn create(claims: ValidatedClaims, Json(req): Json<CreateDbReq>) -> ZapJsonResult {
+    // 套餐配额：数据库数量上限（0 = 不限）
+    ensure_db_quota(&claims).await?;
     let raw = req.name.trim();
-    let name = match schema_prefix(&claims) {
-        Some(p) if !raw.starts_with(&p) => check_ident(&format!("{p}{raw}"), "数据库名")?,
+    let prefix = schema_prefix(&claims);
+    let name = match &prefix {
+        Some(p) if !raw.starts_with(p.as_str()) => check_ident(&format!("{p}{raw}"), "数据库名")?,
         _ => ensure_owned(&claims, raw)?,
     };
     let charset = if req.charset.trim().is_empty() {
@@ -314,7 +434,56 @@ pub async fn create(claims: ValidatedClaims, Json(req): Json<CreateDbReq>) -> Za
 
     run_sqls(&[format!("CREATE DATABASE `{name}` CHARACTER SET {charset}")])?;
 
-    ok(json!({ "ok": true, "name": name }))
+    if !req.create_user {
+        return ok(json!({ "ok": true, "name": name, "charset": charset }));
+    }
+
+    // 库 + 用户一条龙：用户名默认与库名同名（前缀一致），也允许高级模式自定义
+    let base = req.user.as_deref().map(str::trim).unwrap_or("");
+    let raw_user = if base.is_empty() {
+        name.clone()
+    } else {
+        match &prefix {
+            Some(p) if !base.starts_with(p.as_str()) => format!("{p}{base}"),
+            _ => base.to_string(),
+        }
+    };
+    let user = check_ident(&raw_user, "用户名")?;
+    let host = check_host(&req.host)?;
+    let password = match req.password.as_deref().map(str::trim) {
+        Some(p) if !p.is_empty() => {
+            if p.len() < 8 {
+                let _ = run_sqls(&[format!("DROP DATABASE `{name}`")]);
+                return Err(ZapError::New(-1, "密码长度不能少于 8 位".to_string()));
+            }
+            p.to_string()
+        }
+        _ => gen_db_password(),
+    };
+
+    let sqls = [
+        format!(
+            "CREATE USER '{user}'@'{host}' IDENTIFIED BY '{}'",
+            escape_literal(&password)
+        ),
+        format!("GRANT ALL PRIVILEGES ON `{name}`.* TO '{user}'@'{host}'"),
+        "FLUSH PRIVILEGES".to_string(),
+    ];
+    if let Err(e) = run_sqls(&sqls) {
+        // 回滚：不留「有库无用户」的半成品
+        let _ = run_sqls(&[format!("DROP DATABASE `{name}`")]);
+        return Err(e);
+    }
+
+    ok(json!({
+        "ok": true,
+        "name": name,
+        "charset": charset,
+        "user": user,
+        "host": host,
+        // 明文密码仅在创建响应中返回一次，请提示用户立即保存
+        "password": password,
+    }))
 }
 
 /// POST /api/database/drop：删除数据库。

@@ -13,6 +13,12 @@ export interface PackageItem {
   max_domains: number
   /** 月流量上限（MB，0 = 不限；面板暂无流量统计，仅记录） */
   max_bandwidth_mb: number
+  /** MySQL / MariaDB 数据库数量（0 = 不限；超限时拒绝建库） */
+  max_mysql_dbs: number
+  /** PostgreSQL 数据库数量（0 = 不限；面板暂无 PG 模块，仅记录） */
+  max_pgsql_dbs: number
+  /** FTP 账号数量（0 = 不限；面板暂无 FTP 模块，仅记录） */
+  max_ftp_users: number
   /** PHP-FPM 规格模板名；'' = 面板默认 */
   fpm_spec_ref: string
   /** 是否允许使用 SSH 终端 */
@@ -37,6 +43,12 @@ export interface PackagePayload {
   /** 单站点最大域名数（0 = 不限） */
   max_domains?: number
   max_bandwidth_mb?: number
+  /** MySQL / MariaDB 数据库数量（0 = 不限） */
+  max_mysql_dbs?: number
+  /** PostgreSQL 数据库数量（0 = 不限） */
+  max_pgsql_dbs?: number
+  /** FTP 账号数量（0 = 不限） */
+  max_ftp_users?: number
   fpm_spec_ref?: string
   allow_ssh?: boolean
   /** 允许客户使用反向代理（upstream / location） */

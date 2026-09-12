@@ -6,7 +6,7 @@
           <div>
             <div class="page-title">套餐</div>
             <div class="page-sub">
-              定义资源套餐（磁盘配额 / 站点数 / 单站点域名数 / 流量 / FPM 规格 / SSH / 反向代理），创建客户时选择并自动继承；自定义目录已全量开放，不再受套餐限制
+              定义资源套餐（磁盘配额 / 站点数 / 单站点域名数 / 流量 / 数据库与 FTP 账号数 / FPM 规格 / SSH / 反向代理），创建客户时选择并自动继承；自定义目录已全量开放，不再受套餐限制
             </div>
           </div>
           <div class="head-right">
@@ -47,6 +47,21 @@
             <span class="muted">
               {{ row.max_bandwidth_mb > 0 ? `${row.max_bandwidth_mb} MB` : '不限' }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="MySQL 库" width="100" align="center">
+          <template #default="{ row }">
+            <span>{{ row.max_mysql_dbs > 0 ? row.max_mysql_dbs : '不限' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="PG 库" width="90" align="center">
+          <template #default="{ row }">
+            <span class="muted">{{ row.max_pgsql_dbs > 0 ? row.max_pgsql_dbs : '不限' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="FTP 用户" width="100" align="center">
+          <template #default="{ row }">
+            <span class="muted">{{ row.max_ftp_users > 0 ? row.max_ftp_users : '不限' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="FPM 规格" min-width="140" show-overflow-tooltip>
@@ -169,6 +184,39 @@
           />
           <span v-if="!unlimitedBw" class="form-hint">MB（面板暂不统计流量，仅记录）</span>
         </el-form-item>
+        <el-form-item label="MySQL 库数">
+          <el-switch v-model="unlimitedMysql" active-text="不限" inactive-text="限额" />
+          <el-input-number
+            v-if="!unlimitedMysql"
+            v-model="form.max_mysql_dbs"
+            :min="1"
+            :max="100000"
+            style="margin-left: 12px; width: 160px"
+          />
+          <span v-if="!unlimitedMysql" class="form-hint">个（超限时拒绝创建数据库）</span>
+        </el-form-item>
+        <el-form-item label="PostgreSQL 库数">
+          <el-switch v-model="unlimitedPgsql" active-text="不限" inactive-text="限额" />
+          <el-input-number
+            v-if="!unlimitedPgsql"
+            v-model="form.max_pgsql_dbs"
+            :min="1"
+            :max="100000"
+            style="margin-left: 12px; width: 160px"
+          />
+          <span v-if="!unlimitedPgsql" class="form-hint">个（面向 PostgreSQL 数据库数量）</span>
+        </el-form-item>
+        <el-form-item label="FTP 用户数">
+          <el-switch v-model="unlimitedFtp" active-text="不限" inactive-text="限额" />
+          <el-input-number
+            v-if="!unlimitedFtp"
+            v-model="form.max_ftp_users"
+            :min="1"
+            :max="100000"
+            style="margin-left: 12px; width: 160px"
+          />
+          <span v-if="!unlimitedFtp" class="form-hint">个（面向 FTP 账号数量）</span>
+        </el-form-item>
 
         <el-divider content-position="left">能力</el-divider>
 
@@ -242,6 +290,9 @@ const form = reactive({
   max_sites: 5,
   max_domains: 10,
   max_bandwidth_mb: 10240,
+  max_mysql_dbs: 10,
+  max_pgsql_dbs: 10,
+  max_ftp_users: 10,
   fpm_spec_ref: '',
   allow_ssh: false,
   allow_proxy: false,
@@ -252,6 +303,9 @@ const unlimitedDisk = ref(true)
 const unlimitedSites = ref(true)
 const unlimitedDomains = ref(true)
 const unlimitedBw = ref(true)
+const unlimitedMysql = ref(true)
+const unlimitedPgsql = ref(true)
+const unlimitedFtp = ref(true)
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入套餐名', trigger: 'blur' }],
@@ -301,6 +355,9 @@ function resetForm() {
   form.max_sites = 5
   form.max_domains = 10
   form.max_bandwidth_mb = 10240
+  form.max_mysql_dbs = 10
+  form.max_pgsql_dbs = 10
+  form.max_ftp_users = 10
   form.fpm_spec_ref = ''
   form.allow_ssh = false
   form.allow_proxy = false
@@ -309,6 +366,9 @@ function resetForm() {
   unlimitedSites.value = true
   unlimitedDomains.value = true
   unlimitedBw.value = true
+  unlimitedMysql.value = true
+  unlimitedPgsql.value = true
+  unlimitedFtp.value = true
   formRef.value?.clearValidate()
 }
 
@@ -330,6 +390,12 @@ function openEdit(row: PackageItem) {
   form.max_domains = (row.max_domains ?? 0) > 0 ? row.max_domains : 10
   unlimitedBw.value = row.max_bandwidth_mb <= 0
   form.max_bandwidth_mb = row.max_bandwidth_mb > 0 ? row.max_bandwidth_mb : 10240
+  unlimitedMysql.value = (row.max_mysql_dbs ?? 0) <= 0
+  form.max_mysql_dbs = row.max_mysql_dbs > 0 ? row.max_mysql_dbs : 10
+  unlimitedPgsql.value = (row.max_pgsql_dbs ?? 0) <= 0
+  form.max_pgsql_dbs = row.max_pgsql_dbs > 0 ? row.max_pgsql_dbs : 10
+  unlimitedFtp.value = (row.max_ftp_users ?? 0) <= 0
+  form.max_ftp_users = row.max_ftp_users > 0 ? row.max_ftp_users : 10
   form.fpm_spec_ref = row.fpm_spec_ref || ''
   form.allow_ssh = !!row.allow_ssh
   form.allow_proxy = !!row.allow_proxy
@@ -351,6 +417,9 @@ async function submitForm() {
     max_sites: unlimitedSites.value ? 0 : form.max_sites,
     max_domains: unlimitedDomains.value ? 0 : form.max_domains,
     max_bandwidth_mb: unlimitedBw.value ? 0 : form.max_bandwidth_mb,
+    max_mysql_dbs: unlimitedMysql.value ? 0 : form.max_mysql_dbs,
+    max_pgsql_dbs: unlimitedPgsql.value ? 0 : form.max_pgsql_dbs,
+    max_ftp_users: unlimitedFtp.value ? 0 : form.max_ftp_users,
     fpm_spec_ref: form.fpm_spec_ref,
     allow_ssh: form.allow_ssh,
     allow_proxy: form.allow_proxy,

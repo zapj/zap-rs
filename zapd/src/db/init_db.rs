@@ -126,7 +126,8 @@ async fn init_system_user_table_schema() {
 /// 套餐（Packages）：创建客户时选用的资源套餐（对齐 cPanel/WHM 的 Packages）。
 /// - owner_id = 0：全局套餐（admin 维护，所有人可用）
 /// - owner_id != 0：reseller 自建套餐，仅创建者自己可用
-/// - 限制项：磁盘配额 / 最大站点数 / 月流量（仅记录）/ FPM 规格模板 / SSH 终端开关
+/// - 限制项：磁盘配额 / 最大站点数 / 单站点域名数 / 月流量（仅记录）/ MySQL 与 MariaDB 库数 /
+///   PostgreSQL 库数 / FTP 用户数 / FPM 规格模板 / SSH 终端开关
 /// - 能力项：allow_proxy（普通用户可用反向代理）；「自定义目录」不再作为套餐能力，
 ///   已对全部用户开放（home 目录内任意目录可选）
 /// - 数值 0 表示「不限」
@@ -143,6 +144,12 @@ async fn init_packages_table() {
         max_sites INTEGER NOT NULL DEFAULT 0,
         max_domains INTEGER NOT NULL DEFAULT 0,
         max_bandwidth_mb INTEGER NOT NULL DEFAULT 0,
+        -- 用户可创建的 MySQL / MariaDB 数据库数量（0 = 不限，建库时硬拦截）
+        max_mysql_dbs INTEGER NOT NULL DEFAULT 0,
+        -- 用户可创建的 PostgreSQL 数据库数量（0 = 不限，仅记录与展示）
+        max_pgsql_dbs INTEGER NOT NULL DEFAULT 0,
+        -- 用户可创建的 FTP 账号数量（0 = 不限，仅记录与展示）
+        max_ftp_users INTEGER NOT NULL DEFAULT 0,
         fpm_spec_ref TEXT NOT NULL DEFAULT '',
         allow_ssh INTEGER NOT NULL DEFAULT 0,
         allow_proxy INTEGER NOT NULL DEFAULT 0,
@@ -151,8 +158,8 @@ async fn init_packages_table() {
         created_at INTEGER,
         updated_at INTEGER
     );
-    INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_bandwidth_mb, fpm_spec_ref, allow_ssh, allow_proxy, owner_id, status, created_at, updated_at)
-    VALUES ('默认套餐', '不限磁盘、不限站点、不限域名、允许 SSH 终端（反向代理默认关闭，可在「编辑套餐」中开启；自定义目录已全量开放）', 0, 0, 0, '', 1, 0, 0, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_domains, max_bandwidth_mb, max_mysql_dbs, max_pgsql_dbs, max_ftp_users, fpm_spec_ref, allow_ssh, allow_proxy, owner_id, status, created_at, updated_at)
+    VALUES ('默认套餐', '不限磁盘、不限站点、不限域名、不限数据库与 FTP 账号数，允许 SSH 终端（反向代理默认关闭，可在「编辑套餐」中开启；自定义目录已全量开放）', 0, 0, 0, 0, 0, 0, 0, '', 1, 0, 0, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -540,10 +547,8 @@ async fn init_role_menus_table() {
 /// 不会出现「加了权限校验后普通用户被锁死」的情况。新增自定义角色默认无权限，
 /// 需管理员在「角色权限」中显式勾选（fail-closed）。
 async fn init_role_permissions_table() {
-    if table_exists("role_permissions").await {
-        return;
-    }
-    let sql = r#"
+    if !table_exists("role_permissions").await {
+        let sql = r#"
     CREATE TABLE role_permissions (
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         role_id INTEGER NOT NULL,
@@ -552,13 +557,27 @@ async fn init_role_permissions_table() {
     );
     CREATE INDEX idx_role_permissions_role ON role_permissions(role_id);
     "#;
-    let _ = get_db_pool().await.execute(sql).await;
+        let _ = get_db_pool().await.execute(sql).await;
+    }
 
+    // 建表与补齐分开：权限矩阵新增模块（如 database）后，老安装的内置角色
+    // 也要拿到对应权限点，否则新功能对老用户直接 403。
+    sync_builtin_role_permissions().await;
+}
+
+/// 把内置角色的权限点补齐到「权限矩阵推导出的默认值」。
+///
+/// 内置角色（admin/reseller/user/demo）属于系统定义，权限随代码升级而扩展；
+/// 只做 INSERT OR IGNORE —— 只补缺失的权限点，不会删除管理员额外授予的权限点。
+/// 自定义角色不受影响（保持 fail-closed，需管理员在「角色权限」中显式勾选）。
+async fn sync_builtin_role_permissions() {
     let pool = get_db_pool().await;
-    let roles: Vec<(i64, String)> = sqlx::query_as("SELECT id, role_key FROM roles")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
+    let roles: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, role_key FROM roles WHERE role_key IN ('admin','reseller','user','demo')",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
     for (role_id, role_key) in roles {
         for perm in crate::routers::access::default_permissions_for(&role_key) {
             let _ = sqlx::query(

@@ -8,6 +8,8 @@ export interface DbItem {
   /** 字节 */
   size: number
   tables: number
+  /** 可访问该库的账号数（快速模式下为 0） */
+  users: number
 }
 
 /** 数据库用户 */
@@ -20,8 +22,17 @@ export interface DbUser {
 export interface DbStatus {
   ok: boolean
   version: string
+  /** 管理账号（zapadm） */
   user: string
+  /** 展示用主机（127.0.0.1） */
+  host?: string
+  /** 服务监听端口 */
+  port?: number
+  /** 连接地址，形如 127.0.0.1:3306 */
+  addr?: string
   socket: string | null
+  /** 全局 sql_mode */
+  sql_mode: string
 }
 
 export interface DbListResult {
@@ -29,6 +40,18 @@ export interface DbListResult {
   list: DbItem[]
   /** 非管理员可见的库名前缀；管理员为 null */
   prefix: string | null
+  /** 是否快速模式（跳过了容量统计） */
+  light?: boolean
+}
+
+/** 建库结果：create_user 时额外返回账号与随机密码（密码仅此一次） */
+export interface DbCreateResult {
+  ok: boolean
+  name: string
+  charset?: string
+  user?: string
+  host?: string
+  password?: string
 }
 
 /**
@@ -42,12 +65,24 @@ export const databaseApi = {
   /** 服务状态与版本 */
   status: () => http.get<any>('/database/status').then(unwrap<DbStatus>),
 
-  /** 数据库列表 */
-  list: () => http.get<any>('/database/list').then(unwrap<DbListResult>),
+  /** 数据库列表（light = true 时跳过容量统计） */
+  list: (light = false) =>
+    http
+      .get<any>('/database/list', { params: light ? { light: 1 } : undefined })
+      .then(unwrap<DbListResult>),
 
-  /** 创建数据库（非管理员会自动补用户名前缀） */
-  create: (data: { name: string; charset?: string }) =>
-    http.post<any>('/database/create', data).then(unwrap<{ ok: boolean; name: string }>),
+  /**
+   * 创建数据库（非管理员会自动补 `{用户名}_` 前缀）
+   * create_user = true 时一并创建同名用户并授予该库全部权限
+   */
+  create: (data: {
+    name: string
+    charset?: string
+    create_user?: boolean
+    user?: string
+    password?: string
+    host?: string
+  }) => http.post<any>('/database/create', data).then(unwrap<DbCreateResult>),
 
   /** 删除数据库 */
   drop: (data: { name: string }) =>

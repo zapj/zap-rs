@@ -7,6 +7,9 @@
 //! - `max_sites`         最大站点数（0 = 不限），创建站点时硬拦截
 //! - `max_domains`       单站点最大域名数（0 = 不限），创建/编辑站点时硬拦截
 //! - `max_bandwidth_mb`  月流量上限（MB，0 = 不限；面板暂无流量统计，仅记录与展示）
+//! - `max_mysql_dbs`     MySQL / MariaDB 数据库数量（0 = 不限），建库时硬拦截
+//! - `max_pgsql_dbs`     PostgreSQL 数据库数量（0 = 不限；面板暂无 PG 模块，仅记录与展示）
+//! - `max_ftp_users`     FTP 账号数量（0 = 不限；面板暂无 FTP 模块，仅记录与展示）
 //! - `fpm_spec_ref`      PHP-FPM 规格模板名（'' = 面板默认）
 //! - `allow_ssh`         是否允许使用 SSH 终端
 //! - `allow_proxy`       是否允许普通用户创建/编辑「反向代理」站点（upstream / location）
@@ -44,6 +47,12 @@ pub struct PackageRow {
     /// 单站点最大域名数（0 = 不限）
     pub max_domains: i64,
     pub max_bandwidth_mb: i64,
+    /// MySQL / MariaDB 数据库数量（0 = 不限）
+    pub max_mysql_dbs: i64,
+    /// PostgreSQL 数据库数量（0 = 不限，仅记录）
+    pub max_pgsql_dbs: i64,
+    /// FTP 账号数量（0 = 不限，仅记录）
+    pub max_ftp_users: i64,
     pub fpm_spec_ref: String,
     pub allow_ssh: i32,
     /// 允许普通用户使用反向代理（upstream / location）
@@ -55,6 +64,7 @@ pub struct PackageRow {
 }
 
 const COLS: &str = "id, name, remark, disk_quota_mb, max_sites, max_domains, max_bandwidth_mb, \
+                    max_mysql_dbs, max_pgsql_dbs, max_ftp_users, \
                     fpm_spec_ref, allow_ssh, allow_proxy, owner_id, status, \
                     created_at, updated_at";
 
@@ -109,6 +119,9 @@ fn row_json(r: &PackageRow, users_count: i64) -> Value {
         "max_sites": r.max_sites,
         "max_domains": r.max_domains,
         "max_bandwidth_mb": r.max_bandwidth_mb,
+        "max_mysql_dbs": r.max_mysql_dbs,
+        "max_pgsql_dbs": r.max_pgsql_dbs,
+        "max_ftp_users": r.max_ftp_users,
         "fpm_spec_ref": r.fpm_spec_ref,
         "allow_ssh": r.allow_ssh == 1,
         "allow_proxy": r.allow_proxy == 1,
@@ -222,6 +235,12 @@ pub struct PackageAddPayload {
     pub max_domains: Option<i64>,
     /// 月流量上限（MB，0 = 不限，仅记录）
     pub max_bandwidth_mb: Option<i64>,
+    /// MySQL / MariaDB 数据库数量（0 = 不限）
+    pub max_mysql_dbs: Option<i64>,
+    /// PostgreSQL 数据库数量（0 = 不限，仅记录）
+    pub max_pgsql_dbs: Option<i64>,
+    /// FTP 账号数量（0 = 不限，仅记录）
+    pub max_ftp_users: Option<i64>,
     /// PHP-FPM 规格模板名（'' = 面板默认）
     pub fpm_spec_ref: Option<String>,
     /// 是否允许 SSH 终端
@@ -248,6 +267,10 @@ pub async fn package_add(
     let max_sites = validate_limit(payload.max_sites.unwrap_or(0), "最大站点数")?;
     let max_domains = validate_limit(payload.max_domains.unwrap_or(0), "单站点最大域名数")?;
     let max_bandwidth_mb = validate_limit(payload.max_bandwidth_mb.unwrap_or(0), "月流量上限")?;
+    let max_mysql_dbs = validate_limit(payload.max_mysql_dbs.unwrap_or(0), "MySQL 数据库数量")?;
+    let max_pgsql_dbs =
+        validate_limit(payload.max_pgsql_dbs.unwrap_or(0), "PostgreSQL 数据库数量")?;
+    let max_ftp_users = validate_limit(payload.max_ftp_users.unwrap_or(0), "FTP 账号数量")?;
     let fpm_spec_ref = payload.fpm_spec_ref.unwrap_or_default().trim().to_string();
     if !fpm_spec_ref.is_empty() {
         crate::routers::fpm_spec::validate_spec_ref(&fpm_spec_ref, is_admin, claims.sub.as_str())
@@ -263,8 +286,9 @@ pub async fn package_add(
     let pool = db::get_db_pool().await;
     let result = sqlx::query(
         "INSERT INTO packages (name, remark, disk_quota_mb, max_sites, max_domains, max_bandwidth_mb, \
+         max_mysql_dbs, max_pgsql_dbs, max_ftp_users, \
          fpm_spec_ref, allow_ssh, allow_proxy, owner_id, status, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&name)
     .bind(&remark)
@@ -272,6 +296,9 @@ pub async fn package_add(
     .bind(max_sites)
     .bind(max_domains)
     .bind(max_bandwidth_mb)
+    .bind(max_mysql_dbs)
+    .bind(max_pgsql_dbs)
+    .bind(max_ftp_users)
     .bind(&fpm_spec_ref)
     .bind(allow_ssh)
     .bind(allow_proxy)
@@ -295,7 +322,10 @@ pub async fn package_add(
         Some(client_addr.ip().to_string().as_str()),
         "package_add",
         &format!("id={new_id}"),
-        &format!("name={name} sites={max_sites} domains={max_domains} disk={disk_quota_mb}MB"),
+        &format!(
+            "name={name} sites={max_sites} domains={max_domains} disk={disk_quota_mb}MB \
+             mysql={max_mysql_dbs} pgsql={max_pgsql_dbs} ftp={max_ftp_users}"
+        ),
     )
     .await;
     Ok(Json(
@@ -312,6 +342,12 @@ pub struct PackageUpdatePayload {
     pub max_sites: Option<i64>,
     pub max_domains: Option<i64>,
     pub max_bandwidth_mb: Option<i64>,
+    /// MySQL / MariaDB 数据库数量（0 = 不限）
+    pub max_mysql_dbs: Option<i64>,
+    /// PostgreSQL 数据库数量（0 = 不限，仅记录）
+    pub max_pgsql_dbs: Option<i64>,
+    /// FTP 账号数量（0 = 不限，仅记录）
+    pub max_ftp_users: Option<i64>,
     pub fpm_spec_ref: Option<String>,
     pub allow_ssh: Option<bool>,
     /// 是否允许普通用户使用反向代理（upstream / location）
@@ -390,6 +426,33 @@ pub async fn package_update(
     if let Some(v) = payload.max_bandwidth_mb {
         let v = validate_limit(v, "月流量上限")?;
         sqlx::query("UPDATE packages SET max_bandwidth_mb = ?, updated_at = ? WHERE id = ?")
+            .bind(v)
+            .bind(now)
+            .bind(payload.id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(v) = payload.max_mysql_dbs {
+        let v = validate_limit(v, "MySQL 数据库数量")?;
+        sqlx::query("UPDATE packages SET max_mysql_dbs = ?, updated_at = ? WHERE id = ?")
+            .bind(v)
+            .bind(now)
+            .bind(payload.id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(v) = payload.max_pgsql_dbs {
+        let v = validate_limit(v, "PostgreSQL 数据库数量")?;
+        sqlx::query("UPDATE packages SET max_pgsql_dbs = ?, updated_at = ? WHERE id = ?")
+            .bind(v)
+            .bind(now)
+            .bind(payload.id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(v) = payload.max_ftp_users {
+        let v = validate_limit(v, "FTP 账号数量")?;
+        sqlx::query("UPDATE packages SET max_ftp_users = ?, updated_at = ? WHERE id = ?")
             .bind(v)
             .bind(now)
             .bind(payload.id)
