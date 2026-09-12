@@ -57,6 +57,26 @@ async fn handle(original: &Uri, req: Request) -> Result<Response, (StatusCode, S
         .trim_start_matches('/')
         .to_string();
 
+    // ── 1.1) 规范地址：`/webapps/phpmyadmin` → `/webapps/phpmyadmin/` ──
+    // phpMyAdmin 输出的静态资源、表单 action 都是**相对路径**（其 Scripts::getDisplay()
+    // 里 `base_dir` 只对子目录脚本非空），只有当页面 URL 以 `/` 结尾时，
+    // `js/dist/console.js` 才会解析到 `/webapps/phpmyadmin/js/...`。
+    // 若以不带斜杠的地址进入（如应用商店 info.yaml 里的 web_url、安装日志里的访问地址），
+    // 浏览器会请求成 `/webapps/js/dist/console.js` → 一片 404 且页面无样式。
+    // 这里统一 308 跳到带斜杠的规范地址，并保留查询串（便于携带 ?token=）。
+    if rest.is_empty() && !full.ends_with('/') {
+        let mut location = format!("{base}{PMA_MOUNT}/");
+        if let Some(q) = original.query() {
+            location.push('?');
+            location.push_str(q);
+        }
+        return Response::builder()
+            .status(StatusCode::PERMANENT_REDIRECT)
+            .header(header::LOCATION, location)
+            .body(Body::empty())
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "重定向失败".to_string()));
+    }
+
     // ── 2) 登录态：Bearer / 会话 Cookie / ?token= ─────────────
     // 注意：HTTP/2 下浏览器不发 `Host` 头（用 :authority 伪头），
     // 因此优先取 URI 的 authority，Host 头仅作回退。
