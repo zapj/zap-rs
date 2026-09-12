@@ -236,17 +236,47 @@ pub enum Request {
     #[serde(rename = "file.read")]
     FileRead { path: String },
     /// 写文件（文本）
+    ///
+    /// `as_user`：以哪个 Linux 账号名义操作（None = root）；新建/覆盖的内容归属该账号。
+    /// `skip_owner_check`：管理员置 true —— 内容归属自己，但仍可管理服务器上 root 的文件；
+    /// 普通用户保持 false（只能删改本人文件）。
     #[serde(rename = "file.write")]
-    FileWrite { path: String, content: String },
+    FileWrite {
+        path: String,
+        content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
+    },
     /// 删除文件/目录
     #[serde(rename = "file.delete")]
-    FileDelete { path: String },
+    FileDelete {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
+    },
     /// 建目录
     #[serde(rename = "file.mkdir")]
-    FileMkdir { path: String },
+    FileMkdir {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
+    },
     /// 重命名
     #[serde(rename = "file.rename")]
-    FileRename { path: String, new_path: String },
+    FileRename {
+        path: String,
+        new_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
+    },
     /// 下载（base64 字节）
     #[serde(rename = "file.download")]
     FileDownload { path: String },
@@ -256,13 +286,24 @@ pub enum Request {
         path: String,
         name: String,
         content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
     },
     /// 文件信息
     #[serde(rename = "file.info")]
     FileInfo { path: String },
     /// 修改文件/目录权限（mode 为八进制数值，仅低 12 位有效）
     #[serde(rename = "file.chmod")]
-    FileChmod { path: String, mode: u32 },
+    FileChmod {
+        path: String,
+        mode: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
+    },
     /// 添加 AppStore Git 源（clone 到 data/appstore/repos/<id>/）
     #[serde(rename = "appstore.repo_add")]
     AppstoreRepoAdd {
@@ -409,9 +450,9 @@ pub enum Request {
         /// None 时 vhost 不生成日志指令（沿用 nginx 全局日志）
         #[serde(default, skip_serializing_if = "Option::is_none")]
         log_root: Option<String>,
-        /// 站点文件属主（Linux 账号名）；Some 时 web_root/log_root 整树
-        /// chown {owner}:www 并收紧权限（目录 750 / 文件 640），
-        /// None（默认 www 运行模式）则归 www:www
+        /// 站点文件属主（Linux 账号名）；Some 时 web_root 整树归 `{owner}:{owner 主组}`
+        /// （目录 755 / 文件 644，nginx 走 others 位读静态文件，不归属 www 组），
+        /// log_root 整树仍归 www:www（目录 770 / 文件 660，nginx 写日志）
         #[serde(default, skip_serializing_if = "Option::is_none")]
         owner_user: Option<String>,
         /// 站点类型：php（PHP/PHP+静态，默认）/ static（纯静态）/ proxy（反向代理）。
@@ -505,7 +546,7 @@ pub enum Request {
     EnvDetect,
     /// 初始化面板用户家目录骨架：mkdir -p {home_dir}/www {home_dir}/logs {home_dir}/tmp（root 特权）。
     /// owner 为该面板用户对应的 Linux 账号：
-    /// home 711 owner {u}:{u}，www 750 owner {u}:www（nginx worker 属组 www 读静态文件），
+    /// home 711 owner {u}:{u}，www 755 owner {u}:{u 主组}（nginx worker 走 others 位读静态文件），
     /// logs 770 owner www:www（nginx 写日志），tmp 700 owner {u}:{u}。
     #[serde(rename = "user.home_init")]
     UserHomeInit {
@@ -781,6 +822,8 @@ mod tests {
         let req = Request::FileWrite {
             path: "/tmp/a.txt".into(),
             content: "hello".into(),
+            as_user: None,
+            skip_owner_check: false,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: Request = serde_json::from_str(&json).unwrap();

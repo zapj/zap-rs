@@ -96,6 +96,29 @@ async fn user_private_prefixes(claims: &Claims) -> (String, String) {
     (home, format!("/tmp/zap-{}", claims.sub))
 }
 
+/// 文件操作的执行身份 `(linux 账号, 是否跳过属主校验)`：
+/// - 管理员：新建内容归自己的账号（不再一律是 root），但跳过属主校验，
+///   仍可管理服务器上 root 拥有的文件；
+/// - 普通用户：内容归自己，且只能删改本人文件。
+async fn actor_identity(claims: &Claims) -> Result<(Option<String>, bool), ZapError> {
+    let pool = db::get_db_pool().await;
+    let lu: Option<String> = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
+        .bind(claims.id as i64)
+        .fetch_optional(pool)
+        .await?;
+    let lu = lu.filter(|u| !u.trim().is_empty());
+    if is_admin(claims) {
+        return Ok((lu, true));
+    }
+    match lu {
+        Some(u) => Ok((Some(u), false)),
+        None => Err(ZapError::New(
+            -1,
+            "当前账号未绑定系统用户，无法执行文件操作".to_string(),
+        )),
+    }
+}
+
 /// Check if user has read access to a path.
 ///
 /// 权限模型：
@@ -139,9 +162,15 @@ pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJso
     let resolved = resolve_path(&raw_path)?;
     check_access(&claims, &resolved, &home, &tmp)?;
 
-    // 首次访问自己的 home 时自动创建（zapexec 以 root 执行）
+    // 首次访问自己的 home 时自动创建（以该用户名义创建，属主即本人）
     if !is_admin(&claims) && resolved.as_path() == Path::new(&home) && !resolved.exists() {
-        let _ = crate::zapexec::call(Request::FileMkdir { path: home }).await;
+        let (as_user, skip_owner_check) = actor_identity(&claims).await?;
+        let _ = crate::zapexec::call(Request::FileMkdir {
+            path: home,
+            as_user,
+            skip_owner_check,
+        })
+        .await;
     }
 
     let resp = crate::zapexec::call(Request::FileList {
@@ -189,9 +218,12 @@ pub async fn file_write(
     let resolved = resolve_path(&payload.path)?;
     check_write_access(&claims, &resolved, &home, &tmp)?;
 
+    let (as_user, skip_owner_check) = actor_identity(&claims).await?;
     let resp = crate::zapexec::call(Request::FileWrite {
         path: resolved.to_string_lossy().to_string(),
         content: payload.content,
+        as_user,
+        skip_owner_check,
     })
     .await?;
     if resp.code != 0 {
@@ -220,8 +252,11 @@ pub async fn file_delete(
     let resolved = resolve_path(&payload.path)?;
     check_write_access(&claims, &resolved, &home, &tmp)?;
 
+    let (as_user, skip_owner_check) = actor_identity(&claims).await?;
     let resp = crate::zapexec::call(Request::FileDelete {
         path: resolved.to_string_lossy().to_string(),
+        as_user,
+        skip_owner_check,
     })
     .await?;
     if resp.code != 0 {
@@ -248,8 +283,11 @@ pub async fn file_mkdir(
     let resolved = resolve_path(&payload.path)?;
     check_write_access(&claims, &resolved, &home, &tmp)?;
 
+    let (as_user, skip_owner_check) = actor_identity(&claims).await?;
     let resp = crate::zapexec::call(Request::FileMkdir {
         path: resolved.to_string_lossy().to_string(),
+        as_user,
+        skip_owner_check,
     })
     .await?;
     if resp.code != 0 {
@@ -285,9 +323,12 @@ pub async fn file_rename(
     let new_path = resolve_path(&payload.new_path)?;
     check_write_access(&claims, &new_path, &home, &tmp)?;
 
+    let (as_user, skip_owner_check) = actor_identity(&claims).await?;
     let resp = crate::zapexec::call(Request::FileRename {
         path: old_path.to_string_lossy().to_string(),
         new_path: new_path.to_string_lossy().to_string(),
+        as_user,
+        skip_owner_check,
     })
     .await?;
     if resp.code != 0 {
@@ -333,9 +374,12 @@ pub async fn file_chmod(
         return Err(ZapError::New(-1, "路径不存在".to_string()));
     }
 
+    let (as_user, skip_owner_check) = actor_identity(&claims).await?;
     let resp = crate::zapexec::call(Request::FileChmod {
         path: resolved.to_string_lossy().to_string(),
         mode: payload.mode,
+        as_user,
+        skip_owner_check,
     })
     .await?;
     if resp.code != 0 {
@@ -411,6 +455,7 @@ pub async fn file_upload(
     let resolved_dir = resolve_path(target_dir)?;
     check_write_access(&claims, &resolved_dir, &home, &tmp)?;
 
+    let (as_user, skip_owner_check) = actor_identity(&claims).await?;
     let mut uploaded: Vec<String> = Vec::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -429,6 +474,8 @@ pub async fn file_upload(
             path: resolved_dir.to_string_lossy().to_string(),
             name: safe_name.clone(),
             content: zap_proto::b64_encode(&data),
+            as_user: as_user.clone(),
+            skip_owner_check,
         })
         .await?;
         if resp.code != 0 {

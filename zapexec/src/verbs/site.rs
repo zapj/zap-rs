@@ -1174,22 +1174,18 @@ fn validate_vhost_cfg(
 }
 
 /// 递归收敛站点树属主与权限（幂等）：
-/// - web tree：chown -R {owner}:www；目录 750 / 文件 640（nginx 以组 www 读取）
-/// - log tree（is_log=true）：chown -R www:www；目录 770 / 文件 660（nginx 写入日志）
+/// - web tree：chown -R {owner}:{owner 主组}；目录 755 / 文件 644
+///   （nginx worker 走 others 位读静态文件，站点文件不再归属 / 依赖 www 组）
+/// - log tree（is_log=true）：chown -R www:www；目录 770 / 文件 660
+///   （日志由 nginx worker 写入，必须保持 www 组可写）
 fn fix_tree_owner(root: &Path, owner: &str, is_log: bool) -> Result<(), String> {
-    let q = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
-    let dir_mode = if is_log { "770" } else { "750" };
-    let file_mode = if is_log { "660" } else { "640" };
-    let root_s = root.to_string_lossy();
-    let script = format!(
-        "chown -R {}:www {} && find {} -type d -exec chmod {} \\; && find {} -type f -exec chmod {} \\;",
-        q(owner),
-        q(&root_s),
-        q(&root_s),
-        dir_mode,
-        q(&root_s),
-        file_mode
-    );
+    // web tree 归运行账号 + 其主组；log tree 恒归 www:www（nginx worker 写日志）
+    let group = if is_log {
+        "www".to_string()
+    } else {
+        super::user::run_group_of(owner)
+    };
+    let script = tree_fix_script(root, owner, &group, is_log);
     let o = root_cmd("bash")
         .args(["-c", &script])
         .output()
@@ -1202,6 +1198,28 @@ fn fix_tree_owner(root: &Path, owner: &str, is_log: bool) -> Result<(), String> 
             output_err(&o, "未知错误")
         ))
     }
+}
+
+/// 生成站点树收敛脚本（纯函数，单测覆盖）：
+/// `{{}}` 是 find 的匹配文件占位符（format! 里必须转义），漏写会让 chmod 因缺文件参数报错。
+fn tree_fix_script(root: &Path, owner: &str, group: &str, is_log: bool) -> String {
+    let q = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+    let (dir_mode, file_mode) = if is_log {
+        ("770", "660")
+    } else {
+        ("755", "644")
+    };
+    let root_s = root.to_string_lossy();
+    format!(
+        "chown -R {}:{} {} && find {} -type d -exec chmod {} {{}} \\; && find {} -type f -exec chmod {} {{}} \\;",
+        q(owner),
+        q(group),
+        q(&root_s),
+        q(&root_s),
+        dir_mode,
+        q(&root_s),
+        file_mode
+    )
 }
 
 /// 站点 vhost 同步命令的完整入参：协议 `site.vhost_sync` 的字段原样搬入，
@@ -1427,8 +1445,8 @@ fn vhost_sync_inner(cfg: SiteConfig) -> Result<Response, String> {
         &locations,
     )?;
     // 站点树属主/权限收敛（自动目录）：
-    // - web tree：归归属用户的 Linux 账号；组恒为 www，目录 750 / 文件 640
-    //   （nginx worker 以组 www 读静态文件，php-fpm 以该账号身份读写）
+    // - web tree：归归属用户的 Linux 账号及其主组，目录 755 / 文件 644
+    //   （nginx worker 走 others 位读静态文件，php-fpm 以该账号身份读写）
     // - log tree：恒归 www:www，目录 770 / 文件 660（nginx 写 access/error.log）
     // 自定义目录不递归改动用户已有文件属主/权限（由用户自管，nginx 需可读其文件）。
     if let Some(r) = &root {
@@ -1656,6 +1674,27 @@ pub(super) fn reload_nginx(bin: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use zap_proto::UpstreamServer;
+
+    /// 收敛脚本必须是「chown + find chmod」，且 find 的 `{}` 占位符不能被 format! 吞掉
+    /// （历史 bug：生成 `-exec chmod 755 \;` 缺文件参数，权限从未真正收敛）。
+    #[test]
+    fn tree_fix_script_keeps_find_placeholder() {
+        let web = tree_fix_script(Path::new("/home/u/www/a-1"), "u", "u", false);
+        assert_eq!(
+            web,
+            "chown -R 'u':'u' '/home/u/www/a-1' \
+             && find '/home/u/www/a-1' -type d -exec chmod 755 {} \\; \
+             && find '/home/u/www/a-1' -type f -exec chmod 644 {} \\;"
+        );
+        // 日志树：恒归 www:www，目录 770 / 文件 660
+        let log = tree_fix_script(Path::new("/home/u/logs/a-1"), "www", "www", true);
+        assert!(log.contains("chown -R 'www':'www' '/home/u/logs/a-1'"));
+        assert!(log.contains("-exec chmod 770 {} \\;"));
+        assert!(log.contains("-exec chmod 660 {} \\;"));
+        // 含单引号的路径需安全转义
+        let weird = tree_fix_script(Path::new("/home/u/it's"), "u", "u", false);
+        assert!(weird.contains("'/home/u/it'\\''s'"));
+    }
 
     /// 便捷构造一个表单化 server 行（默认参数）
     fn sv(addr: &str, weight: u32) -> UpstreamServer {

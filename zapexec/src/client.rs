@@ -130,12 +130,23 @@ pub async fn run(args: ClientArgs) {
         ClientVerb::SshKeyAuthorizedList => Request::SshKeyAuthorizedList,
         ClientVerb::FileList { path } => Request::FileList { path },
         ClientVerb::FileRead { path } => Request::FileRead { path },
-        ClientVerb::FileWrite { path, content } => Request::FileWrite { path, content },
-        ClientVerb::FileDelete { path } => Request::FileDelete { path },
+        ClientVerb::FileWrite { path, content } => Request::FileWrite {
+            path,
+            content,
+            as_user: None,
+            skip_owner_check: false,
+        },
+        ClientVerb::FileDelete { path } => Request::FileDelete {
+            path,
+            as_user: None,
+            skip_owner_check: false,
+        },
         ClientVerb::FileInfo { path } => Request::FileInfo { path },
         ClientVerb::FileChmod { path, mode } => Request::FileChmod {
             path,
             mode: parse_octal_mode(&mode),
+            as_user: None,
+            skip_owner_check: false,
         },
     };
 

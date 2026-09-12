@@ -102,18 +102,43 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         }
         Request::FileList { path } => file::list(path).await,
         Request::FileRead { path } => file::read(path).await,
-        Request::FileWrite { path, content } => file::write(path, content).await,
-        Request::FileDelete { path } => file::delete(path).await,
-        Request::FileMkdir { path } => file::mkdir(path).await,
-        Request::FileRename { path, new_path } => file::rename(path, new_path).await,
+        Request::FileWrite {
+            path,
+            content,
+            as_user,
+            skip_owner_check,
+        } => file::write(path, content, as_user, skip_owner_check).await,
+        Request::FileDelete {
+            path,
+            as_user,
+            skip_owner_check,
+        } => file::delete(path, as_user, skip_owner_check).await,
+        Request::FileMkdir {
+            path,
+            as_user,
+            skip_owner_check,
+        } => file::mkdir(path, as_user, skip_owner_check).await,
+        Request::FileRename {
+            path,
+            new_path,
+            as_user,
+            skip_owner_check,
+        } => file::rename(path, new_path, as_user, skip_owner_check).await,
         Request::FileDownload { path } => file::download(path).await,
         Request::FileUpload {
             path,
             name,
             content,
-        } => file::upload(path, name, content).await,
+            as_user,
+            skip_owner_check,
+        } => file::upload(path, name, content, as_user, skip_owner_check).await,
         Request::FileInfo { path } => file::info(path).await,
-        Request::FileChmod { path, mode } => file::chmod(path, mode).await,
+        Request::FileChmod {
+            path,
+            mode,
+            as_user,
+            skip_owner_check,
+        } => file::chmod(path, mode, as_user, skip_owner_check).await,
         Request::AppstoreRepoAdd { name, url, run_id } => {
             appstore::repo_add(name, url, run_id).await
         }

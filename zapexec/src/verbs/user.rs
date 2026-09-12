@@ -7,8 +7,8 @@
 //! - `{home_dir}/tmp` —— PHP session / 上传临时目录（open_basedir 白名单）
 //!
 //! 运行账号 `owner` 为该面板用户对应的 Linux 系统账号（nologin）：
-//! web tree 归 `{u}:www`（nginx worker 以组 www 读取静态文件），
-//! PHP-FPM 以「该用户 × 该 PHP 版本」独立 pool 运行。
+//! web tree 归 `{u}:{u 主组}`、目录 755（nginx worker 走 others 位读取静态文件，
+//! 站点文件不归属 www 组），PHP-FPM 以「该用户 × 该 PHP 版本」独立 pool 运行。
 //!
 //! 安全边界：家目录只接受 `/home/` 下绝对路径；禁止 `..`；Linux 账号名白名单校验。
 
@@ -157,13 +157,15 @@ fn home_init_inner(home_dir: &str, owner: &str) -> Result<Response, String> {
     }
     let q = |p: &str| sh_quote(p);
 
-    // web tree（www）：递归归 {run}:www；组保持 www（nginx worker 经组位读取静态文件）
+    // web tree（www）：递归归 {run}:{run_group}，目录 755
+    // （nginx worker 走 others 位读取静态文件，站点文件不归属 www 组）
     run_bash(&format!(
-        "chown -R {}:www {}",
+        "chown -R {}:{} {}",
         q(run),
+        q(&run_group),
         q(&format!("{home}/www"))
     ))?;
-    run_bash(&format!("chmod 750 {}", q(&format!("{home}/www"))))?;
+    run_bash(&format!("chmod 755 {}", q(&format!("{home}/www"))))?;
     // log tree（logs）：nginx 写 access/error.log，恒归 www:www，组可写
     run_bash(&format!("chown -R www:www {}", q(&format!("{home}/logs"))))?;
     run_bash(&format!("chmod 770 {}", q(&format!("{home}/logs"))))?;
