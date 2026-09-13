@@ -61,6 +61,9 @@ pub struct ArchivePayload {
     paths: Vec<String>,
     name: String,
     base_dir: String,
+    /// 目标目录：传了就把压缩包写到该目录，不传则返回内容供下载
+    #[serde(default)]
+    dest_dir: Option<String>,
 }
 
 // ── path helpers ───────────────────────────────────────────
@@ -90,6 +93,21 @@ fn resolve_path(requested: &str) -> Result<PathBuf, ZapError> {
                 Err(ZapError::New(-1, "非法路径".to_string()))
             }
         }
+    }
+}
+
+/// 规范化上传文件名：允许 `dir/sub/a.txt` 这类相对路径（目录上传），
+/// 过滤空段、`.` 与 `..`，避免越出目标目录；结果为空时回退 `unnamed`。
+fn sanitize_relative(name: &str) -> String {
+    let clean = name
+        .split('/')
+        .filter(|seg| !seg.is_empty() && *seg != "." && *seg != "..")
+        .collect::<Vec<_>>()
+        .join("/");
+    if clean.is_empty() {
+        "unnamed".to_string()
+    } else {
+        clean
     }
 }
 
@@ -505,7 +523,8 @@ pub async fn file_copy(
 
 /// POST /system/files/archive
 ///
-/// 把选中的文件/目录打包成 zip（base64 字节）。
+/// 把选中的文件/目录打包成 zip。
+/// 传 `dest_dir` 时压缩包写进该目录（打包到目录），否则返回 base64 字节供下载。
 pub async fn file_archive(
     claims: Claims,
     Extension(client_addr): Extension<SocketAddr>,
@@ -524,10 +543,28 @@ pub async fn file_archive(
         check_access(&claims, &resolved, &home, &tmp)?;
     }
 
+    // 打包到目录：目标目录要有写权限，压缩包归当前操作者所有
+    let dest_dir = match &payload.dest_dir {
+        Some(d) => {
+            let resolved = resolve_path(d)?;
+            check_write_access(&claims, &resolved, &home, &tmp)?;
+            Some(resolved.to_string_lossy().to_string())
+        }
+        None => None,
+    };
+    let (as_user, skip_owner_check) = if dest_dir.is_some() {
+        actor_identity(&claims).await?
+    } else {
+        (None, false)
+    };
+
     let resp = crate::zapexec::call(Request::FileArchive {
         paths: payload.paths.clone(),
         name: payload.name.clone(),
         base_dir: base.to_string_lossy().to_string(),
+        dest_dir: dest_dir.clone(),
+        as_user,
+        skip_owner_check,
     })
     .await?;
     if resp.code != 0 {
@@ -538,7 +575,12 @@ pub async fn file_archive(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
         "file_archive",
-        &format!("{} ({} 项)", base.to_string_lossy(), payload.paths.len()),
+        &format!(
+            "{}{} ({} 项)",
+            base.to_string_lossy(),
+            dest_dir.map(|d| format!(" → {d}")).unwrap_or_default(),
+            payload.paths.len()
+        ),
         "",
     )
     .await;
@@ -608,10 +650,9 @@ pub async fn file_upload(
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let file_name = field.file_name().unwrap_or("unnamed").to_string();
-        let safe_name = Path::new(&file_name)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "unnamed".to_string());
+        // 目录上传时浏览器把相对路径放进 filename（`dir/sub/a.txt`），
+        // 清洗后交给 zapexec 逐级建目录；越界段由 sanitize_relative 过滤。
+        let rel_name = sanitize_relative(&file_name);
 
         let data = field
             .bytes()
@@ -620,7 +661,7 @@ pub async fn file_upload(
 
         let resp = crate::zapexec::call(Request::FileUpload {
             path: resolved_dir.to_string_lossy().to_string(),
-            name: safe_name.clone(),
+            name: rel_name.clone(),
             content: zap_proto::b64_encode(&data),
             as_user: as_user.clone(),
             skip_owner_check,
@@ -629,7 +670,7 @@ pub async fn file_upload(
         if resp.code != 0 {
             return Err(ZapError::New(resp.code, resp.message));
         }
-        uploaded.push(safe_name);
+        uploaded.push(rel_name);
     }
 
     if uploaded.is_empty() {

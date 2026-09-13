@@ -135,7 +135,6 @@ export function cloudUpload(
     `/system/cloud/upload?id=${encodeURIComponent(id)}&path=${encodeURIComponent(dirPath)}`,
     formData,
     {
-      headers: { 'Content-Type': 'multipart/form-data' },
       timeout: TRANSFER_TIMEOUT,
       onUploadProgress: (event) => {
         if (!onProgress || !event.total) return

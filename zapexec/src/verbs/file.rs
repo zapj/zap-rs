@@ -220,6 +220,23 @@ fn create_dirs_owned(actor: Option<Actor>, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 规范化上传用的相对路径（目录上传会带上 `dir/sub/a.txt`）：
+/// 逐段过滤空段、`.` 与 `..`，保证结果始终落在目标目录之内。
+fn sanitize_relative(name: &str) -> Option<PathBuf> {
+    let mut out = PathBuf::new();
+    for seg in name
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+    {
+        out.push(seg);
+    }
+    if out.as_os_str().is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 fn resolve_path(requested: &str) -> PathBuf {
     let clean = requested
         .split('/')
@@ -527,15 +544,22 @@ pub async fn upload(
         if !md.is_dir() {
             return Response::err(-1, "目标路径不是目录");
         }
-        let safe_name = Path::new(&name)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "unnamed".to_string());
+        // 目录上传时 name 形如 `dir/sub/a.txt`，逐级补建目录还原结构
+        let rel = match sanitize_relative(&name) {
+            Some(r) => r,
+            None => return Response::err(-1, "非法的文件名"),
+        };
         let bytes = match b64_decode(&content) {
             Ok(b) => b,
             Err(e) => return Response::err(-1, format!("内容解码失败: {e}")),
         };
-        let dest = dir.join(&safe_name);
+        let dest = dir.join(&rel);
+        if let Some(parent) = dest.parent()
+            && !parent.exists()
+            && let Err(e) = create_dirs_owned(actor, parent)
+        {
+            return Response::err(-1, e);
+        }
         // 覆盖同名文件仅限本人文件；新上传的文件归操作者所有
         if dest.exists()
             && let Err(e) = ensure_owner(actor, &dest)
@@ -544,7 +568,7 @@ pub async fn upload(
         }
         match std::fs::write(&dest, &bytes) {
             Ok(_) => match apply_owner(actor, &dest) {
-                Ok(_) => Response::ok("上传成功", Some(json!({ "name": safe_name }))),
+                Ok(_) => Response::ok("上传成功", Some(json!({ "name": rel.to_string_lossy() }))),
                 Err(e) => Response::err(-1, e),
             },
             Err(e) => Response::err(-1, format!("上传失败: {e}")),
@@ -720,9 +744,23 @@ fn archive_add<W: Write + std::io::Seek>(
     Ok(())
 }
 
-/// 把多个文件/目录打包成 zip 并返回 base64 内容。
-pub async fn archive(paths: Vec<String>, name: String, base_dir: String) -> Response {
+/// 把多个文件/目录打包成 zip。
+///
+/// 给了 `dest_dir` 就把压缩包写进该目录（打包到指定位置），
+/// 否则返回 zip 的 base64 内容，由调用方下载。
+pub async fn archive(
+    paths: Vec<String>,
+    name: String,
+    base_dir: String,
+    dest_dir: Option<String>,
+    as_user: Option<String>,
+    skip_owner_check: bool,
+) -> Response {
     tokio::task::spawn_blocking(move || {
+        let actor = match resolve_actor(as_user, skip_owner_check) {
+            Ok(a) => a,
+            Err(e) => return Response::err(-1, e),
+        };
         let base = resolve_path(&base_dir);
         if !base.exists() {
             return Response::err(-1, "基目录不存在");
@@ -740,6 +778,19 @@ pub async fn archive(paths: Vec<String>, name: String, base_dir: String) -> Resp
             }
         }
 
+        // 压缩包名只取最后一段并过滤 `..`/空段，避免被写到目标目录之外
+        let zip_name = match sanitize_relative(&name)
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        {
+            Some(n) if !n.is_empty() => n,
+            _ => return Response::err(-1, "压缩包名称无效"),
+        };
+        let zip_name = if zip_name.to_lowercase().ends_with(".zip") {
+            zip_name
+        } else {
+            format!("{zip_name}.zip")
+        };
+
         let mut buf = Cursor::new(Vec::new());
         {
             let mut zip = ZipWriter::new(&mut buf);
@@ -753,18 +804,41 @@ pub async fn archive(paths: Vec<String>, name: String, base_dir: String) -> Resp
             }
         }
         let bytes = buf.into_inner();
-        let safe_name = if name.to_lowercase().ends_with(".zip") {
-            name
-        } else {
-            format!("{name}.zip")
+
+        let Some(dest_dir) = dest_dir else {
+            return Response::ok(
+                "ok",
+                Some(json!({
+                    "name": zip_name,
+                    "content": b64_encode(&bytes),
+                })),
+            );
         };
-        Response::ok(
-            "ok",
-            Some(json!({
-                "name": safe_name,
-                "content": b64_encode(&bytes),
-            })),
-        )
+
+        // 目标目录不存在时按操作者身份创建，压缩包同样归操作者所有
+        let dir = resolve_path(&dest_dir);
+        if !dir.exists()
+            && let Err(e) = create_dirs_owned(actor, &dir)
+        {
+            return Response::err(-1, e);
+        }
+        let dest = dir.join(&zip_name);
+        // 覆盖同名压缩包仅限本人文件
+        if dest.exists()
+            && let Err(e) = ensure_owner(actor, &dest)
+        {
+            return Response::err(-1, e);
+        }
+        match std::fs::write(&dest, &bytes) {
+            Ok(_) => match apply_owner(actor, &dest) {
+                Ok(_) => Response::ok(
+                    "打包成功",
+                    Some(json!({ "name": zip_name, "path": dest.to_string_lossy() })),
+                ),
+                Err(e) => Response::err(-1, e),
+            },
+            Err(e) => Response::err(-1, format!("写入压缩包失败: {e}")),
+        }
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))

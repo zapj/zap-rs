@@ -150,7 +150,10 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             paths,
             name,
             base_dir,
-        } => file::archive(paths, name, base_dir).await,
+            dest_dir,
+            as_user,
+            skip_owner_check,
+        } => file::archive(paths, name, base_dir, dest_dir, as_user, skip_owner_check).await,
         Request::AppstoreRepoAdd { name, url, run_id } => {
             appstore::repo_add(name, url, run_id).await
         }

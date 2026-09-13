@@ -58,50 +58,6 @@
           </el-breadcrumb>
         </div>
         <div class="fm-toolbar-right">
-          <span v-if="hasSelection" class="fm-selection-label">
-            已选 {{ selectionCount }} / {{ fileList.length }}
-          </span>
-          <template v-if="hasSelection">
-            <el-button size="small" :disabled="!canOpen" @click="openSelected">
-              <el-icon><Open /></el-icon>
-              打开
-            </el-button>
-            <el-button size="small" :disabled="!canCopy" @click="showCopyDialog(false)">
-              <el-icon><Copy /></el-icon>
-              复制
-            </el-button>
-            <el-button size="small" :disabled="!canDuplicate" @click="duplicateSelected">
-              <el-icon><Copy /></el-icon>
-              复制副本
-            </el-button>
-            <el-button size="small" :disabled="!canMove" @click="showMoveDialog(false)">
-              <el-icon><Move /></el-icon>
-              移动
-            </el-button>
-            <el-button size="small" :disabled="!canDownload" @click="downloadSelected">
-              <el-icon><Download /></el-icon>
-              下载
-            </el-button>
-            <el-button size="small" :disabled="!canArchive" @click="showArchiveDialog">
-              <el-icon><Archive /></el-icon>
-              打包
-            </el-button>
-            <el-button size="small" :disabled="!canRename" @click="showRenameDialog(singleSelected!)">
-              <el-icon><Edit /></el-icon>
-              重命名
-            </el-button>
-            <el-button size="small" :disabled="!canSetPermissions" @click="showPermDialogForSelection">
-              <el-icon><Setting /></el-icon>
-              权限
-            </el-button>
-            <el-button size="small" type="danger" :disabled="!canRemove" @click="removeSelected">
-              <el-icon><Delete /></el-icon>
-              删除
-            </el-button>
-            <el-button size="small" text @click="clearSelection">
-              取消
-            </el-button>
-          </template>
           <el-button-group class="view-toggle">
             <el-button
               :type="viewMode === 'list' ? 'primary' : ''"
@@ -118,15 +74,16 @@
               <el-icon><Grid /></el-icon>
             </el-button>
           </el-button-group>
-          <el-upload
-            :show-file-list="false"
-            :http-request="handleUpload"
-            multiple
-            style="display: inline-block; margin-left: 8px"
-          >
-            <el-button size="small">
+          <el-upload :show-file-list="false" :http-request="handleUpload" multiple>
+            <el-button size="small" :loading="uploadBusy">
               <el-icon><Upload /></el-icon>
-              上传
+              上传文件
+            </el-button>
+          </el-upload>
+          <el-upload :show-file-list="false" :http-request="handleUpload" multiple directory>
+            <el-button size="small" :loading="uploadBusy">
+              <el-icon><FolderOpened /></el-icon>
+              上传目录
             </el-button>
           </el-upload>
           <el-button size="small" @click="showMkdirDialog">
@@ -143,119 +100,189 @@
         </div>
       </div>
 
-      <!-- 文件列表 - 列表视图 -->
-      <div v-if="viewMode === 'list'" class="fm-table-wrap">
-        <el-table
-          ref="tableRef"
-          :data="fileList"
-          v-loading="loading"
-          stripe
-          :row-class-name="rowClassName"
-          @row-click="onRowClick"
-          @row-dblclick="onRowDblClick"
-          @selection-change="onTableSelectionChange"
-          @row-contextmenu="onTableRowContextMenu"
-          style="width: 100%"
-        >
-          <el-table-column type="selection" width="40" />
-          <el-table-column label="名称" min-width="260">
-            <template #default="{ row }">
-              <div class="fm-file-name">
+      <!-- 选中项操作条：紧贴地址栏下方，操作按钮成组排列 -->
+      <div v-if="hasSelection" class="fm-selection-bar">
+        <span class="fm-selection-label">已选 {{ selectionCount }} / {{ fileList.length }}</span>
+        <el-button-group class="fm-selection-actions">
+          <el-button size="small" :disabled="!canOpen" @click="openSelected">
+            <el-icon><Open /></el-icon>
+            打开
+          </el-button>
+          <el-button size="small" :disabled="!canCopy" @click="showCopyDialog(false)">
+            <el-icon><Copy /></el-icon>
+            复制
+          </el-button>
+          <el-button size="small" :disabled="!canDuplicate" @click="showDuplicateDialog">
+            <el-icon><Copy /></el-icon>
+            复制副本
+          </el-button>
+          <el-button size="small" :disabled="!canMove" @click="showMoveDialog(false)">
+            <el-icon><Move /></el-icon>
+            移动
+          </el-button>
+          <el-button size="small" :disabled="!canDownload" @click="downloadSelected">
+            <el-icon><Download /></el-icon>
+            下载
+          </el-button>
+          <el-button size="small" :disabled="!canArchive" @click="showArchiveDialog">
+            <el-icon><Archive /></el-icon>
+            打包
+          </el-button>
+          <el-button size="small" :disabled="!canRename" @click="showRenameDialog(singleSelected!)">
+            <el-icon><Edit /></el-icon>
+            重命名
+          </el-button>
+          <el-button
+            size="small"
+            :disabled="!canSetPermissions"
+            @click="showPermDialogForSelection"
+          >
+            <el-icon><Setting /></el-icon>
+            权限
+          </el-button>
+          <el-button size="small" type="danger" :disabled="!canRemove" @click="removeSelected">
+            <el-icon><Delete /></el-icon>
+            删除
+          </el-button>
+        </el-button-group>
+        <el-button size="small" text @click="clearSelection">取消选择</el-button>
+      </div>
+
+      <!-- 文件列表区：拖拽文件/文件夹到此处即上传到当前目录（文件夹保留层级） -->
+      <div
+        class="fm-list-area"
+        @dragenter.prevent="onDragEnter"
+        @dragover.prevent="onDragOver"
+        @dragleave="onDragLeave"
+        @drop.prevent="handleDrop"
+      >
+        <!-- 文件列表 - 列表视图 -->
+        <div v-if="viewMode === 'list'" class="fm-table-wrap">
+          <el-table
+            ref="tableRef"
+            :data="fileList"
+            v-loading="loading"
+            stripe
+            :row-class-name="rowClassName"
+            @row-click="onRowClick"
+            @row-dblclick="onRowDblClick"
+            @selection-change="onTableSelectionChange"
+            @row-contextmenu="onTableRowContextMenu"
+            style="width: 100%"
+          >
+            <el-table-column type="selection" width="40" />
+            <el-table-column label="名称" min-width="260">
+              <template #default="{ row }">
+                <div class="fm-file-name">
+                  <el-icon
+                    :size="18"
+                    :color="
+                      row.is_dir ? 'var(--el-color-primary)' : 'var(--el-text-color-secondary)'
+                    "
+                  >
+                    <Folder v-if="row.is_dir" />
+                    <Document v-else />
+                  </el-icon>
+                  <span>{{ row.name }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="大小" width="120" align="right">
+              <template #default="{ row }">
+                <span v-if="!row.is_dir">{{ formatSize(row.size) }}</span>
+                <span v-else class="text-muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="修改时间" width="180">
+              <template #default="{ row }">
+                {{ row.modified }}
+              </template>
+            </el-table-column>
+            <el-table-column label="权限" width="110">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  type="primary"
+                  class="mono fm-perm-btn"
+                  title="点击修改权限"
+                  @click.stop="showPermDialog(row)"
+                >
+                  {{ row.permissions }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <el-table-column label="用户" width="100">
+              <template #default="{ row }">
+                <span v-if="row.owner" class="mono">{{ row.owner }}</span>
+                <span v-else class="text-muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="组" width="100">
+              <template #default="{ row }">
+                <span v-if="row.group" class="mono">{{ row.group }}</span>
+                <span v-else class="text-muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="220" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" link type="primary" @click.stop="handleDownload(row)">
+                  下载
+                </el-button>
+                <el-button size="small" link type="warning" @click.stop="showRenameDialog(row)">
+                  重命名
+                </el-button>
+                <el-button size="small" link type="danger" @click.stop="handleDelete(row)">
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <!-- 文件列表 - 网格视图 -->
+        <div v-else class="fm-grid-wrap">
+          <el-scrollbar>
+            <div class="fm-grid" v-loading="loading">
+              <div
+                v-for="row in fileList"
+                :key="row.path"
+                class="fm-grid-item"
+                :class="{ selected: isSelected(row) }"
+                @click="onGridItemClick(row, $event)"
+                @dblclick="onGridItemDblClick(row)"
+                @contextmenu.prevent="onGridContextMenu($event, row)"
+              >
+                <el-checkbox
+                  :model-value="isSelected(row)"
+                  @click.stop
+                  @change="toggleRow(row)"
+                  class="fm-grid-check"
+                />
                 <el-icon
-                  :size="18"
+                  :size="40"
                   :color="row.is_dir ? 'var(--el-color-primary)' : 'var(--el-text-color-secondary)'"
                 >
                   <Folder v-if="row.is_dir" />
                   <Document v-else />
                 </el-icon>
-                <span>{{ row.name }}</span>
+                <span class="fm-grid-name" :title="row.name">{{ row.name }}</span>
+                <span v-if="!row.is_dir" class="fm-grid-size">{{ formatSize(row.size) }}</span>
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="大小" width="120" align="right">
-            <template #default="{ row }">
-              <span v-if="!row.is_dir">{{ formatSize(row.size) }}</span>
-              <span v-else class="text-muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="修改时间" width="180">
-            <template #default="{ row }">
-              {{ row.modified }}
-            </template>
-          </el-table-column>
-          <el-table-column label="权限" width="110">
-            <template #default="{ row }">
-              <el-button
-                link
-                type="primary"
-                class="mono fm-perm-btn"
-                title="点击修改权限"
-                @click.stop="showPermDialog(row)"
-              >
-                {{ row.permissions }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <el-table-column label="用户" width="100">
-            <template #default="{ row }">
-              <span v-if="row.owner" class="mono">{{ row.owner }}</span>
-              <span v-else class="text-muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="组" width="100">
-            <template #default="{ row }">
-              <span v-if="row.group" class="mono">{{ row.group }}</span>
-              <span v-else class="text-muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="220" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" link type="primary" @click.stop="handleDownload(row)">
-                下载
-              </el-button>
-              <el-button size="small" link type="warning" @click.stop="showRenameDialog(row)">
-                重命名
-              </el-button>
-              <el-button size="small" link type="danger" @click.stop="handleDelete(row)">
-                删除
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-
-      <!-- 文件列表 - 网格视图 -->
-      <div v-else class="fm-grid-wrap">
-        <el-scrollbar>
-          <div class="fm-grid" v-loading="loading">
-            <div
-              v-for="row in fileList"
-              :key="row.path"
-              class="fm-grid-item"
-              :class="{ selected: isSelected(row) }"
-              @click="onGridItemClick(row, $event)"
-              @dblclick="onGridItemDblClick(row)"
-              @contextmenu.prevent="onGridContextMenu($event, row)"
-            >
-              <el-checkbox
-                :model-value="isSelected(row)"
-                @click.stop
-                @change="toggleRow(row)"
-                class="fm-grid-check"
-              />
-              <el-icon
-                :size="40"
-                :color="row.is_dir ? 'var(--el-color-primary)' : 'var(--el-text-color-secondary)'"
-              >
-                <Folder v-if="row.is_dir" />
-                <Document v-else />
-              </el-icon>
-              <span class="fm-grid-name" :title="row.name">{{ row.name }}</span>
-              <span v-if="!row.is_dir" class="fm-grid-size">{{ formatSize(row.size) }}</span>
+              <div v-if="fileList.length === 0 && !loading" class="fm-grid-empty">此目录为空</div>
             </div>
-            <div v-if="fileList.length === 0 && !loading" class="fm-grid-empty">此目录为空</div>
+          </el-scrollbar>
+        </div>
+
+        <!-- 拖拽上传遮罩：仅在拖拽进入列表区时出现；drop 由外层 handleDrop 接管
+             （el-upload 的 drag 分支会把目录结构压平，所以不用它） -->
+        <div v-if="dragActive" class="fm-dropzone">
+          <div class="fm-dropzone-inner">
+            <el-icon :size="42"><Upload /></el-icon>
+            <div class="fm-dropzone-text">
+              松开鼠标，上传文件或文件夹到 {{ currentPath || '当前目录' }}
+            </div>
           </div>
-        </el-scrollbar>
+        </div>
       </div>
     </div>
 
@@ -309,6 +336,23 @@
       <template #footer>
         <el-button @click="renameVisible = false">取消</el-button>
         <el-button type="primary" @click="doRename">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 复制副本对话框：与重命名一样先确认名字，默认名由 nextCopyName 自动生成 -->
+    <el-dialog v-model="dupVisible" title="复制副本" width="400px">
+      <el-form @submit.prevent>
+        <el-form-item label="副本名称">
+          <el-input
+            v-model="dupName"
+            placeholder="请输入副本名称"
+            @keydown.enter.prevent="onEnterConfirm($event, doDuplicate)"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dupVisible = false">取消</el-button>
+        <el-button type="primary" :loading="dupSaving" @click="doDuplicate">确定</el-button>
       </template>
     </el-dialog>
 
@@ -416,44 +460,29 @@
       </template>
     </el-dialog>
 
-    <!-- 复制到 -->
-    <el-dialog v-model="copyVisible" title="复制到" width="420px">
-      <el-form @submit.prevent>
-        <el-form-item label="目标目录">
-          <el-input v-model="copyTargetDir" placeholder="请输入目标目录绝对路径" @keydown.enter.prevent="onEnterConfirm($event, doCopy)" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="copyVisible = false">取消</el-button>
-        <el-button type="primary" :loading="copySaving" @click="doCopy">确定</el-button>
+    <!-- 复制 / 移动 / 打包：统一走目录选择窗口（与新建站点的「选择已有目录」一致） -->
+    <DirPicker
+      v-model="pickVisible"
+      :title="pickTitle"
+      :start-path="currentPath"
+      :confirm-text="pickConfirmText"
+      :confirm-loading="pickSaving"
+      @confirm="onPickConfirm"
+    >
+      <template #extra="{ path }">
+        <div v-if="pickMode === 'archive'" class="fm-archive-name">
+          <span class="fm-archive-label">压缩包名称</span>
+          <el-input
+            v-model="archiveName"
+            placeholder="例如 backup"
+            @keydown.enter.prevent="onPickConfirm(path)"
+          />
+          <div v-if="archiveFileName" class="fm-archive-hint">
+            将创建：{{ path }}/{{ archiveFileName }}
+          </div>
+        </div>
       </template>
-    </el-dialog>
-
-    <!-- 移动到 -->
-    <el-dialog v-model="moveVisible" title="移动到" width="420px">
-      <el-form @submit.prevent>
-        <el-form-item label="目标目录">
-          <el-input v-model="moveTargetDir" placeholder="请输入目标目录绝对路径" @keydown.enter.prevent="onEnterConfirm($event, doMove)" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="moveVisible = false">取消</el-button>
-        <el-button type="primary" :loading="moveSaving" @click="doMove">确定</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 打包下载 -->
-    <el-dialog v-model="archiveVisible" title="打包下载" width="420px">
-      <el-form @submit.prevent>
-        <el-form-item label="压缩包名称">
-          <el-input v-model="archiveName" placeholder="例如 backup" @keydown.enter.prevent="onEnterConfirm($event, doArchive)" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="archiveVisible = false">取消</el-button>
-        <el-button type="primary" :loading="archiveSaving" @click="doArchive">确定</el-button>
-      </template>
-    </el-dialog>
+    </DirPicker>
 
     <!-- 右键菜单 -->
     <div v-if="contextMenuVisible" class="fm-context-backdrop" @click="closeContextMenu" />
@@ -545,6 +574,7 @@ import {
   type FileEntry,
 } from '@/api/file'
 import CodeEditor from '@/components/CodeEditor.vue'
+import DirPicker from '@/components/DirPicker.vue'
 
 // ── store ──────────────────────────────────────────────────
 
@@ -660,17 +690,29 @@ const newFileName = ref('')
 const renameVisible = ref(false)
 const renameTarget = ref<FileEntry | null>(null)
 const renameName = ref('')
+const dupVisible = ref(false)
+const dupTarget = ref<FileEntry | null>(null)
+const dupName = ref('')
+const dupSaving = ref(false)
 
-// Copy / Move / Archive 对话框
-const copyVisible = ref(false)
-const copyTargetDir = ref('')
-const copySaving = ref(false)
-const moveVisible = ref(false)
-const moveTargetDir = ref('')
-const moveSaving = ref(false)
-const archiveVisible = ref(false)
+// 复制 / 移动 / 打包：共用一个目录选择窗口（打包额外带压缩包名称）
+type PickMode = 'copy' | 'move' | 'archive'
+const pickVisible = ref(false)
+const pickMode = ref<PickMode>('copy')
+const pickSaving = ref(false)
 const archiveName = ref('')
-const archiveSaving = ref(false)
+const pickTitle = computed(
+  () => ({ copy: '复制到目录', move: '移动到目录', archive: '打包到目录' })[pickMode.value],
+)
+const pickConfirmText = computed(
+  () => ({ copy: '复制到此', move: '移动到此', archive: '打包到此' })[pickMode.value],
+)
+/** 打包时最终生成的文件名（后端会自动补 .zip），用于窗口内的预览提示 */
+const archiveFileName = computed(() => {
+  const n = archiveName.value.trim()
+  if (!n) return ''
+  return n.toLowerCase().endsWith('.zip') ? n : `${n}.zip`
+})
 
 const editVisible = ref(false)
 const editingFile = ref('')
@@ -928,7 +970,7 @@ function copyFromMenu() {
 }
 function duplicateFromMenu() {
   closeContextMenu()
-  duplicateSelected()
+  showDuplicateDialog()
 }
 function moveFromMenu() {
   closeContextMenu()
@@ -1104,14 +1146,146 @@ async function handleDelete(row: FileEntry) {
   }
 }
 
-async function handleUpload(options: any) {
-  try {
-    const files = [options.file] as File[]
-    await uploadFiles(currentPath.value, files)
-    ElMessage.success('上传成功')
+// ── 上传（点选 / 目录 / 拖拽） ────────────────────────────────
+
+/** 拖拽的文件是否悬停在列表区上方 */
+const dragActive = ref(false)
+
+function onDragEnter() {
+  dragActive.value = true
+}
+
+function onDragOver() {
+  dragActive.value = true
+}
+
+/** 用 relatedTarget 判断，移到列表区内部（表格 / 遮罩）不算离开，避免闪烁 */
+function onDragLeave(e: DragEvent) {
+  const el = e.currentTarget as HTMLElement | null
+  const to = e.relatedTarget as Node | null
+  if (!el || !to || !el.contains(to)) dragActive.value = false
+}
+
+/** 拖拽时一次请求带太多文件会让后端整包读进内存，按批切分 */
+const UPLOAD_BATCH_SIZE = 20
+
+/**
+ * 递归展开拖入的目录项。
+ *
+ * 不能用 `dataTransfer.files`：拖文件夹时它只给一个 0 字节的目录项，既没有内部文件
+ * 也没有层级。这里用 `webkitGetAsEntry()` 自己遍历，并把 `entry.fullPath`
+ * （形如 `/dir/sub/a.txt`）写回 `webkitRelativePath`，复用「上传目录」按钮同一条链路，
+ * 由后端按相对路径逐级建目录还原结构。
+ */
+function walkEntry(entry: FileSystemEntry, out: File[]): Promise<void> {
+  if (entry.isFile) {
+    return new Promise((resolve) => {
+      ;(entry as FileSystemFileEntry).file(
+        (file) => {
+          // webkitRelativePath 是 File.prototype 上的只读 getter（无 setter），
+          // 用 defineProperty 造一个同名自有属性，让 uploadFiles 读到层级路径
+          Object.defineProperty(file, 'webkitRelativePath', {
+            value: entry.fullPath.replace(/^\//, ''),
+            configurable: true,
+          })
+          out.push(file)
+          resolve()
+        },
+        // 单个文件读失败（无权限 / 拖拽期间被删）就跳过，不阻断整次拖拽
+        () => resolve(),
+      )
+    })
+  }
+  if (!entry.isDirectory) return Promise.resolve()
+
+  const reader = (entry as FileSystemDirectoryEntry).createReader()
+  // Chromium 单次 readEntries 最多返回 100 条，必须循环读到空才会拿到全部子项
+  const readBatch = () =>
+    new Promise<FileSystemEntry[]>((resolve) => reader.readEntries(resolve, () => resolve([])))
+
+  return (async () => {
+    for (;;) {
+      const batch = await readBatch()
+      if (!batch.length) break
+      for (const child of batch) await walkEntry(child, out)
+    }
+  })()
+}
+
+/** 能拿到 entry 就走递归（保留层级）；拿不到时退回 dataTransfer.files（无层级） */
+async function collectDroppedFiles(dt: DataTransfer | null): Promise<File[]> {
+  const entries = Array.from(dt?.items ?? [])
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.webkitGetAsEntry?.())
+    .filter((entry): entry is FileSystemEntry => !!entry)
+
+  if (entries.length) {
+    const out: File[] = []
+    for (const entry of entries) await walkEntry(entry, out)
+    return out
+  }
+  return dt ? Array.from(dt.files) : []
+}
+
+/** 一次选择/拖拽可能带多个文件，聚合提示一次，避免逐条刷屏 */
+const uploadBusy = ref(false)
+let uploadTimer: ReturnType<typeof setTimeout> | undefined
+let uploadTotal = 0
+let uploadFailed = 0
+
+function scheduleUploadSummary() {
+  clearTimeout(uploadTimer)
+  uploadTimer = setTimeout(() => {
+    const total = uploadTotal
+    const failed = uploadFailed
+    uploadTotal = 0
+    uploadFailed = 0
+    uploadBusy.value = false
+    if (failed === 0) ElMessage.success(`已上传 ${total} 个文件`)
+    else if (failed < total)
+      ElMessage.warning(`上传完成：成功 ${total - failed} 个，失败 ${failed} 个`)
+    else ElMessage.error(`上传失败（${failed} 个文件）`)
     loadFileList()
+    refreshTree()
+  }, 300)
+}
+
+/**
+ * 拖拽落点：文件与文件夹都支持。
+ *
+ * 走自己的 drop（而不是 el-upload 的 drag）是因为它的拖拽分支靠 `entry.file()`
+ * 拿文件，`webkitRelativePath` 为空，目录会被压平；这里由 walkEntry 把层级补回去。
+ */
+async function handleDrop(e: DragEvent) {
+  dragActive.value = false
+  const files = await collectDroppedFiles(e.dataTransfer)
+  if (!files.length) return
+
+  uploadBusy.value = true
+  uploadTotal += files.length
+  try {
+    for (let i = 0; i < files.length; i += UPLOAD_BATCH_SIZE) {
+      const batch = files.slice(i, i + UPLOAD_BATCH_SIZE)
+      try {
+        await uploadFiles(currentPath.value, batch)
+      } catch {
+        uploadFailed += batch.length
+      }
+    }
+  } finally {
+    scheduleUploadSummary()
+  }
+}
+
+async function handleUpload(options: any) {
+  uploadBusy.value = true
+  uploadTotal += 1
+  try {
+    await uploadFiles(currentPath.value, [options.file as File])
   } catch {
-    // handled
+    uploadFailed += 1
+  } finally {
+    scheduleUploadSummary()
   }
 }
 
@@ -1155,9 +1329,10 @@ async function downloadSelected() {
   const name = archiveName.value || `download_${Date.now()}`
   const paths = selectedItems.value.map((e) => e.path)
   try {
+    // 不传目标目录：后端返回 zip 的 base64 内容，这里直接触发浏览器下载
     const res = await archiveFiles(paths, name, currentPath.value)
     const data = res.data
-    if (!data) return
+    if (!data?.content) return
     downloadBlob(data.name, data.content)
     ElMessage.success('开始下载')
   } catch (e: any) {
@@ -1165,118 +1340,197 @@ async function downloadSelected() {
   }
 }
 
-function showCopyDialog(fromMenu: boolean) {
+/** 打开目录选择窗口：复制 / 移动 / 打包共用同一个窗口，只是标题与确认文案不同 */
+function openPicker(mode: PickMode, fromMenu = false) {
   if (!hasSelection.value) return
   if (fromMenu && singleSelected.value) setSelection(singleSelected.value)
-  copyTargetDir.value = currentPath.value
-  copyVisible.value = true
+  pickMode.value = mode
+  if (mode === 'archive') archiveName.value = `archive_${Date.now()}`
+  pickVisible.value = true
 }
 
-async function doCopy() {
-  if (!hasSelection.value || !copyTargetDir.value.trim()) {
-    ElMessage.warning('请输入目标目录')
+function showCopyDialog(fromMenu: boolean) {
+  openPicker('copy', fromMenu)
+}
+
+function showMoveDialog(fromMenu: boolean) {
+  openPicker('move', fromMenu)
+}
+
+function showArchiveDialog() {
+  openPicker('archive')
+}
+
+async function onPickConfirm(dir: string) {
+  if (pickMode.value === 'copy') await doCopy(dir)
+  else if (pickMode.value === 'move') await doMove(dir)
+  else await doArchive(dir)
+}
+
+async function doCopy(dir: string) {
+  const items = selectedItems.value
+  const target = dir.trim()
+  if (!items.length || !target) {
+    ElMessage.warning('请选择目标目录')
     return
   }
-  copySaving.value = true
+  // 目标就是条目当前所在目录时后端会报错，这里提前拦下
+  const same = items.find((it) => `${target}/${it.name}` === it.path)
+  if (same) {
+    ElMessage.warning(`「${same.name}」已在该目录下，无需复制`)
+    return
+  }
+  pickSaving.value = true
   try {
-    for (const item of selectedItems.value) {
-      const target = `${copyTargetDir.value.trim()}/${item.name}`
-      await copyFile(item.path, target)
+    for (const item of items) {
+      await copyFile(item.path, `${target}/${item.name}`)
     }
-    ElMessage.success('复制成功')
-    copyVisible.value = false
+    ElMessage.success(`已复制 ${items.length} 项到 ${target}`)
+    pickVisible.value = false
     loadFileList()
     refreshTree()
   } catch (e: any) {
     ElMessage.error(e?.message || '复制失败')
   } finally {
-    copySaving.value = false
+    pickSaving.value = false
   }
 }
 
-function showMoveDialog(fromMenu: boolean) {
-  if (!hasSelection.value) return
-  if (fromMenu && singleSelected.value) setSelection(singleSelected.value)
-  moveTargetDir.value = currentPath.value
-  moveVisible.value = true
-}
-
-async function doMove() {
-  if (!hasSelection.value || !moveTargetDir.value.trim()) {
-    ElMessage.warning('请输入目标目录')
+async function doMove(dir: string) {
+  const items = selectedItems.value
+  const target = dir.trim()
+  if (!items.length || !target) {
+    ElMessage.warning('请选择目标目录')
     return
   }
-  moveSaving.value = true
+  if (target === currentPath.value) {
+    ElMessage.warning('目标目录就是当前目录，无需移动')
+    return
+  }
+  // 目录不能移动到自己或自己的子目录里
+  const inside = items.find(
+    (it) => it.is_dir && (target === it.path || target.startsWith(`${it.path}/`)),
+  )
+  if (inside) {
+    ElMessage.warning(`不能把「${inside.name}」移动到它自己里面`)
+    return
+  }
+  pickSaving.value = true
   try {
-    for (const item of selectedItems.value) {
-      const target = `${moveTargetDir.value.trim()}/${item.name}`
-      await renameFile(item.path, target)
+    for (const item of items) {
+      await renameFile(item.path, `${target}/${item.name}`)
     }
-    ElMessage.success('移动成功')
-    moveVisible.value = false
+    ElMessage.success(`已移动 ${items.length} 项到 ${target}`)
+    pickVisible.value = false
     loadFileList()
     refreshTree()
   } catch (e: any) {
     ElMessage.error(e?.message || '移动失败')
   } finally {
-    moveSaving.value = false
+    pickSaving.value = false
   }
 }
 
-function showArchiveDialog() {
-  if (!hasSelection.value) return
-  archiveName.value = `archive_${Date.now()}`
-  archiveVisible.value = true
-}
-
-async function doArchive() {
-  if (!hasSelection.value) return
+/** 打包只在目标目录里生成压缩包，不做下载 */
+async function doArchive(dir: string) {
+  const items = selectedItems.value
+  const target = dir.trim()
   const name = archiveName.value.trim()
+  if (!items.length || !target) {
+    ElMessage.warning('请选择目标目录')
+    return
+  }
   if (!name) {
     ElMessage.warning('请输入压缩包名称')
     return
   }
-  archiveSaving.value = true
+  pickSaving.value = true
   try {
-    const paths = selectedItems.value.map((e) => e.path)
-    const res = await archiveFiles(paths, name, currentPath.value)
-    const data = res.data
-    if (!data) return
-    downloadBlob(data.name, data.content)
-    ElMessage.success('开始下载')
-    archiveVisible.value = false
+    const res = await archiveFiles(
+      items.map((e) => e.path),
+      name,
+      currentPath.value,
+      target,
+    )
+    ElMessage.success(`已创建压缩包 ${res.data?.path || archiveFileName.value}`)
+    pickVisible.value = false
+    loadFileList()
+    refreshTree()
   } catch (e: any) {
     ElMessage.error(e?.message || '打包失败')
   } finally {
-    archiveSaving.value = false
+    pickSaving.value = false
   }
 }
 
-/** 复制副本：目标已存在时自动在名字后追加 _copy / _copy2 ... */
-async function duplicateSelected() {
-  if (!singleSelected.value) return
-  const item = singleSelected.value
-  let idx = 0
-  let candidate = ''
-  // 先探测可用名字：最多尝试 100 次
-  for (; idx < 100; idx++) {
-    candidate = idx === 0 ? `${item.path}_copy` : `${item.path}_copy${idx + 1}`
-    try {
-      await copyFile(item.path, candidate)
-      ElMessage.success('复制副本成功')
-      loadFileList()
-      refreshTree()
-      return
-    } catch (e: any) {
-      // 目标已存在则继续尝试下一个名字，其余错误直接抛出
-      if (typeof e?.message === 'string' && e.message.includes('目标已存在')) {
-        continue
-      }
-      ElMessage.error(e?.message || '复制失败')
-      return
-    }
+/** 拆扩展名：目录、以及 `.bashrc` 这类点开头的隐藏文件都算没有扩展名 */
+function splitExt(name: string, isDir: boolean): { base: string; ext: string } {
+  if (isDir) return { base: name, ext: '' }
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0) return { base: name, ext: '' }
+  return { base: name.slice(0, dot), ext: name.slice(dot) }
+}
+
+/** 取父目录（副本建在原条目所在目录，不受 currentPath 影响） */
+function parentDir(path: string): string {
+  const i = path.lastIndexOf('/')
+  return i <= 0 ? '/' : path.slice(0, i)
+}
+
+/**
+ * 自动生成默认副本名：把 `_copy` 插在扩展名前（目录直接追加），
+ * 如 `index.php` → `index_copy.php`；当前目录里已被占用则依次试 `_copy2`、`_copy3` …
+ */
+function nextCopyName(item: FileEntry): string {
+  const { base, ext } = splitExt(item.name, item.is_dir)
+  const taken = new Set(fileList.value.map((e) => e.name))
+  for (let idx = 1; idx <= 100; idx++) {
+    const name = `${base}${idx === 1 ? '_copy' : `_copy${idx}`}${ext}`
+    if (!taken.has(name)) return name
   }
-  ElMessage.error('无法生成可用的副本名称')
+  return `${base}_copy${Date.now()}${ext}`
+}
+
+/** 复制副本：先让用户确认副本名（默认预填自动生成的副本名） */
+function showDuplicateDialog() {
+  const item = singleSelected.value
+  if (!item) return
+  dupTarget.value = item
+  dupName.value = nextCopyName(item)
+  dupVisible.value = true
+}
+
+async function doDuplicate() {
+  const item = dupTarget.value
+  const name = dupName.value.trim()
+  if (!item || !name) {
+    ElMessage.warning('请输入副本名称')
+    return
+  }
+  if (name.includes('/')) {
+    ElMessage.warning('副本名称不能包含 /')
+    return
+  }
+  if (name === item.name) {
+    ElMessage.warning('副本名称不能与原名称相同')
+    return
+  }
+  if (fileList.value.some((e) => e.name === name)) {
+    ElMessage.warning(`「${name}」已存在，请换一个名称`)
+    return
+  }
+  dupSaving.value = true
+  try {
+    await copyFile(item.path, `${parentDir(item.path)}/${name}`)
+    ElMessage.success('复制副本成功')
+    dupVisible.value = false
+    loadFileList()
+    refreshTree()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '复制失败')
+  } finally {
+    dupSaving.value = false
+  }
 }
 
 async function removeSelected() {
@@ -1578,10 +1832,78 @@ watch(viewMode, async (mode) => {
   }
 }
 
+/* 选中项操作条：地址栏下方独立一行 */
+.fm-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-lighter);
+  overflow-x: auto;
+}
+
+.fm-selection-actions {
+  flex: none;
+}
+
+/* 打包窗口里的「压缩包名称」一行（挂在 DirPicker 的 extra 插槽下） */
+.fm-archive-name {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.fm-archive-label {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.fm-archive-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .view-toggle {
   .el-button {
     padding: 5px 10px;
   }
+}
+
+/* 列表区：拖拽上传遮罩的定位参照 */
+.fm-list-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fm-dropzone {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.fm-dropzone-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--el-color-primary);
+}
+
+.fm-dropzone-text {
+  font-size: 14px;
 }
 
 .fm-table-wrap {
@@ -1663,7 +1985,6 @@ watch(viewMode, async (mode) => {
 .fm-selection-label {
   font-size: 13px;
   color: var(--el-text-color-secondary);
-  margin-right: 8px;
   white-space: nowrap;
 }
 

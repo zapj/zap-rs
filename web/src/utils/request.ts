@@ -53,7 +53,11 @@ service.interceptors.request.use(
         config.headers['Authorization'] = `Bearer ${token}`
       }
     }
-    config.headers['Content-Type'] = 'application/json'
+    // FormData 请求（上传）让浏览器/axios 自动设置 Content-Type（含 multipart boundary），
+    // 手动写 'multipart/form-data' 会导致 boundary 丢失，后端 Multipart 解析失败（400）。
+    if (!(config.data instanceof FormData)) {
+      config.headers['Content-Type'] = config.headers['Content-Type'] || 'application/json'
+    }
     return config
   },
   (error) => Promise.reject(error),
@@ -193,10 +197,7 @@ export const http = {
   upload<T = any>(url: string, file: File, config?: AxiosRequestConfig): Promise<T> {
     const formData = new FormData()
     formData.append('file', file)
-    return service.post(url, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      ...config,
-    }) as Promise<T>
+    return service.post(url, formData, config) as Promise<T>
   },
 
   download(url: string, config?: AxiosRequestConfig): Promise<Blob> {

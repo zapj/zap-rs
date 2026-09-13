@@ -314,12 +314,19 @@ pub enum Request {
         #[serde(default)]
         skip_owner_check: bool,
     },
-    /// 打包下载（zip，base64 字节）
+    /// 打包 zip：给出 `dest_dir` 就把压缩包写到该目录（打包到目录），
+    /// 否则返回 zip 的 base64 内容供调用方下载。
     #[serde(rename = "file.archive")]
     FileArchive {
         paths: Vec<String>,
         name: String,
         base_dir: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dest_dir: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
     },
     /// 添加 AppStore Git 源（clone 到 data/appstore/repos/<id>/）
     #[serde(rename = "appstore.repo_add")]

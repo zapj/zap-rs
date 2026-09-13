@@ -82,16 +82,20 @@ export function chmodFile(path: string, mode: number) {
   return http.post<ApiResponse<FileEntry>>('/system/files/chmod', { path, mode })
 }
 
-/** Upload file(s) */
+/**
+ * Upload file(s) to `targetDir`.
+ *
+ * 目录上传（`webkitdirectory`）时浏览器把相对路径挂在 `file.webkitRelativePath`
+ * （如 `dir/sub/a.txt`），这里用它作为 multipart 的文件名，由后端逐级创建目录还原结构。
+ */
 export function uploadFiles(targetDir: string, files: File[]) {
   const formData = new FormData()
   for (const file of files) {
-    formData.append('files', file)
+    formData.append('files', file, file.webkitRelativePath || file.name)
   }
   return http.post<ApiResponse<{ files: string[]; target_dir: string }>>(
     `/system/files/upload?path=${encodeURIComponent(targetDir)}`,
     formData,
-    { headers: { 'Content-Type': 'multipart/form-data' } },
   )
 }
 
@@ -117,14 +121,23 @@ export function copyFile(path: string, newPath: string) {
 
 export interface ArchiveData {
   name: string
-  content: string
+  /** 打包到指定目录时返回压缩包完整路径 */
+  path?: string
+  /** 未指定目录（下载场景）时返回 zip 的 base64 内容 */
+  content?: string
 }
 
-/** Archive selected paths into a zip (returns base64 content) */
-export function archiveFiles(paths: string[], name: string, baseDir: string) {
+/**
+ * Archive selected paths into a zip.
+ *
+ * 传 `destDir` 时后端把压缩包写进该目录并返回其路径；
+ * 不传则返回 base64 内容，由调用方下载。
+ */
+export function archiveFiles(paths: string[], name: string, baseDir: string, destDir?: string) {
   return http.post<ApiResponse<ArchiveData>>('/system/files/archive', {
     paths,
     name,
     base_dir: baseDir,
+    dest_dir: destDir,
   })
 }
