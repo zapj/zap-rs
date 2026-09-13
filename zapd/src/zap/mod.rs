@@ -9,6 +9,7 @@ pub mod appstore;
 pub mod audit;
 pub mod auto_update;
 pub mod certmgr;
+pub mod cloud;
 pub mod crypto;
 pub mod fastcgi;
 pub mod global;

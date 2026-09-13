@@ -16,6 +16,17 @@ ssh2 = "0.9"
 futures-util = "0.3"
 tokio = { version = "1.0", features = ["full"] }
 tower-http = { version = "0.6.1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+# 云存储：统一对象存储访问层（S3 / 阿里云 OSS / 腾讯云 COS / S3 兼容协议）
+opendal = { version = "0.59", default-features = false, features = [
+    "services-s3",
+    "services-oss",
+    "services-cos",
+    "http-transport-reqwest",
+    "executors-tokio",
+    "layers-retry",
+    "layers-timeout",
+] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
@@ -31,6 +42,7 @@ tower-service = "0.3.3"
 
 public-ip-address = { version = "0.3" }
 getrandom = "0.2"
+bytes = "1.10"
 hex = "0.4"
 rust-embed = "8.7.2"
 mime_guess = "2.0.5"

@@ -27,6 +27,11 @@ import IconCheck from '~icons/material-symbols/check'
 import IconCheckCircle from '~icons/material-symbols/check-circle'
 import IconChevronRight from '~icons/material-symbols/chevron-right'
 import IconClose from '~icons/material-symbols/close'
+import IconCloud from '~icons/material-symbols/cloud'
+import IconCloudDone from '~icons/material-symbols/cloud-done'
+import IconCloudDownload from '~icons/material-symbols/cloud-download'
+import IconCloudOff from '~icons/material-symbols/cloud-off'
+import IconCloudUpload from '~icons/material-symbols/cloud-upload'
 import IconConfirmationNumber from '~icons/material-symbols/confirmation-number'
 import IconCreateNewFolder from '~icons/material-symbols/create-new-folder'
 import IconDarkMode from '~icons/material-symbols/dark-mode'
@@ -93,6 +98,11 @@ export const ICON_MAP: Record<string, Component> = {
   'check-circle': IconCheckCircle,
   'chevron-right': IconChevronRight,
   close: IconClose,
+  cloud: IconCloud,
+  'cloud-done': IconCloudDone,
+  'cloud-download': IconCloudDownload,
+  'cloud-off': IconCloudOff,
+  'cloud-upload': IconCloudUpload,
   'confirmation-number': IconConfirmationNumber,
   'create-new-folder': IconCreateNewFolder,
   'dark-mode': IconDarkMode,
@@ -157,6 +167,11 @@ export const Check = IconCheck
 export const CircleCheckFilled = IconCheckCircle
 export const CircleCloseFilled = IconCancel
 export const Close = IconClose
+export const Cloud = IconCloud
+export const CloudDone = IconCloudDone
+export const CloudDownload = IconCloudDownload
+export const CloudOff = IconCloudOff
+export const CloudUpload = IconCloudUpload
 export const Connection = IconCable
 export const Cpu = IconMemory
 export const DataLine = IconMonitoring

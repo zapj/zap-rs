@@ -126,7 +126,10 @@ pub fn users_dir() -> PathBuf {
 }
 
 /// 面板用户名安全校验：仅允许 `[A-Za-z0-9._-]`，禁止 `..` 与首字符为 `.`。
-fn safe_username(username: &str) -> Result<(), ZapError> {
+///
+/// 凡是要拼进 `data/users/<user>/` 路径的地方都先过这道校验（crontab、云存储…），
+/// 避免用户名里的 `/` 或 `..` 把落盘路径带出用户目录。
+pub(crate) fn safe_username(username: &str) -> Result<(), ZapError> {
     let u = username.trim();
     if u.is_empty() || u.len() > 64 {
         return Err(ZapError::New(-1, "用户名不合法".to_string()));

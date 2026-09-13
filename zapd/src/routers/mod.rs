@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     body::Body,
-    extract::Request,
+    extract::{DefaultBodyLimit, Request},
     http::{Method, StatusCode, Uri, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -42,6 +42,7 @@ async fn demo_readonly_guard(req: Request, next: Next) -> Result<Response, Respo
 pub mod access;
 pub mod appstore;
 pub mod auth;
+pub mod cloud;
 pub mod database;
 pub mod dev;
 pub mod fpm_spec;
@@ -78,6 +79,12 @@ pub mod webapps;
 struct Assets;
 
 static INDEX_HTML: &str = "index.html";
+
+/// 云存储上传的请求体上限（4 GiB）。
+///
+/// 上传走「边收边写」的流式写入，内存占用与文件大小无关，因此这里只用于
+/// 挡住明显异常的请求（axum 默认上限是 2 MB，对云存储来说太小）。
+const CLOUD_UPLOAD_LIMIT: usize = 4 * 1024 * 1024 * 1024;
 
 async fn index_html() -> Response {
     match Assets::get(INDEX_HTML) {
@@ -552,6 +559,21 @@ fn api_routers() -> Router {
         .route("/system/files/download", get(system_file::file_download))
         .route("/system/files/upload", post(system_file::file_upload))
         .route("/system/files/info", get(system_file::file_info))
+        // 云存储（多套配置 + 对象浏览/传输）
+        .route("/system/cloud/stores", get(cloud::store_list))
+        .route("/system/cloud/store/save", post(cloud::store_save))
+        .route("/system/cloud/store/delete", post(cloud::store_delete))
+        .route("/system/cloud/test", get(cloud::store_test))
+        .route("/system/cloud/list", get(cloud::file_list))
+        .route("/system/cloud/download", get(cloud::file_download))
+        .route("/system/cloud/mkdir", post(cloud::file_mkdir))
+        .route("/system/cloud/delete", post(cloud::file_delete))
+        .route("/system/cloud/rename", post(cloud::file_rename))
+        // 上传单独放开请求体上限（见 CLOUD_UPLOAD_LIMIT 注释）
+        .route(
+            "/system/cloud/upload",
+            post(cloud::file_upload).layer(DefaultBodyLimit::max(CLOUD_UPLOAD_LIMIT)),
+        )
         // AppStore（多 Git 源）
         .route("/appstore/repos", get(appstore::list_repos))
         .route("/appstore/repos/add", post(appstore::repo_add))

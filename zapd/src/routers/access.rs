@@ -250,6 +250,57 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
         Required::User,
         Some(Perm::action("system.file", "delete")),
     ),
+    // ── 云存储：view / write / delete（配置与对象都按当前用户隔离）──
+    (
+        "/system/cloud/stores",
+        Required::User,
+        Some(Perm::action("system.cloud", "view")),
+    ),
+    (
+        "/system/cloud/test",
+        Required::User,
+        Some(Perm::action("system.cloud", "view")),
+    ),
+    (
+        "/system/cloud/list",
+        Required::User,
+        Some(Perm::action("system.cloud", "view")),
+    ),
+    (
+        "/system/cloud/download",
+        Required::User,
+        Some(Perm::action("system.cloud", "view")),
+    ),
+    (
+        "/system/cloud/store/save",
+        Required::User,
+        Some(Perm::action("system.cloud", "write")),
+    ),
+    (
+        "/system/cloud/mkdir",
+        Required::User,
+        Some(Perm::action("system.cloud", "write")),
+    ),
+    (
+        "/system/cloud/upload",
+        Required::User,
+        Some(Perm::action("system.cloud", "write")),
+    ),
+    (
+        "/system/cloud/rename",
+        Required::User,
+        Some(Perm::action("system.cloud", "write")),
+    ),
+    (
+        "/system/cloud/delete",
+        Required::User,
+        Some(Perm::action("system.cloud", "delete")),
+    ),
+    (
+        "/system/cloud/store/delete",
+        Required::User,
+        Some(Perm::action("system.cloud", "delete")),
+    ),
     // ── 应用商店：view / install / uninstall / upgrade / manage / log / retry ──
     (
         "/appstore/install",
@@ -632,6 +683,7 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
 const NS_LABELS: &[(&str, &str)] = &[
     ("system.menu", "菜单管理"),
     ("system.file", "文件管理"),
+    ("system.cloud", "云存储"),
     ("system.monitor", "服务器状态"),
     ("system.user", "用户管理"),
     ("system.package", "套餐管理"),
@@ -1453,6 +1505,55 @@ mod tests {
         assert_eq!(required_for("/appstore/script/run"), Required::Admin);
         assert_eq!(required_for("/appstore/scripts/tree"), Required::Admin);
         assert_eq!(required_for("/dev/api-token/create"), Required::Admin);
+        // 云存储：配置与桶内对象同属用户级（各自只看自己的目录）
+        assert_eq!(required_for("/system/cloud/stores"), Required::User);
+        assert_eq!(required_for("/system/cloud/download"), Required::User);
+    }
+
+    #[test]
+    fn cloud_paths_map_to_perms() {
+        // `/system/cloud/stores` 与 `/system/cloud/store/*` 只差一个字母，
+        // 前缀匹配不能串门，这里一并锁住。
+        assert_eq!(
+            perm_key_for("/system/cloud/stores", &Method::GET).as_deref(),
+            Some("system.cloud:view")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/test", &Method::GET).as_deref(),
+            Some("system.cloud:view")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/list", &Method::GET).as_deref(),
+            Some("system.cloud:view")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/download", &Method::GET).as_deref(),
+            Some("system.cloud:view")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/store/save", &Method::POST).as_deref(),
+            Some("system.cloud:write")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/mkdir", &Method::POST).as_deref(),
+            Some("system.cloud:write")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/upload", &Method::POST).as_deref(),
+            Some("system.cloud:write")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/rename", &Method::POST).as_deref(),
+            Some("system.cloud:write")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/delete", &Method::POST).as_deref(),
+            Some("system.cloud:delete")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/store/delete", &Method::POST).as_deref(),
+            Some("system.cloud:delete")
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::{env, sync::Arc, time::Duration};
 
-use axum::{Router, extract::Request};
+use axum::{Router, extract::Request, http::StatusCode};
 use clap::Parser;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use openssl::ssl::{AlpnError, Ssl, SslAcceptor, SslFiletype, SslMethod, select_next_proto};
@@ -127,9 +127,13 @@ async fn main() {
     // 自动更新（zapd/zapexec 系统升级）定时调度
     zap::auto_update::start();
 
+    // 全局请求超时：文件上传/下载、云存储与本地互传都属于「一口气传完」的长任务，
+    // 10 秒会误杀（响应还没生成就被判超时）。这里放宽到 30 分钟只做兜底，
+    // 具体服务的连接/读取超时交给各自客户端（zapexec、opendal/reqwest）。
     let app = Router::new().merge(routers::routers()).layer((
         TraceLayer::new_for_http(),
-        TimeoutLayer::new(Duration::from_secs(10)),
+        // `TimeoutLayer::new` 已废弃，`with_status_code` 是它的等价写法（超时返回 408）
+        TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(1800)),
         CompressionLayer::new(),
     ));
 
@@ -142,6 +146,11 @@ async fn main() {
             }
         };
 
+        // SO_LINGER 非零值会阻塞线程，tokio 因此标记了废弃，但这里是刻意保留的：
+        // 关闭连接时若接收缓冲里还有没读完的数据，内核会直接发 RST，客户端看到的是
+        // 「连接被重置」而不是响应内容（POST 被拒的 4xx 响应最容易踩到）；设了 linger
+        // 才会走正常的四次挥手把已写数据送完。tokio 承诺该 API 不会被移除。
+        #[allow(deprecated)]
         stream.set_linger(Some(Duration::from_secs(30))).ok();
 
         // A TLS ClientHello always starts with byte 0x16.
