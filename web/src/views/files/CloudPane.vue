@@ -52,20 +52,23 @@
       <template v-if="activeStore">
         <div class="cm-toolbar">
           <div class="cm-toolbar-left">
-            <el-breadcrumb separator="/">
+            <!-- 地址栏：桶根用云图标表示，层级用 > 分隔（与本地存储一致） -->
+            <el-breadcrumb separator=">" class="cm-crumbs">
               <el-breadcrumb-item>
                 <a
                   href="javascript:void(0)"
                   :class="{ 'is-last': !currentPath }"
+                  title="存储桶根目录"
                   @click="navigateTo('')"
                 >
-                  根目录
+                  <el-icon :size="14" class="cm-crumb-icon"><Cloud /></el-icon>
                 </a>
               </el-breadcrumb-item>
               <el-breadcrumb-item v-for="(seg, idx) in pathSegments" :key="seg.path">
                 <a
                   href="javascript:void(0)"
                   :class="{ 'is-last': idx === pathSegments.length - 1 }"
+                  :title="seg.path"
                   @click="navigateTo(seg.path)"
                 >
                   {{ seg.name }}
@@ -898,14 +901,35 @@ onMounted(() => {
   min-width: 0;
   overflow: hidden;
 
+  /* 层级用 > 分隔；每段单独截断，深目录也不会把工具栏挤变形 */
+  :deep(.el-breadcrumb__inner) {
+    display: inline-flex;
+    align-items: center;
+    max-width: 220px;
+  }
+
   :deep(.el-breadcrumb__inner a) {
     font-weight: 400;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 
     &.is-last {
       color: var(--el-text-color-primary);
       cursor: default;
     }
   }
+
+  :deep(.el-breadcrumb__separator) {
+    margin: 0 6px;
+    font-weight: 400;
+    color: var(--el-text-color-placeholder);
+  }
+}
+
+/* 桶根段只有图标：别被基线挤偏 */
+.cm-crumb-icon {
+  vertical-align: middle;
 }
 
 .cm-toolbar-right {

@@ -156,15 +156,27 @@ fn special_bits_allowed(claims: &Claims, requested: u32, current: u32) -> bool {
 
 // ── handlers ───────────────────────────────────────────────
 
+/// 列目录时把请求路径解析成实际要列的目标：
+/// - 不传 `path`（打开文件管理）：一律进入个人家目录，管理员也一样，
+///   免得一进文件管理就是整个根文件系统；
+/// - 普通用户传 `/`：仍落到自己的 home（home/tmp 白名单保护，行为不变）；
+/// - 其余显式路径原样透传（管理员想回根目录传 `path=/` 即可）。
+fn resolve_list_target(is_admin: bool, requested: &str, home: &str) -> String {
+    if requested.is_empty() || (!is_admin && requested == "/") {
+        home.to_string()
+    } else {
+        requested.to_string()
+    }
+}
+
 /// GET /system/files/list?path=/
+///
+/// 不传 `path` 时进入个人家目录；响应额外带上 `home`，前端用它做侧栏根节点
+/// 与地址栏起点（cPanel 风格：文件管理始终从家目录开始）。
 pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJsonResult {
     let (home, tmp) = user_private_prefixes(&claims).await;
-    // 非管理员默认进入自己的 home 目录
-    let raw_path = match (is_admin(&claims), query.path.as_deref()) {
-        (false, None) | (false, Some("/")) => home.clone(),
-        (_, Some(p)) => p.to_string(),
-        (_, None) => "/".to_string(),
-    };
+    let requested = query.path.as_deref().unwrap_or("");
+    let raw_path = resolve_list_target(is_admin(&claims), requested, &home);
     let resolved = resolve_path(&raw_path)?;
     check_access(&claims, &resolved, &home, &tmp)?;
 
@@ -172,12 +184,20 @@ pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJso
     if !is_admin(&claims) && resolved.as_path() == Path::new(&home) && !resolved.exists() {
         let (as_user, skip_owner_check) = actor_identity(&claims).await?;
         let _ = crate::zapexec::call(Request::FileMkdir {
-            path: home,
+            path: home.clone(),
             as_user,
             skip_owner_check,
         })
         .await;
     }
+
+    // 管理员的家目录可能压根没建过：默认进 home 失败时退回根目录，
+    // 否则文件管理一打开就报「目录不存在」。
+    let resolved = if is_admin(&claims) && requested.is_empty() && !resolved.exists() {
+        PathBuf::from("/")
+    } else {
+        resolved
+    };
 
     let resp = crate::zapexec::call(Request::FileList {
         path: resolved.to_string_lossy().to_string(),
@@ -186,9 +206,12 @@ pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJso
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    Ok(Json(
-        json!({ "code": 0, "message": "ok", "data": resp.data }),
-    ))
+
+    let mut data = resp.data.unwrap_or_else(|| json!({}));
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("home".to_string(), json!(home));
+    }
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": data })))
 }
 
 /// GET /system/files/read?path=...
@@ -609,6 +632,25 @@ mod tests {
         assert!(!special_bits_allowed(&user, 0o0755, 0o4755));
         assert!(!special_bits_allowed(&user, 0o2775, 0o0775));
         assert!(!special_bits_allowed(&user, 0o1777, 0o0777));
+    }
+
+    #[test]
+    fn list_defaults_to_home() {
+        // 打开文件管理（不传 path）：管理员与普通用户都进自己的家目录
+        assert_eq!(resolve_list_target(true, "", "/home/admin"), "/home/admin");
+        assert_eq!(resolve_list_target(false, "", "/home/alice"), "/home/alice");
+        // 普通用户点「根」仍落到家目录；管理员可以显式进根目录
+        assert_eq!(
+            resolve_list_target(false, "/", "/home/alice"),
+            "/home/alice"
+        );
+        assert_eq!(resolve_list_target(true, "/", "/home/admin"), "/");
+        // 显式路径原样透传
+        assert_eq!(resolve_list_target(true, "/etc", "/home/admin"), "/etc");
+        assert_eq!(
+            resolve_list_target(false, "/home/alice/www", "/home/alice"),
+            "/home/alice/www"
+        );
     }
 
     #[test]

@@ -21,10 +21,14 @@
           <template #default="{ node, data }">
             <span class="fm-tree-node">
               <el-icon :size="16">
-                <Folder v-if="data.is_dir" />
-                <Document v-else />
+                <Home v-if="data.icon === 'home'" />
+                <HardDrive v-else-if="data.icon === 'root'" />
+                <FolderOpened v-else-if="node.expanded" />
+                <Folder v-else />
               </el-icon>
-              <span class="fm-tree-label">{{ node.label }}</span>
+              <span class="fm-tree-label" :class="{ mono: !!data.icon }" :title="data.path">
+                {{ node.label }}
+              </span>
             </span>
           </template>
         </el-tree>
@@ -36,14 +40,20 @@
       <!-- 工具栏 -->
       <div class="fm-toolbar">
         <div class="fm-toolbar-left">
-          <el-breadcrumb separator="/">
-            <el-breadcrumb-item v-for="(part, idx) in breadcrumbs" :key="idx">
+          <!-- 地址栏：根用图标表示（家目录 = 房子 / 系统根目录 = 磁盘），层级用 > 分隔 -->
+          <el-breadcrumb separator=">" class="fm-crumbs">
+            <el-breadcrumb-item v-for="(crumb, idx) in crumbs" :key="crumb.path">
               <a
                 href="javascript:void(0)"
-                @click="navigateToBreadcrumb(idx)"
-                :class="{ 'is-last': idx === breadcrumbs.length - 1 }"
+                :title="crumb.title"
+                @click="navigateToCrumb(idx)"
+                :class="{ 'is-last': idx === crumbs.length - 1 }"
               >
-                {{ part.label }}
+                <el-icon v-if="crumb.icon" :size="14" class="fm-crumb-icon">
+                  <Home v-if="crumb.icon === 'home'" />
+                  <HardDrive v-else />
+                </el-icon>
+                <span v-else>{{ crumb.label }}</span>
               </a>
             </el-breadcrumb-item>
           </el-breadcrumb>
@@ -351,8 +361,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { Refresh, Upload, List, Grid, Folder, Document, FolderAdd, DocumentAdd } from '@/icons'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import {
+  Refresh,
+  Upload,
+  List,
+  Grid,
+  Folder,
+  FolderOpened,
+  Document,
+  FolderAdd,
+  DocumentAdd,
+  Home,
+  HardDrive,
+} from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -381,7 +403,10 @@ const isAdmin = computed(() => userStore.roles.includes('admin'))
 // ── state ──────────────────────────────────────────────────
 
 const loading = ref(false)
-const currentPath = ref('/')
+/** 当前目录；空串表示"还没定位"——首次列目录不带 path，由后端落到家目录 */
+const currentPath = ref('')
+/** 家目录（后端返回，如 /home/admin）：侧栏根节点 + 地址栏起点 */
+const homePath = ref('')
 const fileList = ref<FileEntry[]>([])
 const viewMode = ref<'list' | 'grid'>('list')
 const selectedEntry = ref<FileEntry | null>(null)
@@ -395,9 +420,50 @@ interface TreeNode {
   path: string
   is_dir: boolean
   children?: TreeNode[]
+  /** 根节点的类型标记：家目录 / 系统根目录（普通目录不带） */
+  icon?: 'home' | 'root'
 }
 
 const treeData = ref<TreeNode[]>([])
+
+/** 侧栏根节点：家目录（cPanel 风格，普通目录都在它下面）；管理员额外给一个系统根目录 */
+function buildTreeData(): TreeNode[] {
+  const nodes: TreeNode[] = []
+  if (homePath.value) {
+    nodes.push({ name: homePath.value, path: homePath.value, is_dir: true, icon: 'home' })
+  }
+  // 普通用户到不了 home 之外（后端白名单），只有管理员需要这个入口
+  if (isAdmin.value) {
+    nodes.push({ name: '/', path: '/', is_dir: true, icon: 'root' })
+  }
+  // 兜底：万一没拿到 home，也留个根目录入口，别让侧栏空着
+  if (nodes.length === 0) {
+    nodes.push({ name: '/', path: '/', is_dir: true, icon: 'root' })
+  }
+  return nodes
+}
+
+/** el-tree 的 getNode 在节点不存在/未加载时会返回空值，统一兜成 null */
+function treeNode(key: string) {
+  return treeRef.value?.getNode(key) ?? null
+}
+
+/** 展开家目录、高亮当前目录（懒加载树里没加载到的层级保持原样） */
+async function revealInTree() {
+  await nextTick()
+  const tree = treeRef.value
+  if (!tree) return
+  if (homePath.value) treeNode(homePath.value)?.expand()
+  const current = currentPath.value
+  if (current && treeNode(current)) tree.setCurrentKey(current)
+  else if (homePath.value) tree.setCurrentKey(homePath.value)
+}
+
+/** 导航后同步高亮：目标目录已经在树里（展开过）才动，避免误展开一堆分支 */
+function syncTree() {
+  const current = currentPath.value
+  if (current && treeNode(current)) treeRef.value?.setCurrentKey(current)
+}
 
 // Dialogs
 const mkdirVisible = ref(false)
@@ -415,34 +481,74 @@ const saving = ref(false)
 
 // ── breadcrumbs ────────────────────────────────────────────
 
-const breadcrumbs = computed(() => {
-  if (currentPath.value === '/') return [{ label: '/' }]
-  const parts = currentPath.value.split('/').filter(Boolean)
-  let accumulated = ''
+interface Crumb {
+  label: string
+  path: string
+  title: string
+  /** 首段用图标代替文字：家目录 = 房子，系统根目录 = 磁盘 */
+  icon?: 'home' | 'root'
+}
+
+/**
+ * 地址栏段落：
+ * - 家目录内：首段是家目录图标（悬停可见完整路径），后面是相对路径，
+ *   地址栏比整条绝对路径短得多，和左侧「以家目录为根」的树也对得上；
+ * - 家目录外（管理员翻系统目录）：首段是根目录图标，后面是绝对路径。
+ */
+const crumbs = computed<Crumb[]>(() => {
+  const home = homePath.value
+  const current = currentPath.value || home || '/'
+
+  if (home && (current === home || current.startsWith(home + '/'))) {
+    const rest = current.slice(home.length).split('/').filter(Boolean)
+    return [
+      { label: home, path: home, title: `家目录 ${home}`, icon: 'home' },
+      ...rest.map((name, idx) => {
+        const path = `${home}/${rest.slice(0, idx + 1).join('/')}`
+        return { label: name, path, title: path }
+      }),
+    ]
+  }
+
+  const segments = current.split('/').filter(Boolean)
   return [
-    { label: '/' },
-    ...parts.map((p) => {
-      accumulated += '/' + p
-      return { label: p, path: accumulated }
+    { label: '/', path: '/', title: '根目录 /', icon: 'root' },
+    ...segments.map((name, idx) => {
+      const path = `/${segments.slice(0, idx + 1).join('/')}`
+      return { label: name, path, title: path }
     }),
   ]
 })
 
 // ── tree ───────────────────────────────────────────────────
 
+/**
+ * 懒加载子目录。
+ *
+ * 坑：`lazy` 模式下 el-tree 初始化时会跳过 setData，并对「根节点」调一次 load
+ * （node.level === 0），再把返回值 append 成顶层节点。我们的顶层两个节点
+ * （家目录 / 系统根目录）由 `:data` 提供，所以根调用必须返回空数组——
+ * 否则根节点的 data 是那个数组本身、取不到 path，一旦回落到 `/` 就会把
+ * 整个根目录的列表追加成第三组顶级节点（侧栏看起来重复）。
+ */
 async function loadTreeNode(node: any, resolve: (data: TreeNode[]) => void) {
+  const path: string | undefined = node.data?.path
+  if (node.level === 0 || !path) {
+    resolve([])
+    return
+  }
   try {
-    const path = node.data?.path || '/'
     const res = await listFiles(path)
     const entries = res.data?.entries || []
-    const nodes: TreeNode[] = entries
-      .filter((e) => e.is_dir)
-      .map((e) => ({
-        name: e.name,
-        path: e.path,
-        is_dir: true,
-      }))
-    resolve(nodes)
+    resolve(
+      entries
+        .filter((e) => e.is_dir)
+        .map((e) => ({
+          name: e.name,
+          path: e.path,
+          is_dir: true,
+        })),
+    )
   } catch {
     resolve([])
   }
@@ -455,11 +561,9 @@ function onTreeNodeClick(data: TreeNode) {
 }
 
 async function refreshTree() {
-  treeRef.value?.setCurrentKey(null)
-  // Reload the tree from root
-  loadTreeNode({ data: { path: '/' } }, (nodes) => {
-    // Just re-initialize by resetting
-  })
+  // 换一个全新的根节点数组，el-tree 会丢掉懒加载缓存重新拉取
+  treeData.value = buildTreeData()
+  await revealInTree()
   refreshList()
 }
 
@@ -468,10 +572,13 @@ async function refreshTree() {
 async function loadFileList() {
   loading.value = true
   try {
+    // 首次不带 path：后端落到家目录（管理员也是），回来后再以实际目录为准
     const res = await listFiles(currentPath.value)
-    // 以服务端返回的实际目录为基准（普通用户访问 / 时后端会落到其 home）
-    if (res.data?.current_path) currentPath.value = res.data.current_path
-    fileList.value = res.data?.entries || []
+    const data = res.data
+    if (data?.home) homePath.value = data.home
+    if (data?.current_path) currentPath.value = data.current_path
+    fileList.value = data?.entries || []
+    syncTree()
   } catch {
     // handled by interceptor
   } finally {
@@ -488,14 +595,17 @@ function navigateTo(path: string) {
   loadFileList()
 }
 
-function navigateToBreadcrumb(idx: number) {
-  if (idx === 0) {
-    currentPath.value = '/'
-  } else {
-    const parts = currentPath.value.split('/').filter(Boolean)
-    currentPath.value = '/' + parts.slice(0, idx).join('/')
-  }
-  loadFileList()
+function navigateToCrumb(idx: number) {
+  const crumb = crumbs.value[idx]
+  // 最后一段就是当前目录，点它不必再请求一次
+  if (!crumb || idx === crumbs.value.length - 1) return
+  navigateTo(crumb.path)
+}
+
+/** 当前目录下的完整路径（首次列目录前 currentPath 为空，按根目录拼） */
+function joinCurrent(name: string): string {
+  const dir = currentPath.value
+  return !dir || dir === '/' ? `/${name}` : `${dir}/${name}`
 }
 
 function onRowClick(row: FileEntry) {
@@ -547,11 +657,7 @@ async function openFileEditor(row: FileEntry) {
 async function doSaveEdit() {
   saving.value = true
   try {
-    const fullPath =
-      editingFullPath.value ||
-      (currentPath.value === '/'
-        ? '/' + editingFile.value
-        : currentPath.value + '/' + editingFile.value)
+    const fullPath = editingFullPath.value || joinCurrent(editingFile.value)
     await writeFile(fullPath, editContent.value)
     ElMessage.success('保存成功')
     editVisible.value = false
@@ -587,10 +693,7 @@ async function doMkdir() {
     ElMessage.warning('请输入目录名')
     return
   }
-  const fullPath =
-    currentPath.value === '/'
-      ? '/' + mkdirName.value.trim()
-      : currentPath.value + '/' + mkdirName.value.trim()
+  const fullPath = joinCurrent(mkdirName.value.trim())
   try {
     await mkdir(fullPath)
     ElMessage.success('目录创建成功')
@@ -612,10 +715,7 @@ async function doNewFile() {
     ElMessage.warning('请输入文件名')
     return
   }
-  const fullPath =
-    currentPath.value === '/'
-      ? '/' + newFileName.value.trim()
-      : currentPath.value + '/' + newFileName.value.trim()
+  const fullPath = joinCurrent(newFileName.value.trim())
   try {
     await writeFile(fullPath, '')
     ElMessage.success('文件创建成功')
@@ -637,9 +737,7 @@ async function doRename() {
     ElMessage.warning('请输入新名称')
     return
   }
-  const parent = currentPath.value === '/' ? '/' : currentPath.value
-  const newPath =
-    parent === '/' ? '/' + renameName.value.trim() : parent + '/' + renameName.value.trim()
+  const newPath = joinCurrent(renameName.value.trim())
 
   try {
     await renameFile(renameTarget.value.path, newPath)
@@ -854,8 +952,11 @@ async function doChmod() {
 
 // ── lifecycle ──────────────────────────────────────────────
 
-onMounted(() => {
-  loadFileList()
+onMounted(async () => {
+  // 先列一次目录：不带 path，由后端落到家目录，同时把 home 带回来做侧栏根节点
+  await loadFileList()
+  treeData.value = buildTreeData()
+  await revealInTree()
 })
 </script>
 
@@ -1014,6 +1115,34 @@ onMounted(() => {
 .mono {
   font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
   font-size: 12px;
+}
+
+/* ── 地址栏（面包屑）──────────────────────────────────────── */
+.fm-crumbs {
+  /* 层级用 > 分隔；每段单独截断，路径再长也不会把工具栏挤变形 */
+  :deep(.el-breadcrumb__inner) {
+    display: inline-flex;
+    align-items: center;
+    max-width: 220px;
+  }
+
+  :deep(.el-breadcrumb__inner a) {
+    font-weight: 400;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :deep(.el-breadcrumb__separator) {
+    margin: 0 6px;
+    font-weight: 400;
+    color: var(--el-text-color-placeholder);
+  }
+}
+
+/* "根"段只有图标：别被基线挤偏，也别撑出多余宽度 */
+.fm-crumb-icon {
+  vertical-align: middle;
 }
 
 :deep(.el-breadcrumb__item .is-last) {

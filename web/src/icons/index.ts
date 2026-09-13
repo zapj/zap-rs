@@ -44,6 +44,7 @@ import IconEdit from '~icons/material-symbols/edit'
 import IconFolder from '~icons/material-symbols/folder'
 import IconFolderOpen from '~icons/material-symbols/folder-open'
 import IconGridView from '~icons/material-symbols/grid-view'
+import IconHardDrive from '~icons/material-symbols/hard-drive'
 import IconHome from '~icons/material-symbols/home'
 import IconInfo from '~icons/material-symbols/info'
 import IconKey from '~icons/material-symbols/key'
@@ -115,6 +116,7 @@ export const ICON_MAP: Record<string, Component> = {
   folder: IconFolder,
   'folder-open': IconFolderOpen,
   'grid-view': IconGridView,
+  'hard-drive': IconHardDrive,
   home: IconHome,
   info: IconInfo,
   key: IconKey,
@@ -185,6 +187,8 @@ export const FolderAdd = IconCreateNewFolder
 export const FolderOpened = IconFolderOpen
 export const Goods = IconStorefront
 export const Grid = IconGridView
+export const HardDrive = IconHardDrive
+export const Home = IconHome
 export const InfoFilled = IconInfo
 export const Key = IconKey
 export const Link = IconLink

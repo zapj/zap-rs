@@ -21,6 +21,8 @@ export interface FileListData {
   current_path: string
   parent_path: string
   entries: FileEntry[]
+  /** 当前用户的家目录（如 `/home/admin`），文件管理以此作为起点与侧栏根节点 */
+  home?: string
 }
 
 export interface FileReadData {
@@ -31,8 +33,14 @@ export interface FileReadData {
 
 // ── API ────────────────────────────────────────────────────
 
-/** List directory contents */
-export function listFiles(path: string = '/') {
+/**
+ * List directory contents
+ *
+ * `path` 传空串（默认）表示"由后端决定"：落到当前用户的家目录（管理员同样如此），
+ * 文件管理首次打开就是这个语义，保证始终从家目录开始。
+ * 响应里的 `current_path` 是服务端确认后的实际目录，`home` 即家目录。
+ */
+export function listFiles(path: string = '') {
   return http.get<ApiResponse<FileListData>>('/system/files/list', {
     params: { path },
   })
@@ -62,10 +70,11 @@ export function mkdir(path: string) {
 
 /** Rename / move file */
 export function renameFile(path: string, newPath: string) {
-  return http.post<ApiResponse<{ old_path: string; new_path: string }>>(
-    '/system/files/rename',
-    { path, new_path: newPath, content: '' },
-  )
+  return http.post<ApiResponse<{ old_path: string; new_path: string }>>('/system/files/rename', {
+    path,
+    new_path: newPath,
+    content: '',
+  })
 }
 
 /** Change permissions（mode 为八进制数值，如 0755 传 493） */
