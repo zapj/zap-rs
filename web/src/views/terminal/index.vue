@@ -413,7 +413,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Link, Monitor, Key, Search, MoreFilled, Close } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Link, Monitor, Key, Search, MoreFilled, Close } from '@/icons'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'

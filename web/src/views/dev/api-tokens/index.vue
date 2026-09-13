@@ -117,7 +117,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getApiTokenList,

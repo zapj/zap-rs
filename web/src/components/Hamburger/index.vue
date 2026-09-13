@@ -1,12 +1,13 @@
 <template>
   <div style="padding: 0 15px" @click="toggleClick">
     <el-icon :class="{ 'is-active': isActive }" class="hamburger-icon">
-      <icon-ep-fold />
+      <Fold />
     </el-icon>
   </div>
 </template>
 
 <script setup lang="ts">
+import { Fold } from '@/icons'
 
 defineProps({
   isActive: {

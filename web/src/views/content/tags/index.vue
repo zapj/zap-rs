@@ -122,7 +122,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, nextTick } from 'vue'
-import { Search, Plus } from '@element-plus/icons-vue'
+import { Search, Plus } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import type { Tag } from '@/types/tags'

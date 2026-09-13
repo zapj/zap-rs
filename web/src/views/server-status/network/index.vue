@@ -45,7 +45,7 @@
 import Chart from 'chart.js/auto'
 import { applyChartTheme, watchChartTheme } from '@/utils/chart-theme'
 import { onMounted, onUnmounted, ref } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '@/icons'
 import { getRTStatus } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt'
 

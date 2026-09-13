@@ -3,6 +3,8 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { getMenuList, createMenu, updateMenu, deleteMenu, toggleMenuStatus, type MenuItem, type MenuForm } from '@/api/menu'
+// 图标必须是 @/icons 图标表里的名字，否则侧边栏渲染不出图标，因此做成下拉选择
+import { Icon, ICON_NAMES, ICON_PREFIX } from '@/icons'
 
 const tableData = ref<MenuItem[]>([])
 const loading = ref(false)
@@ -203,7 +205,22 @@ onMounted(loadMenus)
           <el-input v-model="form.title" placeholder="侧边栏显示的文字" />
         </el-form-item>
         <el-form-item v-if="form.type !== 'button'" label="图标">
-          <el-input v-model="form.icon" placeholder="如 ep:setting" />
+          <el-select v-model="form.icon" clearable filterable placeholder="选择图标" class="icon-select">
+            <template #prefix>
+              <Icon v-if="form.icon" :icon="form.icon" />
+            </template>
+            <el-option
+              v-for="name in ICON_NAMES"
+              :key="name"
+              :label="name"
+              :value="ICON_PREFIX + name"
+            >
+              <span class="icon-option">
+                <Icon :icon="ICON_PREFIX + name" />
+                <span>{{ name }}</span>
+              </span>
+            </el-option>
+          </el-select>
         </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="form.sort_order" :min="0" />
@@ -233,4 +250,7 @@ onMounted(loadMenus)
 
 <style scoped>
 .app-container { padding: 20px; }
+
+.icon-select { width: 100%; }
+.icon-option { display: flex; align-items: center; gap: 8px; }
 </style>

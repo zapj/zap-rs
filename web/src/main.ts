@@ -1,10 +1,5 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-// 注意：这里用 @iconify/vue/offline（离线版），它不含任何联网代码。
-// 普通版 @iconify/vue 在图标未注册时会去请求 https://api.iconify.design，
-// 内网部署下该请求会挂起，导致图标空白。
-import { addCollection } from '@iconify/vue/offline'
-import { icons as epIcons } from '@iconify-json/ep'
 import 'element-plus/dist/index.css'
 // Element Plus 官方深色主题变量（配合 <html class="dark"> 生效，见 composables/useTheme.ts）
 import 'element-plus/theme-chalk/dark/css-vars.css'
@@ -17,8 +12,8 @@ import './assets/styles/index.css'
 // 使用Element Plus的消息提示
 import { ElMessage } from 'element-plus'
 
-// 离线注册 Element Plus 图标集合（ep:xxx），避免菜单图标依赖外网 API
-addCollection(epIcons)
+// 图标统一由 @/icons 提供（Material Symbols，构建期按需打包，离线可用），
+// 不注册任何在线图标集合，内网部署下也不会发起图标请求。
 
 const app = createApp(App)
 

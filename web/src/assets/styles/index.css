@@ -71,7 +71,7 @@ body {
   vertical-align: middle;
 }
 
-/* 仅对标题文字生效，避免误伤 el-icon 内的 iconify span（避免图标偏移） */
+/* 仅对标题文字生效，避免误伤 el-icon 内的图标 svg（避免图标偏移） */
 .el-menu-item > span:not(.el-icon) {
   height: 20px;
   line-height: 20px;

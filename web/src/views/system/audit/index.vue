@@ -85,7 +85,7 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted, onUnmounted } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '@/icons'
 import { getAuditLogList, type AuditLogItem } from '@/api/audit'
 
 const loading = ref(false)

@@ -12,31 +12,31 @@
       <el-dropdown trigger="click" @command="handleThemeCommand">
         <div class="icon-button theme-trigger" :title="`主题：${currentThemeLabel}`">
           <el-icon :size="18">
-            <icon-ep-sunny v-if="themeMode === 'light'" />
-            <icon-ep-moon v-else-if="themeMode === 'dark'" />
-            <icon-ep-monitor v-else />
+            <Sunny v-if="themeMode === 'light'" />
+            <Moon v-else-if="themeMode === 'dark'" />
+            <Monitor v-else />
           </el-icon>
         </div>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="light">
               <span class="theme-item">
-                <el-icon><icon-ep-check v-if="themeMode === 'light'" /></el-icon>
-                <el-icon><icon-ep-sunny /></el-icon>
+                <el-icon><Check v-if="themeMode === 'light'" /></el-icon>
+                <el-icon><Sunny /></el-icon>
                 <span>浅色 Light</span>
               </span>
             </el-dropdown-item>
             <el-dropdown-item command="dark">
               <span class="theme-item">
-                <el-icon><icon-ep-check v-if="themeMode === 'dark'" /></el-icon>
-                <el-icon><icon-ep-moon /></el-icon>
+                <el-icon><Check v-if="themeMode === 'dark'" /></el-icon>
+                <el-icon><Moon /></el-icon>
                 <span>深色 Dark</span>
               </span>
             </el-dropdown-item>
             <el-dropdown-item command="auto">
               <span class="theme-item">
-                <el-icon><icon-ep-check v-if="themeMode === 'auto'" /></el-icon>
-                <el-icon><icon-ep-monitor /></el-icon>
+                <el-icon><Check v-if="themeMode === 'auto'" /></el-icon>
+                <el-icon><Monitor /></el-icon>
                 <span>跟随系统 Auto</span>
               </span>
             </el-dropdown-item>
@@ -55,7 +55,7 @@
         <template #reference>
           <div class="notice-trigger" title="通知">
             <el-badge :value="unread" :hidden="unread <= 0" :max="99">
-              <el-icon :size="18"><icon-ep-bell /></el-icon>
+              <el-icon :size="18"><Bell /></el-icon>
             </el-badge>
           </div>
         </template>
@@ -100,17 +100,17 @@
           <img :src="userStore.userInfo.avatar" class="user-avatar" />
           <span class="user-name">{{ userStore.userInfo.name }}</span>
           <el-icon class="el-icon-caret-bottom">
-            <icon-ep-arrow-down />
+            <ArrowDown />
           </el-icon>
         </div>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item @click="handleProfile">
-              <el-icon><icon-ep-user-filled /></el-icon>
+              <el-icon><UserFilled /></el-icon>
               个人中心
             </el-dropdown-item>
             <el-dropdown-item divided @click="handleLogout">
-              <el-icon><icon-ep-switch-button /></el-icon>
+              <el-icon><SwitchButton /></el-icon>
               退出登录
             </el-dropdown-item>
           </el-dropdown-menu>
@@ -132,6 +132,7 @@ import type { NoticeMessage } from '@/api/notice'
 import Breadcrumb from '@/components/Breadcrumb/index.vue'
 import Hamburger from '@/components/Hamburger/index.vue'
 import { setThemeMode, themeMode, type ThemeMode } from '@/composables/useTheme'
+import { ArrowDown, Bell, Check, Monitor, Moon, Sunny, SwitchButton, UserFilled } from '@/icons'
 
 const THEME_LABELS: Record<ThemeMode, string> = {
   light: '浅色',

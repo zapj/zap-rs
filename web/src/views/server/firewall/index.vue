@@ -157,7 +157,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '@/icons'
 import {
   addFirewallRule,
   deleteFirewallRule,

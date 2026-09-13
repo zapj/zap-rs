@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '@/icons'
 import { getSystemInfo } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt'
 import { isArray } from '@/utils/validate'

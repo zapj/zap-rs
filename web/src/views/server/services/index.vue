@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
+import { Search } from '@/icons'
 
 interface ServiceItem {
   name: string
@@ -91,7 +92,7 @@ onMounted(loadServices)
           <div class="header-actions">
             <el-input v-model="filter" placeholder="搜索服务名或描述..." clearable style="width: 240px">
               <template #prefix>
-                <el-icon><icon-ep-search /></el-icon>
+                <el-icon><Search /></el-icon>
               </template>
             </el-input>
             <el-button type="primary" :loading="loading" @click="loadServices">刷新</el-button>

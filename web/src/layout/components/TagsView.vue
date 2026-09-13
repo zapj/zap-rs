@@ -11,7 +11,7 @@
       >
         <span>{{ tag.title }}</span>
         <el-icon class="close-icon" @click.stop="closeSelectedTag(tag)" v-if="!isAffix(tag)">
-          <icon-ep-close />
+          <Close />
         </el-icon>
       </div>
     </el-scrollbar>
@@ -29,6 +29,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter, type RouteLocationNormalized } from 'vue-router'
+import { Close } from '@/icons'
 
 const route = useRoute()
 const router = useRouter()

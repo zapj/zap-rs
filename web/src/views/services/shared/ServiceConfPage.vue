@@ -194,7 +194,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document } from '@element-plus/icons-vue'
+import { Document } from '@/icons'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { formatBytes } from '@/utils/fmt'
 import {

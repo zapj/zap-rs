@@ -114,7 +114,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus } from '@/icons'
 import dayjs from 'dayjs'
 import type { FormInstance, FormRules } from 'element-plus'
 import { getScriptsTree } from '@/api/appstore'

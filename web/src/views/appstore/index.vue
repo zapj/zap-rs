@@ -358,7 +358,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Goods, Search, InfoFilled } from '@element-plus/icons-vue'
+import { Goods, Search, InfoFilled } from '@/icons'
 import { useUserStore } from '@/stores/user'
 import {
   getRepos,

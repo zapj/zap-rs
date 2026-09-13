@@ -221,7 +221,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Odometer, InfoFilled, Document, Cpu, Refresh, Timer } from '@element-plus/icons-vue'
+import { Odometer, InfoFilled, Document, Cpu, Refresh, Timer } from '@/icons'
 import {
   controlNginx,
   getNginxStatus,

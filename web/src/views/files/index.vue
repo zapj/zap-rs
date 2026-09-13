@@ -339,7 +339,7 @@ import {
   Document,
   FolderAdd,
   DocumentAdd,
-} from '@element-plus/icons-vue'
+} from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import { useUserStore } from '@/stores/user'

@@ -65,7 +65,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { userHomeSync, type HomeSyncOkItem, type HomeSyncFailItem } from '@/api/user'
 

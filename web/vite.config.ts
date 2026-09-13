@@ -9,7 +9,6 @@ import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 // import { visualizer } from "rollup-plugin-visualizer";
 import Icons from 'unplugin-icons/vite'
-import IconsResolver from 'unplugin-icons/resolver'
 
 /**
  * Zap 版本（唯一来源）：根 Cargo.toml [workspace.package] 的 version。
@@ -56,24 +55,11 @@ export default defineConfig(({ mode }) => {
       // vueDevTools(),
       UnoCSS(),
       AutoImport({
-        resolvers: [
-          ElementPlusResolver(),
-          IconsResolver({
-            prefix: "icon",
-            // 只启用 ep：mdi 未安装图标包，内网下自动安装会失败
-            enabledCollections: ['ep'],
-          }),
-        ],
+        resolvers: [ElementPlusResolver()],
         imports:['vue','vue-router','pinia']
       }),
       Components({
-        resolvers: [
-          ElementPlusResolver(),
-          IconsResolver({
-            prefix: "icon",
-            enabledCollections: ['ep'],
-          }),
-        ],
+        resolvers: [ElementPlusResolver()],
       }),
       // visualizer({
       //   gzipSize: true,
@@ -82,9 +68,11 @@ export default defineConfig(({ mode }) => {
       //   filename: "a.html", //分析图生成的文件名
       //   open:true //如果存在本地服务端口，将在打包后自动展示
       // }),
+      // Material Symbols 图标：`~icons/material-symbols/*` 在构建期被编译成 Vue
+      // 组件（统一出口见 src/icons/index.ts），只有用到的图标会进产物。
       Icons({
         // 关闭自动安装：内网/离线构建时 npm 拉取图标包会失败。
-        // 需要的图标集需显式安装（当前只用 @iconify-json/ep）。
+        // 需要的图标集需显式安装（当前只用 @iconify-json/material-symbols）。
         autoInstall: false,
         compiler: 'vue3',
       }),

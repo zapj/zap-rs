@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import type { FormInstance, FormRules } from 'element-plus'
 import type { LoginForm } from '@/types/user'
+import { Key, Lock, User } from '@/icons'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -140,7 +141,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
           autocomplete="on"
         >
           <template #prefix>
-            <el-icon><icon-ep-user /></el-icon>
+            <el-icon><User /></el-icon>
           </template>
         </el-input>
       </el-form-item>
@@ -156,7 +157,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
           @keyup.enter="handleLogin(loginFormRef)"
         >
           <template #prefix>
-            <el-icon><icon-ep-lock /></el-icon>
+            <el-icon><Lock /></el-icon>
           </template>
         </el-input>
         <!-- 密码强度指示器 -->
@@ -192,7 +193,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
           @keyup.enter="handleLogin(loginFormRef)"
         >
           <template #prefix>
-            <el-icon><icon-ep-key /></el-icon>
+            <el-icon><Key /></el-icon>
           </template>
         </el-input>
         <div class="totp-tip">该账号已启用两步验证，请输入身份验证器中显示的 6 位动态码</div>

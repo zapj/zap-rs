@@ -11,7 +11,6 @@
       <app-link v-if="onlyOneChild.meta" :to="resolvePath(onlyOneChild.path)">
         <el-menu-item :index="resolvePath(onlyOneChild.path)">
           <el-icon v-if="resolvedIcon">
-            <!-- <component :is="resolvedIcon" /> -->
             <Icon :icon="resolvedIcon" />
           </el-icon>
           <template #title>
@@ -25,8 +24,7 @@
     <el-sub-menu v-else :index="resolvePath(item.path)">
       <template #title>
         <el-icon v-if="item.meta && item.meta.icon">
-          <!-- <component :is="item.meta.icon" /> -->
-          <Icon :icon="resolveIcon(item.meta.icon)" />
+          <Icon :icon="item.meta.icon" />
         </el-icon>
         <span>{{ item.meta.title }}</span>
       </template>
@@ -48,8 +46,8 @@ import { computed, ref } from 'vue'
 import { isExternal } from '@/utils/validate'
 import AppLink from './AppLink.vue'
 import path from 'path-browserify'
-// 离线版 Icon：不含任何联网代码，图标数据来自 main.ts 注册的本地 ep 集合
-import { Icon, resolveIcon } from '@/utils/icon'
+// 离线图标：图标名为字符串，由 <Icon> 解析成对应图标组件（见 @/icons）
+import { Icon } from '@/icons'
 
 const props = defineProps({
   item: {
@@ -70,12 +68,10 @@ const props = defineProps({
 const onlyOneChild = ref<any>(null)
 
 // 单子菜单显示时：优先子菜单图标，缺失则回退父菜单图标。
-// 菜单图标来自数据库，管理员可能填了未注册集合的图标名（内网下无法加载），
-// 因此统一走 resolveIcon 做前缀校验与兜底。
-const resolvedIcon = computed(() => {
-  const raw = onlyOneChild.value?.meta?.icon || props.item.meta?.icon || ''
-  return resolveIcon(raw)
-})
+// 菜单图标来自数据库，可能是不认识的名字，由 <Icon> 内部解析并兜底。
+const resolvedIcon = computed(
+  () => onlyOneChild.value?.meta?.icon || props.item.meta?.icon || '',
+)
 
 /**
  * 判断是否只有一个显示的子菜单

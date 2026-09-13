@@ -3,7 +3,7 @@
     <!-- Logo -->
     <div class="logo-container">
       <router-link to="/" class="logo-link">
-        <el-icon class="logo-icon"><icon-ep-cpu /></el-icon>
+        <el-icon class="logo-icon"><Cpu /></el-icon>
         <div v-if="!isCollapse" class="logo-title">ZAP</div>
       </router-link>
     </div>
@@ -36,6 +36,7 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { usePermissionStore } from '@/stores/permission'
 import SidebarItem from './SidebarItem.vue'
+import { Cpu } from '@/icons'
 
 const route = useRoute()
 const appStore = useAppStore()

@@ -8,7 +8,7 @@ import {
   Plus,
   Refresh,
   Search,
-} from '@element-plus/icons-vue'
+} from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/user'

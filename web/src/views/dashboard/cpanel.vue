@@ -4,7 +4,7 @@
     <div class="search-bar">
       <el-input v-model="keyword" placeholder="搜索功能..." clearable class="search-input">
         <template #prefix>
-          <el-icon><Icon icon="ep:search" /></el-icon>
+          <el-icon><Icon icon="material-symbols:search" /></el-icon>
         </template>
       </el-input>
     </div>
@@ -81,7 +81,7 @@
           :key="item.title"
         >
           <div class="app-tile" @click="handleClick(item)">
-            <el-icon class="app-icon"><Icon :icon="resolveIcon(item.icon)" /></el-icon>
+            <el-icon class="app-icon"><Icon :icon="item.icon" /></el-icon>
             <div class="app-title">{{ item.title }}</div>
           </div>
         </el-col>
@@ -94,7 +94,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Icon, resolveIcon } from '@/utils/icon'
+import { Icon } from '@/icons'
 import { useUserStore } from '@/stores/user'
 import { getSystemInfo } from '@/api/dashboard'
 import { getUserInfo } from '@/api/user'
@@ -125,19 +125,19 @@ const groups: AppGroup[] = [
   {
     title: '常用功能',
     items: [
-      { title: '文件管理', icon: 'ep:folder', path: '/files', roles: ['user', 'reseller'] },
-      { title: '站点', icon: 'ep:aim', path: '/site', roles: ['user', 'reseller'] },
-      { title: 'SSL/TLS', icon: 'ep:lock', path: '/ssl-tls', roles: ['user'] },
-      { title: '终端', icon: 'ep:monitor', path: '/terminal', roles: ['user', 'reseller'] },
-      { title: '个人中心', icon: 'ep:user', path: '/profile', roles: ['user', 'reseller'] },
+      { title: '文件管理', icon: 'material-symbols:folder', path: '/files', roles: ['user', 'reseller'] },
+      { title: '站点', icon: 'material-symbols:public', path: '/site', roles: ['user', 'reseller'] },
+      { title: 'SSL/TLS', icon: 'material-symbols:lock', path: '/ssl-tls', roles: ['user'] },
+      { title: '终端', icon: 'material-symbols:monitor', path: '/terminal', roles: ['user', 'reseller'] },
+      { title: '个人中心', icon: 'material-symbols:person', path: '/profile', roles: ['user', 'reseller'] },
     ],
   },
   {
     title: '经销商功能',
     items: [
-      { title: '客户管理', icon: 'ep:user-filled', path: '/reseller/users', roles: ['reseller'] },
-      { title: '配额管理', icon: 'ep:odometer', roles: ['reseller'], coming: true },
-      { title: '资源分配', icon: 'ep:set-up', roles: ['reseller'], coming: true },
+      { title: '客户管理', icon: 'material-symbols:account-circle', path: '/reseller/users', roles: ['reseller'] },
+      { title: '配额管理', icon: 'material-symbols:speed', roles: ['reseller'], coming: true },
+      { title: '资源分配', icon: 'material-symbols:tune', roles: ['reseller'], coming: true },
     ],
   },
 ]

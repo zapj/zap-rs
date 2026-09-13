@@ -313,7 +313,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { Connection, Link, Plus, Refresh, User } from '@element-plus/icons-vue'
+import { Connection, Link, Plus, Refresh, User } from '@/icons'
 import { databaseApi, type DbItem, type DbStatus, type DbUser } from '@/api/database'
 
 const status = ref<DbStatus | null>(null)

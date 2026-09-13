@@ -4,7 +4,7 @@
       <el-col :sm="6" v-for="(item, index) in statCards" :key="index">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-icon" :style="{ backgroundColor: item.color }">
-            <Icon :icon="resolveIcon(item.icon)" />
+            <Icon :icon="item.icon" />
           </div>
           <div class="stat-info">
             <div class="stat-value">{{ item.value }}</div>
@@ -65,7 +65,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Icon, resolveIcon } from '@/utils/icon'
+import { Icon } from '@/icons'
 
 // import('@/views/dashboard/')
 
@@ -73,25 +73,25 @@ const statCards = ref([
   {
     title: '用户总数',
     value: '1,234',
-    icon: 'ep:user',
+    icon: 'material-symbols:person',
     color: '#40c9c6',
   },
   {
     title: '订单总数',
     value: '3,456',
-    icon: 'ep:shopping-cart',
+    icon: 'material-symbols:shopping-cart',
     color: '#36a3f7',
   },
   {
     title: '商品总数',
     value: '5,678',
-    icon: 'ep:goods',
+    icon: 'material-symbols:storefront',
     color: '#f4516c',
   },
   {
     title: '销售总额',
     value: '¥98,765',
-    icon: 'ep:money',
+    icon: 'material-symbols:payments',
     color: '#34bfa3',
   },
 ])

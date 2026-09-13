@@ -121,7 +121,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { Search, Plus } from '@element-plus/icons-vue'
+import { Search, Plus } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type {Article} from '@/types/articles'
 

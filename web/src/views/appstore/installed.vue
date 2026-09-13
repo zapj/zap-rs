@@ -333,7 +333,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Box, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Box, Refresh, Search } from '@/icons'
 import { useUserStore } from '@/stores/user'
 import { getInstalledApps, instanceAction, type InstalledApp } from '@/api/appstore'
 import { readFile, writeFile } from '@/api/file'

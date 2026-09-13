@@ -63,7 +63,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Folder, Document, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, Folder, Document, InfoFilled } from '@/icons'
 import { useUserStore } from '@/stores/user'
 import {
   getScriptsTree,

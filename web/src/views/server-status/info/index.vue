@@ -163,7 +163,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
-import { Monitor, Cpu, DataLine, Box, Folder } from '@element-plus/icons-vue'
+import { Monitor, Cpu, DataLine, Box, Folder } from '@/icons'
 import { getSystemOverview } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt.ts'
 

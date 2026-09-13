@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Delete } from '@element-plus/icons-vue'
+import { Delete } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
 
