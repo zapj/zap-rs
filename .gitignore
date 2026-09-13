@@ -19,3 +19,4 @@ data/apps/*/
 data/sites/*
 data/ssl/
 data/backups/
+data/users/

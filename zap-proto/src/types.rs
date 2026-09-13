@@ -685,6 +685,23 @@ pub enum Request {
     /// 用于创建数据库 / 初始化服务时取回密码。仅回传明文，不做任何写操作。
     #[serde(rename = "cred.read")]
     CredRead { service: String, user: String },
+    /// 面板用户的计划任务（crontab）：以指定 Linux 账号运行一条命令 / 脚本。
+    ///
+    /// - `linux_user`：实际执行身份（已由 zapd 校验；非 admin 恒为其自身账号）
+    /// - `home_dir`：非空且存在时作为工作目录
+    /// - `kind`：`script`（`command` 为脚本绝对路径）或 `command`（`command` 为 sh 命令体）
+    /// - `log_path`：输出追加写入的日志文件（须位于 `{ZAP_PATH}/data/users/` 之下）
+    ///
+    /// 后台执行：立即返回，结束后在日志末尾追加 `__ZAP_DONE__ <exit_code>`。
+    #[serde(rename = "cron.run")]
+    CronRun {
+        run_id: String,
+        linux_user: String,
+        home_dir: String,
+        command: String,
+        kind: String,
+        log_path: String,
+    },
 }
 
 /// `zapexec` -> `zapd` 的响应。

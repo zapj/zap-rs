@@ -70,6 +70,7 @@ pub mod system_service_conf;
 pub mod system_update;
 pub mod system_zap;
 pub mod user;
+pub mod user_cron;
 pub mod webapps;
 
 #[derive(RustEmbed)]
@@ -514,6 +515,18 @@ fn api_routers() -> Router {
         .route("/terminal/keys/generate", post(ssh_user_keys::generate_key))
         .route("/terminal/keys/import", post(ssh_user_keys::import_key))
         .route("/terminal/keys/delete", post(ssh_user_keys::delete_key))
+        // 计划任务（crontab）：所有角色可管理自己的任务；执行身份由 handler 收敛
+        .route("/terminal/crontab/list", get(user_cron::cron_list))
+        .route(
+            "/terminal/crontab/exec-users",
+            get(user_cron::cron_exec_users),
+        )
+        .route("/terminal/crontab/add", post(user_cron::cron_add))
+        .route("/terminal/crontab/update", post(user_cron::cron_update))
+        .route("/terminal/crontab/delete", post(user_cron::cron_delete))
+        .route("/terminal/crontab/toggle", post(user_cron::cron_toggle))
+        .route("/terminal/crontab/run_now", post(user_cron::cron_run_now))
+        .route("/terminal/crontab/log", get(user_cron::cron_log))
         // System
         .route("/system/info", get(system_info::system_info))
         .route("/system/status", get(system_info::system_status))

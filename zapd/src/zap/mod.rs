@@ -20,6 +20,7 @@ pub mod system_info;
 pub mod totp;
 pub mod types;
 pub mod updater;
+pub mod user_cron;
 
 #[derive(Error, Debug)]
 pub enum ZapError {

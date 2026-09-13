@@ -401,6 +401,12 @@ async fn init_menus_table() {
     VALUES (122, 12, 'api-docs', 'api-docs', 'dev/api-docs/index', 'menu', 'API 文档', 'material-symbols:description', 1, 'admin,user,reseller', 2, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (123, 12, 'app-script-guide', 'app-script-guide', 'dev/app-script-guide/index', 'menu', '应用脚本编写', 'material-symbols:menu-book', 1, 'admin,user,reseller', 3, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- 计划任务（Layout + 子菜单，所有角色可用；执行身份由后端收敛，admin 可选执行用户）
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (15, 0, 'crontab', '/crontab', 'Layout', '/crontab/index', 'dir', '计划任务', 'material-symbols:schedule', 1, 'admin,user,reseller,demo', 4, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (151, 15, 'crontab-index', 'index', 'crontab/index', 'menu', '定时任务', 'material-symbols:alarm', 1, 'admin,user,reseller,demo', 1, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -532,6 +538,15 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 121);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 122);
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 123);
+    -- 计划任务（每用户管理自己的定时任务）：admin / user / reseller / demo 均可见
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 15);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 151);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 15);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 151);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 15);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 151);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 15);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 151);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }

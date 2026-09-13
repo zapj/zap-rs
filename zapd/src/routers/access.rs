@@ -558,6 +558,18 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
     ),
     // ── 终端与密钥：路径含动态 id，按方法派生 view / edit ────
     ("/terminal", Required::User, Some(Perm::module("terminal"))),
+    // ── 计划任务（crontab）：所有角色管理自己的任务；执行身份由 handler 收敛 ──
+    // 更具体的条目排在前面亦无妨：匹配取最长前缀。
+    (
+        "/terminal/crontab/exec-users",
+        Required::Admin,
+        Some(Perm::action("crontab", "view")),
+    ),
+    (
+        "/terminal/crontab",
+        Required::User,
+        Some(Perm::module("crontab")),
+    ),
     // ── 其余 admin-only 模块：按方法派生 view / edit ─────────
     (
         "/system/nginx",
@@ -639,6 +651,7 @@ const NS_LABELS: &[(&str, &str)] = &[
     ("site", "站点管理"),
     ("ssl", "SSL 证书"),
     ("terminal", "终端与密钥"),
+    ("crontab", "计划任务"),
     ("appstore", "应用商店"),
     ("appstore.repo", "应用源管理"),
     ("appstore.script", "自定义脚本"),

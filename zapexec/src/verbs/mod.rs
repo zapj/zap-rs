@@ -1,5 +1,6 @@
 mod appstore;
 mod cred;
+mod cron;
 mod env;
 mod file;
 mod firewall;
@@ -335,6 +336,14 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             service_conf::set_default(&service, enable).await
         }
         Request::CredRead { service, user } => cred::read(&service, &user).await,
+        Request::CronRun {
+            run_id,
+            linux_user,
+            home_dir,
+            command,
+            kind,
+            log_path,
+        } => cron::run(run_id, linux_user, home_dir, command, kind, log_path).await,
     }
 }
 
