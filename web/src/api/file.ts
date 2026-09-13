@@ -87,8 +87,15 @@ export function chmodFile(path: string, mode: number) {
  *
  * 目录上传（`webkitdirectory`）时浏览器把相对路径挂在 `file.webkitRelativePath`
  * （如 `dir/sub/a.txt`），这里用它作为 multipart 的文件名，由后端逐级创建目录还原结构。
+ *
+ * `onProgress` 是整包进度，一次传多个文件时只能得到合计百分比，
+ * 所以调用方按「一个文件一个请求」来逐个显示进度。
  */
-export function uploadFiles(targetDir: string, files: File[]) {
+export function uploadFiles(
+  targetDir: string,
+  files: File[],
+  onProgress?: (percent: number) => void,
+) {
   const formData = new FormData()
   for (const file of files) {
     formData.append('files', file, file.webkitRelativePath || file.name)
@@ -96,6 +103,12 @@ export function uploadFiles(targetDir: string, files: File[]) {
   return http.post<ApiResponse<{ files: string[]; target_dir: string }>>(
     `/system/files/upload?path=${encodeURIComponent(targetDir)}`,
     formData,
+    {
+      onUploadProgress: (event) => {
+        if (!onProgress || !event.total) return
+        onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)))
+      },
+    },
   )
 }
 

@@ -105,15 +105,20 @@ service.interceptors.response.use(
           break
 
         case 403:
-          ElMessage({ message: data?.message || '无权限执行该操作', type: 'error', duration: 5000 })
+          ElMessage({
+            message: data?.message || '无权限执行该操作',
+            type: 'error',
+            duration: 5000,
+            grouping: true,
+          })
           break
 
         case 404:
-          ElMessage({ message: '请求的资源不存在', type: 'error', duration: 5000 })
+          ElMessage({ message: '请求的资源不存在', type: 'error', duration: 5000, grouping: true })
           break
 
         case 500:
-          ElMessage({ message: '服务器内部错误', type: 'error', duration: 5000 })
+          ElMessage({ message: '服务器内部错误', type: 'error', duration: 5000, grouping: true })
           break
 
         default:
@@ -127,12 +132,22 @@ service.interceptors.response.use(
             handleAuthExpired('登录状态已失效，请重新登录')
             break
           }
-          ElMessage({ message: data?.message || `请求错误 (${status})`, type: 'error', duration: 5000 })
+          ElMessage({
+            message: data?.message || `请求错误 (${status})`,
+            type: 'error',
+            duration: 5000,
+            grouping: true,
+          })
       }
     } else if (error.message?.includes('Network Error')) {
-      ElMessage({ message: '网络连接失败，请检查后端服务是否启动', type: 'error', duration: 5000 })
+      ElMessage({
+        message: '网络连接失败，请检查后端服务是否启动',
+        type: 'error',
+        duration: 5000,
+        grouping: true,
+      })
     } else if (error.message?.includes('timeout')) {
-      ElMessage({ message: '请求超时，请稍后重试', type: 'error', duration: 5000 })
+      ElMessage({ message: '请求超时，请稍后重试', type: 'error', duration: 5000, grouping: true })
     }
     // 其他错误（如业务错误 reject 的 Error）不弹窗，由调用方处理
 
@@ -148,7 +163,7 @@ service.interceptors.response.use(
  */
 function handleAuthExpired(message = '登录已过期，请重新登录') {
   removeToken()
-  ElMessage({ message, type: 'error', duration: 5000 })
+  ElMessage({ message, type: 'error', duration: 5000, grouping: true })
   setTimeout(() => {
     window.location.href = withBase('/login')
   }, 1500)
