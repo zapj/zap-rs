@@ -244,12 +244,12 @@
         <el-input
           v-model="permInput"
           class="fm-perm-input mono"
-          maxlength="4"
-          placeholder="0755"
+          :maxlength="isAdmin ? 4 : 3"
+          :placeholder="permInputPlaceholder"
           @keyup.enter="doChmod"
           @input="onPermInput"
         />
-        <span class="fm-perm-hint">八进制 1-4 位，如 0755 / 0644 / 1777</span>
+        <span class="fm-perm-hint">{{ permInputHint }}</span>
       </div>
 
       <table class="fm-perm-table">
@@ -280,7 +280,7 @@
             <td><el-checkbox v-model="permBits.ow" @change="onPermBitsChange" /></td>
             <td><el-checkbox v-model="permBits.ox" @change="onPermBitsChange" /></td>
           </tr>
-          <tr class="fm-perm-special">
+          <tr v-if="isAdmin" class="fm-perm-special">
             <td class="fm-perm-owner">特殊位</td>
             <td>
               <el-checkbox v-model="permBits.suid" @change="onPermBitsChange">Set UID</el-checkbox>
@@ -294,6 +294,10 @@
           </tr>
         </tbody>
       </table>
+
+      <div v-if="!isAdmin" class="fm-perm-note">
+        特殊位（Set UID / Set GID / Sticky）仅管理员可设置，其余角色仅能修改 rwx 权限。
+      </div>
 
       <div class="fm-perm-preview">
         预览：<span class="mono">{{ permOct }}</span>
@@ -362,6 +366,8 @@ import CodeEditor from '@/components/CodeEditor.vue'
 const userStore = useUserStore()
 // 写操作面向所有登录用户（admin / user / reseller）开放；
 // 普通用户的访问范围由后端按「本人 home 与私有 tmp」白名单兜底。
+/** 仅 admin 可设置特殊位（Set UID / Set GID / Sticky），其余角色只能改 rwx */
+const isAdmin = computed(() => userStore.roles.includes('admin'))
 
 // ── state ──────────────────────────────────────────────────
 
@@ -672,6 +678,20 @@ const permTarget = ref<FileEntry | null>(null)
 const permInput = ref('0755')
 const permSaving = ref(false)
 
+/** 特殊位掩码（Set UID / Set GID / Sticky） */
+const PERM_SPECIAL_MASK = 0o7000
+
+/** 当前用户可编辑的权限位掩码：admin 含特殊位，其余角色仅 rwx */
+const permMask = computed(() => (isAdmin.value ? 0o7777 : 0o777))
+
+/**
+ * 非 admin 提交时原样带上的目标文件特殊位：
+ * 后端只接受「不改变特殊位」的请求，普通用户既不能新增也无法清除特殊位。
+ */
+const permKeepSpecial = computed(() =>
+  isAdmin.value ? 0 : (permTarget.value?.mode ?? 0) & PERM_SPECIAL_MASK,
+)
+
 /** 权限位开关：用户/组/其他的 rwx + 三个特殊位 */
 const permBits = reactive({
   ur: false,
@@ -707,12 +727,13 @@ const PERM_BITS: Array<[PermBitKey, number]> = [
 ]
 
 function bitsToMode(): number {
-  return PERM_BITS.reduce((acc, [key, mask]) => (permBits[key] ? acc | mask : acc), 0)
+  const mode = PERM_BITS.reduce((acc, [key, mask]) => (permBits[key] ? acc | mask : acc), 0)
+  return mode & permMask.value
 }
 
 function modeToBits(mode: number) {
   for (const [key, mask] of PERM_BITS) {
-    permBits[key] = (mode & mask) !== 0
+    permBits[key] = (mode & mask & permMask.value) !== 0
   }
 }
 
@@ -721,14 +742,25 @@ function toOct4(mode: number): string {
   return (mode & 0o7777).toString(8).padStart(4, '0')
 }
 
+/** 权限数值 → 输入框/预览文本：admin 为 4 位（含特殊位），其余角色为 3 位 rwx */
+function toPermText(mode: number): string {
+  const masked = mode & permMask.value
+  return isAdmin.value ? toOct4(masked) : (masked & 0o777).toString(8).padStart(3, '0')
+}
+
 /** 权限文本 → 数值（非法输入回退 0755） */
 function fromOct(text: string): number {
   const digits = (text || '').trim().replace(/^0o/i, '')
   return /^[0-7]{1,4}$/.test(digits) ? parseInt(digits, 8) : 0o755
 }
 
+const permInputPlaceholder = computed(() => (isAdmin.value ? '0755' : '755'))
+const permInputHint = computed(() =>
+  isAdmin.value ? '八进制 1-4 位，如 0755 / 0644 / 1777' : '八进制 1-3 位，如 755 / 644 / 777',
+)
+
 const permMode = computed(() => bitsToMode())
-const permOct = computed(() => toOct4(permMode.value))
+const permOct = computed(() => toPermText(permMode.value))
 const permRwx = computed(() => {
   const mode = permMode.value
   const triples: Array<[number, number, number, number, string]> = [
@@ -752,7 +784,7 @@ function showPermDialog(row: FileEntry) {
   permTarget.value = row
   const mode = typeof row.mode === 'number' ? row.mode : fromOct(row.permissions)
   modeToBits(mode)
-  permInput.value = toOct4(mode)
+  permInput.value = toPermText(mode)
   permVisible.value = true
 }
 
@@ -763,9 +795,9 @@ function onPermInput(value: string) {
   modeToBits(parseInt(digits, 8))
 }
 
-/** 勾选框变化：回写规范化的 4 位八进制文本 */
+/** 勾选框变化：回写规范化的八进制文本 */
 function onPermBitsChange() {
-  permInput.value = toOct4(bitsToMode())
+  permInput.value = toPermText(bitsToMode())
 }
 
 async function doChmod() {
@@ -773,12 +805,16 @@ async function doChmod() {
   if (!target) return
   const digits = (permInput.value || '').trim()
   if (!/^[0-7]{1,4}$/.test(digits)) {
-    ElMessage.warning('请输入 1-4 位八进制权限值，如 0755')
+    ElMessage.warning(
+      `请输入 1-${isAdmin.value ? 4 : 3} 位八进制权限值，如 ${permInputPlaceholder.value}`,
+    )
     return
   }
+  // 非 admin 仅提交 rwx 位，特殊位沿用文件当前值（改动特殊位会被后端拒绝）
+  const mode = (parseInt(digits, 8) & permMask.value) | permKeepSpecial.value
   permSaving.value = true
   try {
-    const res = await chmodFile(target.path, parseInt(digits, 8))
+    const res = await chmodFile(target.path, mode)
     const info = res.data
     if (info) {
       target.permissions = info.permissions
@@ -1046,6 +1082,13 @@ onMounted(() => {
       font-size: 12px;
     }
   }
+}
+
+.fm-perm-note {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
 }
 
 .fm-perm-preview {

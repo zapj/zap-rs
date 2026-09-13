@@ -148,6 +148,12 @@ fn check_write_access(claims: &Claims, path: &Path, home: &str, tmp: &str) -> Re
     check_access(claims, path, home, tmp)
 }
 
+/// 特殊位（Set UID / Set GID / Sticky）仅 admin 可改动：
+/// admin 恒放行；其余角色要求请求值与文件当前特殊位一致（即原样保留，不能新增也不能清除）。
+fn special_bits_allowed(claims: &Claims, requested: u32, current: u32) -> bool {
+    is_admin(claims) || (requested & 0o7000) == (current & 0o7000)
+}
+
 // ── handlers ───────────────────────────────────────────────
 
 /// GET /system/files/list?path=/
@@ -355,6 +361,8 @@ pub async fn file_rename(
 ///
 /// 修改文件/目录权限（cPanel 风格）：mode 为八进制数值（如 0755 → 493），
 /// 仅低 12 位有效（含 setuid/setgid/sticky）。
+/// 特殊位（setuid/setgid/sticky）为高危权限，仅 admin 可改动：
+/// 非 admin 请求中的特殊位必须与文件当前值一致（即原样保留），否则拒绝。
 pub async fn file_chmod(
     claims: Claims,
     Extension(client_addr): Extension<SocketAddr>,
@@ -372,6 +380,23 @@ pub async fn file_chmod(
 
     if !resolved.exists() {
         return Err(ZapError::New(-1, "路径不存在".to_string()));
+    }
+
+    // 特殊位（Set UID / Set GID / Sticky）仅 admin 可设置：
+    // 非 admin 只能改 rwx 位，且特殊位必须保持文件当前取值（前端同样不暴露这几个开关，
+    // 这里兜底拦住手工构造的请求）。
+    if !is_admin(&claims) {
+        use std::os::unix::fs::PermissionsExt;
+        let current_mode = std::fs::metadata(&resolved)
+            .map_err(|e| ZapError::New(-1, format!("读取当前权限失败：{e}")))?
+            .permissions()
+            .mode();
+        if !special_bits_allowed(&claims, payload.mode, current_mode) {
+            return Err(ZapError::New(
+                -1,
+                "特殊权限位（Set UID / Set GID / Sticky）仅管理员可设置".to_string(),
+            ));
+        }
     }
 
     let (as_user, skip_owner_check) = actor_identity(&claims).await?;
@@ -566,6 +591,24 @@ mod tests {
         let c = admin_claims();
         assert!(access(&c, "/etc/shadow").is_ok());
         assert!(access(&c, "/var/www").is_ok());
+    }
+
+    #[test]
+    fn only_admin_can_change_special_bits() {
+        let admin = admin_claims();
+        let user = claims_for("alice");
+        // admin：新增 / 清除特殊位均放行
+        assert!(special_bits_allowed(&admin, 0o4755, 0o0755));
+        assert!(special_bits_allowed(&admin, 0o0755, 0o4755));
+        // 普通用户：特殊位与文件当前值一致（原样保留）放行，rwx 位可改
+        assert!(special_bits_allowed(&user, 0o4755, 0o4755));
+        assert!(special_bits_allowed(&user, 0o4777, 0o4755));
+        assert!(special_bits_allowed(&user, 0o0755, 0o0755));
+        // 普通用户：新增 / 清除 Set UID / Set GID / Sticky 均拒绝
+        assert!(!special_bits_allowed(&user, 0o4755, 0o0755));
+        assert!(!special_bits_allowed(&user, 0o0755, 0o4755));
+        assert!(!special_bits_allowed(&user, 0o2775, 0o0775));
+        assert!(!special_bits_allowed(&user, 0o1777, 0o0777));
     }
 
     #[test]
