@@ -284,16 +284,13 @@
           </div>
         </div>
 
-        <!-- 上传进度面板：逐文件显示进度与结果，拖拽与按钮上传共用同一队列 -->
-        <div
-          v-if="uploadPanelVisible && (uploadTasks.length || uploadScanning)"
-          class="fm-upload-panel"
-        >
+        <!-- 上传进度面板：只渲染「正在上传」的文件行，其余用聚合统计展示，4000+ 文件也不卡 -->
+        <div v-if="uploadPanelVisible && (uploadTotal || uploadScanning)" class="fm-upload-panel">
           <div class="fm-upload-head" @click="uploadPanelCollapsed = !uploadPanelCollapsed">
             <el-icon><Upload /></el-icon>
             <span class="fm-upload-title">{{ uploadPanelTitle }}</span>
-            <span v-if="uploadTasks.length" class="fm-upload-count">
-              {{ uploadDoneCount }}/{{ uploadTasks.length }}
+            <span v-if="uploadTotal" class="fm-upload-count">
+              {{ uploadFinishCount }}/{{ uploadTotal }}
             </span>
             <el-icon class="fm-upload-toggle" :class="{ expanded: !uploadPanelCollapsed }">
               <ArrowDown />
@@ -301,21 +298,46 @@
             <el-icon class="fm-upload-close" @click.stop="closeUploadPanel"><Close /></el-icon>
           </div>
           <el-progress
-            v-if="uploadTasks.length"
+            v-if="uploadTotal"
             :percentage="uploadPercent"
             :stroke-width="6"
             :show-text="false"
           />
-          <div v-show="!uploadPanelCollapsed" class="fm-upload-list">
-            <div v-for="t in uploadTasks" :key="t.id" class="fm-upload-item">
-              <el-icon class="fm-upload-item-icon" :class="t.status">
-                <CircleCheckFilled v-if="t.status === 'done'" />
-                <CircleCloseFilled v-else-if="t.status === 'failed'" />
-                <Loading v-else />
-              </el-icon>
-              <span class="fm-upload-item-name" :title="t.relPath">{{ t.relPath }}</span>
-              <span class="fm-upload-item-size">{{ formatSize(t.size) }}</span>
-              <span class="fm-upload-item-status" :class="t.status">{{ uploadItemText(t) }}</span>
+          <div v-show="!uploadPanelCollapsed" class="fm-upload-body">
+            <div v-if="uploadTotal" class="fm-upload-summary">
+              <span>成功 {{ uploadDone }}</span>
+              <span v-if="uploadFailed" class="failed">失败 {{ uploadFailed }}</span>
+              <span>等待 {{ uploadPendingCount }}</span>
+            </div>
+
+            <!-- 正在上传的文件 -->
+            <div v-if="activeUploads.length" class="fm-upload-list">
+              <div v-for="t in activeUploads" :key="t.id" class="fm-upload-item">
+                <el-icon class="fm-upload-item-icon uploading"><Loading /></el-icon>
+                <span class="fm-upload-item-name" :title="t.relPath">{{ t.relPath }}</span>
+                <span class="fm-upload-item-size">{{ formatSize(t.size) }}</span>
+                <span class="fm-upload-item-status uploading">{{ t.percent }}%</span>
+              </div>
+            </div>
+
+            <!-- 失败的文件：可单个重试或全部重试 -->
+            <div v-if="failedUploads.length" class="fm-upload-failed">
+              <div class="fm-upload-failed-head">
+                <span>失败 {{ failedUploads.length }}</span>
+                <el-button size="small" text type="primary" @click.stop="retryAllFailed">
+                  全部重试
+                </el-button>
+              </div>
+              <div class="fm-upload-list">
+                <div v-for="t in failedUploads" :key="t.id" class="fm-upload-item">
+                  <el-icon class="fm-upload-item-icon failed"><CircleCloseFilled /></el-icon>
+                  <span class="fm-upload-item-name" :title="t.relPath">{{ t.relPath }}</span>
+                  <span class="fm-upload-item-size">{{ formatSize(t.size) }}</span>
+                  <el-button size="small" text type="primary" @click.stop="retryUpload(t)">
+                    重试
+                  </el-button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -594,7 +616,6 @@ import {
   Close,
   Loading,
   ArrowDown,
-  CircleCheckFilled,
   CircleCloseFilled,
 } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -1277,6 +1298,8 @@ type UploadStatus = 'pending' | 'uploading' | 'done' | 'failed'
 interface UploadTask {
   id: number
   file: File
+  /** 目标目录：重试时沿用原目录，避免用户切目录后传错地方 */
+  dir: string
   /** 相对路径（目录上传带层级，如 `upload/index.php`），用于展示 */
   relPath: string
   size: number
@@ -1289,76 +1312,114 @@ interface UploadTask {
 interface UploadJob {
   task: UploadTask
   dir: string
-  resolve: () => void
+  /** 批量入队时没有等待者，可以不传 */
+  resolve?: () => void
 }
 
-const uploadTasks = ref<UploadTask[]>([])
 const uploadPanelVisible = ref(false)
 const uploadPanelCollapsed = ref(false)
 const uploadBusy = ref(false)
 /** 拖拽目录时正在递归遍历 entry（还没开始传），用于显示「读取中」 */
 const uploadScanning = ref(false)
 
+/** 只放「正在上传」的文件（≤ 并发数），逐行显示进度；结束立即移出，避免渲染上千行 */
+const activeUploads = ref<UploadTask[]>([])
+/** 失败的文件：留在列表里，支持单个/全部重新上传 */
+const failedUploads = ref<UploadTask[]>([])
+/**
+ * 整轮的聚合统计：入队/完成时增量更新。
+ * 之前用 computed 对全部任务做 filter/reduce，4000+ 文件时每次进度事件都是 O(n)，
+ * 直接把主线程打满；改成计数器后每次更新都是 O(1)。
+ */
+const uploadTotal = ref(0)
+const uploadTotalBytes = ref(0)
+const uploadLoadedBytes = ref(0)
+const uploadDone = ref(0)
+const uploadFailed = ref(0)
+
 const uploadJobs: UploadJob[] = []
 let activeJobs = 0
 let uploadSeq = 0
 
-const uploadPendingCount = computed(
-  () => uploadTasks.value.filter((t) => t.status === 'pending' || t.status === 'uploading').length,
-)
 /** 已出结果的文件数（成功 + 失败） */
-const uploadDoneCount = computed(
-  () => uploadTasks.value.filter((t) => t.status === 'done' || t.status === 'failed').length,
+const uploadFinishCount = computed(() => uploadDone.value + uploadFailed.value)
+/** 还没开始的排队数（不含正在上传的） */
+const uploadPendingCount = computed(() =>
+  Math.max(0, uploadTotal.value - uploadFinishCount.value - activeUploads.value.length),
 )
-const uploadFailedCount = computed(
-  () => uploadTasks.value.filter((t) => t.status === 'failed').length,
-)
+/** 本轮是否还有未完成的文件 */
+const uploadInFlight = computed(() => uploadTotal.value > uploadFinishCount.value)
 
 /** 总进度：按字节加权；全是空文件时退化成按文件数 */
 const uploadPercent = computed(() => {
-  const list = uploadTasks.value
-  if (!list.length) return 0
-  const totalBytes = list.reduce((sum, t) => sum + t.size, 0)
-  const loaded = list.reduce((sum, t) => sum + t.loaded, 0)
-  const ratio = totalBytes ? loaded / totalBytes : uploadDoneCount.value / list.length
+  if (!uploadTotal.value) return 0
+  const ratio = uploadTotalBytes.value
+    ? uploadLoadedBytes.value / uploadTotalBytes.value
+    : uploadFinishCount.value / uploadTotal.value
   return Math.min(100, Math.round(ratio * 100))
 })
 
 const uploadPanelTitle = computed(() => {
-  if (uploadScanning.value && !uploadTasks.value.length) return '正在读取待上传的文件…'
-  if (uploadPendingCount.value) return `正在上传 ${uploadPendingCount.value} 个文件`
-  return uploadFailedCount.value ? '上传结束（有失败）' : '上传完成'
+  if (uploadScanning.value && !uploadTotal.value) return '正在读取待上传的文件…'
+  if (uploadInFlight.value) return `正在上传 ${uploadTotal.value} 个文件`
+  return uploadFailed.value ? '上传结束（有失败）' : '上传完成'
 })
 
-function uploadItemText(t: UploadTask): string {
-  if (t.status === 'pending') return '等待'
-  if (t.status === 'uploading') return `${t.percent}%`
-  if (t.status === 'done') return '已完成'
-  return '失败'
+/** 开始新一轮前清空上一轮的统计与显示 */
+function resetUploadRound() {
+  activeUploads.value = []
+  failedUploads.value = []
+  uploadTotal.value = 0
+  uploadTotalBytes.value = 0
+  uploadLoadedBytes.value = 0
+  uploadDone.value = 0
+  uploadFailed.value = 0
+  uploadPanelCollapsed.value = false
 }
 
-/** 入队一个文件；返回的 Promise 在该文件结束（成功或失败）时 resolve */
-function enqueueUpload(dir: string, file: File): Promise<void> {
-  // 上一轮已全部结束：清掉旧结果，面板只展示当前这一轮
-  if (!uploadPendingCount.value && uploadTasks.value.length) {
-    uploadTasks.value = []
-    uploadPanelCollapsed.value = false
-  }
-  const task = shallowReactive<UploadTask>({
+function createUploadTask(dir: string, file: File): UploadTask {
+  return shallowReactive<UploadTask>({
     id: ++uploadSeq,
     // File 是平台对象，不要深响应，否则传给 FormData 可能出问题
     file: markRaw(file),
+    dir,
     relPath: file.webkitRelativePath || file.name,
     size: file.size,
     loaded: 0,
     percent: 0,
     status: 'pending',
   })
-  uploadTasks.value.push(task)
+}
+
+/**
+ * 批量入队（拖拽目录走这里）。
+ * 关键优化：4000+ 文件时只做一次统计写入，避免每个文件都触发一轮响应式更新。
+ */
+function enqueueUploads(dir: string, files: File[]) {
+  if (!files.length) return
+  if (!uploadInFlight.value && uploadTotal.value) resetUploadRound()
   uploadPanelVisible.value = true
   uploadBusy.value = true
+
+  let totalBytes = 0
+  for (const file of files) {
+    totalBytes += file.size
+    uploadJobs.push({ task: createUploadTask(dir, file), dir })
+  }
+  uploadTotal.value += files.length
+  uploadTotalBytes.value += totalBytes
+  pumpUploadQueue()
+}
+
+/** 单个文件入队（按钮上传走这里）；返回的 Promise 在该文件结束（成功或失败）时 resolve */
+function enqueueUpload(dir: string, file: File): Promise<void> {
+  if (!uploadInFlight.value && uploadTotal.value) resetUploadRound()
+  uploadPanelVisible.value = true
+  uploadBusy.value = true
+  uploadTotal.value++
+  uploadTotalBytes.value += file.size
   return new Promise((resolve) => {
-    uploadJobs.push({ task, dir, resolve })
+    uploadJobs.push({ task: createUploadTask(dir, file), dir, resolve })
     pumpUploadQueue()
   })
 }
@@ -1375,20 +1436,33 @@ function pumpUploadQueue() {
 async function runUploadJob(job: UploadJob) {
   const { task } = job
   task.status = 'uploading'
+  activeUploads.value.push(task)
+  let lastPercent = -1
   try {
     await uploadFiles(job.dir, [task.file], (percent) => {
+      // 同一百分比不重复发响应式更新，进一步降低高频事件带来的重渲染
+      if (percent === lastPercent) return
+      lastPercent = percent
+      const nextLoaded = Math.round((task.size * percent) / 100)
+      uploadLoadedBytes.value += nextLoaded - task.loaded
       task.percent = percent
-      task.loaded = Math.round((task.size * percent) / 100)
+      task.loaded = nextLoaded
     })
     task.status = 'done'
     task.percent = 100
+    uploadLoadedBytes.value += task.size - task.loaded
     task.loaded = task.size
+    uploadDone.value++
   } catch {
     // 失败原因由响应拦截器统一提示，这里只标记这一行，不影响同批其他文件
     task.status = 'failed'
+    uploadFailed.value++
+    failedUploads.value.push(task)
   } finally {
+    const idx = activeUploads.value.indexOf(task)
+    if (idx !== -1) activeUploads.value.splice(idx, 1)
     activeJobs--
-    job.resolve()
+    job.resolve?.()
     pumpUploadQueue()
     if (!activeJobs && !uploadJobs.length) finishUploadRound()
   }
@@ -1396,8 +1470,8 @@ async function runUploadJob(job: UploadJob) {
 
 /** 整轮结束：聚合提示一次并刷新列表；全部成功时自动收起进度面板 */
 function finishUploadRound() {
-  const total = uploadTasks.value.length
-  const failed = uploadFailedCount.value
+  const total = uploadTotal.value
+  const failed = uploadFailed.value
   uploadBusy.value = false
   loadFileList()
   refreshTree()
@@ -1411,6 +1485,30 @@ function finishUploadRound() {
   } else {
     ElMessage.error(`上传失败（${failed} 个文件）`)
   }
+}
+
+/**
+ * 重试单个失败文件：从失败列表移回队列重新上传。
+ * 不重置整轮统计，只回退该文件的失败计数与已计字节，顶部进度会实时反映。
+ */
+function retryUpload(task: UploadTask) {
+  const idx = failedUploads.value.indexOf(task)
+  if (idx === -1) return
+  failedUploads.value.splice(idx, 1)
+  uploadFailed.value--
+  uploadLoadedBytes.value -= task.loaded
+  task.loaded = 0
+  task.percent = 0
+  task.status = 'pending'
+  uploadPanelVisible.value = true
+  uploadBusy.value = true
+  uploadJobs.push({ task, dir: task.dir })
+  pumpUploadQueue()
+}
+
+/** 重试全部失败文件 */
+function retryAllFailed() {
+  for (const task of [...failedUploads.value]) retryUpload(task)
 }
 
 function closeUploadPanel() {
@@ -1439,7 +1537,7 @@ async function handleDrop(e: DragEvent) {
   }
   if (!files.length) return
   const dir = currentPath.value
-  files.forEach((file) => void enqueueUpload(dir, file))
+  enqueueUploads(dir, files)
 }
 
 async function handleUpload(options: any) {
@@ -2066,16 +2164,20 @@ watch(viewMode, async (mode) => {
 /* 上传进度面板：浮在列表区右下角（z-index 高于拖拽遮罩，避免被盖住） */
 .fm-upload-panel {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   z-index: 20;
-  width: 340px;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
   max-width: calc(100% - 32px);
-  padding: 10px 12px;
+  max-height: calc(100% - 32px);
+  padding: 12px 14px;
   background: var(--el-bg-color-overlay);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
-  box-shadow: var(--el-box-shadow-light);
+  box-shadow: var(--el-box-shadow);
 }
 
 .fm-upload-head {
@@ -2116,9 +2218,38 @@ watch(viewMode, async (mode) => {
   color: var(--el-color-primary);
 }
 
-.fm-upload-list {
-  max-height: 180px;
+.fm-upload-body {
+  min-height: 0;
   margin-top: 8px;
+  overflow-y: auto;
+}
+
+.fm-upload-summary {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.fm-upload-summary .failed {
+  color: var(--el-color-danger);
+}
+
+.fm-upload-failed {
+  margin-top: 8px;
+}
+
+.fm-upload-failed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--el-color-danger);
+}
+
+.fm-upload-list {
+  max-height: 200px;
+  margin-top: 6px;
   overflow-y: auto;
 }
 
@@ -2165,6 +2296,10 @@ watch(viewMode, async (mode) => {
   min-width: 40px;
   text-align: right;
   color: var(--el-text-color-secondary);
+}
+
+.fm-upload-item-status.uploading {
+  color: var(--el-color-primary);
 }
 
 .fm-upload-item-status.done {
