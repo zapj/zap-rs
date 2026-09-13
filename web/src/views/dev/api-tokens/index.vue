@@ -69,7 +69,7 @@
 
     <!-- 新建 -->
     <el-dialog v-model="createVisible" title="新建 API Token" width="460px" @closed="resetCreate">
-      <el-form :model="createForm" label-width="90px">
+      <el-form :model="createForm" label-width="90px" @submit.prevent>
         <el-form-item label="备注名称">
           <el-input v-model="createForm.name" placeholder="用于辨识，可留空（默认：当前时间）" maxlength="60" />
         </el-form-item>

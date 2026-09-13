@@ -18,7 +18,7 @@
             title="创建站点时使用的默认网络参数：地址留空则由系统自动分配。"
             style="margin-bottom: 16px"
           />
-          <el-form :model="basic" label-width="150px" style="max-width: 660px">
+          <el-form :model="basic" label-width="150px" style="max-width: 660px" @submit.prevent>
             <el-form-item label="默认 IPv4 地址">
               <el-input
                 v-model="basic.ipv4"
@@ -53,7 +53,7 @@
             title="配置发送邮件所需的 SMTP 参数（供系统通知等场景使用）。密码留空表示不修改原密码。"
             style="margin-bottom: 16px"
           />
-          <el-form :model="mail" label-width="150px" style="max-width: 660px">
+          <el-form :model="mail" label-width="150px" style="max-width: 660px" @submit.prevent>
             <el-form-item label="SMTP 服务器">
               <el-input v-model="mail.host" placeholder="如 smtp.example.com" clearable />
             </el-form-item>
@@ -101,7 +101,7 @@
             title="面板对外展示的服务商 / 客服联系方式。"
             style="margin-bottom: 16px"
           />
-          <el-form :model="contact" label-width="150px" style="max-width: 660px">
+          <el-form :model="contact" label-width="150px" style="max-width: 660px" @submit.prevent>
             <el-form-item label="名称">
               <el-input v-model="contact.name" placeholder="如 XX 云客服中心" clearable />
             </el-form-item>

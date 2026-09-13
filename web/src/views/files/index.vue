@@ -191,10 +191,16 @@
     </div>
 
     <!-- 新建目录对话框 -->
+    <!-- el-form 渲染的是原生 form + 单输入框，回车会触发浏览器隐式提交（页面刷新），
+         故 @submit.prevent 阻止提交，回车确认交给 @keydown.enter -->
     <el-dialog v-model="mkdirVisible" title="新建目录" width="400px">
-      <el-form>
+      <el-form @submit.prevent>
         <el-form-item label="目录名">
-          <el-input v-model="mkdirName" placeholder="请输入目录名" @keyup.enter="doMkdir" />
+          <el-input
+            v-model="mkdirName"
+            placeholder="请输入目录名"
+            @keydown.enter.prevent="onEnterConfirm($event, doMkdir)"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -205,9 +211,13 @@
 
     <!-- 新建文件对话框 -->
     <el-dialog v-model="newFileVisible" title="新建文件" width="400px">
-      <el-form>
+      <el-form @submit.prevent>
         <el-form-item label="文件名">
-          <el-input v-model="newFileName" placeholder="请输入文件名" @keyup.enter="doNewFile" />
+          <el-input
+            v-model="newFileName"
+            placeholder="请输入文件名"
+            @keydown.enter.prevent="onEnterConfirm($event, doNewFile)"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -218,9 +228,13 @@
 
     <!-- 重命名对话框 -->
     <el-dialog v-model="renameVisible" title="重命名" width="400px">
-      <el-form>
+      <el-form @submit.prevent>
         <el-form-item label="新名称">
-          <el-input v-model="renameName" placeholder="请输入新名称" @keyup.enter="doRename" />
+          <el-input
+            v-model="renameName"
+            placeholder="请输入新名称"
+            @keydown.enter.prevent="onEnterConfirm($event, doRename)"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -556,6 +570,16 @@ async function doSaveEdit() {
 
 function onEditorOpened() {
   // Focus the textarea
+}
+
+/**
+ * 对话框回车确认：忽略输入法组词（中文输入）过程中的回车，
+ * 否则按回车选词时会用半截名字直接提交。
+ */
+function onEnterConfirm(e: Event, action: () => void) {
+  const ev = e as KeyboardEvent
+  if (ev.isComposing || ev.keyCode === 229) return
+  action()
 }
 
 function showMkdirDialog() {

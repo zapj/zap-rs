@@ -337,7 +337,7 @@ onMounted(load)
 
     <!-- 添加弹窗 -->
     <el-dialog v-model="addVisible" title="添加 IP（支持批量）" width="560px" :close-on-click-modal="false">
-      <el-form label-width="110px">
+      <el-form label-width="110px" @submit.prevent>
         <el-form-item label="IP 地址">
           <el-input
             v-model="addForm.text"
@@ -368,7 +368,7 @@ onMounted(load)
 
     <!-- 编辑弹窗 -->
     <el-dialog v-model="editVisible" title="编辑 IP" width="520px" :close-on-click-modal="false">
-      <el-form label-width="110px">
+      <el-form label-width="110px" @submit.prevent>
         <el-form-item label="IP 地址">
           <span class="ip-text">{{ editForm.address }}</span>
         </el-form-item>

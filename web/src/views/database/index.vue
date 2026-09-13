@@ -77,6 +77,7 @@
         :rules="createRules"
         label-width="110px"
         class="create-form"
+        @submit.prevent
       >
         <el-form-item label="数据库名" prop="name">
           <div class="field-block">
@@ -194,7 +195,7 @@
         style="margin-bottom: 12px"
       />
 
-      <el-form :model="userForm" inline class="remote-form">
+      <el-form :model="userForm" inline class="remote-form" @submit.prevent>
         <el-form-item label="用户名">
           <el-input
             v-model="userForm.user"
@@ -259,7 +260,7 @@
         style="margin-bottom: 12px"
       />
 
-      <el-form :model="remoteForm" inline class="remote-form">
+      <el-form :model="remoteForm" inline class="remote-form" @submit.prevent>
         <el-form-item label="用户">
           <el-select
             v-model="remoteForm.user"

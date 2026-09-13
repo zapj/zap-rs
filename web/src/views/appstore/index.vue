@@ -263,7 +263,7 @@
 
     <!-- 添加源对话框 -->
     <el-dialog v-model="showAddDialog" title="添加 Git 源" width="520px">
-      <el-form label-width="80px">
+      <el-form label-width="80px" @submit.prevent>
         <el-form-item label="名称" required>
           <el-input v-model="addForm.name" placeholder="例如: 我的应用商店" maxlength="32" />
         </el-form-item>

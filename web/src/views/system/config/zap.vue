@@ -28,7 +28,7 @@
             title="面板仅以 HTTPS 对外提供服务（HTTP 会自动跳转）。修改绑定 IP 或端口后需重启 Zap 服务，请确认新端口未被占用且防火墙已放行。"
             style="margin-bottom: 16px"
           />
-          <el-form :model="server" label-width="150px" style="max-width: 660px">
+          <el-form :model="server" label-width="150px" style="max-width: 660px" @submit.prevent>
             <el-form-item label="绑定 IP">
               <el-select
                 v-model="server.address"
@@ -127,7 +127,7 @@
           />
 
           <div class="section-title">更换证书</div>
-          <el-form :model="sslForm" label-width="150px" style="max-width: 760px">
+          <el-form :model="sslForm" label-width="150px" style="max-width: 760px" @submit.prevent>
             <el-form-item label="证书来源">
               <el-radio-group v-model="sslForm.source">
                 <el-radio value="self-signed">自动生成自签证书</el-radio>
@@ -192,7 +192,7 @@
             title="配置后页面与接口统一位于 /前缀/ 下，可隐藏后台入口；留空表示不启用前缀（页面在根路径、接口在 /api/）。"
             style="margin-bottom: 16px"
           />
-          <el-form label-width="150px" style="max-width: 660px">
+          <el-form label-width="150px" style="max-width: 660px" @submit.prevent>
             <el-form-item label="URL 前缀">
               <el-input
                 v-model="server.url_prefix"

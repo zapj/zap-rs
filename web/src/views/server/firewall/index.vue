@@ -85,7 +85,7 @@
 
       <el-divider content-position="left">端口规则</el-divider>
 
-      <el-form :inline="true" :model="form" class="rule-form">
+      <el-form :inline="true" :model="form" class="rule-form" @submit.prevent>
         <el-form-item label="端口">
           <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 140px" />
         </el-form-item>

@@ -56,7 +56,7 @@
         </div>
       </template>
 
-      <el-form label-width="120px" class="auto-form">
+      <el-form label-width="120px" class="auto-form" @submit.prevent>
         <el-form-item label="启用自动更新">
           <el-switch v-model="form.auto" />
           <span class="form-hint">开启后按下方 cron 定时检查；发现新版本自动升级 zapd 与 zapexec</span>

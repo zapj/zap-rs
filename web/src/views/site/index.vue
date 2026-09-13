@@ -1427,7 +1427,7 @@ onMounted(() => {
       :close-on-click-modal="false"
       class="site-form-dialog"
     >
-      <el-form label-width="118px" class="site-form site-tabs-form">
+      <el-form label-width="118px" class="site-form site-tabs-form" @submit.prevent>
         <el-tabs v-model="activeTab" type="border-card" class="site-tabs">
           <!-- 基础信息 -->
           <el-tab-pane label="基础信息" name="base">

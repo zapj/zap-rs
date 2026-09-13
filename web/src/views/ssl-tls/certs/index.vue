@@ -93,7 +93,7 @@
       top="4vh"
       @closed="resetEdit"
     >
-      <el-form :model="editForm" label-width="86px">
+      <el-form :model="editForm" label-width="86px" @submit.prevent>
         <el-form-item v-if="canManageAll" label="归属用户">
           <el-select
             v-model="editForm.user_id"
@@ -245,7 +245,7 @@
     <el-dialog v-model="selfSignVisible" title="生成自签名证书" width="560px">
       <el-alert type="warning" :closable="false" show-icon
         description="自签名证书不会被浏览器信任，适合测试 / 内网使用；证书与私钥、CSR 将由服务端即时生成并保存。" />
-      <el-form label-width="90px" style="margin-top: 12px">
+      <el-form label-width="90px" style="margin-top: 12px" @submit.prevent>
         <el-form-item label="证书名称">
           <el-input v-model="selfSignForm.name" placeholder="如 dev-server" maxlength="80" />
         </el-form-item>
@@ -287,7 +287,7 @@
     <el-dialog v-model="leVisible" title="申请 Let's Encrypt 证书" width="620px">
       <el-alert type="info" :closable="false" show-icon
         description="通过 ACME HTTP-01 验证域名所有权：申请期间本服务将在 80 端口临时响应验证请求，请确保域名已解析到本机且 80 端口对外可达、未被占用。" />
-      <el-form label-width="90px" style="margin-top: 12px">
+      <el-form label-width="90px" style="margin-top: 12px" @submit.prevent>
         <el-form-item label="域名">
           <el-input v-model="leForm.domains" placeholder="example.com, www.example.com（首域名将作为证书名称）" />
         </el-form-item>

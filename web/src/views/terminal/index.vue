@@ -136,7 +136,7 @@
       width="500px"
       :close-on-click-modal="false"
     >
-      <el-form :model="form" label-width="90px" ref="formRef">
+      <el-form :model="form" label-width="90px" ref="formRef" @submit.prevent>
         <el-form-item label="连接名称" required>
           <el-input v-model="form.name" placeholder="如：生产服务器" />
         </el-form-item>
@@ -241,7 +241,7 @@
         <b style="margin: 0 4px">{{ pushKeyTarget }}</b>
         的 ~/.ssh/authorized_keys。该操作需要 root 权限，仅 <b>admin</b> 角色可用，无需输入密码。
       </el-alert>
-      <el-form v-if="!pushKeyIsLocal" label-width="90px" style="margin-top: 16px">
+      <el-form v-if="!pushKeyIsLocal" label-width="90px" style="margin-top: 16px" @submit.prevent>
         <el-form-item label="SSH 密码" required>
           <el-input
             v-model="pushKeyPwd"
@@ -329,7 +329,7 @@
 
     <!-- 生成密钥 -->
     <el-dialog v-model="showKeyGen" title="生成 SSH 密钥" width="480px" :close-on-click-modal="false">
-      <el-form label-width="90px">
+      <el-form label-width="90px" @submit.prevent>
         <el-form-item label="密钥名称" required>
           <el-input v-model="keyGenForm.name" placeholder="如：my-server（字母/数字/-/_，最多 64 位）" />
         </el-form-item>
@@ -358,7 +358,7 @@
 
     <!-- 导入密钥 -->
     <el-dialog v-model="showKeyImport" title="导入 SSH 密钥" width="560px" :close-on-click-modal="false">
-      <el-form label-width="90px">
+      <el-form label-width="90px" @submit.prevent>
         <el-form-item label="密钥名称" required>
           <el-input v-model="keyImportForm.name" placeholder="如：my-server（字母/数字/-/_，最多 64 位）" />
         </el-form-item>

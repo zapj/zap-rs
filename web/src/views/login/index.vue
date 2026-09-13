@@ -127,6 +127,7 @@ const handleLogin = async (formEl: FormInstance | undefined) => {
       class="login-form"
       autocomplete="on"
       label-position="top"
+      @submit.prevent
     >
       <div class="title-container">
         <h3 class="title">ZAP</h3>

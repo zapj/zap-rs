@@ -227,7 +227,7 @@ async function savePrefs() {
       <el-tabs v-model="activeTab">
         <!-- 基本资料 -->
         <el-tab-pane label="基本资料" name="info">
-          <el-form label-width="80px" style="max-width: 440px">
+          <el-form label-width="80px" style="max-width: 440px" @submit.prevent>
             <el-form-item label="用户名">
               <el-input :model-value="userInfo.username" disabled />
             </el-form-item>
@@ -258,7 +258,7 @@ async function savePrefs() {
 
         <!-- 修改密码 -->
         <el-tab-pane label="修改密码" name="password">
-          <el-form label-width="90px" style="max-width: 400px">
+          <el-form label-width="90px" style="max-width: 400px" @submit.prevent>
             <el-form-item label="新密码">
               <el-input
                 v-model="pwdForm.newPassword"

@@ -224,7 +224,7 @@ onMounted(() => {
 
     <!-- 生成密钥对话框 -->
     <el-dialog v-model="genVisible" title="生成 SSH 密钥" width="480px">
-      <el-form label-width="80px">
+      <el-form label-width="80px" @submit.prevent>
         <el-form-item label="名称">
           <el-input v-model="genForm.name" placeholder="如 id_rsa_zap" />
         </el-form-item>
@@ -253,7 +253,7 @@ onMounted(() => {
 
     <!-- 导入密钥对话框 -->
     <el-dialog v-model="importVisible" title="导入 SSH 密钥" width="560px">
-      <el-form label-width="80px">
+      <el-form label-width="80px" @submit.prevent>
         <el-form-item label="名称">
           <el-input v-model="importForm.name" placeholder="密钥文件名（不含扩展名）" />
         </el-form-item>

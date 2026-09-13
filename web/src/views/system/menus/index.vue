@@ -181,7 +181,7 @@ onMounted(loadMenus)
 
     <!-- 菜单表单 -->
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="660px" destroy-on-close>
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px" @submit.prevent>
         <el-form-item label="菜单类型">
           <el-radio-group v-model="form.type">
             <el-radio-button value="dir">目录</el-radio-button>

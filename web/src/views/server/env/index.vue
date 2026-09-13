@@ -673,7 +673,7 @@ onMounted(() => {
       top="6vh"
       destroy-on-close
     >
-      <el-form label-width="110px">
+      <el-form label-width="110px" @submit.prevent>
         <el-form-item label="模板名" required>
           <el-input
             v-model="specForm.name"
@@ -805,7 +805,7 @@ onMounted(() => {
 
     <!-- 全局默认配置 -->
     <el-dialog v-model="dialogVisible" title="全局默认配置" width="640px">
-      <el-form label-width="130px">
+      <el-form label-width="130px" @submit.prevent>
         <el-form-item label="默认 Web 服务器">
           <el-select v-model="form.webserver" clearable placeholder="跟随自动探测" style="width: 100%">
             <el-option label="跟随自动探测（自动）" value="" />

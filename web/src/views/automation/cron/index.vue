@@ -66,7 +66,7 @@
       width="620px"
       :close-on-click-modal="false"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px" @submit.prevent>
         <el-form-item label="任务名称" prop="name">
           <el-input v-model="form.name" placeholder="例如：每日备份网站" maxlength="60" />
         </el-form-item>

@@ -92,6 +92,7 @@
         label-position="left"
         label-width="80px"
         style="margin-left: 50px; margin-right: 50px"
+        @submit.prevent
       >
         <el-form-item label="分类名称" prop="name">
           <el-input v-model="temp.name" />

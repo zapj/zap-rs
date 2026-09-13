@@ -6,7 +6,7 @@
       </template>
 
       <!-- 搜索 -->
-      <el-form :inline="true" :model="searchForm">
+      <el-form :inline="true" :model="searchForm" @submit.prevent>
         <el-form-item label="用户名">
           <el-input v-model="searchForm.username" placeholder="请输入" clearable style="width: 180px" />
         </el-form-item>
@@ -121,7 +121,7 @@
       width="480px"
       @closed="resetForm"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="70px">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="70px" @submit.prevent>
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" :disabled="dialogType === 'edit'" />
         </el-form-item>

@@ -128,7 +128,7 @@
       width="560px"
       @closed="resetForm"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" @submit.prevent>
         <el-form-item label="套餐名" prop="name">
           <el-input v-model="form.name" placeholder="如：基础型 / 企业型" maxlength="64" />
         </el-form-item>

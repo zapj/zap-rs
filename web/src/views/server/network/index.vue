@@ -136,7 +136,7 @@ onMounted(load)
           </el-descriptions>
 
           <el-divider content-position="left">修改主机名</el-divider>
-          <el-form label-width="100px" style="max-width: 520px">
+          <el-form label-width="100px" style="max-width: 520px" @submit.prevent>
             <el-form-item label="新主机名">
               <el-input v-model="newHostname" placeholder="例如：web-01" maxlength="253" clearable />
             </el-form-item>
@@ -171,7 +171,7 @@ onMounted(load)
             </div>
           </el-alert>
 
-          <el-form label-width="100px" style="max-width: 620px">
+          <el-form label-width="100px" style="max-width: 620px" @submit.prevent>
             <el-form-item label="Nameserver">
               <div style="width: 100%">
                 <div v-for="(ns, i) in nameservers" :key="i" class="row-line">
