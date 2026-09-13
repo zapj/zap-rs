@@ -109,6 +109,7 @@ cp -Rf "$CUR_DIR/scripts" "$DIST_ZAP/"
 #   appstore/repos/zap-appstore/          内置 AppStore 种子源
 #   appstore/repos.yaml、custom/README.md 安装脚本(install.sh)依赖的模板
 #   apps/README.md                        APPS_DIR 占位说明（apps 下其它为运行时安装实例，不打包）
+#   www/                                 站点骨架模板(data/www/skel) + IP 默认页 / 维护页(data/www/_zap)
 # 说明：systemd 服务模板、运维脚本、zap 共享工具与 conf 模板统一由 scripts/ 提供，
 #       不重复打进 data/；安装后 data/ 是运行时数据区（zap.db、apps、appstore、run/ 等）
 # 不打包：zap.db、run/、tmp/、apps/library、appstore 的 cache/logs/runs/tmp/custom/scripts
@@ -119,6 +120,8 @@ cp -Rf "$CUR_DIR/data/appstore/repos/zap-appstore" "$DIST_DATA/appstore/repos/" 
 cp -f "$CUR_DIR/data/appstore/repos.yaml" "$DIST_DATA/appstore/" 2>/dev/null || true
 cp -f "$CUR_DIR/data/appstore/custom/README.md" "$DIST_DATA/appstore/custom/" 2>/dev/null || true
 cp -f "$CUR_DIR/data/apps/README.md" "$DIST_DATA/apps/" 2>/dev/null || true
+# www/：站点骨架模板 skel/index.html 与 IP 默认页 / 维护页 _zap/*.html（运维可直接编辑）
+cp -Rf "$CUR_DIR/data/www" "$DIST_DATA/" 2>/dev/null || true
 
 # 不打包 conf/：zap.yaml 由安装文件(install.sh)创建，升级沿用已有配置，无需内置模板
 ok "资源复制完成"
@@ -147,9 +150,9 @@ zapfile upload zap/releases/ "$ZAP_FILE_NAME.sha256" || die "上传校验文件�
 # 避免依赖 zapfile put 的内容写入语义（此前 put 未生效导致 latest.txt 停滞在旧版本）。
 info "更新版本文件 latest.txt ..."
 LATEST_FILE="$DIST_DIR/latest.txt"
-printf '%s' "$VERSION" > "$LATEST_FILE"
-zapfile upload zap/releases/ "$LATEST_FILE" || die "更新版本文件失败"
-rm -f "$LATEST_FILE"
+# printf '%s' "$VERSION" > "$LATEST_FILE"
+zapfile put "zap/releases/${LATEST_FILE}" $VERSION || die "更新版本文件失败"
+# rm -f "$LATEST_FILE"
 ok "上传完成"
 
 # ── 完成总结 ────────────────────────────────────────────────

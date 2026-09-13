@@ -180,11 +180,12 @@ fn output_err(o: &std::process::Output, fallback: &str) -> String {
 
 // ── 文档根 ───────────────────────────────────────────────────
 
-/// 站点骨架目录：`{ZAP_PATH}/scripts/zap/skel/`，其中的 index.html 为新站点的默认首页模板。
+/// 站点骨架模板：`{ZAP_PATH}/data/www/skel/index.html`，为新站点的默认首页模板。
+/// 与 IP 默认页 / 维护页（同为 {ZAP_PATH}/data/www/_zap/）放在一起，便于统一维护。
 /// 运维可直接修改该模板（支持 __SITE_NAME__ / __SITE_ID__ / __SITE_DOMAINS__ /
 /// __SITE_ROOT__ / __CREATED_AT__ 占位符），下次建站即生效。
 fn skel_file() -> PathBuf {
-    zap_path().join("scripts/zap/skel/index.html")
+    zap_path().join("data/www/skel/index.html")
 }
 
 /// skel 模板缺失时的兜底页（保证离线/精简部署也能建站成功）
