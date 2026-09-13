@@ -40,7 +40,6 @@
       <!-- 工具栏 -->
       <div class="fm-toolbar">
         <div class="fm-toolbar-left">
-          <!-- 地址栏：根用图标表示（家目录 = 房子 / 系统根目录 = 磁盘），层级用 > 分隔 -->
           <el-breadcrumb separator=">" class="fm-crumbs">
             <el-breadcrumb-item v-for="(crumb, idx) in crumbs" :key="crumb.path">
               <a
@@ -59,6 +58,50 @@
           </el-breadcrumb>
         </div>
         <div class="fm-toolbar-right">
+          <span v-if="hasSelection" class="fm-selection-label">
+            已选 {{ selectionCount }} / {{ fileList.length }}
+          </span>
+          <template v-if="hasSelection">
+            <el-button size="small" :disabled="!canOpen" @click="openSelected">
+              <el-icon><Open /></el-icon>
+              打开
+            </el-button>
+            <el-button size="small" :disabled="!canCopy" @click="showCopyDialog(false)">
+              <el-icon><Copy /></el-icon>
+              复制
+            </el-button>
+            <el-button size="small" :disabled="!canDuplicate" @click="duplicateSelected">
+              <el-icon><Copy /></el-icon>
+              复制副本
+            </el-button>
+            <el-button size="small" :disabled="!canMove" @click="showMoveDialog(false)">
+              <el-icon><Move /></el-icon>
+              移动
+            </el-button>
+            <el-button size="small" :disabled="!canDownload" @click="downloadSelected">
+              <el-icon><Download /></el-icon>
+              下载
+            </el-button>
+            <el-button size="small" :disabled="!canArchive" @click="showArchiveDialog">
+              <el-icon><Archive /></el-icon>
+              打包
+            </el-button>
+            <el-button size="small" :disabled="!canRename" @click="showRenameDialog(singleSelected!)">
+              <el-icon><Edit /></el-icon>
+              重命名
+            </el-button>
+            <el-button size="small" :disabled="!canSetPermissions" @click="showPermDialogForSelection">
+              <el-icon><Setting /></el-icon>
+              权限
+            </el-button>
+            <el-button size="small" type="danger" :disabled="!canRemove" @click="removeSelected">
+              <el-icon><Delete /></el-icon>
+              删除
+            </el-button>
+            <el-button size="small" text @click="clearSelection">
+              取消
+            </el-button>
+          </template>
           <el-button-group class="view-toggle">
             <el-button
               :type="viewMode === 'list' ? 'primary' : ''"
@@ -103,15 +146,19 @@
       <!-- 文件列表 - 列表视图 -->
       <div v-if="viewMode === 'list'" class="fm-table-wrap">
         <el-table
+          ref="tableRef"
           :data="fileList"
           v-loading="loading"
           stripe
-          highlight-current-row
+          :row-class-name="rowClassName"
           @row-click="onRowClick"
           @row-dblclick="onRowDblClick"
+          @selection-change="onTableSelectionChange"
+          @row-contextmenu="onTableRowContextMenu"
           style="width: 100%"
         >
-          <el-table-column label="名称" min-width="280">
+          <el-table-column type="selection" width="40" />
+          <el-table-column label="名称" min-width="260">
             <template #default="{ row }">
               <div class="fm-file-name">
                 <el-icon
@@ -185,9 +232,17 @@
               v-for="row in fileList"
               :key="row.path"
               class="fm-grid-item"
-              @click="onRowClick(row)"
-              @dblclick="onRowDblClick(row)"
+              :class="{ selected: isSelected(row) }"
+              @click="onGridItemClick(row, $event)"
+              @dblclick="onGridItemDblClick(row)"
+              @contextmenu.prevent="onGridContextMenu($event, row)"
             >
+              <el-checkbox
+                :model-value="isSelected(row)"
+                @click.stop
+                @change="toggleRow(row)"
+                class="fm-grid-check"
+              />
               <el-icon
                 :size="40"
                 :color="row.is_dir ? 'var(--el-color-primary)' : 'var(--el-text-color-secondary)'"
@@ -265,6 +320,9 @@
           <Document v-else />
         </el-icon>
         <span class="mono">{{ permTarget?.path }}</span>
+        <span v-if="permTargets.length > 1" class="fm-perm-count">
+          等 {{ permTargets.length }} 项
+        </span>
       </div>
 
       <div class="fm-perm-value">
@@ -357,11 +415,97 @@
         <el-button type="primary" :loading="saving" @click="doSaveEdit">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 复制到 -->
+    <el-dialog v-model="copyVisible" title="复制到" width="420px">
+      <el-form @submit.prevent>
+        <el-form-item label="目标目录">
+          <el-input v-model="copyTargetDir" placeholder="请输入目标目录绝对路径" @keydown.enter.prevent="onEnterConfirm($event, doCopy)" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="copyVisible = false">取消</el-button>
+        <el-button type="primary" :loading="copySaving" @click="doCopy">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 移动到 -->
+    <el-dialog v-model="moveVisible" title="移动到" width="420px">
+      <el-form @submit.prevent>
+        <el-form-item label="目标目录">
+          <el-input v-model="moveTargetDir" placeholder="请输入目标目录绝对路径" @keydown.enter.prevent="onEnterConfirm($event, doMove)" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="moveVisible = false">取消</el-button>
+        <el-button type="primary" :loading="moveSaving" @click="doMove">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 打包下载 -->
+    <el-dialog v-model="archiveVisible" title="打包下载" width="420px">
+      <el-form @submit.prevent>
+        <el-form-item label="压缩包名称">
+          <el-input v-model="archiveName" placeholder="例如 backup" @keydown.enter.prevent="onEnterConfirm($event, doArchive)" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="archiveVisible = false">取消</el-button>
+        <el-button type="primary" :loading="archiveSaving" @click="doArchive">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 右键菜单 -->
+    <div v-if="contextMenuVisible" class="fm-context-backdrop" @click="closeContextMenu" />
+    <div
+      v-if="contextMenuVisible"
+      class="fm-context-menu"
+      :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }"
+      @click.stop
+    >
+      <div class="fm-context-item" :class="{ disabled: !canOpen }" @click="openSelectedFromMenu">
+        <el-icon><Open /></el-icon>
+        <span>打开</span>
+      </div>
+      <div class="fm-context-item" :class="{ disabled: !canCopy }" @click="copyFromMenu">
+        <el-icon><Copy /></el-icon>
+        <span>复制到...</span>
+      </div>
+      <div class="fm-context-item" :class="{ disabled: !canDuplicate }" @click="duplicateFromMenu">
+        <el-icon><Copy /></el-icon>
+        <span>复制副本</span>
+      </div>
+      <div class="fm-context-item" :class="{ disabled: !canMove }" @click="moveFromMenu">
+        <el-icon><Move /></el-icon>
+        <span>移动到...</span>
+      </div>
+      <div class="fm-context-item" :class="{ disabled: !canDownload }" @click="downloadFromMenu">
+        <el-icon><Download /></el-icon>
+        <span>下载</span>
+      </div>
+      <div class="fm-context-item" :class="{ disabled: !canArchive }" @click="archiveFromMenu">
+        <el-icon><Archive /></el-icon>
+        <span>打包</span>
+      </div>
+      <div class="fm-context-item" :class="{ disabled: !canRename }" @click="renameFromMenu">
+        <el-icon><Edit /></el-icon>
+        <span>重命名</span>
+      </div>
+      <div class="fm-context-item" :class="{ disabled: !canSetPermissions }" @click="permFromMenu">
+        <el-icon><Setting /></el-icon>
+        <span>权限</span>
+      </div>
+      <div class="fm-context-divider" />
+      <div class="fm-context-item danger" :class="{ disabled: !canRemove }" @click="removeFromMenu">
+        <el-icon><Delete /></el-icon>
+        <span>删除</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import {
   Refresh,
   Upload,
@@ -374,6 +518,14 @@ import {
   DocumentAdd,
   Home,
   HardDrive,
+  Open,
+  Copy,
+  Download,
+  Move,
+  Archive,
+  Delete,
+  Edit,
+  Setting,
 } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
@@ -388,6 +540,8 @@ import {
   downloadFile as downloadFileApi,
   uploadFiles,
   chmodFile,
+  copyFile,
+  archiveFiles,
   type FileEntry,
 } from '@/api/file'
 import CodeEditor from '@/components/CodeEditor.vue'
@@ -409,10 +563,43 @@ const currentPath = ref('')
 const homePath = ref('')
 const fileList = ref<FileEntry[]>([])
 const viewMode = ref<'list' | 'grid'>('list')
-const selectedEntry = ref<FileEntry | null>(null)
+/** 当前选中的条目路径集合（支持多选） */
+const selectedEntries = ref<Set<string>>(new Set())
 
-// Tree
+/** 选中的条目对象（按 fileList 顺序） */
+const selectedItems = computed<FileEntry[]>(() =>
+  fileList.value.filter((e) => selectedEntries.value.has(e.path)),
+)
+const selectionCount = computed(() => selectedEntries.value.size)
+const hasSelection = computed(() => selectionCount.value > 0)
+const singleSelected = computed<FileEntry | null>(() =>
+  hasSelection.value ? selectedItems.value[0] : null,
+)
+
+/** 当前能不能执行「下载」：单文件直接下；多选或目录则走打包 */
+const canDownloadDirectly = computed(
+  () => selectionCount.value === 1 && !singleSelected.value?.is_dir,
+)
+const hasDirectory = computed(() => selectedItems.value.some((e) => e.is_dir))
+
+const canOpen = computed(() => selectionCount.value === 1)
+const canRename = computed(() => selectionCount.value === 1)
+const canDuplicate = computed(() => selectionCount.value === 1)
+const canSetPermissions = computed(() => hasSelection.value)
+const canCopy = computed(() => hasSelection.value)
+const canMove = computed(() => hasSelection.value)
+const canArchive = computed(() => hasSelection.value)
+const canRemove = computed(() => hasSelection.value)
+const canDownload = computed(() => hasSelection.value)
+
+// Context menu
+const contextMenuVisible = ref(false)
+const contextMenuX = ref(0)
+const contextMenuY = ref(0)
+
+// Tree / Table refs
 const treeRef = ref<InstanceType<typeof ElTree>>()
+const tableRef = ref<any>(null)
 const treeProps = { label: 'name', children: 'children', isLeaf: (data: any) => !data.is_dir }
 
 interface TreeNode {
@@ -473,6 +660,18 @@ const newFileName = ref('')
 const renameVisible = ref(false)
 const renameTarget = ref<FileEntry | null>(null)
 const renameName = ref('')
+
+// Copy / Move / Archive 对话框
+const copyVisible = ref(false)
+const copyTargetDir = ref('')
+const copySaving = ref(false)
+const moveVisible = ref(false)
+const moveTargetDir = ref('')
+const moveSaving = ref(false)
+const archiveVisible = ref(false)
+const archiveName = ref('')
+const archiveSaving = ref(false)
+
 const editVisible = ref(false)
 const editingFile = ref('')
 const editingFullPath = ref('')
@@ -578,6 +777,7 @@ async function loadFileList() {
     if (data?.home) homePath.value = data.home
     if (data?.current_path) currentPath.value = data.current_path
     fileList.value = data?.entries || []
+    clearSelection()
     syncTree()
   } catch {
     // handled by interceptor
@@ -608,17 +808,151 @@ function joinCurrent(name: string): string {
   return !dir || dir === '/' ? `/${name}` : `${dir}/${name}`
 }
 
-function onRowClick(row: FileEntry) {
-  selectedEntry.value = row
+/** 同步选中态到 el-table 时，忽略其 selection-change 回灌，避免互相覆盖 */
+let syncingSelection = false
+
+function syncTableSelection() {
+  const t = tableRef.value
+  if (!t) return
+  syncingSelection = true
+  t.clearSelection?.()
+  fileList.value.forEach((r) => {
+    if (selectedEntries.value.has(r.path)) t.toggleRowSelection?.(r, true)
+  })
+  syncingSelection = false
+}
+
+function clearSelection() {
+  selectedEntries.value = new Set()
+  syncTableSelection()
+}
+
+function toggleRow(row: FileEntry) {
+  const next = new Set(selectedEntries.value)
+  if (next.has(row.path)) next.delete(row.path)
+  else next.add(row.path)
+  selectedEntries.value = next
+  syncTableSelection()
+}
+
+function setSelection(row: FileEntry) {
+  selectedEntries.value = new Set([row.path])
+  syncTableSelection()
+}
+
+function isSelected(row: FileEntry) {
+  return selectedEntries.value.has(row.path)
+}
+
+let lastClickedPath = ''
+
+function handleRowClick(row: FileEntry, event?: MouseEvent) {
+  if (event && (event.ctrlKey || event.metaKey)) {
+    toggleRow(row)
+    lastClickedPath = row.path
+    return
+  }
+  if (event && event.shiftKey && lastClickedPath) {
+    const paths = fileList.value.map((e) => e.path)
+    const start = paths.indexOf(lastClickedPath)
+    const end = paths.indexOf(row.path)
+    if (start !== -1 && end !== -1) {
+      const range = fileList.value.slice(Math.min(start, end), Math.max(start, end) + 1)
+      const next = new Set(selectedEntries.value)
+      range.forEach((e) => next.add(e.path))
+      selectedEntries.value = next
+      syncTableSelection()
+      return
+    }
+  }
+  setSelection(row)
+  lastClickedPath = row.path
+}
+
+function onRowClick(row: FileEntry, _column: any, event: MouseEvent) {
+  handleRowClick(row, event)
 }
 
 async function onRowDblClick(row: FileEntry) {
   if (row.is_dir) {
     navigateTo(row.path)
   } else {
-    // Open for editing (admin) or read-only view
     await openFileEditor(row)
   }
+}
+
+function onTableSelectionChange(rows: FileEntry[]) {
+  if (syncingSelection) return
+  selectedEntries.value = new Set(rows.map((r) => r.path))
+}
+
+function onGridItemClick(row: FileEntry, event: MouseEvent) {
+  handleRowClick(row, event)
+}
+
+function onGridItemDblClick(row: FileEntry) {
+  onRowDblClick(row)
+}
+
+function rowClassName({ row }: { row: FileEntry }) {
+  return isSelected(row) ? 'selected-row' : ''
+}
+
+function onTableRowContextMenu(row: FileEntry, _column: any, event: MouseEvent) {
+  openContextMenu(event, row)
+}
+
+function onGridContextMenu(event: MouseEvent, row: FileEntry) {
+  openContextMenu(event, row)
+}
+
+function openContextMenu(event: MouseEvent, row?: FileEntry) {
+  event.preventDefault()
+  if (row && !isSelected(row)) setSelection(row)
+  contextMenuX.value = event.clientX
+  contextMenuY.value = event.clientY
+  contextMenuVisible.value = true
+}
+
+function closeContextMenu() {
+  contextMenuVisible.value = false
+}
+
+function openSelectedFromMenu() {
+  closeContextMenu()
+  openSelected()
+}
+function copyFromMenu() {
+  closeContextMenu()
+  showCopyDialog(false)
+}
+function duplicateFromMenu() {
+  closeContextMenu()
+  duplicateSelected()
+}
+function moveFromMenu() {
+  closeContextMenu()
+  showMoveDialog(false)
+}
+function downloadFromMenu() {
+  closeContextMenu()
+  downloadSelected()
+}
+function archiveFromMenu() {
+  closeContextMenu()
+  showArchiveDialog()
+}
+function renameFromMenu() {
+  closeContextMenu()
+  if (singleSelected.value) showRenameDialog(singleSelected.value)
+}
+function permFromMenu() {
+  closeContextMenu()
+  showPermDialogForSelection()
+}
+function removeFromMenu() {
+  closeContextMenu()
+  removeSelected()
 }
 
 // ── file operations ────────────────────────────────────────
@@ -781,6 +1115,193 @@ async function handleUpload(options: any) {
   }
 }
 
+// ── selection actions ────────────────────────────────────────
+
+function openSelected() {
+  const item = singleSelected.value
+  if (!item) return
+  if (item.is_dir) {
+    navigateTo(item.path)
+  } else {
+    openFileEditor(item)
+  }
+}
+
+function downloadBlob(name: string, content: string) {
+  const bytes = zapProtoB64Decode(content)
+  const url = window.URL.createObjectURL(new Blob([bytes as BlobPart]))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  window.URL.revokeObjectURL(url)
+}
+
+function zapProtoB64Decode(content: string): Uint8Array {
+  const bin = atob(content.replace(/\s/g, ''))
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i)
+  }
+  return out
+}
+
+async function downloadSelected() {
+  if (!hasSelection.value) return
+  if (canDownloadDirectly.value && singleSelected.value) {
+    await handleDownload(singleSelected.value)
+    return
+  }
+  const name = archiveName.value || `download_${Date.now()}`
+  const paths = selectedItems.value.map((e) => e.path)
+  try {
+    const res = await archiveFiles(paths, name, currentPath.value)
+    const data = res.data
+    if (!data) return
+    downloadBlob(data.name, data.content)
+    ElMessage.success('开始下载')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '下载失败')
+  }
+}
+
+function showCopyDialog(fromMenu: boolean) {
+  if (!hasSelection.value) return
+  if (fromMenu && singleSelected.value) setSelection(singleSelected.value)
+  copyTargetDir.value = currentPath.value
+  copyVisible.value = true
+}
+
+async function doCopy() {
+  if (!hasSelection.value || !copyTargetDir.value.trim()) {
+    ElMessage.warning('请输入目标目录')
+    return
+  }
+  copySaving.value = true
+  try {
+    for (const item of selectedItems.value) {
+      const target = `${copyTargetDir.value.trim()}/${item.name}`
+      await copyFile(item.path, target)
+    }
+    ElMessage.success('复制成功')
+    copyVisible.value = false
+    loadFileList()
+    refreshTree()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '复制失败')
+  } finally {
+    copySaving.value = false
+  }
+}
+
+function showMoveDialog(fromMenu: boolean) {
+  if (!hasSelection.value) return
+  if (fromMenu && singleSelected.value) setSelection(singleSelected.value)
+  moveTargetDir.value = currentPath.value
+  moveVisible.value = true
+}
+
+async function doMove() {
+  if (!hasSelection.value || !moveTargetDir.value.trim()) {
+    ElMessage.warning('请输入目标目录')
+    return
+  }
+  moveSaving.value = true
+  try {
+    for (const item of selectedItems.value) {
+      const target = `${moveTargetDir.value.trim()}/${item.name}`
+      await renameFile(item.path, target)
+    }
+    ElMessage.success('移动成功')
+    moveVisible.value = false
+    loadFileList()
+    refreshTree()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '移动失败')
+  } finally {
+    moveSaving.value = false
+  }
+}
+
+function showArchiveDialog() {
+  if (!hasSelection.value) return
+  archiveName.value = `archive_${Date.now()}`
+  archiveVisible.value = true
+}
+
+async function doArchive() {
+  if (!hasSelection.value) return
+  const name = archiveName.value.trim()
+  if (!name) {
+    ElMessage.warning('请输入压缩包名称')
+    return
+  }
+  archiveSaving.value = true
+  try {
+    const paths = selectedItems.value.map((e) => e.path)
+    const res = await archiveFiles(paths, name, currentPath.value)
+    const data = res.data
+    if (!data) return
+    downloadBlob(data.name, data.content)
+    ElMessage.success('开始下载')
+    archiveVisible.value = false
+  } catch (e: any) {
+    ElMessage.error(e?.message || '打包失败')
+  } finally {
+    archiveSaving.value = false
+  }
+}
+
+/** 复制副本：目标已存在时自动在名字后追加 _copy / _copy2 ... */
+async function duplicateSelected() {
+  if (!singleSelected.value) return
+  const item = singleSelected.value
+  let idx = 0
+  let candidate = ''
+  // 先探测可用名字：最多尝试 100 次
+  for (; idx < 100; idx++) {
+    candidate = idx === 0 ? `${item.path}_copy` : `${item.path}_copy${idx + 1}`
+    try {
+      await copyFile(item.path, candidate)
+      ElMessage.success('复制副本成功')
+      loadFileList()
+      refreshTree()
+      return
+    } catch (e: any) {
+      // 目标已存在则继续尝试下一个名字，其余错误直接抛出
+      if (typeof e?.message === 'string' && e.message.includes('目标已存在')) {
+        continue
+      }
+      ElMessage.error(e?.message || '复制失败')
+      return
+    }
+  }
+  ElMessage.error('无法生成可用的副本名称')
+}
+
+async function removeSelected() {
+  if (!hasSelection.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除选中的 ${selectionCount.value} 项？${hasDirectory.value ? '目录内所有内容将被删除。' : ''}此操作不可恢复。`,
+      '警告',
+      { type: 'warning', confirmButtonText: '确认删除' },
+    )
+  } catch {
+    return
+  }
+  try {
+    for (const item of selectedItems.value) {
+      await deleteFile(item.path)
+    }
+    ElMessage.success('删除成功')
+    loadFileList()
+    refreshTree()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '删除失败')
+  }
+}
+
 // ── utils ──────────────────────────────────────────────────
 
 function formatSize(bytes: number): string {
@@ -795,6 +1316,7 @@ function formatSize(bytes: number): string {
 
 const permVisible = ref(false)
 const permTarget = ref<FileEntry | null>(null)
+const permTargets = ref<FileEntry[]>([])
 const permInput = ref('0755')
 const permSaving = ref(false)
 
@@ -902,7 +1424,19 @@ const permRwx = computed(() => {
 
 function showPermDialog(row: FileEntry) {
   permTarget.value = row
+  permTargets.value = [row]
   const mode = typeof row.mode === 'number' ? row.mode : fromOct(row.permissions)
+  modeToBits(mode)
+  permInput.value = toPermText(mode)
+  permVisible.value = true
+}
+
+function showPermDialogForSelection() {
+  if (!hasSelection.value) return
+  const items = selectedItems.value
+  permTargets.value = items
+  permTarget.value = items[0]
+  const mode = typeof items[0].mode === 'number' ? items[0].mode : fromOct(items[0].permissions)
   modeToBits(mode)
   permInput.value = toPermText(mode)
   permVisible.value = true
@@ -921,8 +1455,7 @@ function onPermBitsChange() {
 }
 
 async function doChmod() {
-  const target = permTarget.value
-  if (!target) return
+  if (permTargets.value.length === 0) return
   const digits = (permInput.value || '').trim()
   if (!/^[0-7]{1,4}$/.test(digits)) {
     ElMessage.warning(
@@ -934,11 +1467,13 @@ async function doChmod() {
   const mode = (parseInt(digits, 8) & permMask.value) | permKeepSpecial.value
   permSaving.value = true
   try {
-    const res = await chmodFile(target.path, mode)
-    const info = res.data
-    if (info) {
-      target.permissions = info.permissions
-      target.mode = info.mode
+    for (const target of permTargets.value) {
+      const res = await chmodFile(target.path, mode)
+      const info = res.data
+      if (info) {
+        target.permissions = info.permissions
+        target.mode = info.mode
+      }
     }
     ElMessage.success('权限修改成功')
     permVisible.value = false
@@ -957,6 +1492,14 @@ onMounted(async () => {
   await loadFileList()
   treeData.value = buildTreeData()
   await revealInTree()
+})
+
+// 切回列表视图时，把当前选中态同步到 el-table 的复选框
+watch(viewMode, async (mode) => {
+  if (mode === 'list') {
+    await nextTick()
+    syncTableSelection()
+  }
 })
 </script>
 
@@ -1115,6 +1658,83 @@ onMounted(async () => {
 .mono {
   font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
   font-size: 12px;
+}
+
+.fm-selection-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+:deep(.selected-row) {
+  background-color: var(--el-color-primary-light-9) !important;
+}
+
+.fm-grid-item {
+  position: relative;
+
+  &.selected {
+    background: var(--el-color-primary-light-9);
+  }
+}
+
+.fm-grid-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+}
+
+.fm-context-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1998;
+}
+
+.fm-context-menu {
+  position: fixed;
+  z-index: 1999;
+  min-width: 160px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  box-shadow: var(--el-box-shadow-light);
+  padding: 6px 0;
+}
+
+.fm-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--el-text-color-primary);
+
+  &:hover:not(.disabled) {
+    background: var(--el-fill-color-light);
+  }
+
+  &.disabled {
+    color: var(--el-text-color-disabled);
+    cursor: not-allowed;
+  }
+
+  &.danger:not(.disabled) {
+    color: var(--el-color-danger);
+  }
+}
+
+.fm-context-divider {
+  height: 1px;
+  background: var(--el-border-color-lighter);
+  margin: 6px 0;
+}
+
+.fm-perm-count {
+  margin-left: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
 }
 
 /* ── 地址栏（面包屑）──────────────────────────────────────── */

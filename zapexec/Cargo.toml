@@ -15,4 +15,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
 chrono = "0.4"
 serde_yaml = "0.9"
+zip = "2"
 zap-crypto = { path = "../zap-crypto" }

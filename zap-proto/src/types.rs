@@ -304,6 +304,23 @@ pub enum Request {
         #[serde(default)]
         skip_owner_check: bool,
     },
+    /// 复制文件/目录（递归）
+    #[serde(rename = "file.copy")]
+    FileCopy {
+        path: String,
+        new_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
+    },
+    /// 打包下载（zip，base64 字节）
+    #[serde(rename = "file.archive")]
+    FileArchive {
+        paths: Vec<String>,
+        name: String,
+        base_dir: String,
+    },
     /// 添加 AppStore Git 源（clone 到 data/appstore/repos/<id>/）
     #[serde(rename = "appstore.repo_add")]
     AppstoreRepoAdd {

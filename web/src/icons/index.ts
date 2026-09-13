@@ -59,8 +59,14 @@ import IconMenuBook from '~icons/material-symbols/menu-book'
 import IconMonitor from '~icons/material-symbols/monitor'
 import IconMonitoring from '~icons/material-symbols/monitoring'
 import IconMoreVert from '~icons/material-symbols/more-vert'
+import IconContentCopy from '~icons/material-symbols/content-copy'
+import IconContentCut from '~icons/material-symbols/content-cut'
+import IconDownload from '~icons/material-symbols/download'
+import IconDriveFileMove from '~icons/material-symbols/drive-file-move'
+import IconInventory2 from '~icons/material-symbols/inventory-2'
 import IconNoteAdd from '~icons/material-symbols/note-add'
 import IconNotifications from '~icons/material-symbols/notifications'
+import IconOpenInNew from '~icons/material-symbols/open-in-new'
 import IconPayments from '~icons/material-symbols/payments'
 import IconPerson from '~icons/material-symbols/person'
 import IconProgressActivity from '~icons/material-symbols/progress-activity'
@@ -90,6 +96,7 @@ export const ICON_MAP: Record<string, Component> = {
   add: IconAdd,
   alarm: IconAlarm,
   analytics: IconAnalytics,
+  archive: IconInventory2,
   'auto-fix-high': IconAutoFixHigh,
   badge: IconBadge,
   build: IconBuild,
@@ -105,6 +112,8 @@ export const ICON_MAP: Record<string, Component> = {
   'cloud-off': IconCloudOff,
   'cloud-upload': IconCloudUpload,
   'confirmation-number': IconConfirmationNumber,
+  content_copy: IconContentCopy,
+  content_cut: IconContentCut,
   'create-new-folder': IconCreateNewFolder,
   'dark-mode': IconDarkMode,
   database: IconDatabase,
@@ -112,12 +121,16 @@ export const ICON_MAP: Record<string, Component> = {
   'deployed-code': IconDeployedCode,
   description: IconDescription,
   dns: IconDns,
+  download: IconDownload,
+  'drive-file-move': IconDriveFileMove,
   edit: IconEdit,
   folder: IconFolder,
   'folder-open': IconFolderOpen,
   'grid-view': IconGridView,
   'hard-drive': IconHardDrive,
   home: IconHome,
+  inventory_2: IconInventory2,
+  'open-in-new': IconOpenInNew,
   info: IconInfo,
   key: IconKey,
   'keyboard-arrow-down': IconKeyboardArrowDown,
@@ -161,6 +174,7 @@ export const ICON_NAMES: string[] = Object.keys(ICON_MAP).sort()
 export const DEFAULT_ICON: Component = IconMenu
 
 /* ── 具名导出：沿用改造前的 Element Plus 图标名，视图标签无需改动 ───── */
+export const Archive = IconInventory2
 export const ArrowDown = IconKeyboardArrowDown
 export const ArrowRight = IconChevronRight
 export const Bell = IconNotifications
@@ -175,11 +189,14 @@ export const CloudDownload = IconCloudDownload
 export const CloudOff = IconCloudOff
 export const CloudUpload = IconCloudUpload
 export const Connection = IconCable
+export const Copy = IconContentCopy
 export const Cpu = IconMemory
+export const Cut = IconContentCut
 export const DataLine = IconMonitoring
 export const Delete = IconDelete
 export const Document = IconDescription
 export const DocumentAdd = IconNoteAdd
+export const Download = IconDownload
 export const Edit = IconEdit
 export const Fold = IconMenu
 export const Folder = IconFolder
@@ -199,10 +216,13 @@ export const MagicStick = IconAutoFixHigh
 export const Monitor = IconMonitor
 export const Moon = IconDarkMode
 export const MoreFilled = IconMoreVert
+export const Move = IconDriveFileMove
 export const Odometer = IconSpeed
+export const Open = IconOpenInNew
 export const Plus = IconAdd
 export const Refresh = IconRefresh
 export const Search = IconSearch
+export const Setting = IconSettings
 export const Sunny = IconLightMode
 export const SwitchButton = IconLogout
 export const Timer = IconTimer

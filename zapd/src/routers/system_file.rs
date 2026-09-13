@@ -50,6 +50,19 @@ pub struct ChmodPayload {
     mode: u32,
 }
 
+#[derive(Deserialize)]
+pub struct CopyPayload {
+    path: String,
+    new_path: String,
+}
+
+#[derive(Deserialize)]
+pub struct ArchivePayload {
+    paths: Vec<String>,
+    name: String,
+    base_dir: String,
+}
+
 // ── path helpers ───────────────────────────────────────────
 // 授权（基于 JWT 角色）仍在 zapd 完成；实际文件操作转发给 zapexec（root）。
 
@@ -439,6 +452,93 @@ pub async fn file_chmod(
         Some(client_addr.ip().to_string().as_str()),
         "file_chmod",
         &format!("{} ({:04o})", resolved.to_string_lossy(), payload.mode),
+        "",
+    )
+    .await;
+
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
+}
+
+/// POST /system/files/copy
+pub async fn file_copy(
+    claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<CopyPayload>,
+) -> ZapJsonResult {
+    let (home, tmp) = user_private_prefixes(&claims).await;
+    let src = resolve_path(&payload.path)?;
+    check_access(&claims, &src, &home, &tmp)?;
+    if !src.exists() {
+        return Err(ZapError::New(-1, "源文件不存在".to_string()));
+    }
+
+    let dst = resolve_path(&payload.new_path)?;
+    check_write_access(&claims, &dst, &home, &tmp)?;
+
+    let (as_user, skip_owner_check) = actor_identity(&claims).await?;
+    let resp = crate::zapexec::call(Request::FileCopy {
+        path: src.to_string_lossy().to_string(),
+        new_path: dst.to_string_lossy().to_string(),
+        as_user,
+        skip_owner_check,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_copy",
+        &format!("{} → {}", src.to_string_lossy(), dst.to_string_lossy()),
+        "",
+    )
+    .await;
+
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
+}
+
+/// POST /system/files/archive
+///
+/// 把选中的文件/目录打包成 zip（base64 字节）。
+pub async fn file_archive(
+    claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<ArchivePayload>,
+) -> ZapJsonResult {
+    let (home, tmp) = user_private_prefixes(&claims).await;
+    let base = resolve_path(&payload.base_dir)?;
+    check_access(&claims, &base, &home, &tmp)?;
+    if payload.paths.is_empty() {
+        return Err(ZapError::New(-1, "请选择要打包的文件".to_string()));
+    }
+
+    // 校验所有源路径的访问权限
+    for p in &payload.paths {
+        let resolved = resolve_path(p)?;
+        check_access(&claims, &resolved, &home, &tmp)?;
+    }
+
+    let resp = crate::zapexec::call(Request::FileArchive {
+        paths: payload.paths.clone(),
+        name: payload.name.clone(),
+        base_dir: base.to_string_lossy().to_string(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_archive",
+        &format!("{} ({} 项)", base.to_string_lossy(), payload.paths.len()),
         "",
     )
     .await;

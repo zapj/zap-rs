@@ -5,12 +5,14 @@
 //! 以 root 权限执行实际文件操作。二进制内容（download/upload）用 base64 传输。
 
 use std::collections::HashMap;
+use std::io::{Cursor, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 
 use serde_json::json;
+use zip::{ZipWriter, write::FileOptions};
 
 use zap_proto::{Response, b64_decode, b64_encode};
 
@@ -604,6 +606,165 @@ pub async fn chmod(
             },
             Err(e) => Response::err(-1, format!("修改权限失败: {e}")),
         }
+    })
+    .await
+    .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+/// 递归复制文件或目录。
+fn copy_recursive(src: &Path, dst: &Path, actor: Option<Actor>) -> Result<(), String> {
+    let md = std::fs::metadata(src).map_err(|e| format!("读取源失败 {}: {e}", src.display()))?;
+    if md.is_dir() {
+        std::fs::create_dir_all(dst).map_err(|e| format!("创建目录失败 {}: {e}", dst.display()))?;
+        std::fs::set_permissions(dst, md.permissions())
+            .map_err(|e| format!("设置权限失败 {}: {e}", dst.display()))?;
+        apply_owner(actor, dst)?;
+        for entry in std::fs::read_dir(src)
+            .map_err(|e| format!("读取目录失败 {}: {e}", src.display()))?
+            .flatten()
+        {
+            let name = entry.file_name();
+            copy_recursive(&entry.path(), &dst.join(name), actor)?;
+        }
+    } else {
+        // 父目录不存在时逐级创建（中间层同样归操作者所有）
+        if let Some(parent) = dst.parent() {
+            create_dirs_owned(actor, parent)?;
+        }
+        std::fs::copy(src, dst).map_err(|e| format!("复制文件失败 {}: {e}", dst.display()))?;
+        // std::fs::copy 会保留权限模式；再归到操作者名下
+        apply_owner(actor, dst)?;
+    }
+    Ok(())
+}
+
+/// 复制文件/目录到目标路径。
+pub async fn copy(
+    path: String,
+    new_path: String,
+    as_user: Option<String>,
+    skip_owner_check: bool,
+) -> Response {
+    tokio::task::spawn_blocking(move || {
+        let actor = match resolve_actor(as_user, skip_owner_check) {
+            Ok(a) => a,
+            Err(e) => return Response::err(-1, e),
+        };
+        let src = resolve_path(&path);
+        if !src.exists() {
+            return Response::err(-1, "源文件不存在");
+        }
+        let dst = resolve_path(&new_path);
+        if is_critical_path(&dst) {
+            return Response::err(-1, "不能覆盖系统关键目录");
+        }
+        if dst.exists() {
+            return Response::err(-1, "目标已存在");
+        }
+        // 复制需要读取源 + 在目标父目录写入
+        if let Err(e) = ensure_owner(actor, &src) {
+            return Response::err(-1, e);
+        }
+        if let Some(parent) = dst.parent()
+            && !parent.exists()
+            && let Err(e) = create_dirs_owned(actor, parent)
+        {
+            return Response::err(-1, e);
+        }
+        match copy_recursive(&src, &dst, actor) {
+            Ok(_) => match file_info(&dst) {
+                Some(info) => Response::ok("复制成功", Some(json!(info))),
+                None => Response::ok("复制成功", Some(json!({ "path": dst.to_string_lossy() }))),
+            },
+            Err(e) => Response::err(-1, e),
+        }
+    })
+    .await
+    .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+/// 递归把文件/目录加入 zip。
+fn archive_add<W: Write + std::io::Seek>(
+    zip: &mut ZipWriter<W>,
+    base: &Path,
+    path: &Path,
+) -> Result<(), String> {
+    let md = std::fs::metadata(path).map_err(|e| format!("读取失败 {}: {e}", path.display()))?;
+    let name_in_zip = path
+        .strip_prefix(base)
+        .map_err(|_| format!("路径 {} 不在基目录 {} 下", path.display(), base.display()))?
+        .to_string_lossy()
+        .to_string();
+    if md.is_dir() {
+        // 目录名保证以 / 结尾
+        let dir_name = if name_in_zip.ends_with('/') {
+            name_in_zip
+        } else {
+            format!("{name_in_zip}/")
+        };
+        zip.add_directory::<_, ()>(dir_name, FileOptions::<()>::default())
+            .map_err(|e| format!("添加目录失败: {e}"))?;
+        for entry in std::fs::read_dir(path)
+            .map_err(|e| format!("读取目录失败: {e}"))?
+            .flatten()
+        {
+            archive_add(zip, base, &entry.path())?;
+        }
+    } else {
+        zip.start_file(name_in_zip, FileOptions::<()>::default())
+            .map_err(|e| format!("添加文件失败: {e}"))?;
+        let bytes = std::fs::read(path).map_err(|e| format!("读取文件失败: {e}"))?;
+        zip.write_all(&bytes)
+            .map_err(|e| format!("写入 zip 失败: {e}"))?;
+    }
+    Ok(())
+}
+
+/// 把多个文件/目录打包成 zip 并返回 base64 内容。
+pub async fn archive(paths: Vec<String>, name: String, base_dir: String) -> Response {
+    tokio::task::spawn_blocking(move || {
+        let base = resolve_path(&base_dir);
+        if !base.exists() {
+            return Response::err(-1, "基目录不存在");
+        }
+        let resolved_paths: Vec<PathBuf> = paths.into_iter().map(|p| resolve_path(&p)).collect();
+        for p in &resolved_paths {
+            if !p.exists() {
+                return Response::err(-1, format!("路径不存在: {}", p.display()));
+            }
+            if !p.starts_with(&base) {
+                return Response::err(
+                    -1,
+                    format!("路径 {} 不在基目录 {} 下", p.display(), base.display()),
+                );
+            }
+        }
+
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut buf);
+            for p in &resolved_paths {
+                if let Err(e) = archive_add(&mut zip, &base, p) {
+                    return Response::err(-1, e);
+                }
+            }
+            if let Err(e) = zip.finish() {
+                return Response::err(-1, format!("打包失败: {e}"));
+            }
+        }
+        let bytes = buf.into_inner();
+        let safe_name = if name.to_lowercase().ends_with(".zip") {
+            name
+        } else {
+            format!("{name}.zip")
+        };
+        Response::ok(
+            "ok",
+            Some(json!({
+                "name": safe_name,
+                "content": b64_encode(&bytes),
+            })),
+        )
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))

@@ -140,6 +140,17 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             as_user,
             skip_owner_check,
         } => file::chmod(path, mode, as_user, skip_owner_check).await,
+        Request::FileCopy {
+            path,
+            new_path,
+            as_user,
+            skip_owner_check,
+        } => file::copy(path, new_path, as_user, skip_owner_check).await,
+        Request::FileArchive {
+            paths,
+            name,
+            base_dir,
+        } => file::archive(paths, name, base_dir).await,
         Request::AppstoreRepoAdd { name, url, run_id } => {
             appstore::repo_add(name, url, run_id).await
         }

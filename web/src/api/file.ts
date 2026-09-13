@@ -99,3 +99,32 @@ export function uploadFiles(targetDir: string, files: File[]) {
 export function downloadFile(path: string) {
   return http.download(`/system/files/download?path=${encodeURIComponent(path)}`)
 }
+
+/** Get file/directory metadata */
+export function getFileInfo(path: string) {
+  return http.get<ApiResponse<FileEntry>>('/system/files/info', {
+    params: { path },
+  })
+}
+
+/** Copy file/directory to a new path */
+export function copyFile(path: string, newPath: string) {
+  return http.post<ApiResponse<{ path: string }>>('/system/files/copy', {
+    path,
+    new_path: newPath,
+  })
+}
+
+export interface ArchiveData {
+  name: string
+  content: string
+}
+
+/** Archive selected paths into a zip (returns base64 content) */
+export function archiveFiles(paths: string[], name: string, baseDir: string) {
+  return http.post<ApiResponse<ArchiveData>>('/system/files/archive', {
+    paths,
+    name,
+    base_dir: baseDir,
+  })
+}
