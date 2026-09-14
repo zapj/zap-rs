@@ -1009,6 +1009,50 @@ impl UploadSession {
     }
 }
 
+/// 读盘分块大小：单次读入内存的粒度，与文件大小无关。
+const UPLOAD_CHUNK: usize = 256 * 1024;
+
+/// 把服务器上的本地文件流式上传成云对象（不经浏览器中转）。
+///
+/// 供 `/system/cloud/upload-local` 使用：本地路径的可访问性由路由层校验
+/// （家目录白名单），这里只负责「读盘 → 写对象」，内存占用与文件大小无关。
+pub async fn upload_from_path(
+    store: &CloudStore,
+    target: &str,
+    local: &Path,
+) -> Result<u64, ZapError> {
+    use tokio::io::AsyncReadExt;
+
+    let mut file = tokio::fs::File::open(local)
+        .await
+        .map_err(|e| fail(format!("读取本地文件失败：{e}")))?;
+    let mut session = UploadSession::create(store, target).await?;
+    let mut buf = vec![0u8; UPLOAD_CHUNK];
+
+    loop {
+        let read = match file.read(&mut buf).await {
+            Ok(n) => n,
+            Err(e) => {
+                // 读盘失败同样丢弃半截对象，别在桶里留个残缺文件
+                session.abort().await;
+                return Err(fail(format!("读取本地文件失败：{e}")));
+            }
+        };
+        if read == 0 {
+            break;
+        }
+        if let Err(e) = session
+            .write(bytes::Bytes::copy_from_slice(&buf[..read]))
+            .await
+        {
+            session.abort().await;
+            return Err(e);
+        }
+    }
+
+    session.finish().await
+}
+
 // ── 前端表单预设 ────────────────────────────────────────────
 
 /// 服务预设：默认端点、哪些字段必填。

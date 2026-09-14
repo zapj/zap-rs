@@ -1,5 +1,6 @@
 import { http } from '@/utils/request'
 import type { ApiResponse } from '@/types/api_response'
+import type { FileListData } from '@/api/file'
 
 // ── types ──────────────────────────────────────────────────
 
@@ -148,6 +149,23 @@ export function cloudUpload(
 export function downloadCloudFile(id: string, path: string) {
   return http.download(
     `/system/cloud/download?id=${encodeURIComponent(id)}&path=${encodeURIComponent(path)}`,
+    { timeout: TRANSFER_TIMEOUT },
+  )
+}
+
+// ── 「从服务器上传」─────────────────────────────────────────
+// 文件本来就在服务器上，不必经浏览器中转：由后端读盘后直接写入对象存储。
+
+/** 浏览服务器上当前用户可访问的目录（`path` 留空 = 家目录） */
+export function listLocalFiles(path: string = '') {
+  return http.get<ApiResponse<FileListData>>('/system/cloud/local/list', { params: { path } })
+}
+
+/** 把服务器上的文件直接上传到云存储（`files` 为本地绝对路径） */
+export function cloudUploadLocal(id: string, dirPath: string, files: string[]) {
+  return http.post<ApiResponse<{ files: string[]; failed: string[] }>>(
+    '/system/cloud/upload-local',
+    { id, path: dirPath, files },
     { timeout: TRANSFER_TIMEOUT },
   )
 }

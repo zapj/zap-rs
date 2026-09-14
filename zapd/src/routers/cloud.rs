@@ -28,6 +28,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::net::SocketAddr;
 
+use super::system_file;
 use crate::zap::{ZapError, ZapJsonResult, audit, cloud, jwt::Claims};
 
 // ── request types ──────────────────────────────────────────
@@ -60,6 +61,24 @@ pub struct CloudRenamePayload {
     pub id: String,
     pub path: String,
     pub new_path: String,
+}
+
+#[derive(Deserialize)]
+pub struct LocalListQuery {
+    /// 服务器上的目录（缺省 = 当前用户家目录）
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct LocalUploadPayload {
+    /// 云存储 ID
+    pub id: String,
+    /// 云端目标目录（相对逻辑根，缺省 = 根）
+    #[serde(default)]
+    pub path: String,
+    /// 服务器上的本地文件路径（限自身 home 与私有 tmp，admin 不限）
+    pub files: Vec<String>,
 }
 
 // ── 存储配置 ────────────────────────────────────────────────
@@ -250,6 +269,99 @@ pub async fn file_upload(
         "code": 0,
         "message": format!("已上传 {} 个文件", uploaded.len()),
         "data": { "files": uploaded },
+    })))
+}
+
+/// GET /system/cloud/local/list?path= —— 浏览服务器上「当前用户可访问」的目录
+///
+/// 供上传弹窗里的「从服务器选择」用：与文件管理共用同一套隔离规则
+/// （非 admin 仅自己 home 与私有 tmp），不传 path 时进入家目录。
+pub async fn local_list(claims: Claims, Query(query): Query<LocalListQuery>) -> ZapJsonResult {
+    // 直接复用文件管理的列目录实现：同一套家目录收敛与隔离规则
+    let data = system_file::list_local_dir(&claims, query.path.as_deref().unwrap_or("")).await?;
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": data })))
+}
+
+/// POST /system/cloud/upload-local —— 把服务器上的文件直接传到云存储
+///
+/// 与 multipart 上传的差别：文件本来就在服务器上，不必经浏览器来回中转；
+/// 后端「读盘 → 写对象」全程流式（[`cloud::upload_from_path`]），内存与文件大小无关。
+/// 多个文件逐个处理：单个失败（越权 / 读不到）不影响其余文件，失败项随响应返回。
+pub async fn file_upload_local(
+    claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<LocalUploadPayload>,
+) -> ZapJsonResult {
+    let store = cloud::get_store(&claims.sub, &payload.id)?;
+    let dir = cloud::normalize_path(&payload.path)?;
+    if payload.files.is_empty() {
+        return Err(ZapError::New(-1, "没有选择要上传的文件".to_string()));
+    }
+
+    let (home, tmp) = system_file::user_private_prefixes(&claims).await;
+    let mut uploaded: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+
+    for raw in &payload.files {
+        let resolved = match system_file::resolve_path(raw) {
+            Ok(p) => p,
+            Err(e) => {
+                failed.push(format!("{raw}：{e}"));
+                continue;
+            }
+        };
+        if let Err(e) = system_file::check_access(&claims, &resolved, &home, &tmp) {
+            failed.push(format!("{raw}：{e}"));
+            continue;
+        }
+        let name = match resolved.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => {
+                failed.push(format!("{raw}：路径不合法"));
+                continue;
+            }
+        };
+        if resolved.is_dir() {
+            failed.push(format!("{raw}：暂不支持上传目录"));
+            continue;
+        }
+
+        let target = if dir.is_empty() {
+            name.clone()
+        } else {
+            format!("{dir}/{name}")
+        };
+        match cloud::upload_from_path(&store, &target, &resolved).await {
+            Ok(_) => uploaded.push(target),
+            Err(e) => failed.push(format!("{name}：{e}")),
+        }
+    }
+
+    if uploaded.is_empty() {
+        return Err(ZapError::New(
+            -1,
+            format!("上传失败：{}", failed.join("；")),
+        ));
+    }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "cloud_upload_local",
+        &store.name,
+        &uploaded.join(", "),
+    )
+    .await;
+
+    let message = if failed.is_empty() {
+        format!("已上传 {} 个文件", uploaded.len())
+    } else {
+        format!("已上传 {} 个文件，{} 个失败", uploaded.len(), failed.len())
+    };
+    Ok(Json(json!({
+        "code": 0,
+        "message": message,
+        "data": { "files": uploaded, "failed": failed },
     })))
 }
 

@@ -87,7 +87,7 @@ pub struct ArchivePayload {
 // 授权（基于 JWT 角色）仍在 zapd 完成；实际文件操作转发给 zapexec（root）。
 
 /// Resolve and sanitize a path, preventing directory traversal.
-fn resolve_path(requested: &str) -> Result<PathBuf, ZapError> {
+pub(crate) fn resolve_path(requested: &str) -> Result<PathBuf, ZapError> {
     let clean = requested
         .split('/')
         .filter(|seg| !seg.is_empty() && *seg != "..")
@@ -131,7 +131,7 @@ fn sanitize_relative(name: &str) -> String {
 /// 非管理员可访问的私有目录前缀（自己的 home 与私有临时目录）。
 /// home 跟随 `user.home_dir`（迁移挂载点后文件管理自动切到新路径），
 /// 无记录时回退 `/home/{username}`。
-async fn user_private_prefixes(claims: &Claims) -> (String, String) {
+pub(crate) async fn user_private_prefixes(claims: &Claims) -> (String, String) {
     let pool = db::get_db_pool().await;
     let home: Option<String> =
         sqlx::query_scalar("SELECT home_dir FROM user WHERE username = ? AND home_dir != ''")
@@ -176,7 +176,12 @@ async fn actor_identity(claims: &Claims) -> Result<(Option<String>, bool), ZapEr
 ///   彻底移除此前"所有人可读 /var/www、/var/log"的越权隐患。
 ///
 /// home/tmp 前缀由调用方异步查询后传入。
-fn check_access(claims: &Claims, path: &Path, home: &str, tmp: &str) -> Result<(), ZapError> {
+pub(crate) fn check_access(
+    claims: &Claims,
+    path: &Path,
+    home: &str,
+    tmp: &str,
+) -> Result<(), ZapError> {
     if is_admin(claims) {
         return Ok(());
     }
@@ -222,20 +227,23 @@ fn resolve_list_target(is_admin: bool, requested: &str, home: &str) -> String {
     }
 }
 
-/// GET /system/files/list?path=/
+/// 列本地目录的公共实现：路径收敛 + 越权校验 + home 兜底与自动创建。
 ///
-/// 不传 `path` 时进入个人家目录；响应额外带上 `home`，前端用它做侧栏根节点
-/// 与地址栏起点（cPanel 风格：文件管理始终从家目录开始）。
-pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJsonResult {
-    let (home, tmp) = user_private_prefixes(&claims).await;
-    let requested = query.path.as_deref().unwrap_or("");
-    let raw_path = resolve_list_target(is_admin(&claims), requested, &home);
+/// 文件管理与云存储的「从服务器选择」共用这一套隔离规则（两处必须一致，
+/// 否则会出现「文件管理进得去、云存储却选不到」的割裂），因此把逻辑收在这里。
+/// 返回的 data 额外带 `home`，供前端做侧栏根节点 / 服务器浏览的起点。
+pub(crate) async fn list_local_dir(
+    claims: &Claims,
+    requested: &str,
+) -> Result<serde_json::Value, ZapError> {
+    let (home, tmp) = user_private_prefixes(claims).await;
+    let raw_path = resolve_list_target(is_admin(claims), requested, &home);
     let resolved = resolve_path(&raw_path)?;
-    check_access(&claims, &resolved, &home, &tmp)?;
+    check_access(claims, &resolved, &home, &tmp)?;
 
     // 首次访问自己的 home 时自动创建（以该用户名义创建，属主即本人）
-    if !is_admin(&claims) && resolved.as_path() == Path::new(&home) && !resolved.exists() {
-        let (as_user, skip_owner_check) = actor_identity(&claims).await?;
+    if !is_admin(claims) && resolved.as_path() == Path::new(&home) && !resolved.exists() {
+        let (as_user, skip_owner_check) = actor_identity(claims).await?;
         let _ = crate::zapexec::call(Request::FileMkdir {
             path: home.clone(),
             as_user,
@@ -246,7 +254,7 @@ pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJso
 
     // 管理员的家目录可能压根没建过：默认进 home 失败时退回根目录，
     // 否则文件管理一打开就报「目录不存在」。
-    let resolved = if is_admin(&claims) && requested.is_empty() && !resolved.exists() {
+    let resolved = if is_admin(claims) && requested.is_empty() && !resolved.exists() {
         PathBuf::from("/")
     } else {
         resolved
@@ -264,6 +272,15 @@ pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJso
     if let Some(obj) = data.as_object_mut() {
         obj.insert("home".to_string(), json!(home));
     }
+    Ok(data)
+}
+
+/// GET /system/files/list?path=/
+///
+/// 不传 `path` 时进入个人家目录；响应额外带上 `home`，前端用它做侧栏根节点
+/// 与地址栏起点（cPanel 风格：文件管理始终从家目录开始）。
+pub async fn file_list(claims: Claims, Query(query): Query<PathQuery>) -> ZapJsonResult {
+    let data = list_local_dir(&claims, query.path.as_deref().unwrap_or("")).await?;
     Ok(Json(json!({ "code": 0, "message": "ok", "data": data })))
 }
 

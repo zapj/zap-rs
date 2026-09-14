@@ -297,6 +297,16 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
         Some(Perm::action("system.cloud", "write")),
     ),
     (
+        "/system/cloud/local/list",
+        Required::User,
+        Some(Perm::action("system.cloud", "view")),
+    ),
+    (
+        "/system/cloud/upload-local",
+        Required::User,
+        Some(Perm::action("system.cloud", "write")),
+    ),
+    (
         "/system/cloud/delete",
         Required::User,
         Some(Perm::action("system.cloud", "delete")),
@@ -1549,6 +1559,14 @@ mod tests {
         );
         assert_eq!(
             perm_key_for("/system/cloud/rename", &Method::POST).as_deref(),
+            Some("system.cloud:write")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/local/list", &Method::GET).as_deref(),
+            Some("system.cloud:view")
+        );
+        assert_eq!(
+            perm_key_for("/system/cloud/upload-local", &Method::POST).as_deref(),
             Some("system.cloud:write")
         );
         assert_eq!(

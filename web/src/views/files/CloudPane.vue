@@ -77,17 +77,10 @@
             </el-breadcrumb>
           </div>
           <div class="cm-toolbar-right">
-            <el-upload
-              :show-file-list="false"
-              :http-request="handleUpload"
-              multiple
-              style="display: inline-block; margin-right: 8px"
-            >
-              <el-button size="small" :loading="uploading">
-                <el-icon><Upload /></el-icon>
-                上传
-              </el-button>
-            </el-upload>
+            <el-button size="small" @click="openUploadDialog">
+              <el-icon><Upload /></el-icon>
+              上传
+            </el-button>
             <el-button size="small" @click="showMkdirDialog">
               <el-icon><FolderAdd /></el-icon>
               新建目录
@@ -106,14 +99,6 @@
             显示隐藏文件
           </el-checkbox>
         </div>
-
-        <el-progress
-          v-if="uploading"
-          class="cm-upload-progress"
-          :percentage="uploadPercent"
-          :stroke-width="4"
-          :show-text="false"
-        />
 
         <div class="cm-table-wrap">
           <el-table
@@ -183,6 +168,163 @@
 
       <el-empty v-else description="请选择或添加一个云存储" :image-size="90" />
     </div>
+
+    <!--
+      上传：两种来源
+      - 从本地上传：文件经浏览器 → 服务端 → 云存储（multipart 流式写入）
+      - 从服务器选择：文件已在服务器上，后端读盘直接写入云存储，不经浏览器中转
+    -->
+    <el-dialog
+      v-model="uploadVisible"
+      title="上传到云存储"
+      width="780px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!uploading"
+      :show-close="!uploading"
+      destroy-on-close
+      @closed="resetUploadDialog"
+    >
+      <div class="cm-upload-target">
+        <span class="cm-upload-target-label">目标目录</span>
+        <span class="mono">{{ storeLocation }}{{ currentPath ? '/' + currentPath : '' }}</span>
+      </div>
+
+      <el-tabs v-model="uploadTab">
+        <el-tab-pane label="从本地上传" name="local" lazy>
+          <el-upload
+            drag
+            multiple
+            :auto-upload="false"
+            :show-file-list="false"
+            :on-change="onLocalPick"
+            class="cm-upload-drop"
+          >
+            <el-icon class="cm-upload-drop-icon"><Upload /></el-icon>
+            <div class="cm-upload-drop-text">把文件拖到这里，或 <em>点击选择文件</em></div>
+            <div class="cm-upload-drop-tip">支持多选；文件先传到本服务器，再写入云存储</div>
+          </el-upload>
+        </el-tab-pane>
+
+        <el-tab-pane label="从服务器选择" name="server" lazy>
+          <div class="cm-server-bar">
+            <el-breadcrumb separator=">" class="cm-server-crumbs">
+              <el-breadcrumb-item>
+                <a href="javascript:void(0)" @click="loadServerDir(serverHome)">家目录</a>
+              </el-breadcrumb-item>
+              <el-breadcrumb-item v-for="seg in serverSegments" :key="seg.path">
+                <a href="javascript:void(0)" @click="loadServerDir(seg.path)">{{ seg.name }}</a>
+              </el-breadcrumb-item>
+            </el-breadcrumb>
+            <el-button size="small" :loading="serverLoading" @click="loadServerDir(serverPath)">
+              <el-icon><Refresh /></el-icon>
+            </el-button>
+          </div>
+
+          <el-table
+            ref="serverTableRef"
+            :data="serverEntries"
+            v-loading="serverLoading"
+            height="240"
+            size="small"
+            stripe
+            @row-dblclick="onServerRowDblClick"
+            @selection-change="onServerSelectionChange"
+          >
+            <el-table-column type="selection" width="42" :selectable="selectableServerRow" />
+            <el-table-column label="名称" min-width="240">
+              <template #default="{ row }">
+                <div class="cm-file-name" @click="onServerNameClick(row)">
+                  <el-icon
+                    :size="16"
+                    :color="
+                      row.is_dir ? 'var(--el-color-primary)' : 'var(--el-text-color-secondary)'
+                    "
+                  >
+                    <Folder v-if="row.is_dir" />
+                    <Document v-else />
+                  </el-icon>
+                  <span>{{ row.name }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="大小" width="100" align="right">
+              <template #default="{ row }">
+                <span v-if="!row.is_dir">{{ formatSize(row.size) }}</span>
+                <span v-else class="cm-muted">-</span>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="cm-server-foot">
+            <span class="cm-server-tip">
+              非管理员只能浏览自己的家目录；已选 {{ serverChecked.length }} 个文件
+            </span>
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :disabled="!serverChecked.length"
+              @click="addServerFiles"
+            >
+              添加到待上传
+            </el-button>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+
+      <!-- 待上传清单：两种来源合并在一起，每个文件标注来源 -->
+      <div class="cm-pending">
+        <div class="cm-pending-head">
+          <span>待上传 {{ pendingList.length }} 个文件</span>
+          <el-button
+            link
+            type="primary"
+            size="small"
+            :disabled="uploading || !pendingList.length"
+            @click="clearPending"
+          >
+            清空
+          </el-button>
+        </div>
+        <el-scrollbar max-height="132px">
+          <div v-if="!pendingList.length" class="cm-pending-empty">
+            还没有选择文件：可切换到「从服务器选择」直接挑选服务器上的文件
+          </div>
+          <div v-for="item in pendingList" :key="item.key" class="cm-pending-item">
+            <el-icon :size="14" class="cm-pending-icon"><Document /></el-icon>
+            <span class="cm-pending-name" :title="item.name">{{ item.name }}</span>
+            <span class="cm-pending-src">{{ item.source === 'local' ? '本地' : '服务器' }}</span>
+            <span class="cm-pending-size">{{ formatSize(item.size) }}</span>
+            <el-button
+              link
+              type="danger"
+              size="small"
+              :disabled="uploading"
+              @click="removePending(item.key)"
+            >
+              移除
+            </el-button>
+          </div>
+        </el-scrollbar>
+      </div>
+
+      <div v-if="uploading || uploadSummary" class="cm-upload-foot">
+        <el-progress :percentage="uploadPercent" :stroke-width="6" />
+        <div class="cm-upload-summary">{{ uploadSummary }}</div>
+      </div>
+
+      <template #footer>
+        <el-button :disabled="uploading" @click="uploadVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="uploading"
+          :disabled="!pendingList.length"
+          @click="doUpload"
+        >
+          开始上传
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 新建目录 -->
     <el-dialog v-model="mkdirVisible" title="新建目录" width="420px">
@@ -330,7 +472,7 @@
  */
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance } from 'element-plus'
+import type { FormInstance, TableInstance, UploadFile } from 'element-plus'
 
 import { Cloud, Document, Folder, FolderAdd, MoreFilled, Plus, Refresh, Upload } from '@/icons'
 import {
@@ -338,10 +480,12 @@ import {
   cloudMkdir,
   cloudRename,
   cloudUpload,
+  cloudUploadLocal,
   deleteCloudStore,
   downloadCloudFile,
   listCloudFiles,
   listCloudStores,
+  listLocalFiles,
   saveCloudStore,
   testCloudStore,
   type CloudEntry,
@@ -349,6 +493,7 @@ import {
   type CloudStore,
   type CloudStoreInput,
 } from '@/api/cloud'
+import type { FileEntry } from '@/api/file'
 
 // ── state ──────────────────────────────────────────────────
 
@@ -358,14 +503,43 @@ const presets = ref<CloudServicePreset[]>([])
 const activeStoreId = ref('')
 
 const fileLoading = ref(false)
-const uploading = ref(false)
-const uploadPercent = ref(0)
 const entries = ref<CloudEntry[]>([])
 const currentPath = ref('')
 const truncated = ref(false)
 /** 上一次列目录失败的提示（空串 = 没失败），用于把「空目录」和「读失败」区分开 */
 const listError = ref('')
 const showHidden = ref(false)
+
+// ── 上传弹窗 ────────────────────────────────────────────────
+
+/** 待上传项：两种来源（本地文件 / 服务器路径）合并成一个清单 */
+interface PendingUpload {
+  /** 去重键：本地按「名字+大小+修改时间」，服务器按绝对路径 */
+  key: string
+  name: string
+  size: number
+  source: 'local' | 'server'
+  file?: File
+  localPath?: string
+}
+
+const uploadVisible = ref(false)
+const uploadTab = ref<'local' | 'server'>('local')
+const pendingList = ref<PendingUpload[]>([])
+const uploading = ref(false)
+const uploadPercent = ref(0)
+const uploadSummary = ref('')
+/** el-upload 内部累积条目的 uid：同一次选择里防止重复入清单 */
+const localSeenUids = new Set<number>()
+
+const serverLoading = ref(false)
+const serverEntries = ref<FileEntry[]>([])
+/** 当前浏览的服务器目录（绝对路径） */
+const serverPath = ref('')
+/** 当前用户家目录：面包屑根节点 */
+const serverHome = ref('')
+const serverChecked = ref<FileEntry[]>([])
+const serverTableRef = ref<TableInstance>()
 
 const mkdirVisible = ref(false)
 const mkdirName = ref('')
@@ -411,6 +585,21 @@ const storeLocation = computed(() => {
   if (!store) return ''
   const root = store.root ? `/${store.root}` : ''
   return `${store.service_label} · ${store.bucket}${root}`
+})
+
+/** 服务器目录面包屑：家目录为根，家目录之外（admin 浏览系统目录）退回根路径展开 */
+const serverSegments = computed(() => {
+  const home = serverHome.value.replace(/\/+$/, '')
+  const current = serverPath.value.replace(/\/+$/, '')
+  if (!current || current === home) return []
+  const underHome = !!home && current.startsWith(`${home}/`)
+  const rel = underHome ? current.slice(home.length + 1) : current.replace(/^\//, '')
+  const parts = rel.split('/').filter(Boolean)
+  const base = underHome ? home : ''
+  return parts.map((name, idx) => ({
+    name,
+    path: `${base}/${parts.slice(0, idx + 1).join('/')}`,
+  }))
 })
 
 /** 表单校验：必填项跟随所选服务类型（与后端保存时的校验保持一致） */
@@ -624,25 +813,184 @@ async function downloadEntry(row: CloudEntry) {
   }
 }
 
-async function handleUpload(options: any) {
+// ── 上传（从本地上传 / 从服务器选择）────────────────────────
+
+function openUploadDialog() {
+  if (!activeStore.value) {
+    ElMessage.warning('请先选择云存储')
+    return
+  }
+  uploadTab.value = 'local'
+  pendingList.value = []
+  uploadPercent.value = 0
+  uploadSummary.value = ''
+  localSeenUids.clear()
+  uploadVisible.value = true
+  // 顺手把服务器侧的家目录读出来：切到「从服务器选择」页签即可用
+  loadServerDir('')
+}
+
+function resetUploadDialog() {
+  pendingList.value = []
+  localSeenUids.clear()
+  uploadPercent.value = 0
+  uploadSummary.value = ''
+  serverEntries.value = []
+  serverChecked.value = []
+  serverPath.value = ''
+}
+
+function clearPending() {
+  pendingList.value = []
+}
+
+function removePending(key: string) {
+  pendingList.value = pendingList.value.filter((item) => item.key !== key)
+}
+
+/** 入清单：按 key 去重，重复选择只提示一次 */
+function addPending(item: PendingUpload): boolean {
+  if (pendingList.value.some((i) => i.key === item.key)) {
+    ElMessage.info(`「${item.name}」已在待上传列表中`)
+    return false
+  }
+  pendingList.value.push(item)
+  return true
+}
+
+/** 本地文件由 el-upload 收集（关闭自动上传，选中即入清单） */
+function onLocalPick(file: UploadFile) {
+  const raw = file.raw
+  if (!raw) return
+  if (localSeenUids.has(file.uid)) return
+  localSeenUids.add(file.uid)
+  addPending({
+    key: `local:${raw.name}:${raw.size}:${raw.lastModified}`,
+    name: raw.name,
+    size: raw.size,
+    source: 'local',
+    file: raw,
+  })
+}
+
+// ── 服务器文件浏览 ──────────────────────────────────────────
+
+async function loadServerDir(path: string) {
+  serverLoading.value = true
+  try {
+    const res = await listLocalFiles(path)
+    const data = res.data
+    serverEntries.value = data?.entries || []
+    serverPath.value = data?.current_path || ''
+    if (data?.home) serverHome.value = data.home
+    serverChecked.value = []
+    serverTableRef.value?.clearSelection()
+  } catch (e) {
+    serverEntries.value = []
+    notifyError(e, '读取服务器目录失败')
+  } finally {
+    serverLoading.value = false
+  }
+}
+
+/** 目录不参与上传（对象存储没有目录概念），选择列里禁掉 */
+function selectableServerRow(row: FileEntry) {
+  return !row.is_dir
+}
+
+function onServerSelectionChange(rows: FileEntry[]) {
+  serverChecked.value = rows
+}
+
+function onServerNameClick(row: FileEntry) {
+  if (row.is_dir) loadServerDir(row.path)
+}
+
+function onServerRowDblClick(row: FileEntry) {
+  if (row.is_dir) loadServerDir(row.path)
+}
+
+function addServerFiles() {
+  let added = 0
+  for (const row of serverChecked.value) {
+    const ok = addPending({
+      key: `server:${row.path}`,
+      name: row.name,
+      size: row.size,
+      source: 'server',
+      localPath: row.path,
+    })
+    if (ok) added++
+  }
+  serverChecked.value = []
+  serverTableRef.value?.clearSelection()
+  if (added) ElMessage.success(`已添加 ${added} 个文件`)
+}
+
+// ── 开始上传 ────────────────────────────────────────────────
+
+/** 并发上限：本地走 multipart、服务器走后端直传，一次全打出去对两边都不友好 */
+const UPLOAD_CONCURRENCY = 3
+
+async function doUpload() {
   const store = activeStore.value
-  if (!store) return
+  const list = [...pendingList.value]
+  if (!store || !list.length) return
+
   uploading.value = true
   uploadPercent.value = 0
-  try {
-    await cloudUpload(store.id, currentPath.value, [options.file as File], (percent) => {
-      uploadPercent.value = percent
-    })
-    ElMessage.success(`已上传 ${options.file?.name ?? ''}`)
-    options.onSuccess?.({})
-    loadFiles()
-  } catch (error) {
-    notifyError(error, `上传「${options.file?.name ?? ''}」失败`)
-    options.onError?.(error)
-  } finally {
-    uploading.value = false
-    uploadPercent.value = 0
+  uploadSummary.value = `正在上传 0/${list.length}…`
+
+  const queue = [...list]
+  const succeeded: string[] = []
+  const failed: string[] = []
+  let finished = 0
+
+  const worker = async () => {
+    for (;;) {
+      const item = queue.shift()
+      if (!item) return
+      try {
+        if (item.source === 'local' && item.file) {
+          await cloudUpload(store.id, currentPath.value, [item.file])
+        } else if (item.localPath) {
+          const res = await cloudUploadLocal(store.id, currentPath.value, [item.localPath])
+          // 后端逐个文件处理，失败项随响应返回（单个失败不影响其余文件）
+          if (res.data?.failed?.length) throw new Error(res.data.failed.join('；'))
+        } else {
+          throw new Error('文件来源缺失')
+        }
+        succeeded.push(item.key)
+      } catch (e) {
+        failed.push(item.name)
+        // 失败原因（越权 / 读不到 / 写入失败）都由这里显式提示
+        notifyError(e, `上传「${item.name}」失败`)
+      } finally {
+        finished++
+        uploadPercent.value = Math.round((finished / list.length) * 100)
+        uploadSummary.value = `正在上传 ${finished}/${list.length}…`
+      }
+    }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, () => worker()),
+  )
+
+  uploading.value = false
+  // 只保留失败的项：改好后可直接再点一次「开始上传」重试
+  const doneSet = new Set(succeeded)
+  pendingList.value = pendingList.value.filter((item) => !doneSet.has(item.key))
+
+  uploadSummary.value = failed.length
+    ? `已上传 ${succeeded.length} 个，失败 ${failed.length} 个（可重试）`
+    : `已上传 ${succeeded.length} 个文件`
+
+  if (!failed.length) {
+    ElMessage.success(`已上传 ${succeeded.length} 个文件`)
+    uploadVisible.value = false
+  }
+  loadFiles()
 }
 
 function showMkdirDialog() {
@@ -954,8 +1302,154 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
-.cm-upload-progress {
-  padding: 0 12px;
+/* ── 上传弹窗 ─────────────────────────────────────────── */
+
+.cm-upload-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 8px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+
+  &-label {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--el-fill-color-light);
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+}
+
+.cm-upload-drop {
+  :deep(.el-upload-dragger) {
+    padding: 18px;
+  }
+}
+
+.cm-upload-drop-icon {
+  font-size: 34px;
+  color: var(--el-text-color-placeholder);
+}
+
+.cm-upload-drop-text {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+
+  em {
+    color: var(--el-color-primary);
+    font-style: normal;
+  }
+}
+
+.cm-upload-drop-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.cm-server-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cm-server-crumbs {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.cm-server-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.cm-server-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.cm-pending {
+  margin-top: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+}
+
+.cm-pending-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  background: var(--el-fill-color-lighter);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.cm-pending-empty {
+  padding: 14px 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  text-align: center;
+}
+
+.cm-pending-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+
+  & + & {
+    border-top: 1px solid var(--el-border-color-lighter);
+  }
+}
+
+.cm-pending-icon {
+  flex: none;
+  color: var(--el-text-color-secondary);
+}
+
+.cm-pending-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cm-pending-src {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.cm-pending-size {
+  flex: none;
+  width: 80px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-align: right;
+}
+
+.cm-upload-foot {
+  margin-top: 12px;
+}
+
+.cm-upload-summary {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .cm-table-wrap {

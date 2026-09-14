@@ -572,6 +572,9 @@ fn api_routers() -> Router {
         .route("/system/cloud/mkdir", post(cloud::file_mkdir))
         .route("/system/cloud/delete", post(cloud::file_delete))
         .route("/system/cloud/rename", post(cloud::file_rename))
+        // 「从服务器上传」：浏览当前用户可访问的目录 + 直接把服务器文件传到云存储
+        .route("/system/cloud/local/list", get(cloud::local_list))
+        .route("/system/cloud/upload-local", post(cloud::file_upload_local))
         // 上传单独放开请求体上限（见 CLOUD_UPLOAD_LIMIT 注释）
         .route(
             "/system/cloud/upload",
