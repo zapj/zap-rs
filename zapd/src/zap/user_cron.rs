@@ -528,11 +528,11 @@ async fn launch_exec(
 async fn clear_last_run(username: &str, job_id: &str, run_id: &str) {
     if let Ok(mut ct) = load(username).await {
         let mut changed = false;
-        if let Some(job) = ct.jobs.iter_mut().find(|j| j.id == job_id) {
-            if job.last_run_id == run_id {
-                job.last_run_id = String::new();
-                changed = true;
-            }
+        if let Some(job) = ct.jobs.iter_mut().find(|j| j.id == job_id)
+            && job.last_run_id == run_id
+        {
+            job.last_run_id = String::new();
+            changed = true;
         }
         if changed {
             let _ = save(username, &ct).await;
