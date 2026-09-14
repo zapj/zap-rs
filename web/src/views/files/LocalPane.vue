@@ -100,8 +100,8 @@
         </div>
       </div>
 
-      <!-- 选中项操作条：紧贴地址栏下方，操作按钮成组排列 -->
-      <div v-if="hasSelection" class="fm-selection-bar">
+      <!-- 选中项操作条：常显，避免选中/取消时布局抖动；未选中时按钮禁用 -->
+      <div class="fm-selection-bar">
         <span class="fm-selection-label">已选 {{ selectionCount }} / {{ fileList.length }}</span>
         <el-button-group class="fm-selection-actions">
           <el-button size="small" :disabled="!canOpen" @click="openSelected">
@@ -140,12 +140,23 @@
             <el-icon><Setting /></el-icon>
             权限
           </el-button>
+          <el-button
+            v-if="isAdmin"
+            size="small"
+            :disabled="!hasSelection"
+            @click="showOwnerDialogForSelection"
+          >
+            <el-icon><User /></el-icon>
+            属主
+          </el-button>
           <el-button size="small" type="danger" :disabled="!canRemove" @click="removeSelected">
             <el-icon><Delete /></el-icon>
             删除
           </el-button>
         </el-button-group>
-        <el-button size="small" text @click="clearSelection">取消选择</el-button>
+        <el-button size="small" text :disabled="!hasSelection" @click="clearSelection">
+          取消选择
+        </el-button>
       </div>
 
       <!-- 文件列表区：拖拽文件/文件夹到此处即上传到当前目录（文件夹保留层级） -->
@@ -211,29 +222,37 @@
                 </el-button>
               </template>
             </el-table-column>
-            <el-table-column label="用户" width="100">
+            <el-table-column label="用户" width="110">
               <template #default="{ row }">
-                <span v-if="row.owner" class="mono">{{ row.owner }}</span>
+                <!-- admin 可点击直接修改属主/属组，其余角色只读展示 -->
+                <el-button
+                  v-if="isAdmin"
+                  link
+                  type="primary"
+                  class="mono"
+                  title="点击修改属主 / 属组"
+                  @click.stop="showOwnerDialog(row)"
+                >
+                  {{ row.owner || '-' }}
+                </el-button>
+                <span v-else-if="row.owner" class="mono">{{ row.owner }}</span>
                 <span v-else class="text-muted">-</span>
               </template>
             </el-table-column>
-            <el-table-column label="组" width="100">
+            <el-table-column label="组" width="110">
               <template #default="{ row }">
-                <span v-if="row.group" class="mono">{{ row.group }}</span>
+                <el-button
+                  v-if="isAdmin"
+                  link
+                  type="primary"
+                  class="mono"
+                  title="点击修改属主 / 属组"
+                  @click.stop="showOwnerDialog(row)"
+                >
+                  {{ row.group || '-' }}
+                </el-button>
+                <span v-else-if="row.group" class="mono">{{ row.group }}</span>
                 <span v-else class="text-muted">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="220" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" link type="primary" @click.stop="handleDownload(row)">
-                  下载
-                </el-button>
-                <el-button size="small" link type="warning" @click.stop="showRenameDialog(row)">
-                  重命名
-                </el-button>
-                <el-button size="small" link type="danger" @click.stop="handleDelete(row)">
-                  删除
-                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -492,9 +511,49 @@
         <span class="text-muted">（{{ permRwx }}）</span>
       </div>
 
+      <div class="fm-perm-recursive">
+        <el-checkbox v-model="permRecursive">递归修改（包含子目录与文件）</el-checkbox>
+      </div>
+
       <template #footer>
         <el-button @click="permVisible = false">取消</el-button>
         <el-button type="primary" :loading="permSaving" @click="doChmod">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 修改属主/属组对话框（仅 admin）：chown/chgrp，支持递归 -->
+    <el-dialog v-model="ownVisible" title="修改属主 / 属组" width="460px">
+      <div class="fm-perm-target">
+        <el-icon :size="16">
+          <Folder v-if="ownTarget?.is_dir" />
+          <Document v-else />
+        </el-icon>
+        <span class="mono">{{ ownTarget?.path }}</span>
+        <span v-if="ownTargets.length > 1" class="fm-perm-count"
+          >等 {{ ownTargets.length }} 项</span
+        >
+      </div>
+
+      <el-form label-width="70px" @submit.prevent>
+        <el-form-item label="属主">
+          <el-input v-model="ownUser" placeholder="Linux 用户名，留空表示不修改" clearable />
+        </el-form-item>
+        <el-form-item label="属组">
+          <el-input v-model="ownGroup" placeholder="Linux 用户组名，留空表示不修改" clearable />
+        </el-form-item>
+      </el-form>
+
+      <div class="fm-perm-recursive">
+        <el-checkbox v-model="ownRecursive">递归修改（包含子目录与文件）</el-checkbox>
+      </div>
+
+      <div class="fm-perm-note">
+        需填写系统已存在的 Linux 用户名 / 用户组名；该操作仅管理员可用。
+      </div>
+
+      <template #footer>
+        <el-button @click="ownVisible = false">取消</el-button>
+        <el-button type="primary" :loading="ownSaving" @click="doChown">确定</el-button>
       </template>
     </el-dialog>
 
@@ -582,6 +641,15 @@
         <el-icon><Setting /></el-icon>
         <span>权限</span>
       </div>
+      <div
+        v-if="isAdmin"
+        class="fm-context-item"
+        :class="{ disabled: !hasSelection }"
+        @click="ownFromMenu"
+      >
+        <el-icon><User /></el-icon>
+        <span>属主 / 属组</span>
+      </div>
       <div class="fm-context-divider" />
       <div class="fm-context-item danger" :class="{ disabled: !canRemove }" @click="removeFromMenu">
         <el-icon><Delete /></el-icon>
@@ -617,6 +685,7 @@ import {
   Loading,
   ArrowDown,
   CircleCloseFilled,
+  User,
 } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
@@ -631,6 +700,7 @@ import {
   downloadFile as downloadFileApi,
   uploadFiles,
   chmodFile,
+  chownFile,
   copyFile,
   archiveFiles,
   type FileEntry,
@@ -1054,6 +1124,10 @@ function permFromMenu() {
   closeContextMenu()
   showPermDialogForSelection()
 }
+function ownFromMenu() {
+  closeContextMenu()
+  showOwnerDialogForSelection()
+}
 function removeFromMenu() {
   closeContextMenu()
   removeSelected()
@@ -1181,26 +1255,6 @@ async function doRename() {
     await renameFile(renameTarget.value.path, newPath)
     ElMessage.success('重命名成功')
     renameVisible.value = false
-    loadFileList()
-    refreshTree()
-  } catch {
-    // handled
-  }
-}
-
-async function handleDelete(row: FileEntry) {
-  try {
-    await ElMessageBox.confirm(
-      `确认删除「${row.name}」？${row.is_dir ? '目录内所有内容将被删除。' : ''}此操作不可恢复。`,
-      '警告',
-      { type: 'warning', confirmButtonText: '确认删除' },
-    )
-  } catch {
-    return
-  }
-  try {
-    await deleteFile(row.path)
-    ElMessage.success('删除成功')
     loadFileList()
     refreshTree()
   } catch {
@@ -1828,6 +1882,8 @@ const permTarget = ref<FileEntry | null>(null)
 const permTargets = ref<FileEntry[]>([])
 const permInput = ref('0755')
 const permSaving = ref(false)
+/** 是否递归修改选中目录下的所有子项（所有角色都可用） */
+const permRecursive = ref(false)
 
 /** 特殊位掩码（Set UID / Set GID / Sticky） */
 const PERM_SPECIAL_MASK = 0o7000
@@ -1937,6 +1993,7 @@ function showPermDialog(row: FileEntry) {
   const mode = typeof row.mode === 'number' ? row.mode : fromOct(row.permissions)
   modeToBits(mode)
   permInput.value = toPermText(mode)
+  permRecursive.value = false
   permVisible.value = true
 }
 
@@ -1948,6 +2005,7 @@ function showPermDialogForSelection() {
   const mode = typeof items[0].mode === 'number' ? items[0].mode : fromOct(items[0].permissions)
   modeToBits(mode)
   permInput.value = toPermText(mode)
+  permRecursive.value = false
   permVisible.value = true
 }
 
@@ -1977,20 +2035,90 @@ async function doChmod() {
   permSaving.value = true
   try {
     for (const target of permTargets.value) {
-      const res = await chmodFile(target.path, mode)
+      const res = await chmodFile(target.path, mode, permRecursive.value)
       const info = res.data
       if (info) {
         target.permissions = info.permissions
         target.mode = info.mode
       }
     }
-    ElMessage.success('权限修改成功')
+    ElMessage.success(permRecursive.value ? '权限修改成功（已递归）' : '权限修改成功')
     permVisible.value = false
     loadFileList()
   } catch {
     // handled by interceptor
   } finally {
     permSaving.value = false
+  }
+}
+
+// ── 属主 / 属组修改（仅 admin）─────────────────────────────
+
+const ownVisible = ref(false)
+const ownTarget = ref<FileEntry | null>(null)
+const ownTargets = ref<FileEntry[]>([])
+const ownUser = ref('')
+const ownGroup = ref('')
+const ownSaving = ref(false)
+/** 是否递归修改目录下所有子项的属主/属组 */
+const ownRecursive = ref(false)
+
+function showOwnerDialog(row: FileEntry) {
+  if (!isAdmin.value) return
+  ownTarget.value = row
+  ownTargets.value = [row]
+  ownUser.value = row.owner || ''
+  ownGroup.value = row.group || ''
+  ownRecursive.value = false
+  ownVisible.value = true
+}
+
+function showOwnerDialogForSelection() {
+  if (!isAdmin.value || !hasSelection.value) return
+  const items = selectedItems.value
+  ownTargets.value = items
+  ownTarget.value = items[0]
+  ownUser.value = items[0].owner || ''
+  ownGroup.value = items[0].group || ''
+  ownRecursive.value = false
+  ownVisible.value = true
+}
+
+async function doChown() {
+  if (ownTargets.value.length === 0) return
+  const owner = ownUser.value.trim() || null
+  const group = ownGroup.value.trim() || null
+  if (!owner && !group) {
+    ElMessage.warning('请至少填写属主或属组')
+    return
+  }
+  ownSaving.value = true
+  try {
+    let changed = 0
+    for (const target of ownTargets.value) {
+      // 非递归时只提交真正变化的字段；递归时原样下发，把改动传播到所有子项
+      const nextOwner = ownRecursive.value ? owner : owner && owner !== target.owner ? owner : null
+      const nextGroup = ownRecursive.value ? group : group && group !== target.group ? group : null
+      if (!nextOwner && !nextGroup) continue
+      const res = await chownFile(target.path, nextOwner, nextGroup, ownRecursive.value)
+      const info = res.data
+      if (info) {
+        target.owner = info.owner
+        target.group = info.group
+      }
+      changed++
+    }
+    if (changed === 0) {
+      ElMessage.info('属主/属组没有变化')
+      return
+    }
+    ElMessage.success(ownRecursive.value ? '属主修改成功（已递归）' : '属主修改成功')
+    ownVisible.value = false
+    loadFileList()
+  } catch {
+    // handled by interceptor
+  } finally {
+    ownSaving.value = false
   }
 }
 
@@ -2598,5 +2726,9 @@ watch(viewMode, async (mode) => {
   margin-top: 12px;
   font-size: 13px;
   color: var(--el-text-color-regular);
+}
+
+.fm-perm-recursive {
+  margin-top: 10px;
 }
 </style>

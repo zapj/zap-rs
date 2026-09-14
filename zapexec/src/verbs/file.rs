@@ -177,6 +177,30 @@ fn user_lookup(name: &str) -> Option<Actor> {
     None
 }
 
+/// Linux 用户名 → uid（解析 /etc/passwd；用于「修改属主」）。
+fn user_id_by_name(name: &str) -> Option<u32> {
+    let content = std::fs::read_to_string("/etc/passwd").ok()?;
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split(':').collect();
+        if parts.len() >= 4 && parts[0] == name {
+            return parts[2].parse().ok();
+        }
+    }
+    None
+}
+
+/// Linux 组名 → gid（解析 /etc/group；用于「修改属组」）。
+fn group_id_by_name(name: &str) -> Option<u32> {
+    let content = std::fs::read_to_string("/etc/group").ok()?;
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split(':').collect();
+        if parts.len() >= 3 && parts[0] == name {
+            return parts[2].parse().ok();
+        }
+    }
+    None
+}
+
 /// 普通用户只能删改自己名下的文件；管理员与 root 不受限。
 fn ensure_owner(actor: Option<Actor>, path: &Path) -> Result<(), String> {
     let Some(actor) = actor else { return Ok(()) };
@@ -590,10 +614,22 @@ pub async fn info(path: String) -> Response {
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
 }
 
+/// 成功响应：带上根路径的最新信息（前端用它回填权限 / 属主列）。
+fn ok_with_info(path: &Path, msg: &str) -> Response {
+    match file_info(path) {
+        Some(info) => Response::ok(msg, Some(json!(info))),
+        None => Response::ok(msg, None),
+    }
+}
+
 /// 修改文件/目录权限（八进制，仅低 12 位，含 setuid/setgid/sticky）。
+///
+/// `recursive=true` 时递归应用到目录下所有子项；普通用户只能改自己名下文件，
+/// 递归过程中遇到非本人文件会跳过并计数，避免整棵树因个别异主文件整体失败。
 pub async fn chmod(
     path: String,
     mode: u32,
+    recursive: bool,
     as_user: Option<String>,
     skip_owner_check: bool,
 ) -> Response {
@@ -612,24 +648,119 @@ pub async fn chmod(
         if !resolved.exists() {
             return Response::err(-1, "路径不存在");
         }
-        // 只能修改本人文件的权限
-        if let Err(e) = ensure_owner(actor, &resolved) {
-            return Response::err(-1, e);
+
+        let set_mode =
+            |p: &Path| std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode));
+
+        if !recursive {
+            // 只能修改本人文件的权限
+            if let Err(e) = ensure_owner(actor, &resolved) {
+                return Response::err(-1, e);
+            }
+            return match set_mode(&resolved) {
+                Ok(_) => ok_with_info(&resolved, "权限修改成功"),
+                Err(e) => Response::err(-1, format!("修改权限失败: {e}")),
+            };
         }
-        match std::fs::set_permissions(&resolved, std::fs::Permissions::from_mode(mode)) {
-            Ok(_) => match file_info(&resolved) {
-                Some(info) => Response::ok("权限修改成功", Some(json!(info))),
-                None => Response::ok(
-                    "权限修改成功",
-                    Some(json!({
-                        "path": resolved.to_string_lossy(),
-                        "permissions": mode_text(mode),
-                        "mode": mode,
-                    })),
-                ),
-            },
-            Err(e) => Response::err(-1, format!("修改权限失败: {e}")),
+
+        let mut changed = 0usize;
+        let mut skipped = 0usize;
+        let mut stack = vec![resolved.clone()];
+        while let Some(p) = stack.pop() {
+            if ensure_owner(actor, &p).is_err() {
+                skipped += 1;
+            } else if let Err(e) = set_mode(&p) {
+                return Response::err(-1, format!("修改权限失败 {}: {e}", p.display()));
+            } else {
+                changed += 1;
+            }
+            if p.is_dir()
+                && let Ok(rd) = std::fs::read_dir(&p)
+            {
+                for entry in rd.flatten() {
+                    stack.push(entry.path());
+                }
+            }
         }
+        let msg = if skipped > 0 {
+            format!("权限修改成功（{changed} 项，跳过 {skipped} 项无权限）")
+        } else {
+            format!("权限修改成功（{changed} 项）")
+        };
+        ok_with_info(&resolved, &msg)
+    })
+    .await
+    .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+/// 修改文件/目录属主与属组（仅 admin 调用；角色校验在 zapd 完成）。
+///
+/// `owner` / `group` 传 Linux 名称，None 表示保持不变；`recursive=true` 递归应用。
+pub async fn chown(
+    path: String,
+    owner: Option<String>,
+    group: Option<String>,
+    recursive: bool,
+    as_user: Option<String>,
+    skip_owner_check: bool,
+) -> Response {
+    tokio::task::spawn_blocking(move || {
+        if owner.is_none() && group.is_none() {
+            return Response::err(-1, "请至少指定新的属主或属组");
+        }
+        let uid = if let Some(name) = owner.as_deref() {
+            match user_id_by_name(name) {
+                Some(uid) => Some(uid),
+                None => return Response::err(-1, format!("系统用户不存在: {name}")),
+            }
+        } else {
+            None
+        };
+        let gid = if let Some(name) = group.as_deref() {
+            match group_id_by_name(name) {
+                Some(gid) => Some(gid),
+                None => return Response::err(-1, format!("系统用户组不存在: {name}")),
+            }
+        } else {
+            None
+        };
+        let _actor = match resolve_actor(as_user, skip_owner_check) {
+            Ok(a) => a,
+            Err(e) => return Response::err(-1, e),
+        };
+        let resolved = resolve_path(&path);
+        if is_critical_path(&resolved) {
+            return Response::err(-1, "不能修改系统关键目录的属主");
+        }
+        if !resolved.exists() {
+            return Response::err(-1, "路径不存在");
+        }
+
+        let do_chown = |p: &Path| std::os::unix::fs::chown(p, uid, gid).map(|_| ());
+
+        if !recursive {
+            return match do_chown(&resolved) {
+                Ok(()) => ok_with_info(&resolved, "属主修改成功"),
+                Err(e) => Response::err(-1, format!("修改属主失败: {e}")),
+            };
+        }
+
+        let mut changed = 0usize;
+        let mut stack = vec![resolved.clone()];
+        while let Some(p) = stack.pop() {
+            if let Err(e) = do_chown(&p) {
+                return Response::err(-1, format!("修改属主失败 {}: {e}", p.display()));
+            }
+            changed += 1;
+            if p.is_dir()
+                && let Ok(rd) = std::fs::read_dir(&p)
+            {
+                for entry in rd.flatten() {
+                    stack.push(entry.path());
+                }
+            }
+        }
+        ok_with_info(&resolved, &format!("属主修改成功（{changed} 项）"))
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))

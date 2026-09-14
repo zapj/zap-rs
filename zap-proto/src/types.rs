@@ -299,6 +299,25 @@ pub enum Request {
     FileChmod {
         path: String,
         mode: u32,
+        /// 递归应用到目录下的所有子项
+        #[serde(default)]
+        recursive: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        as_user: Option<String>,
+        #[serde(default)]
+        skip_owner_check: bool,
+    },
+    /// 修改文件/目录属主与属组（仅 admin）。`owner`/`group` 为 Linux 名称，None 表示不改该项。
+    #[serde(rename = "file.chown")]
+    FileChown {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<String>,
+        /// 递归应用到目录下的所有子项
+        #[serde(default)]
+        recursive: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         as_user: Option<String>,
         #[serde(default)]

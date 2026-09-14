@@ -145,6 +145,7 @@ pub async fn run(args: ClientArgs) {
         ClientVerb::FileChmod { path, mode } => Request::FileChmod {
             path,
             mode: parse_octal_mode(&mode),
+            recursive: false,
             as_user: None,
             skip_owner_check: false,
         },

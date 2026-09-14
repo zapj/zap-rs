@@ -137,9 +137,18 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::FileChmod {
             path,
             mode,
+            recursive,
             as_user,
             skip_owner_check,
-        } => file::chmod(path, mode, as_user, skip_owner_check).await,
+        } => file::chmod(path, mode, recursive, as_user, skip_owner_check).await,
+        Request::FileChown {
+            path,
+            owner,
+            group,
+            recursive,
+            as_user,
+            skip_owner_check,
+        } => file::chown(path, owner, group, recursive, as_user, skip_owner_check).await,
         Request::FileCopy {
             path,
             new_path,

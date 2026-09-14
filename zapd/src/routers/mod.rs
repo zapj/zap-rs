@@ -556,6 +556,7 @@ fn api_routers() -> Router {
         .route("/system/files/mkdir", post(system_file::file_mkdir))
         .route("/system/files/rename", post(system_file::file_rename))
         .route("/system/files/chmod", post(system_file::file_chmod))
+        .route("/system/files/chown", post(system_file::file_chown))
         .route("/system/files/copy", post(system_file::file_copy))
         .route("/system/files/archive", post(system_file::file_archive))
         .route("/system/files/download", get(system_file::file_download))

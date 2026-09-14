@@ -246,6 +246,11 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
         Some(Perm::action("system.file", "write")),
     ),
     (
+        "/system/files/chown",
+        Required::Admin,
+        Some(Perm::action("system.file", "write")),
+    ),
+    (
         "/system/files/delete",
         Required::User,
         Some(Perm::action("system.file", "delete")),

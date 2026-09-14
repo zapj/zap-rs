@@ -78,8 +78,23 @@ export function renameFile(path: string, newPath: string) {
 }
 
 /** Change permissions（mode 为八进制数值，如 0755 传 493） */
-export function chmodFile(path: string, mode: number) {
-  return http.post<ApiResponse<FileEntry>>('/system/files/chmod', { path, mode })
+export function chmodFile(path: string, mode: number, recursive = false) {
+  return http.post<ApiResponse<FileEntry>>('/system/files/chmod', { path, mode, recursive })
+}
+
+/** Change owner / group（仅 admin）。owner/group 为 Linux 名称，null 表示保持不变 */
+export function chownFile(
+  path: string,
+  owner: string | null,
+  group: string | null,
+  recursive = false,
+) {
+  return http.post<ApiResponse<FileEntry>>('/system/files/chown', {
+    path,
+    owner,
+    group,
+    recursive,
+  })
 }
 
 /**

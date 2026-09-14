@@ -48,6 +48,23 @@ pub struct ChmodPayload {
     path: String,
     /// 目标权限：八进制数值（如 0755 传 493），仅低 12 位有效
     mode: u32,
+    /// 递归应用到目录下所有子项
+    #[serde(default)]
+    recursive: bool,
+}
+
+#[derive(Deserialize)]
+pub struct ChownPayload {
+    path: String,
+    /// 新属主（Linux 用户名）；不传表示保持不变
+    #[serde(default)]
+    owner: Option<String>,
+    /// 新属组（Linux 组名）；不传表示保持不变
+    #[serde(default)]
+    group: Option<String>,
+    /// 递归应用到目录下所有子项
+    #[serde(default)]
+    recursive: bool,
 }
 
 #[derive(Deserialize)]
@@ -183,6 +200,11 @@ fn check_write_access(claims: &Claims, path: &Path, home: &str, tmp: &str) -> Re
 /// admin 恒放行；其余角色要求请求值与文件当前特殊位一致（即原样保留，不能新增也不能清除）。
 fn special_bits_allowed(claims: &Claims, requested: u32, current: u32) -> bool {
     is_admin(claims) || (requested & 0o7000) == (current & 0o7000)
+}
+
+/// 属主/属组名称清洗：空白视为未指定（保持原值）。
+fn normalize_name(raw: Option<String>) -> Option<String> {
+    raw.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 // ── handlers ───────────────────────────────────────────────
@@ -439,6 +461,7 @@ pub async fn file_chmod(
     // 特殊位（Set UID / Set GID / Sticky）仅 admin 可设置：
     // 非 admin 只能改 rwx 位，且特殊位必须保持文件当前取值（前端同样不暴露这几个开关，
     // 这里兜底拦住手工构造的请求）。
+    let mut mode = payload.mode;
     if !is_admin(&claims) {
         use std::os::unix::fs::PermissionsExt;
         let current_mode = std::fs::metadata(&resolved)
@@ -451,12 +474,17 @@ pub async fn file_chmod(
                 "特殊权限位（Set UID / Set GID / Sticky）仅管理员可设置".to_string(),
             ));
         }
+        // 递归时子项的特殊位各不相同、无法逐项校验：非 admin 一律只改 rwx，剥离特殊位
+        if payload.recursive {
+            mode &= 0o777;
+        }
     }
 
     let (as_user, skip_owner_check) = actor_identity(&claims).await?;
     let resp = crate::zapexec::call(Request::FileChmod {
         path: resolved.to_string_lossy().to_string(),
-        mode: payload.mode,
+        mode,
+        recursive: payload.recursive,
         as_user,
         skip_owner_check,
     })
@@ -470,6 +498,62 @@ pub async fn file_chmod(
         Some(client_addr.ip().to_string().as_str()),
         "file_chmod",
         &format!("{} ({:04o})", resolved.to_string_lossy(), payload.mode),
+        "",
+    )
+    .await;
+
+    Ok(Json(
+        json!({ "code": 0, "message": resp.message, "data": resp.data }),
+    ))
+}
+
+/// POST /system/files/chown
+///
+/// 修改文件/目录的属主与属组：仅 admin 可用（普通用户改属主等于越权）。
+/// `owner` / `group` 传 Linux 名称，不传表示保持不变；`recursive` 为 true 时递归应用。
+pub async fn file_chown(
+    claims: Claims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<ChownPayload>,
+) -> ZapJsonResult {
+    if !is_admin(&claims) {
+        return Err(ZapError::New(-1, "仅管理员可以修改文件属主".to_string()));
+    }
+    let owner = normalize_name(payload.owner);
+    let group = normalize_name(payload.group);
+    if owner.is_none() && group.is_none() {
+        return Err(ZapError::New(-1, "请至少指定新的属主或属组".to_string()));
+    }
+    let resolved = resolve_path(&payload.path)?;
+    if !resolved.exists() {
+        return Err(ZapError::New(-1, "路径不存在".to_string()));
+    }
+
+    let (as_user, skip_owner_check) = actor_identity(&claims).await?;
+    let resp = crate::zapexec::call(Request::FileChown {
+        path: resolved.to_string_lossy().to_string(),
+        owner: owner.clone(),
+        group: group.clone(),
+        recursive: payload.recursive,
+        as_user,
+        skip_owner_check,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "file_chown",
+        &format!(
+            "{} owner={:?} group={:?} recursive={}",
+            resolved.to_string_lossy(),
+            owner,
+            group,
+            payload.recursive
+        ),
         "",
     )
     .await;
