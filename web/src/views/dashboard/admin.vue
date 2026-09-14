@@ -64,27 +64,36 @@
               <span>{{ t('dashboardAdmin.aboutZap') }}</span>
             </div>
           </template>
-          <div class="about-list">
-            <div class="about-item">
-              <span class="about-label">{{ t('dashboardAdmin.version') }}</span>
-              <span class="about-value">{{ about.version || '-' }}</span>
-            </div>
-            <div class="about-item">
-              <span class="about-label">{{ t('dashboardAdmin.buildDate') }}</span>
-              <span class="about-value">{{ about.build_date || '-' }}</span>
-            </div>
-            <div class="about-item">
-              <span class="about-label">{{ t('dashboardAdmin.license') }}</span>
-              <span class="about-value">{{ about.license || '-' }}</span>
-            </div>
-            <div class="about-actions">
-              <el-link type="primary" :underline="false" @click="go('/docs/manual')">
-                {{ t('dashboardAdmin.docs') }}
-              </el-link>
-              <el-link type="primary" :underline="false" @click="go('/dev/api-docs')">
-                {{ t('dashboardAdmin.apiDocs') }}
-              </el-link>
-            </div>
+          <el-descriptions :column="1" size="small" border>
+            <el-descriptions-item :label="t('dashboardAdmin.version')">
+              {{ about.version || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardAdmin.buildDate')">
+              {{ buildDateText }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardAdmin.commit')">
+              {{ commitText }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardAdmin.branch')">
+              {{ about.git_branch || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardAdmin.rust')">
+              {{ rustText }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardAdmin.target')">
+              {{ targetText }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardAdmin.license')">
+              {{ about.license || '-' }}
+            </el-descriptions-item>
+          </el-descriptions>
+          <div class="about-actions">
+            <el-link type="primary" :underline="false" @click="go('/docs/manual')">
+              {{ t('dashboardAdmin.docs') }}
+            </el-link>
+            <el-link type="primary" :underline="false" @click="go('/dev/api-docs')">
+              {{ t('dashboardAdmin.apiDocs') }}
+            </el-link>
           </div>
         </el-card>
       </el-col>
@@ -231,6 +240,40 @@ const shortcuts = computed(() => [
   { title: t('dashboardAdmin.terminal'), path: '/terminal/index', icon: 'material-symbols:monitor', color: '#13c2c2' },
   { title: 'SSL/TLS', path: '/ssl-tls/certs', icon: 'material-symbols:lock', color: '#eb2f96' },
 ])
+
+/** 构建信息缺失时 vergen 会返回 unknown，统一不展示内部占位串 */
+function meta(value: any) {
+  return !value || value === 'unknown' ? '' : String(value)
+}
+
+const buildDateText = computed(() => {
+  const date = meta(about.value.build_date)
+  if (!date) return '-'
+  const ts = meta(about.value.build_timestamp)
+  const time = ts.length >= 19 ? ts.slice(11, 19) : ''
+  return time ? `${date} ${time}` : date
+})
+
+const commitText = computed(() => {
+  const sha = meta(about.value.git_sha)
+  if (!sha) return '-'
+  const short = sha.slice(0, 7)
+  return about.value.git_dirty === 'true' ? `${short} (dirty)` : short
+})
+
+const rustText = computed(() => {
+  const version = meta(about.value.rustc_version)
+  if (!version) return '-'
+  const channel = meta(about.value.rustc_channel)
+  return channel ? `${version} (${channel})` : version
+})
+
+const targetText = computed(() => {
+  const triple = meta(about.value.target_triple)
+  if (!triple) return '-'
+  const profile = meta(about.value.profile)
+  return profile ? `${triple} / ${profile}` : triple
+})
 
 const cpuModel = computed(() => {
   const cpu = overview.value.cpu || {}
@@ -567,28 +610,6 @@ onUnmounted(() => {
 
 .info-card :deep(.el-card__body) {
   padding: 12px;
-}
-
-.about-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.about-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 14px;
-}
-
-.about-label {
-  color: var(--el-text-color-secondary);
-}
-
-.about-value {
-  color: var(--el-text-color-primary);
-  font-weight: 500;
 }
 
 .about-actions {

@@ -84,5 +84,21 @@ idna = "1.1"
 # （依赖 pulldown-cmark-escape），缺它 `pulldown_cmark::html::push_html` 编译失败。
 pulldown-cmark = "0.12"
 
+# 构建期注入版本元信息（build date / git / rustc），见 build.rs
+# features 说明：
+#   build  → VERGEN_BUILD_DATE / VERGEN_BUILD_TIMESTAMP
+#   cargo  → VERGEN_CARGO_TARGET_TRIPLE / VERGEN_CARGO_PROFILE ...
+#   git+gitcl → VERGEN_GIT_*（gitcl 走本机 git 命令，无需 libgit2）
+#   rustc  → VERGEN_RUSTC_SEMVER / VERGEN_RUSTC_CHANNEL ...
+[build-dependencies]
+vergen = { version = "8", default-features = false, features = [
+    "build",
+    "cargo",
+    "git",
+    "gitcl",
+    "rustc",
+] }
+anyhow = "1"
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
