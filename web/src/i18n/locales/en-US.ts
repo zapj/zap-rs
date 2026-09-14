@@ -2863,6 +2863,8 @@ const enUS: Messages = {
     connError: 'Connection error',
     connClosed:
       'Connection closed; double-click a connection on the left or click "Connect" to reconnect',
+    inputDropped:
+      'Session is not connected; input was not sent (double-click a connection on the left to reconnect)',
     pwdPrompt: 'Enter the SSH password for {user}@{host} (this session only, not saved)',
     connectTitle: 'Connect {name}',
     pwdNotEmpty: 'The password cannot be empty',

@@ -162,6 +162,7 @@
           :ref="(el) => setTerminalRef(tab.id, el)"
           class="terminal-instance"
           :class="{ hidden: activeTabId !== tab.id }"
+          @mousedown="focusTab(tab)"
         ></div>
 
         <div v-if="tabs.length === 0" class="terminal-placeholder">
@@ -1158,7 +1159,14 @@ async function openTerminal(conn: SshConnection) {
   term.onData((data) => {
     const w = tab.ws
     if (w && w.readyState === WebSocket.OPEN) {
+      ;(tab as any).inputWarned = false
       w.send(data)
+      return
+    }
+    // 会话已断开时不要静默丢弃按键，给出一次性提示
+    if (!(tab as any).inputWarned) {
+      ;(tab as any).inputWarned = true
+      term.writeln('\r\n\x1b[33m' + t('terminal.inputDropped') + '\x1b[0m')
     }
   })
 
@@ -1251,6 +1259,11 @@ function connectTab(tab: TerminalTab, conn: SshConnection, authPassword?: string
     tab.status = 'disconnected'
     term.writeln('\r\n\x1b[33m' + t('terminal.connClosed') + '\x1b[0m')
   }
+}
+
+/** 点击终端区域兜底取回焦点（切换标签/重连后 xterm 可能失去焦点） */
+function focusTab(tab: TerminalTab) {
+  tab.term?.focus()
 }
 
 function switchTab(tabId: string) {

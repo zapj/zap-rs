@@ -2815,6 +2815,7 @@ export default {
     connectedTo: '已连接到 {name} ({host}:{port})',
     connError: '连接错误',
     connClosed: '连接已断开，双击左侧连接或点击「连接」可重连',
+    inputDropped: '会话未连接，输入未发送（请双击左侧连接重新连接）',
     pwdPrompt: '请输入 {user}@{host} 的 SSH 密码（仅本次会话使用，不会保存）',
     connectTitle: '连接 {name}',
     pwdNotEmpty: '密码不能为空',
