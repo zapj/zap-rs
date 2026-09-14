@@ -535,6 +535,20 @@ pub async fn get_system_overview() -> ZapJsonResult {
         0.0
     };
 
+    // 网络接口总流量（与 /system/info 中的 NetWorkInfo 同构）
+    let mut networks: Vec<serde_json::Value> = Vec::new();
+    let networks_list = Networks::new_with_refreshed_list();
+    for (interface_name, data) in &networks_list {
+        let ipaddrs: Vec<String> = data.ip_networks().iter().map(|v| v.to_string()).collect();
+        networks.push(json!({
+            "interface_name": interface_name.to_string(),
+            "mtu": data.mtu(),
+            "up": data.total_transmitted(),
+            "down": data.total_received(),
+            "ipaddrs": ipaddrs,
+        }));
+    }
+
     Ok(Json(json!({
         "code": 0,
         "message": "OK",
@@ -575,6 +589,7 @@ pub async fn get_system_overview() -> ZapJsonResult {
             },
             "physical_disks": list_physical_disks(),
             "disk_usage": disk_usage,
+            "networks": networks,
         }
     })))
 }
