@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-import { getToken, getTokenExpire, removeToken, setToken } from './auth'
+import { getToken, getTokenExpire, removeToken, setToken, setTokenExpire } from './auth'
 import { API_BASE, withBase } from './base'
 // 非组件环境（拦截器）用全局 t：取调用瞬间的语言，无需响应式
 import { t } from '@/i18n'
@@ -39,7 +39,10 @@ service.interceptors.request.use(
           config.headers['Authorization'] = `Bearer ${newToken}`
           onTokenRefreshed(newToken)
         } catch {
-          // 刷新失败，让请求带着旧 token 去，由 401 处理
+          // 刷新失败：唤醒并发等待的请求（否则这些 Promise 永远 pending），
+          // 让它们带着旧 token 继续，由 401 分支统一处理
+          config.headers['Authorization'] = `Bearer ${token}`
+          onTokenRefreshed(token)
         } finally {
           isRefreshing = false
         }
@@ -172,6 +175,28 @@ function handleAuthExpired(message = t('error.sessionExpired')) {
   }, 1500)
 }
 
+/**
+ * 从 JWT 里解析 exp（Unix 秒），拿不到返回 null。
+ * 后端刷新接口已返回 expire_in，这里只作兜底。
+ */
+function tokenExpireFromJwt(token: string): number | null {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const json = decodeURIComponent(
+      atob(b64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join(''),
+    )
+    const exp = JSON.parse(json)?.exp
+    return typeof exp === 'number' ? exp : null
+  } catch {
+    return null
+  }
+}
+
 async function refreshToken(): Promise<string> {
   // reflash_token 要求携带仍有效的 Bearer 凭据（过期前 60 秒的缓冲窗口内刷新）
   const token = getToken()
@@ -187,6 +212,14 @@ async function refreshToken(): Promise<string> {
   )
   if (resp.data?.access_token) {
     setToken(resp.data.access_token)
+    // 必须同步刷新本地过期时间：否则过期时间永远停在登录那一刻，
+    // 之后每个请求都会被判定为「已过期」，于是轮询接口（如 /system/status，
+    // 每 5 秒一次）每次都伴随一次无意义的 reflash_token。
+    const exp = tokenExpireFromJwt(resp.data.access_token)
+    const seconds =
+      Number(resp.data.expire_in) ||
+      (exp ? exp - Math.floor(Date.now() / 1000) : 0)
+    if (seconds > 0) setTokenExpire(seconds)
     return resp.data.access_token
   }
   throw new Error(t('error.refreshFailed'))
