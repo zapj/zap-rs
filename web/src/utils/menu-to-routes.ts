@@ -6,14 +6,16 @@ const modules = import.meta.glob('../views/**/*.vue')
 
 /**
  * 动态加载组件
+ * 组件文件不存在时返回 null（例如数据库里残留了已删除页面的菜单记录），
+ * 由调用方跳过该菜单，避免中断整个动态路由注册。
  * @param component 组件路径
  */
 function loadComponent(component: string) {
   // 处理布局组件
   if (component === 'Layout') {
     return () => import('@/layout/index.vue')
-  } 
- 
+  }
+
   // 处理其他组件
   // 1. 移除开头的斜杠
   const path = component.replace(/^\//, '')
@@ -21,28 +23,34 @@ function loadComponent(component: string) {
   const componentPath = path.endsWith('.vue') ? path : `${path}.vue`
   // 3. 构造完整的组件路径
   const fullPath = `../views/${componentPath}`
-  
+
   // 检查组件是否存在
   if (!modules[fullPath]) {
     console.error(`组件不存在: ${fullPath}`)
-    console.log('可用的组件:', Object.keys(modules))
-    throw new Error(`未找到组件: ${component}`)
+    return null
   }
-  
+
   return modules[fullPath]
 }
 
 /**
  * 将MenuItem转换为RouteRecordRaw
+ * 菜单无效（缺 name / 组件不存在）时返回 null，由调用方跳过
  * @param menuItem 菜单项
  */
-export function menuToRoute(menuItem: MenuItem): RouteRecordRaw {
+export function menuToRoute(menuItem: MenuItem): RouteRecordRaw | null {
   // 确保基础属性存在
   if (!menuItem.name) {
-    throw new Error('菜单项必须包含name属性')
+    console.error('菜单项必须包含name属性，已跳过:', menuItem)
+    return null
   }
   // 兼容空 path：子菜单使用 'index' 作为默认路径
   const itemPath = menuItem.path || 'index'
+  const component = menuItem.component ? loadComponent(menuItem.component) : undefined
+  if (menuItem.component && !component) {
+    // 组件未找到：整条菜单不注册
+    return null
+  }
   const route: RouteRecordRaw = {
     path: itemPath,
     name: menuItem.name,
@@ -53,7 +61,7 @@ export function menuToRoute(menuItem: MenuItem): RouteRecordRaw {
       hidden: menuItem.status === 0,
     },
     // 明确设置可能的属性
-    component: menuItem.component ? loadComponent(menuItem.component) : undefined,
+    component,
     redirect: menuItem.redirect,
     children: [],
   }
@@ -63,6 +71,7 @@ export function menuToRoute(menuItem: MenuItem): RouteRecordRaw {
     route.children = menuItem.children
       .filter((child) => child.type !== 'button')
       .map((child) => menuToRoute(child))
+      .filter((child): child is RouteRecordRaw => child !== null)
   }
 
   // 清理未定义的属性
@@ -73,7 +82,7 @@ export function menuToRoute(menuItem: MenuItem): RouteRecordRaw {
 }
 
 /**
- * 将菜单树转换为路由配置
+ * 将菜单树转换为路由配置（自动跳过无效菜单）
  * @param menuTree 菜单树
  */
 export function menuTreeToRoutes(menuTree: MenuItem[]): RouteRecordRaw[] {
@@ -82,4 +91,5 @@ export function menuTreeToRoutes(menuTree: MenuItem[]): RouteRecordRaw[] {
     .filter((menu) => menu.status !== 0) // 过滤掉禁用的菜单
     .filter((menu) => !menu.meta.hidden) // 过滤掉隐藏的菜单
     .map((menu) => menuToRoute(menu))
+    .filter((route): route is RouteRecordRaw => route !== null)
 }

@@ -121,7 +121,6 @@ const enUS: Messages = {
     user: 'Users',
     roles: 'Roles',
     menus: 'Menus',
-    'ssh-keys': 'SSH Keys',
     update: 'System Update',
     audit: 'Audit Logs',
     package: 'Packages',
@@ -2776,7 +2775,8 @@ const enUS: Messages = {
     keyTipLocal:
       'Local host connection: writes to the local user authorized_keys (requires the admin role)',
     keyTipSaved: 'The key must already be added to the host ~/.ssh/authorized_keys to log in',
-    keyTipEmpty: 'No keys available; generate/import one under "My Keys" first',
+    keyTipEmpty:
+      'Leave empty to auto-use the default private key in ~/.ssh (id_ed25519 / id_ecdsa / id_rsa)',
     manageKeys: 'Manage My Keys',
     localPush: 'Write local SSH authorization',
     pushToHost: 'Push public key to host',

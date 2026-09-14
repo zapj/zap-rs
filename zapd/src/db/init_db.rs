@@ -299,8 +299,6 @@ async fn init_menus_table() {
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (23, 2, 'menus', 'menus', 'system/menus/index', 'menu', '菜单管理', 'material-symbols:menu', 1, 'admin', 5, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (25, 2, 'ssh-keys', 'ssh-keys', 'system/config/ssh-keys', 'menu', 'SSH 密钥', 'material-symbols:key', 1, 'admin', 6, 1, strftime('%s','now'), strftime('%s','now'));
-    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (24, 2, 'audit', 'audit', 'system/audit/index', 'menu', '审计日志', 'material-symbols:confirmation-number', 1, 'admin', 7, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (27, 2, 'system-update', 'update', 'system/update/index', 'menu', '系统更新', 'material-symbols:refresh', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));

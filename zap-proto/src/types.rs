@@ -175,6 +175,10 @@ pub enum Request {
     /// 读取用户家目录私钥内容（仅终端连接时使用，私钥不落 DB / 不返回前端列表）
     #[serde(rename = "ssh_user_key.private_get")]
     SshUserKeyPrivateGet { linux_user: String, name: String },
+    /// 读取用户家目录 ~/.ssh 下的 OpenSSH 默认私钥（id_ed25519 → id_ecdsa → id_rsa）。
+    /// 只扫描该用户自己的家目录，不回退到其他账户；私钥同样不落 DB
+    #[serde(rename = "ssh_user_key.default_get")]
+    SshUserKeyDefaultGet { linux_user: String },
     /// 读取用户家目录公钥内容
     #[serde(rename = "ssh_user_key.public_get")]
     SshUserKeyPublicGet { linux_user: String, name: String },

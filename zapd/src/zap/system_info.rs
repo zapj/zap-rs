@@ -82,8 +82,9 @@ const PUB_IP_CACHE_TTL: StdDuration = StdDuration::from_secs(60);
 static PUB_IP_CACHE: OnceLock<Mutex<(Instant, String)>> = OnceLock::new();
 
 /// 获取公网 IP（尽力而为）：
-/// - 查询自带 3 秒超时（无外网/被墙环境下 `public_ip_address` 会长时间挂起，
-///   曾导致 /system/info 超过服务端 10s TimeoutLayer 而被掐断返回 408）；
+/// - 查询走 `ip_discovery`：DNS/STUN 等无连接协议 + 多源并发取首个成功结果，
+///   比逐个访问 HTTP 公网服务快得多；仍保留 3 秒超时兜底
+///   （无外网/被墙时曾导致 /system/info 超过服务端 10s TimeoutLayer 而被掐断返回 408）；
 /// - 失败回退内网 IP，再失败回退 127.0.0.1；
 /// - 结果缓存 60s。
 async fn public_ip_cached() -> String {
@@ -102,12 +103,7 @@ async fn public_ip_cached() -> String {
             }
         }
     }
-    let ip = match tokio::time::timeout(
-        StdDuration::from_secs(3),
-        public_ip_address::perform_lookup(None),
-    )
-    .await
-    {
+    let ip = match tokio::time::timeout(StdDuration::from_secs(3), ip_discovery::get_ip()).await {
         Ok(Ok(found)) => found.ip.to_string(),
         _ => match local_ip_address::local_ip() {
             Ok(ip) => ip.to_string(),

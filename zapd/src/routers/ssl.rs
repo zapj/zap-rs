@@ -737,31 +737,75 @@ fn parse_pem_info(raw: &str) -> Option<ParsedCertInfo> {
 /// - `Ok(false)`：两者都能解析，但公钥不一致
 /// - `Err(msg)`：私钥 / 证书无法解析，无法完成校验
 pub(crate) fn key_matches(pem: &str, key_pem: &str) -> Result<bool, String> {
-    use openssl::pkey::PKey;
-    use openssl::x509::{X509, X509Req};
-
-    let t = pem.trim();
-    let pub_key =
-        if t.contains("BEGIN CERTIFICATE REQUEST") || t.contains("BEGIN NEW CERTIFICATE REQUEST") {
-            X509Req::from_pem(t.as_bytes())
-                .map_err(|e| format!("CSR 无法解析：{e}"))?
-                .public_key()
-                .map_err(|e| format!("CSR 公钥读取失败：{e}"))?
-        } else {
-            X509::from_pem(t.as_bytes())
-                .map_err(|e| format!("证书无法解析：{e}"))?
-                .public_key()
-                .map_err(|e| format!("证书公钥读取失败：{e}"))?
-        };
+    // 与证书解析链路一样刻意避开 OpenSSL：私钥用 rcgen（ring 后端）解析并导出
+    // SubjectPublicKeyInfo，证书 / CSR 用 x509-parser，两边都只比较裸公钥位串。
+    let cert_key = cert_pubkey_bits(pem)?;
 
     // 私钥优先；也接受直接粘贴公钥（便于只做比对）
-    if let Ok(key) = PKey::private_key_from_pem(key_pem.as_bytes()) {
-        return Ok(pub_key.public_eq(&key));
+    let kp = key_pem.trim();
+    if kp.contains("PUBLIC KEY") {
+        let der =
+            first_pem_der(kp).ok_or_else(|| "公钥无法解析：请粘贴 PEM 格式公钥".to_string())?;
+        return Ok(spki_bits(&der)? == cert_key);
     }
-    if let Ok(key) = PKey::public_key_from_pem(key_pem.as_bytes()) {
-        return Ok(pub_key.public_eq(&key));
+    Ok(private_key_pubkey_bits(kp)? == cert_key)
+}
+
+/// 取 PEM 中第一个块的 DER 内容（忽略标签）。
+fn first_pem_der(pem: &str) -> Option<Vec<u8>> {
+    x509_parser::pem::Pem::iter_from_buffer(pem.as_bytes())
+        .flatten()
+        .next()
+        .map(|b| b.contents.clone())
+}
+
+/// 从 SubjectPublicKeyInfo 的 DER 中取出裸公钥位串。
+fn spki_bits(spki_der: &[u8]) -> Result<Vec<u8>, String> {
+    use x509_parser::prelude::FromDer;
+
+    let (_, spki) = x509_parser::x509::SubjectPublicKeyInfo::from_der(spki_der)
+        .map_err(|e| format!("公钥无法解析：{e}"))?;
+    Ok(spki.subject_public_key.as_ref().to_vec())
+}
+
+/// 取证书（或 CSR）里的裸公钥位串。
+fn cert_pubkey_bits(pem: &str) -> Result<Vec<u8>, String> {
+    use x509_parser::prelude::FromDer;
+
+    for item in x509_parser::pem::Pem::iter_from_buffer(pem.as_bytes()) {
+        let Ok(block) = item else { continue };
+        let label = block.label.trim().to_ascii_uppercase();
+        if label.contains("REQUEST") {
+            let (_, csr) = x509_parser::certification_request::X509CertificationRequest::from_der(
+                &block.contents,
+            )
+            .map_err(|e| format!("CSR 无法解析：{e}"))?;
+            return Ok(csr
+                .certification_request_info
+                .subject_pki
+                .subject_public_key
+                .as_ref()
+                .to_vec());
+        }
+        if label.contains("CERTIFICATE") {
+            let (_, cert) = x509_parser::certificate::X509Certificate::from_der(&block.contents)
+                .map_err(|e| format!("证书无法解析：{e}"))?;
+            return Ok(cert
+                .tbs_certificate
+                .subject_pki
+                .subject_public_key
+                .as_ref()
+                .to_vec());
+        }
     }
-    Err("私钥无法解析：请粘贴 PEM 格式私钥（暂不支持带密码的私钥）".to_string())
+    Err("证书无法解析：请粘贴 PEM 格式的证书（crt）或 CSR".to_string())
+}
+
+/// 解析私钥并导出它的裸公钥位串（与证书侧同格式，便于直接比对）。
+fn private_key_pubkey_bits(key_pem: &str) -> Result<Vec<u8>, String> {
+    let pair = rcgen::KeyPair::from_pem(key_pem)
+        .map_err(|_| "私钥无法解析：请粘贴 PEM 格式私钥（暂不支持带密码的私钥）".to_string())?;
+    spki_bits(&pair.public_key_der())
 }
 
 /// 保存前的配对校验：证书（或 CSR）与私钥同时提供时必须能配上，

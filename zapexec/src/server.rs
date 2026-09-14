@@ -49,11 +49,7 @@ pub async fn serve(socket: &Path, secret: &[u8], identity: ClientIdentity) {
     }
 }
 
-async fn handle_conn(
-    stream: UnixStream,
-    secret: &[u8],
-    expected_uid: u32,
-) -> std::io::Result<()> {
+async fn handle_conn(stream: UnixStream, secret: &[u8], expected_uid: u32) -> std::io::Result<()> {
     // 1) SO_PEERCRED：只允许 zapadm 用户连接
     let uid = match peer_uid(stream.as_raw_fd()) {
         Some(u) => u,

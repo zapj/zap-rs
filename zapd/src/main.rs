@@ -3,9 +3,10 @@ use std::{env, sync::Arc, time::Duration};
 use axum::{Router, extract::Request, http::StatusCode};
 use clap::Parser;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use openssl::ssl::{AlpnError, Ssl, SslAcceptor, SslFiletype, SslMethod, select_next_proto};
+use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::net::TcpListener;
-use tokio_openssl::SslStream;
+use tokio_rustls::TlsAcceptor;
 use tower_http::compression::CompressionLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
@@ -181,29 +182,17 @@ async fn main() {
 async fn serve_tls_connection(
     stream: tokio::net::TcpStream,
     client_addr: std::net::SocketAddr,
-    acceptor: Arc<SslAcceptor>,
+    acceptor: Arc<TlsAcceptor>,
     app: Router,
 ) {
-    let ssl = match Ssl::new(acceptor.context()) {
-        Ok(ssl) => ssl,
-        Err(e) => {
-            error!("Failed to create TLS session for {}: {}", client_addr, e);
-            return;
-        }
-    };
-    let mut stream = match SslStream::new(ssl, stream) {
+    // 握手（含 ALPN 协商）由 rustls 在 accept 内部完成
+    let stream = match acceptor.accept(stream).await {
         Ok(stream) => stream,
         Err(e) => {
-            error!("Failed to create TLS stream for {}: {}", client_addr, e);
+            error!("Error during TLS handshake from {}: {}", client_addr, e);
             return;
         }
     };
-
-    // Perform the server-side TLS handshake.
-    if let Err(e) = std::pin::Pin::new(&mut stream).accept().await {
-        error!("Error during TLS handshake from {}: {}", client_addr, e);
-        return;
-    }
 
     let stream = TokioIo::new(stream);
     let hyper_service =
@@ -268,31 +257,49 @@ async fn serve_plain_http(
     Ok(())
 }
 
-/// Build an OpenSSL TLS acceptor from the PEM cert/key files.
+/// Build a rustls TLS acceptor from the PEM cert/key files.
 ///
 /// ALPN 通告 h2 + http/1.1：浏览器/客户端协商 h2 时使用 HTTP/2，
 /// 否则回落到 HTTP/1.1（与 hyper_util auto 的前言探测配合）。
-fn create_tls_acceptor(cert: &str, key: &str) -> Arc<SslAcceptor> {
-    let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
-        .expect("failed to initialize TLS acceptor");
-    builder
-        .set_private_key_file(key, SslFiletype::PEM)
-        .expect("failed to load TLS private key");
-    builder
-        .set_certificate_chain_file(cert)
-        .expect("failed to load TLS certificate chain");
-    builder
-        .check_private_key()
-        .expect("TLS private key does not match the certificate");
+fn create_tls_acceptor(cert: &str, key: &str) -> Arc<TlsAcceptor> {
+    // rustls 要求显式选定进程级加密后端：统一使用 ring（纯 Rust 侧依赖，
+    // 避免 aws-lc-rs 的 C 工具链）。依赖树里若同时引入了 aws-lc-rs，
+    // 不显式安装会在构造 ServerConfig 时 panic。install_default 重复调用无害。
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // ALPN wire format: 每个协议名前缀长度字节，如 b"\x02h2\x08http/1.1"
-    let alpn: &[u8] = b"\x02h2\x08http/1.1";
-    builder
-        .set_alpn_protos(alpn)
-        .expect("failed to set ALPN protocols");
-    builder.set_alpn_select_callback(|_ssl, client_protocols| {
-        select_next_proto(alpn, client_protocols).ok_or(AlpnError::ALERT_FATAL)
-    });
+    let certs = load_certs(cert).expect("failed to load TLS certificate chain");
+    let key = load_private_key(key).expect("failed to load TLS private key");
 
-    Arc::new(builder.build())
+    let mut config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .expect("TLS 证书与私钥不匹配，无法构建服务端配置");
+
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+    Arc::new(TlsAcceptor::from(Arc::new(config)))
+}
+
+/// 读取 PEM 证书链（fullchain 时含中间证书，按文件顺序全部加载）。
+fn load_certs(path: &str) -> anyhow::Result<Vec<CertificateDer<'static>>> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| anyhow::anyhow!("打开证书文件 {} 失败: {}", path, e))?;
+    let mut reader = std::io::BufReader::new(file);
+    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| anyhow::anyhow!("解析证书 {} 失败: {}", path, e))?;
+    if certs.is_empty() {
+        return Err(anyhow::anyhow!("证书文件 {} 中没有证书", path));
+    }
+    Ok(certs)
+}
+
+/// 读取 PEM 私钥（PKCS#8 / PKCS#1 / SEC1 均可）。
+fn load_private_key(path: &str) -> anyhow::Result<PrivateKeyDer<'static>> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| anyhow::anyhow!("打开私钥文件 {} 失败: {}", path, e))?;
+    let mut reader = std::io::BufReader::new(file);
+    rustls_pemfile::private_key(&mut reader)
+        .map_err(|e| anyhow::anyhow!("解析私钥 {} 失败: {}", path, e))?
+        .ok_or_else(|| anyhow::anyhow!("私钥文件 {} 中没有可用的私钥", path))
 }

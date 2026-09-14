@@ -79,6 +79,7 @@ pub async fn dispatch(req: Request) -> Response {
         Request::SshUserKeyPrivateGet { linux_user, name } => {
             ssh_user_key::private_get(linux_user, name).await
         }
+        Request::SshUserKeyDefaultGet { linux_user } => ssh_user_key::default_get(linux_user).await,
         Request::SshUserKeyPublicGet { linux_user, name } => {
             ssh_user_key::public_get(linux_user, name).await
         }

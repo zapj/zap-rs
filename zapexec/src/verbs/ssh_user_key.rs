@@ -355,6 +355,50 @@ pub async fn private_get(linux_user: String, name: String) -> Response {
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
 }
 
+/// 家目录 `~/.ssh` 下 OpenSSH 默认私钥的探测顺序（与 ssh 客户端一致）
+const DEFAULT_KEY_NAMES: [&str; 3] = ["id_ed25519", "id_ecdsa", "id_rsa"];
+
+/// 读取用户家目录 ~/.ssh 下的默认私钥（id_ed25519 → id_ecdsa → id_rsa）。
+///
+/// 面板由 zapadm 运行、无权读他人 0600 私钥，故一律由 zapexec（root）代读；
+/// 只扫描 `linux_user` 自己的家目录，缺失即失败，不回退到其他账户的密钥。
+pub async fn default_get(linux_user: String) -> Response {
+    tokio::task::spawn_blocking(move || {
+        let (home, _, _) = match home_of(&linux_user) {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+        let ssh_dir = home.join(".ssh");
+        for name in DEFAULT_KEY_NAMES {
+            let priv_path = ssh_dir.join(name);
+            let Ok(content) = std::fs::read_to_string(&priv_path) else {
+                continue;
+            };
+            if !content.contains("PRIVATE KEY") {
+                continue;
+            }
+            let public_key =
+                read_pub_line(&ssh_dir.join(format!("{name}.pub"))).unwrap_or_default();
+            return Response::ok(
+                "ok",
+                Some(json!({
+                    "name": name,
+                    "private_key": content,
+                    "public_key": public_key,
+                })),
+            );
+        }
+        Response::err(
+            -1,
+            format!(
+                "{linux_user} 的家目录 ~/.ssh 下没有可用的默认私钥（id_ed25519 / id_ecdsa / id_rsa）"
+            ),
+        )
+    })
+    .await
+    .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
 /// 读取公钥内容。
 pub async fn public_get(linux_user: String, name: String) -> Response {
     tokio::task::spawn_blocking(move || {

@@ -1,5 +1,5 @@
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::{
     Json,
@@ -12,10 +12,13 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use jsonwebtoken::{DecodingKey, Validation, decode};
+use russh::client;
+use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::{ChannelMsg, Disconnect};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Executor, Row};
-use ssh2::{OpenFlags, OpenType, Session};
+use tokio::io::AsyncWriteExt;
 use tracing::{error, info, warn};
 
 use zap_proto::Request;
@@ -308,13 +311,9 @@ pub async fn create_connection(
             "认证类型仅支持 password 或 key".to_string(),
         ));
     }
-    // 密码认证允许密码为空：表示「未设置密码」，连接时由前端弹窗临时输入、不落库
-    if payload.auth_type == "key" && payload.ssh_key_name.is_empty() {
-        return Err(ZapError::New(
-            -1,
-            "密钥认证时必须选择一个 SSH 密钥".to_string(),
-        ));
-    }
+    // 密码认证允许密码为空：表示「未设置密码」，连接时由前端弹窗临时输入、不落库。
+    // 密钥认证的 ssh_key_name 同样允许为空：表示不绑定面板密钥，连接时自动探测
+    // 家目录 ~/.ssh 下的默认私钥（id_ed25519 → id_ecdsa → id_rsa）。
 
     let pool = db::get_db_pool().await;
     let now = chrono::Utc::now().timestamp();
@@ -590,33 +589,6 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
         }
     };
 
-    let addr = format!("{}:{}", conn_info.host, conn_info.port);
-    let tcp = match TcpStream::connect(&addr) {
-        Ok(tcp) => tcp,
-        Err(e) => {
-            error!("Failed to connect to {}: {}", addr, e);
-            send_error_and_close(socket, &format!("连接失败: {}\r\n", e)).await;
-            return;
-        }
-    };
-
-    let mut session = match Session::new() {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to create SSH session: {}", e);
-            send_error_and_close(socket, &format!("创建 SSH 会话失败: {}\r\n", e)).await;
-            return;
-        }
-    };
-
-    session.set_tcp_stream(tcp);
-    // Handshake must run in blocking mode
-    if let Err(e) = session.handshake() {
-        error!("SSH handshake failed: {}", e);
-        send_error_and_close(socket, &format!("SSH 握手失败: {}\r\n", e)).await;
-        return;
-    }
-
     // 密码认证但未保存密码（如默认的 localhost 连接）：先等待前端通过 WebSocket
     // 下发本次会话的临时密码 {"type":"auth","password":"..."}，认证后即丢弃、不落库
     let mut temporary_password: Option<String> = None;
@@ -666,19 +638,22 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
     if let Some(pwd) = temporary_password {
         auth_info.password = pwd;
     }
-    if let Err(e) = authenticate(&mut session, &auth_info) {
-        error!("SSH authentication failed: {}", e);
-        let _ = ws_tx
-            .send(Message::Text(axum::extract::ws::Utf8Bytes::from(format!(
-                "认证失败: {}\r\n",
-                e
-            ))))
-            .await;
-        let _ = ws_tx.close().await;
-        return;
-    }
+    let handle = match ssh_connect(&auth_info).await {
+        Ok(h) => h,
+        Err(e) => {
+            error!("SSH authentication failed: {}", e);
+            let _ = ws_tx
+                .send(Message::Text(axum::extract::ws::Utf8Bytes::from(format!(
+                    "认证失败: {}\r\n",
+                    e
+                ))))
+                .await;
+            let _ = ws_tx.close().await;
+            return;
+        }
+    };
 
-    let mut channel = match session.channel_session() {
+    let mut channel = match handle.channel_open_session().await {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to open SSH channel: {}", e);
@@ -693,7 +668,10 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
         }
     };
 
-    if let Err(e) = channel.request_pty("xterm-256color", None, Some((cols, rows, 0, 0))) {
+    if let Err(e) = channel
+        .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
+        .await
+    {
         error!("Failed to request PTY: {}", e);
         let _ = ws_tx
             .send(Message::Text(axum::extract::ws::Utf8Bytes::from(format!(
@@ -705,7 +683,7 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
         return;
     }
 
-    if let Err(e) = channel.shell() {
+    if let Err(e) = channel.request_shell(true).await {
         error!("Failed to start shell: {}", e);
         let _ = ws_tx
             .send(Message::Text(axum::extract::ws::Utf8Bytes::from(format!(
@@ -717,115 +695,80 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
         return;
     }
 
-    // Now switch to non-blocking for the interactive I/O loop
-    session.set_blocking(false);
-
     info!("SSH terminal started for connection {}", conn_id);
 
-    // Channel: SSH read → WebSocket
-    let (ssh_read_tx, mut ssh_read_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
-    // Channel: WebSocket → SSH write
-    let (ssh_write_tx, mut ssh_write_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     // Channel: WebSocket → PTY resize (cols, rows)
     let (resize_tx, mut resize_rx) = tokio::sync::mpsc::channel::<(u32, u32)>(16);
 
-    // Spawn blocking SSH I/O task (owns the channel, no mutex needed)
-    let ssh_handle = tokio::task::spawn_blocking(move || {
-        let mut buf = [0u8; 4096];
-        let mut write_buf: Vec<u8> = Vec::new();
-        loop {
-            // Apply any pending PTY resize requests (window-change)
-            while let Ok((cols, rows)) = resize_rx.try_recv() {
-                if let Err(e) = channel.request_pty_size(cols, rows, None, None) {
-                    warn!("PTY resize to {}x{} failed: {}", cols, rows, e);
-                }
-            }
-            // Try to read from SSH
-            match channel.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if ssh_read_tx.blocking_send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(e) => {
-                    warn!("SSH read error: {}", e);
-                    break;
-                }
-            }
+    // 主循环：远端输出 → WebSocket，WebSocket 输入 → 远端。
+    // `ssh_writer` 是 'static 的写端，不占用 channel 借用，便于与 wait() 并发。
+    let mut ssh_writer = channel.make_writer();
 
-            // Drain all pending writes
-            while let Ok(data) = ssh_write_rx.try_recv() {
-                write_buf.extend_from_slice(&data);
-            }
-            if !write_buf.is_empty() {
-                match channel.write_all(&write_buf) {
-                    Ok(()) => {
-                        write_buf.clear();
-                        let _ = channel.flush();
+    loop {
+        tokio::select! {
+            msg = channel.wait() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    ChannelMsg::Data { data } => {
+                        if ws_tx.send(Message::Binary(data)).await.is_err() {
+                            break;
+                        }
                     }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                    Err(e) => {
-                        warn!("SSH write error: {}", e);
-                        break;
+                    ChannelMsg::Eof | ChannelMsg::Close => break,
+                    ChannelMsg::ExitStatus { exit_status } => {
+                        info!(
+                            "SSH shell exited with status {} (connection {})",
+                            exit_status, conn_id
+                        );
                     }
+                    _ => {}
                 }
             }
-
-            // Avoid busy-waiting
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        // Cleanup
-        let _ = channel.close();
-        let _ = channel.wait_close();
-    });
-
-    // Forward SSH reads to WebSocket
-    let ws_forward = tokio::spawn(async move {
-        while let Some(data) = ssh_read_rx.recv().await {
-            if ws_tx.send(Message::Binary(data.into())).await.is_err() {
-                break;
+            ws_msg = ws_rx.next() => {
+                let Some(Ok(msg)) = ws_msg else { break };
+                match msg {
+                    Message::Text(t) => {
+                        let txt = t.as_ref();
+                        // resize 控制消息：前端 fit 后自动同步窗口尺寸
+                        if let Ok(resize) = serde_json::from_str::<ResizeMsg>(txt)
+                            && resize.kind == "resize"
+                            && resize.cols > 0
+                            && resize.rows > 0
+                        {
+                            let _ = resize_tx.send((resize.cols, resize.rows)).await;
+                            continue;
+                        }
+                        // 其余文本一律作为终端输入
+                        if ssh_writer.write_all(txt.as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                    Message::Binary(d) => {
+                        if ssh_writer.write_all(&d).await.is_err() {
+                            break;
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
+                }
+                let _ = ssh_writer.flush().await;
             }
         }
-        let _ = ws_tx.close().await;
-    });
 
-    // Forward WebSocket writes to SSH，并识别 resize 控制消息
-    while let Some(Ok(msg)) = ws_rx.next().await {
-        match msg {
-            Message::Binary(d) => {
-                if ssh_write_tx.send(d.to_vec()).await.is_err() {
-                    break;
-                }
+        // 应用窗口尺寸变更：此处未持有 channel 的独占借用
+        while let Ok((c, r)) = resize_rx.try_recv() {
+            if let Err(e) = channel.window_change(c, r, 0, 0).await {
+                warn!("PTY resize to {}x{} failed: {}", c, r, e);
             }
-            Message::Text(t) => {
-                let txt = t.as_ref();
-                // resize 控制消息：前端 fit 后自动同步窗口尺寸
-                if let Ok(resize) = serde_json::from_str::<ResizeMsg>(txt)
-                    && resize.kind == "resize"
-                    && resize.cols > 0
-                    && resize.rows > 0
-                {
-                    if resize_tx.send((resize.cols, resize.rows)).await.is_err() {
-                        break;
-                    }
-                    continue;
-                }
-                // 其余文本一律作为终端输入
-                if ssh_write_tx.send(txt.as_bytes().to_vec()).await.is_err() {
-                    break;
-                }
-            }
-            Message::Close(_) => break,
-            _ => continue,
         }
     }
 
     // Cleanup
-    ws_forward.abort();
-    drop(ssh_write_tx); // signal SSH task to stop
-    let _ = ssh_handle.await;
+    let _ = ws_tx.close().await;
+    let _ = channel.close().await;
+    let _ = handle
+        .disconnect(Disconnect::ByApplication, "", "English")
+        .await;
     info!("Terminal WebSocket closed for connection {}", conn_id);
 }
 
@@ -841,37 +784,97 @@ async fn send_error_and_close(socket: WebSocket, msg: &str) {
 
 // ── Authentication ─────────────────────────────────────────
 
-fn authenticate(session: &mut Session, info: &ConnectionInfo) -> Result<(), String> {
+/// russh 客户端事件回调。
+///
+/// 面板只需要「连上去、开终端 / 执行命令」，不消费服务端主动推送的消息，
+/// 因此除 `check_server_key` 外全部使用默认实现。
+struct SshClient;
+
+impl client::Handler for SshClient {
+    type Error = russh::Error;
+
+    /// 不做 known_hosts 校验：面板里的主机由用户自己录入，
+    /// 语义等同于 OpenSSH 首次连接时接受该主机指纹。
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &PublicKeyOrCertificate,
+    ) -> Result<bool, Self::Error> {
+        Ok(true)
+    }
+}
+
+/// 建立 SSH 连接并完成认证（密码 / 私钥）。
+///
+/// 全程异步：russh 基于 tokio 实现，无需再像 libssh2 那样包一层
+/// `spawn_blocking` 去隔离 OpenSSL 错误队列（那条链路会污染同线程上的 TLS）。
+/// 解析 PEM 私钥：优先 OpenSSH 新格式，失败时按「剥离 PEM 头尾 + base64」兜底。
+///
+/// 家目录里的密钥常以 `-----END ...-----\n\n` 结尾，ssh-key 的 PEM 解码对此敏感，
+/// 先 trim 再解析；仍失败则手工解出二进制交给 `from_bytes`。
+fn parse_private_key(content: &str) -> Result<PrivateKey, String> {
+    use base64::Engine;
+
+    let trimmed = content.trim();
+    if let Ok(key) = PrivateKey::from_openssh(trimmed) {
+        return Ok(key);
+    }
+    let b64: String = trimmed
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("-----"))
+        .map(|l| l.trim())
+        .collect();
+    let bin = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("私钥 base64 解码失败: {e}"))?;
+    PrivateKey::from_bytes(&bin).map_err(|e| format!("SSH 私钥解析失败: {e}"))
+}
+
+async fn ssh_connect(info: &ConnectionInfo) -> Result<client::Handle<SshClient>, String> {
+    let addr = format!("{}:{}", info.host, info.port);
+    let config = Arc::new(client::Config::default());
+    let mut handle = client::connect(config, addr, SshClient)
+        .await
+        .map_err(|e| format!("SSH 连接失败: {}", e))?;
+
     match info.auth_type.as_str() {
         "password" => {
-            session
-                .userauth_password(&info.username, &info.password)
+            let res = handle
+                .authenticate_password(&info.username, &info.password)
+                .await
                 .map_err(|e| format!("密码认证失败: {}", e))?;
+            if !res.success() {
+                return Err("密码认证失败：用户名或密码错误".to_string());
+            }
         }
         "key" => {
-            // 私钥/公钥已在 load_connection_info 中按归属解析好（用户家目录密钥由
-            // zapexec root 按需读取）
+            // 私钥已在 load_connection_info 中按归属解析好（家目录 ~/.ssh 文件）
             let key_content = info.ssh_private_key.as_deref().ok_or_else(|| {
                 format!(
                     "SSH 密钥 '{}' 不可用：请在「我的密钥」中创建/导入并重新绑定到连接",
                     info.ssh_key_name
                 )
             })?;
-            let pub_content = info
-                .ssh_public_key
-                .as_deref()
-                .ok_or_else(|| format!("SSH 密钥 '{}' 的公钥不可用", info.ssh_key_name))?;
-            // 显式传入公钥，避免 libssh2 从 OpenSSH 私钥格式推导公钥的兼容性问题
-            session
-                .userauth_pubkey_memory(&info.username, Some(pub_content), key_content, None)
+            // russh 直接吃 OpenSSH 新格式私钥（ed25519 / ECDSA / RSA 均可）
+            let key = parse_private_key(key_content)?;
+            // 服务端经 server-sig-algs 通告的最优 RSA 哈希；非 RSA 密钥用不到
+            let hash_alg = match handle.best_supported_rsa_hash().await {
+                Ok(v) => v.flatten(),
+                Err(_) => None,
+            };
+            let res = handle
+                .authenticate_publickey(
+                    &info.username,
+                    PrivateKeyWithHashAlg::new(Arc::new(key), hash_alg),
+                )
+                .await
                 .map_err(|e| format!("密钥认证失败: {}", e))?;
+            if !res.success() {
+                return Err("密钥认证失败：该主机未授权此密钥".to_string());
+            }
         }
         _ => return Err(format!("不支持的认证类型: {}", info.auth_type)),
     }
-    if !session.authenticated() {
-        return Err("认证失败".to_string());
-    }
-    Ok(())
+    Ok(handle)
 }
 
 struct ConnectionInfo {
@@ -940,14 +943,27 @@ async fn load_connection_info(id: i64) -> Result<ConnectionInfo, ZapError> {
                 ssh_private_key: None,
                 ssh_public_key: None,
             };
-            if auth_type == "key" && !ssh_key_name.is_empty() {
-                match resolve_key_material(&linux_user, &ssh_key_name).await {
-                    Ok((private_key, public_key)) => {
-                        info.ssh_private_key = Some(private_key);
-                        info.ssh_public_key = Some(public_key);
-                    }
-                    Err(e) => return Err(e),
+            if auth_type == "key" {
+                // 1) 连接绑定的面板密钥（家目录 ~/.ssh/zap_<name>，经 zapexec 读取）
+                // 2) 未绑定或读取失败时，回退到家目录 ~/.ssh 下的默认私钥
+                let mut resolved = None;
+                if !ssh_key_name.is_empty() {
+                    resolved = resolve_key_material(&linux_user, &ssh_key_name).await.ok();
                 }
+                let (private_key, public_key) =
+                    match resolved.or(resolve_default_key(&linux_user).await) {
+                        Some(v) => v,
+                        None => {
+                            return Err(ZapError::New(
+                                -1,
+                                "未找到可用 SSH 私钥：请在「我的密钥」中创建并绑定到连接，\
+                                 或在账号家目录 ~/.ssh 下放置 id_ed25519 / id_ecdsa / id_rsa"
+                                    .to_string(),
+                            ));
+                        }
+                    };
+                info.ssh_private_key = Some(private_key);
+                info.ssh_public_key = Some(public_key);
             }
             Ok(info)
         }
@@ -1011,6 +1027,36 @@ async fn resolve_key_material(
     ))
 }
 
+/// 从账号家目录 `~/.ssh` 读取默认私钥（id_ed25519 → id_ecdsa → id_rsa）。
+///
+/// 面板以 zapadm 运行、无权读他人 0600 的私钥，故统一交给 zapexec（root）代读；
+/// 只扫描 `linux_user` 自己的家目录，没有就直接失败，绝不回退到其他账户的密钥。
+/// 私钥只在本次连接期间留在 zapd 内存中，不落库、不下发前端。
+async fn resolve_default_key(linux_user: &str) -> Option<(String, String)> {
+    if linux_user.is_empty() {
+        return None;
+    }
+    let resp = crate::zapexec::call(Request::SshUserKeyDefaultGet {
+        linux_user: linux_user.to_string(),
+    })
+    .await
+    .ok()?;
+    if resp.code != 0 {
+        return None;
+    }
+    let data = resp.data.as_ref()?;
+    let private_key = data.get("private_key")?.as_str()?.to_string();
+    if private_key.is_empty() {
+        return None;
+    }
+    let public_key = data
+        .get("public_key")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Some((private_key, public_key))
+}
+
 /// 推送公钥前解析公钥内容：本人家目录密钥（`~/.ssh/zap_<name>.pub`）。
 async fn resolve_pub_for_push(
     claims: &ValidatedClaims,
@@ -1058,29 +1104,17 @@ pub async fn test_connection(
 ) -> ZapJsonResult {
     connection_in_scope(&claims, params.id).await?;
     let conn_info = load_connection_info(params.id).await?;
-    let addr = format!("{}:{}", conn_info.host, conn_info.port);
 
-    let tcp = match TcpStream::connect(&addr) {
-        Ok(tcp) => tcp,
-        Err(e) => {
-            return Ok(Json(
-                json!({ "code": 0, "success": false, "message": format!("TCP 连接失败: {}", e) }),
-            ));
+    match ssh_connect(&conn_info).await {
+        Ok(handle) => {
+            // 只验证「能连上且能认证」，验证完立即断开
+            let _ = handle
+                .disconnect(Disconnect::ByApplication, "", "English")
+                .await;
+            Ok(Json(
+                json!({ "code": 0, "success": true, "message": "连接成功" }),
+            ))
         }
-    };
-
-    let mut session =
-        Session::new().map_err(|e| ZapError::Error(format!("创建 SSH 会话失败: {}", e)))?;
-
-    session.set_tcp_stream(tcp);
-    session
-        .handshake()
-        .map_err(|e| ZapError::Error(format!("SSH 握手失败: {}", e)))?;
-
-    match authenticate(&mut session, &conn_info) {
-        Ok(()) => Ok(Json(
-            json!({ "code": 0, "success": true, "message": "连接成功" }),
-        )),
         Err(e) => Ok(Json(json!({ "code": 0, "success": false, "message": e }))),
     }
 }
@@ -1100,6 +1134,12 @@ pub struct PushKeyRequest {
     pub username: String,
     pub ssh_key_name: String,
     pub password: Option<String>,
+}
+
+/// 把字符串包成 shell 单引号字面量（内部单引号按 POSIX 规则转义），
+/// 供把公钥安全地拼进远程命令。
+fn shell_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// 判断目标主机是否为本地回环（localhost / 127.0.0.1 / ::1）
@@ -1215,64 +1255,67 @@ async fn push_key_core(
         return Ok(Json(json!({ "code": 0, "message": resp.message })));
     }
 
-    let addr = format!("{}:{}", host, port);
-    let tcp =
-        TcpStream::connect(&addr).map_err(|e| ZapError::Error(format!("TCP 连接失败: {}", e)))?;
-    let mut session =
-        Session::new().map_err(|e| ZapError::Error(format!("创建 SSH 会话失败: {}", e)))?;
-    session.set_tcp_stream(tcp);
-    session
-        .handshake()
-        .map_err(|e| ZapError::Error(format!("SSH 握手失败: {}", e)))?;
+    // 远程主机：用一次性密码认证后执行 ssh-copy-id 等价命令追加公钥
     let password = password.ok_or_else(|| ZapError::New(-1, "远程主机密码不能为空".to_string()))?;
-    session
-        .userauth_password(username, password)
-        .map_err(|e| ZapError::Error(format!("远程主机密码认证失败: {}", e)))?;
-    if !session.authenticated() {
-        return Err(ZapError::New(-1, "远程主机密码认证失败".to_string()));
-    }
+    let info = ConnectionInfo {
+        host: host.to_string(),
+        port,
+        username: username.to_string(),
+        auth_type: "password".to_string(),
+        password: password.to_string(),
+        ssh_key_name: String::new(),
+        ssh_private_key: None,
+        ssh_public_key: None,
+    };
+    let handle = ssh_connect(&info).await.map_err(ZapError::Error)?;
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| ZapError::Error(format!("打开 SSH 通道失败: {}", e)))?;
 
-    // 通过 SFTP 写入 ~/.ssh/authorized_keys
-    let sftp = session
-        .sftp()
-        .map_err(|e| ZapError::Error(format!("SFTP 初始化失败: {}", e)))?;
-    let home = sftp
-        .realpath(std::path::Path::new("."))
-        .map_err(|e| ZapError::Error(format!("获取用户主目录失败: {}", e)))?;
-    let ssh_dir = home.join(".ssh");
-    if sftp.stat(&ssh_dir).is_err() {
-        sftp.mkdir(&ssh_dir, 0o700)
-            .map_err(|e| ZapError::Error(format!("创建远程 ~/.ssh 失败: {}", e)))?;
-    }
-    let auth_path = ssh_dir.join("authorized_keys");
+    // 幂等：目录/文件权限就位 → 已含该公钥则跳过 → 否则追加
+    let line = shell_single_quote(pub_content.trim());
+    let cmd = format!(
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && \
+         chmod 600 ~/.ssh/authorized_keys && \
+         grep -qF {line} ~/.ssh/authorized_keys || printf '%s\\n' {line} >> ~/.ssh/authorized_keys"
+    );
+    channel
+        .exec(true, cmd)
+        .await
+        .map_err(|e| ZapError::Error(format!("远程执行命令失败: {}", e)))?;
 
-    // 已存在且包含该公钥则跳过
-    if sftp.stat(&auth_path).is_ok()
-        && let Ok(mut f) = sftp.open(&auth_path)
-    {
-        let mut content = String::new();
-        if f.read_to_string(&mut content).is_ok()
-            && content.lines().any(|l| l.trim() == pub_content)
-        {
-            return Ok(Json(
-                json!({ "code": 0, "message": "公钥已存在于远程主机，无需重复推送" }),
+    let mut exit_code = None;
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::ExitStatus { exit_status } => {
+                exit_code = Some(exit_status);
+                break;
+            }
+            ChannelMsg::Eof | ChannelMsg::Close => break,
+            _ => {}
+        }
+    }
+    let _ = channel.close().await;
+    let _ = handle
+        .disconnect(Disconnect::ByApplication, "", "English")
+        .await;
+
+    match exit_code {
+        Some(0) => {}
+        Some(code) => {
+            return Err(ZapError::New(
+                -1,
+                format!("远程写入 authorized_keys 失败（退出码 {code}）"),
+            ));
+        }
+        None => {
+            return Err(ZapError::New(
+                -1,
+                "远程写入 authorized_keys 失败：未收到退出状态".to_string(),
             ));
         }
     }
-
-    // 追加公钥（文件不存在则创建，权限 0600）
-    let mut f = sftp
-        .open_mode(
-            &auth_path,
-            OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::APPEND,
-            0o600,
-            OpenType::File,
-        )
-        .map_err(|e| ZapError::Error(format!("打开远程 authorized_keys 失败: {}", e)))?;
-    f.write_all(pub_content.as_bytes())
-        .map_err(|e| ZapError::Error(format!("写入远程 authorized_keys 失败: {}", e)))?;
-    f.write_all(b"\n").ok();
-    drop(f);
 
     audit::log(
         Some(claims),
