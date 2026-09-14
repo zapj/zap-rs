@@ -6,7 +6,7 @@
         <template #label>
           <span class="files-tab-label">
             <el-icon><Monitor /></el-icon>
-            本地存储
+            {{ t('files.tabLocal') }}
           </span>
         </template>
         <LocalPane />
@@ -17,7 +17,7 @@
         <template #label>
           <span class="files-tab-label">
             <el-icon><Cloud /></el-icon>
-            云存储
+            {{ t('files.tabCloud') }}
           </span>
         </template>
         <CloudPane />
@@ -36,11 +36,14 @@
  * 两块是独立的组件与接口，互不影响：本地走高权限的 zapexec，云存储走 S3 协议的 HTTP API。
  */
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { Cloud, Monitor } from '@/icons'
 
 import CloudPane from './CloudPane.vue'
 import LocalPane from './LocalPane.vue'
+
+const { t } = useI18n()
 
 type TabName = 'local' | 'cloud'
 const STORAGE_KEY = 'files:active-tab'

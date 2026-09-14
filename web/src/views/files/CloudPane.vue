@@ -3,8 +3,14 @@
     <!-- 左侧：云存储列表（一个用户可配多套） -->
     <div class="cm-sidebar">
       <div class="cm-sidebar-header">
-        <span>云存储</span>
-        <el-button :icon="Plus" size="small" text title="添加云存储" @click="openStoreDialog()" />
+        <span>{{ t('filesCloud.storeListTitle') }}</span>
+        <el-button
+          :icon="Plus"
+          size="small"
+          text
+          :title="t('filesCloud.addStore')"
+          @click="openStoreDialog()"
+        />
       </div>
       <el-scrollbar class="cm-store-scroll">
         <div v-loading="storeLoading" class="cm-store-list">
@@ -26,9 +32,15 @@
               <el-icon class="cm-store-more" @click.stop><MoreFilled /></el-icon>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="test">测试连接</el-dropdown-item>
-                  <el-dropdown-item command="edit">编辑配置</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>删除配置</el-dropdown-item>
+                  <el-dropdown-item command="test">
+                    {{ t('filesCloud.testConn') }}
+                  </el-dropdown-item>
+                  <el-dropdown-item command="edit">
+                    {{ t('filesCloud.editConfig') }}
+                  </el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>
+                    {{ t('filesCloud.deleteConfig') }}
+                  </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -36,11 +48,11 @@
 
           <el-empty
             v-if="!storeLoading && stores.length === 0"
-            description="还没有配置云存储"
+            :description="t('filesCloud.noStore')"
             :image-size="64"
           >
             <el-button type="primary" size="small" :icon="Plus" @click="openStoreDialog()">
-              添加云存储
+              {{ t('filesCloud.addStore') }}
             </el-button>
           </el-empty>
         </div>
@@ -58,7 +70,7 @@
                 <a
                   href="javascript:void(0)"
                   :class="{ 'is-last': !currentPath }"
-                  title="存储桶根目录"
+                  :title="t('filesCloud.bucketRoot')"
                   @click="navigateTo('')"
                 >
                   <el-icon :size="14" class="cm-crumb-icon"><Cloud /></el-icon>
@@ -79,11 +91,11 @@
           <div class="cm-toolbar-right">
             <el-button size="small" @click="openUploadDialog">
               <el-icon><Upload /></el-icon>
-              上传
+              {{ t('filesCloud.upload') }}
             </el-button>
             <el-button size="small" @click="showMkdirDialog">
               <el-icon><FolderAdd /></el-icon>
-              新建目录
+              {{ t('filesCloud.newDir') }}
             </el-button>
             <el-button size="small" :loading="fileLoading" @click="loadFiles">
               <el-icon><Refresh /></el-icon>
@@ -96,7 +108,7 @@
             {{ storeLocation }}{{ currentPath ? '/' + currentPath : '' }}
           </span>
           <el-checkbox v-model="showHidden" size="small" @change="loadFiles">
-            显示隐藏文件
+            {{ t('filesCloud.showHidden') }}
           </el-checkbox>
         </div>
 
@@ -109,7 +121,7 @@
             style="width: 100%"
             @row-dblclick="onRowDblClick"
           >
-            <el-table-column label="名称" min-width="300">
+            <el-table-column :label="t('filesCloud.name')" min-width="300">
               <template #default="{ row }">
                 <div class="cm-file-name" @click="onNameClick(row)">
                   <el-icon
@@ -125,18 +137,18 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="大小" width="120" align="right">
+            <el-table-column :label="t('filesCloud.size')" width="120" align="right">
               <template #default="{ row }">
                 <span v-if="!row.is_dir">{{ formatSize(row.size) }}</span>
                 <span v-else class="cm-muted">-</span>
               </template>
             </el-table-column>
-            <el-table-column label="修改时间" width="180">
+            <el-table-column :label="t('filesCloud.modified')" width="180">
               <template #default="{ row }">
                 <span class="cm-muted">{{ formatTime(row.modified) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="180" align="right">
+            <el-table-column :label="t('filesCloud.actions')" width="180" align="right">
               <template #default="{ row }">
                 <el-button
                   v-if="!row.is_dir"
@@ -145,28 +157,30 @@
                   size="small"
                   @click="downloadEntry(row)"
                 >
-                  下载
+                  {{ t('filesCloud.download') }}
                 </el-button>
                 <el-button link type="primary" size="small" @click="showRenameDialog(row)">
-                  重命名
+                  {{ t('filesCloud.rename') }}
                 </el-button>
-                <el-button link type="danger" size="small" @click="doDelete(row)">删除</el-button>
+                <el-button link type="danger" size="small" @click="doDelete(row)">
+                  {{ t('filesCloud.remove') }}
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
 
           <el-empty
             v-if="!fileLoading && entries.length === 0"
-            :description="listError || '当前目录为空'"
+            :description="listFailed ? t('filesCloud.listError') : t('filesCloud.emptyDir')"
             :image-size="70"
           />
           <div v-if="truncated" class="cm-truncated">
-            条目过多，仅显示前 {{ entries.length }} 条（可用对象存储控制台查看完整列表）
+            {{ t('filesCloud.truncated', { n: entries.length }) }}
           </div>
         </div>
       </template>
 
-      <el-empty v-else description="请选择或添加一个云存储" :image-size="90" />
+      <el-empty v-else :description="t('filesCloud.pickStore')" :image-size="90" />
     </div>
 
     <!--
@@ -176,7 +190,7 @@
     -->
     <el-dialog
       v-model="uploadVisible"
-      title="上传到云存储"
+      :title="t('filesCloud.uploadTitle')"
       width="780px"
       :close-on-click-modal="false"
       :close-on-press-escape="!uploading"
@@ -185,12 +199,12 @@
       @closed="resetUploadDialog"
     >
       <div class="cm-upload-target">
-        <span class="cm-upload-target-label">目标目录</span>
+        <span class="cm-upload-target-label">{{ t('filesCloud.targetDir') }}</span>
         <span class="mono">{{ storeLocation }}{{ currentPath ? '/' + currentPath : '' }}</span>
       </div>
 
       <el-tabs v-model="uploadTab">
-        <el-tab-pane label="从本地上传" name="local" lazy>
+        <el-tab-pane :label="t('filesCloud.tabLocal')" name="local" lazy>
           <el-upload
             drag
             multiple
@@ -200,16 +214,20 @@
             class="cm-upload-drop"
           >
             <el-icon class="cm-upload-drop-icon"><Upload /></el-icon>
-            <div class="cm-upload-drop-text">把文件拖到这里，或 <em>点击选择文件</em></div>
-            <div class="cm-upload-drop-tip">支持多选；文件先传到本服务器，再写入云存储</div>
+            <div class="cm-upload-drop-text">
+              {{ t('filesCloud.dropTextPrefix') }}<em>{{ t('filesCloud.dropAction') }}</em>
+            </div>
+            <div class="cm-upload-drop-tip">{{ t('filesCloud.dropTip') }}</div>
           </el-upload>
         </el-tab-pane>
 
-        <el-tab-pane label="从服务器选择" name="server" lazy>
+        <el-tab-pane :label="t('filesCloud.tabServer')" name="server" lazy>
           <div class="cm-server-bar">
             <el-breadcrumb separator=">" class="cm-server-crumbs">
               <el-breadcrumb-item>
-                <a href="javascript:void(0)" @click="loadServerDir(serverHome)">家目录</a>
+                <a href="javascript:void(0)" @click="loadServerDir(serverHome)">
+                  {{ t('filesCloud.home') }}
+                </a>
               </el-breadcrumb-item>
               <el-breadcrumb-item v-for="seg in serverSegments" :key="seg.path">
                 <a href="javascript:void(0)" @click="loadServerDir(seg.path)">{{ seg.name }}</a>
@@ -231,7 +249,7 @@
             @selection-change="onServerSelectionChange"
           >
             <el-table-column type="selection" width="42" :selectable="selectableServerRow" />
-            <el-table-column label="名称" min-width="240">
+            <el-table-column :label="t('filesCloud.name')" min-width="240">
               <template #default="{ row }">
                 <div class="cm-file-name" @click="onServerNameClick(row)">
                   <el-icon
@@ -247,7 +265,7 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="大小" width="100" align="right">
+            <el-table-column :label="t('filesCloud.size')" width="100" align="right">
               <template #default="{ row }">
                 <span v-if="!row.is_dir">{{ formatSize(row.size) }}</span>
                 <span v-else class="cm-muted">-</span>
@@ -257,7 +275,7 @@
 
           <div class="cm-server-foot">
             <span class="cm-server-tip">
-              非管理员只能浏览自己的家目录；已选 {{ serverChecked.length }} 个文件
+              {{ t('filesCloud.serverTip', { n: serverChecked.length }) }}
             </span>
             <el-button
               size="small"
@@ -266,7 +284,7 @@
               :disabled="!serverChecked.length"
               @click="addServerFiles"
             >
-              添加到待上传
+              {{ t('filesCloud.addToPending') }}
             </el-button>
           </div>
         </el-tab-pane>
@@ -275,7 +293,7 @@
       <!-- 待上传清单：两种来源合并在一起，每个文件标注来源 -->
       <div class="cm-pending">
         <div class="cm-pending-head">
-          <span>待上传 {{ pendingList.length }} 个文件</span>
+          <span>{{ t('filesCloud.pendingTitle', { n: pendingList.length }) }}</span>
           <el-button
             link
             type="primary"
@@ -283,17 +301,21 @@
             :disabled="uploading || !pendingList.length"
             @click="clearPending"
           >
-            清空
+            {{ t('filesCloud.clearAll') }}
           </el-button>
         </div>
         <el-scrollbar max-height="132px">
           <div v-if="!pendingList.length" class="cm-pending-empty">
-            还没有选择文件：可切换到「从服务器选择」直接挑选服务器上的文件
+            {{ t('filesCloud.pendingEmpty') }}
           </div>
           <div v-for="item in pendingList" :key="item.key" class="cm-pending-item">
             <el-icon :size="14" class="cm-pending-icon"><Document /></el-icon>
             <span class="cm-pending-name" :title="item.name">{{ item.name }}</span>
-            <span class="cm-pending-src">{{ item.source === 'local' ? '本地' : '服务器' }}</span>
+            <span class="cm-pending-src">
+              {{
+                item.source === 'local' ? t('filesCloud.sourceLocal') : t('filesCloud.sourceServer')
+              }}
+            </span>
             <span class="cm-pending-size">{{ formatSize(item.size) }}</span>
             <el-button
               link
@@ -302,7 +324,7 @@
               :disabled="uploading"
               @click="removePending(item.key)"
             >
-              移除
+              {{ t('filesCloud.removeItem') }}
             </el-button>
           </div>
         </el-scrollbar>
@@ -314,56 +336,58 @@
       </div>
 
       <template #footer>
-        <el-button :disabled="uploading" @click="uploadVisible = false">取消</el-button>
+        <el-button :disabled="uploading" @click="uploadVisible = false">
+          {{ t('filesCloud.cancel') }}
+        </el-button>
         <el-button
           type="primary"
           :loading="uploading"
           :disabled="!pendingList.length"
           @click="doUpload"
         >
-          开始上传
+          {{ t('filesCloud.startUpload') }}
         </el-button>
       </template>
     </el-dialog>
 
     <!-- 新建目录 -->
-    <el-dialog v-model="mkdirVisible" title="新建目录" width="420px">
+    <el-dialog v-model="mkdirVisible" :title="t('filesCloud.newDir')" width="420px">
       <el-form @submit.prevent>
-        <el-form-item label="目录名称">
+        <el-form-item :label="t('filesCloud.dirName')">
           <el-input
             v-model="mkdirName"
-            placeholder="请输入目录名称"
+            :placeholder="t('filesCloud.dirNamePlaceholder')"
             @keydown.enter.prevent="onEnterConfirm($event, doMkdir)"
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="mkdirVisible = false">取消</el-button>
-        <el-button type="primary" @click="doMkdir">确定</el-button>
+        <el-button @click="mkdirVisible = false">{{ t('filesCloud.cancel') }}</el-button>
+        <el-button type="primary" @click="doMkdir">{{ t('filesCloud.confirm') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 重命名 -->
-    <el-dialog v-model="renameVisible" title="重命名" width="420px">
+    <el-dialog v-model="renameVisible" :title="t('filesCloud.rename')" width="420px">
       <el-form @submit.prevent>
-        <el-form-item label="新名称">
+        <el-form-item :label="t('filesCloud.newName')">
           <el-input
             v-model="renameName"
-            placeholder="请输入新名称"
+            :placeholder="t('filesCloud.newNamePlaceholder')"
             @keydown.enter.prevent="onEnterConfirm($event, doRename)"
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="renameVisible = false">取消</el-button>
-        <el-button type="primary" @click="doRename">确定</el-button>
+        <el-button @click="renameVisible = false">{{ t('filesCloud.cancel') }}</el-button>
+        <el-button type="primary" @click="doRename">{{ t('filesCloud.confirm') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 新增 / 编辑云存储 -->
     <el-dialog
       v-model="storeDialogVisible"
-      :title="editingId ? '编辑云存储' : '添加云存储'"
+      :title="editingId ? t('filesCloud.editStore') : t('filesCloud.addStore')"
       width="640px"
       :close-on-click-modal="false"
     >
@@ -374,11 +398,15 @@
         label-width="130px"
         @submit.prevent
       >
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="storeForm.name" placeholder="如：生产静态资源" maxlength="40" />
+        <el-form-item :label="t('filesCloud.name')" prop="name">
+          <el-input
+            v-model="storeForm.name"
+            :placeholder="t('filesCloud.namePlaceholder')"
+            maxlength="40"
+          />
         </el-form-item>
 
-        <el-form-item label="服务类型" prop="service">
+        <el-form-item :label="t('filesCloud.serviceType')" prop="service">
           <el-select v-model="storeForm.service" style="width: 100%" @change="onServiceChange">
             <el-option v-for="p in presets" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
@@ -392,39 +420,36 @@
         </el-form-item>
 
         <el-form-item label="Region" prop="region" :required="currentPreset?.region_required">
-          <el-input v-model="storeForm.region" placeholder="如：us-east-1（自建存储可留空）" />
+          <el-input v-model="storeForm.region" :placeholder="t('filesCloud.regionPlaceholder')" />
         </el-form-item>
 
         <el-form-item label="Bucket" prop="bucket">
-          <el-input v-model="storeForm.bucket" placeholder="存储桶名称" />
+          <el-input v-model="storeForm.bucket" :placeholder="t('filesCloud.bucketPlaceholder')" />
         </el-form-item>
 
-        <el-form-item label="根目录" prop="root">
-          <el-input
-            v-model="storeForm.root"
-            placeholder="留空 = 桶根；也可填 website/ 只管理某个前缀"
-          />
+        <el-form-item :label="t('filesCloud.rootLabel')" prop="root">
+          <el-input v-model="storeForm.root" :placeholder="t('filesCloud.rootPlaceholder')" />
         </el-form-item>
 
-        <el-form-item label="访问方式">
+        <el-form-item :label="t('filesCloud.accessMode')">
           <el-switch v-model="storeForm.virtual_host_style" />
           <span class="cm-form-tip">
             {{
-              storeForm.virtual_host_style
-                ? '虚拟主机样式（bucket.endpoint）'
-                : 'Path 样式（endpoint/bucket）'
+              storeForm.virtual_host_style ? t('filesCloud.vhostStyle') : t('filesCloud.pathStyle')
             }}
           </span>
         </el-form-item>
 
-        <el-divider content-position="left">访问密钥</el-divider>
+        <el-divider content-position="left">{{ t('filesCloud.credentials') }}</el-divider>
 
         <el-form-item label="AccessKey ID" prop="access_key_id">
           <el-input
             v-model="storeForm.access_key_id"
             :placeholder="
               editingId
-                ? `留空沿用已保存的密钥（${storeForm.access_key_hint || '已保存'}）`
+                ? t('filesCloud.keyKeepWithHint', {
+                    hint: storeForm.access_key_hint || t('filesCloud.saved'),
+                  })
                 : 'AccessKey ID'
             "
             autocomplete="off"
@@ -436,25 +461,25 @@
             v-model="storeForm.secret_access_key"
             type="password"
             show-password
-            :placeholder="editingId ? '留空沿用已保存的密钥' : 'AccessKey Secret'"
+            :placeholder="editingId ? t('filesCloud.keyKeep') : 'AccessKey Secret'"
             autocomplete="new-password"
           />
         </el-form-item>
 
-        <el-form-item label="安全令牌">
-          <el-input v-model="storeForm.security_token" placeholder="STS 临时凭据才需要，一般留空" />
+        <el-form-item :label="t('filesCloud.securityToken')">
+          <el-input
+            v-model="storeForm.security_token"
+            :placeholder="t('filesCloud.securityTokenPlaceholder')"
+          />
         </el-form-item>
 
-        <el-alert
-          type="info"
-          :closable="false"
-          show-icon
-          title="密钥在服务端用机器主密钥加密后保存，接口只返回脱敏提示，不会回显明文。"
-        />
+        <el-alert type="info" :closable="false" show-icon :title="t('filesCloud.secretNote')" />
       </el-form>
       <template #footer>
-        <el-button @click="storeDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="storeSaving" @click="doSaveStore">保存</el-button>
+        <el-button @click="storeDialogVisible = false">{{ t('filesCloud.cancel') }}</el-button>
+        <el-button type="primary" :loading="storeSaving" @click="doSaveStore">
+          {{ t('filesCloud.save') }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -473,6 +498,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, TableInstance, UploadFile } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 
 import { Cloud, Document, Folder, FolderAdd, MoreFilled, Plus, Refresh, Upload } from '@/icons'
 import {
@@ -495,6 +521,8 @@ import {
 } from '@/api/cloud'
 import type { FileEntry } from '@/api/file'
 
+const { t } = useI18n()
+
 // ── state ──────────────────────────────────────────────────
 
 const storeLoading = ref(false)
@@ -506,8 +534,8 @@ const fileLoading = ref(false)
 const entries = ref<CloudEntry[]>([])
 const currentPath = ref('')
 const truncated = ref(false)
-/** 上一次列目录失败的提示（空串 = 没失败），用于把「空目录」和「读失败」区分开 */
-const listError = ref('')
+/** 上一次列目录是否失败，用于把「空目录」和「读失败」区分开 */
+const listFailed = ref(false)
 const showHidden = ref(false)
 
 // ── 上传弹窗 ────────────────────────────────────────────────
@@ -604,22 +632,22 @@ const serverSegments = computed(() => {
 
 /** 表单校验：必填项跟随所选服务类型（与后端保存时的校验保持一致） */
 const storeRules = computed(() => ({
-  name: [{ required: true, message: '请填写名称', trigger: 'blur' }],
-  service: [{ required: true, message: '请选择服务类型', trigger: 'change' }],
-  bucket: [{ required: true, message: '请填写 Bucket', trigger: 'blur' }],
+  name: [{ required: true, message: t('filesCloud.ruleName'), trigger: 'blur' }],
+  service: [{ required: true, message: t('filesCloud.ruleService'), trigger: 'change' }],
+  bucket: [{ required: true, message: t('filesCloud.ruleBucket'), trigger: 'blur' }],
   endpoint: currentPreset.value?.endpoint_required
-    ? [{ required: true, message: '请填写 Endpoint', trigger: 'blur' }]
+    ? [{ required: true, message: t('filesCloud.ruleEndpoint'), trigger: 'blur' }]
     : [],
   region: currentPreset.value?.region_required
-    ? [{ required: true, message: '请填写 Region', trigger: 'blur' }]
+    ? [{ required: true, message: t('filesCloud.ruleRegion'), trigger: 'blur' }]
     : [],
   // 编辑时密钥留空表示沿用，不做必填
   access_key_id: editingId.value
     ? []
-    : [{ required: true, message: '请填写 AccessKey ID', trigger: 'blur' }],
+    : [{ required: true, message: t('filesCloud.ruleAccessKey'), trigger: 'blur' }],
   secret_access_key: editingId.value
     ? []
-    : [{ required: true, message: '请填写 AccessKey Secret', trigger: 'blur' }],
+    : [{ required: true, message: t('filesCloud.ruleSecret'), trigger: 'blur' }],
 }))
 
 // ── 存储配置 ────────────────────────────────────────────────
@@ -646,7 +674,7 @@ async function loadStores(preferId?: string) {
     }
     await loadFiles()
   } catch (e) {
-    notifyError(e, '读取云存储列表失败')
+    notifyError(e, t('filesCloud.errLoadStores'))
   } finally {
     storeLoading.value = false
   }
@@ -667,13 +695,13 @@ function onStoreCommand(command: string, store: CloudStore) {
 }
 
 async function testStore(store: CloudStore) {
-  const notice = ElMessage({ message: `正在测试「${store.name}」…`, duration: 0 })
+  const notice = ElMessage({ message: t('filesCloud.testing', { name: store.name }), duration: 0 })
   try {
     const res = await testCloudStore(store.id)
-    ElMessage.success(res.message || '连接成功')
+    ElMessage.success(res.message || t('filesCloud.testOk'))
   } catch (e) {
     // 失败原因来自后端（鉴权 / endpoint / 桶不存在 / 网络），必须显式提示
-    notifyError(e, `连接「${store.name}」失败`)
+    notifyError(e, t('filesCloud.testFailed', { name: store.name }))
   } finally {
     notice.close()
   }
@@ -728,11 +756,11 @@ async function doSaveStore() {
   storeSaving.value = true
   try {
     const res = await saveCloudStore(payload)
-    ElMessage.success(editingId.value ? '云存储已更新' : '云存储已创建')
+    ElMessage.success(editingId.value ? t('filesCloud.storeUpdated') : t('filesCloud.storeCreated'))
     storeDialogVisible.value = false
     await loadStores(res.data?.store?.id)
   } catch (e) {
-    notifyError(e, '保存云存储失败')
+    notifyError(e, t('filesCloud.errSaveStore'))
   } finally {
     storeSaving.value = false
   }
@@ -741,8 +769,8 @@ async function doSaveStore() {
 async function doDeleteStore(store: CloudStore) {
   try {
     await ElMessageBox.confirm(
-      `删除云存储「${store.name}」的配置？桶内的数据不会被删除。`,
-      '删除确认',
+      t('filesCloud.deleteStoreConfirm', { name: store.name }),
+      t('filesCloud.deleteStoreTitle'),
       { type: 'warning' },
     )
   } catch {
@@ -750,7 +778,7 @@ async function doDeleteStore(store: CloudStore) {
   }
   try {
     await deleteCloudStore(store.id)
-    ElMessage.success('配置已删除')
+    ElMessage.success(t('filesCloud.storeDeleted'))
     if (activeStoreId.value === store.id) {
       activeStoreId.value = ''
       entries.value = []
@@ -758,7 +786,7 @@ async function doDeleteStore(store: CloudStore) {
     }
     await loadStores()
   } catch (e) {
-    notifyError(e, '删除云存储配置失败')
+    notifyError(e, t('filesCloud.errDeleteStore'))
   }
 }
 
@@ -768,7 +796,7 @@ async function loadFiles() {
   const store = activeStore.value
   if (!store) return
   fileLoading.value = true
-  listError.value = ''
+  listFailed.value = false
   try {
     const res = await listCloudFiles(store.id, currentPath.value, showHidden.value)
     entries.value = res.data?.entries || []
@@ -778,8 +806,8 @@ async function loadFiles() {
     entries.value = []
     truncated.value = false
     // 只留一个「当前目录为空」会把「没权限 / 桶不存在」说成「桶是空的」，这里区分开
-    listError.value = '读取失败，请检查该云存储的配置与密钥'
-    notifyError(e, '读取目录失败')
+    listFailed.value = true
+    notifyError(e, t('filesCloud.errListDir'))
   } finally {
     fileLoading.value = false
   }
@@ -809,7 +837,7 @@ async function downloadEntry(row: CloudEntry) {
     a.click()
     window.URL.revokeObjectURL(url)
   } catch (e) {
-    notifyError(e, `下载「${row.name}」失败`)
+    notifyError(e, t('filesCloud.errDownload', { name: row.name }))
   }
 }
 
@@ -817,7 +845,7 @@ async function downloadEntry(row: CloudEntry) {
 
 function openUploadDialog() {
   if (!activeStore.value) {
-    ElMessage.warning('请先选择云存储')
+    ElMessage.warning(t('filesCloud.needStore'))
     return
   }
   uploadTab.value = 'local'
@@ -851,7 +879,7 @@ function removePending(key: string) {
 /** 入清单：按 key 去重，重复选择只提示一次 */
 function addPending(item: PendingUpload): boolean {
   if (pendingList.value.some((i) => i.key === item.key)) {
-    ElMessage.info(`「${item.name}」已在待上传列表中`)
+    ElMessage.info(t('filesCloud.alreadyPending', { name: item.name }))
     return false
   }
   pendingList.value.push(item)
@@ -887,7 +915,7 @@ async function loadServerDir(path: string) {
     serverTableRef.value?.clearSelection()
   } catch (e) {
     serverEntries.value = []
-    notifyError(e, '读取服务器目录失败')
+    notifyError(e, t('filesCloud.errServerDir'))
   } finally {
     serverLoading.value = false
   }
@@ -924,7 +952,7 @@ function addServerFiles() {
   }
   serverChecked.value = []
   serverTableRef.value?.clearSelection()
-  if (added) ElMessage.success(`已添加 ${added} 个文件`)
+  if (added) ElMessage.success(t('filesCloud.serverAdded', { n: added }))
 }
 
 // ── 开始上传 ────────────────────────────────────────────────
@@ -939,7 +967,7 @@ async function doUpload() {
 
   uploading.value = true
   uploadPercent.value = 0
-  uploadSummary.value = `正在上传 0/${list.length}…`
+  uploadSummary.value = t('filesCloud.uploadingProgress', { done: 0, total: list.length })
 
   const queue = [...list]
   const succeeded: string[] = []
@@ -958,17 +986,20 @@ async function doUpload() {
           // 后端逐个文件处理，失败项随响应返回（单个失败不影响其余文件）
           if (res.data?.failed?.length) throw new Error(res.data.failed.join('；'))
         } else {
-          throw new Error('文件来源缺失')
+          throw new Error(t('filesCloud.errNoSource'))
         }
         succeeded.push(item.key)
       } catch (e) {
         failed.push(item.name)
         // 失败原因（越权 / 读不到 / 写入失败）都由这里显式提示
-        notifyError(e, `上传「${item.name}」失败`)
+        notifyError(e, t('filesCloud.errUpload', { name: item.name }))
       } finally {
         finished++
         uploadPercent.value = Math.round((finished / list.length) * 100)
-        uploadSummary.value = `正在上传 ${finished}/${list.length}…`
+        uploadSummary.value = t('filesCloud.uploadingProgress', {
+          done: finished,
+          total: list.length,
+        })
       }
     }
   }
@@ -983,11 +1014,14 @@ async function doUpload() {
   pendingList.value = pendingList.value.filter((item) => !doneSet.has(item.key))
 
   uploadSummary.value = failed.length
-    ? `已上传 ${succeeded.length} 个，失败 ${failed.length} 个（可重试）`
-    : `已上传 ${succeeded.length} 个文件`
+    ? t('filesCloud.uploadDoneFailed', {
+        ok: succeeded.length,
+        failed: failed.length,
+      })
+    : t('filesCloud.uploadDone', { n: succeeded.length })
 
   if (!failed.length) {
-    ElMessage.success(`已上传 ${succeeded.length} 个文件`)
+    ElMessage.success(t('filesCloud.uploadDone', { n: succeeded.length }))
     uploadVisible.value = false
   }
   loadFiles()
@@ -1000,17 +1034,17 @@ function showMkdirDialog() {
 
 async function doMkdir() {
   const name = mkdirName.value.trim()
-  if (!name) return ElMessage.warning('请输入目录名称')
-  if (name.includes('/')) return ElMessage.warning('名称不能包含斜杠')
+  if (!name) return ElMessage.warning(t('filesCloud.needDirName'))
+  if (name.includes('/')) return ElMessage.warning(t('filesCloud.noSlash'))
 
   const path = joinPath(currentPath.value, name)
   try {
     await cloudMkdir(activeStoreId.value, path)
-    ElMessage.success('目录已创建')
+    ElMessage.success(t('filesCloud.dirCreated'))
     mkdirVisible.value = false
     loadFiles()
   } catch (e) {
-    notifyError(e, `创建目录「${name}」失败`)
+    notifyError(e, t('filesCloud.errMkdir', { name }))
   }
 }
 
@@ -1024,8 +1058,8 @@ async function doRename() {
   const row = renameTarget
   if (!row) return
   const name = renameName.value.trim()
-  if (!name) return ElMessage.warning('请输入新名称')
-  if (name.includes('/')) return ElMessage.warning('名称不能包含斜杠')
+  if (!name) return ElMessage.warning(t('filesCloud.needNewName'))
+  if (name.includes('/')) return ElMessage.warning(t('filesCloud.noSlash'))
   if (name === row.name) {
     renameVisible.value = false
     return
@@ -1036,29 +1070,33 @@ async function doRename() {
   const target = joinPath(parent, name)
   try {
     await cloudRename(activeStoreId.value, row.path, row.is_dir ? `${target}/` : target)
-    ElMessage.success('已重命名')
+    ElMessage.success(t('filesCloud.renamed'))
     renameVisible.value = false
     loadFiles()
   } catch (e) {
-    notifyError(e, `重命名「${row.name}」失败`)
+    notifyError(e, t('filesCloud.errRename', { name: row.name }))
   }
 }
 
 async function doDelete(row: CloudEntry) {
   const tip = row.is_dir
-    ? `删除目录「${row.name}」及其中的全部对象？此操作不可恢复。`
-    : `删除文件「${row.name}」？此操作不可恢复。`
+    ? t('filesCloud.deleteDirConfirm', { name: row.name })
+    : t('filesCloud.deleteFileConfirm', { name: row.name })
   try {
-    await ElMessageBox.confirm(tip, row.is_dir ? '删除目录' : '删除文件', { type: 'warning' })
+    await ElMessageBox.confirm(
+      tip,
+      row.is_dir ? t('filesCloud.deleteDirTitle') : t('filesCloud.deleteFileTitle'),
+      { type: 'warning' },
+    )
   } catch {
     return
   }
   try {
     await cloudDelete(activeStoreId.value, row.path)
-    ElMessage.success('已删除')
+    ElMessage.success(t('filesCloud.deleted'))
     loadFiles()
   } catch (e) {
-    notifyError(e, `删除「${row.name}」失败`)
+    notifyError(e, t('filesCloud.errDelete', { name: row.name }))
   }
 }
 

@@ -3,16 +3,16 @@
     <div class="filter-container">
       <el-input
         v-model="listQuery.name"
-        placeholder="分类名称"
+        :placeholder="t('content.categories.filterName')"
         style="width: 200px"
         class="filter-item"
         @keyup.enter="handleFilter"
       />
       <el-button class="filter-item" type="primary" :icon="Search" @click="handleFilter">
-        搜索
+        {{ t('common.search') }}
       </el-button>
       <el-button class="filter-item" type="primary" :icon="Plus" @click="handleCreate">
-        新增
+        {{ t('common.create') }}
       </el-button>
     </div>
 
@@ -31,39 +31,43 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="分类名称" min-width="150px">
+      <el-table-column :label="t('content.categories.colName')" min-width="150px">
         <template #default="scope">
           <span>{{ scope.row.name }}</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="排序" width="100" align="center">
+      <el-table-column :label="t('content.categories.colSort')" width="100" align="center">
         <template #default="scope">
           <span>{{ scope.row.sort }}</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="文章数量" width="100" align="center">
+      <el-table-column :label="t('content.categories.colCount')" width="100" align="center">
         <template #default="scope">
           <el-tag type="info">{{ scope.row.articleCount }}</el-tag>
         </template>
       </el-table-column>
 
-      <el-table-column label="创建时间" width="160" align="center">
+      <el-table-column :label="t('common.createdAt')" width="160" align="center">
         <template #default="scope">
           <span>{{ scope.row.createTime }}</span>
         </template>
       </el-table-column>
 
       <el-table-column
-        label="操作"
+        :label="t('common.operation')"
         align="center"
         width="180"
         class-name="small-padding fixed-width"
       >
         <template #default="scope">
-          <el-button type="primary" size="small" @click="handleUpdate(scope.row)"> 编辑 </el-button>
-          <el-button type="danger" size="small" @click="handleDelete(scope.row)"> 删除 </el-button>
+          <el-button type="primary" size="small" @click="handleUpdate(scope.row)">
+            {{ t('common.edit') }}
+          </el-button>
+          <el-button type="danger" size="small" @click="handleDelete(scope.row)">
+            {{ t('common.delete') }}
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -81,7 +85,11 @@
 
     <!-- 新增/编辑对话框 -->
     <el-dialog
-      :title="dialogStatus === 'create' ? '新增分类' : '编辑分类'"
+      :title="
+        dialogStatus === 'create'
+          ? t('content.categories.dialogCreate')
+          : t('content.categories.dialogEdit')
+      "
       v-model="dialogFormVisible"
       width="500px"
     >
@@ -94,21 +102,21 @@
         style="margin-left: 50px; margin-right: 50px"
         @submit.prevent
       >
-        <el-form-item label="分类名称" prop="name">
+        <el-form-item :label="t('content.categories.formName')" prop="name">
           <el-input v-model="temp.name" />
         </el-form-item>
-        <el-form-item label="排序" prop="sort">
+        <el-form-item :label="t('content.categories.formSort')" prop="sort">
           <el-input-number v-model="temp.sort" :min="0" />
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
-          <el-button @click="dialogFormVisible = false">取消</el-button>
+          <el-button @click="dialogFormVisible = false">{{ t('common.cancel') }}</el-button>
           <el-button
             type="primary"
             @click="dialogStatus === 'create' ? createData() : updateData()"
           >
-            确认
+            {{ t('common.confirm') }}
           </el-button>
         </div>
       </template>
@@ -117,11 +125,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted,nextTick } from 'vue'
+import { ref, reactive, onMounted, nextTick, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Search, Plus } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import type { Category } from '@/types/categories'
+
+const { t } = useI18n()
+
 // 列表数据
 const list = ref<Category[]>([])
 const total = ref(0)
@@ -142,10 +154,10 @@ const temp = reactive({
   sort: 0,
 })
 
-const rules = reactive({
-  name: [{ required: true, message: '请输入分类名称', trigger: 'blur' }],
-  sort: [{ required: true, message: '请输入排序值', trigger: 'blur' }],
-})
+const rules = computed(() => ({
+  name: [{ required: true, message: t('content.categories.nameRule'), trigger: 'blur' }],
+  sort: [{ required: true, message: t('content.categories.sortRule'), trigger: 'blur' }],
+}))
 
 // 获取列表数据
 const getList = () => {
@@ -156,7 +168,7 @@ const getList = () => {
     list.value = [
       {
         id: 1,
-        name: '技术',
+        name: 'Tech',
         sort: 1,
         articleCount: 10,
         createTime: '2024-01-20 12:00:00',
@@ -195,7 +207,7 @@ const createData = () => {
   dataFormRef.value?.validate((valid) => {
     if (valid) {
       // TODO: 调用API创建数据
-      ElMessage.success('创建成功')
+      ElMessage.success(t('common.createSuccess'))
       dialogFormVisible.value = false
       getList()
     }
@@ -219,7 +231,7 @@ const updateData = () => {
   dataFormRef.value?.validate((valid) => {
     if (valid) {
       // TODO: 调用API更新数据
-      ElMessage.success('更新成功')
+      ElMessage.success(t('common.updateSuccess'))
       dialogFormVisible.value = false
       getList()
     }
@@ -228,18 +240,18 @@ const updateData = () => {
 
 // 删除
 const handleDelete = (row: any) => {
-  ElMessageBox.confirm('确认要删除该分类吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
+  ElMessageBox.confirm(t('content.categories.deleteConfirm'), t('common.tip'), {
+    confirmButtonText: t('common.confirm'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning',
   })
     .then(async () => {
       // TODO: 调用API删除数据
-      ElMessage.success('删除成功')
+      ElMessage.success(t('common.deleteSuccess'))
       getList()
     })
     .catch(() => {
-      ElMessage.info('已取消删除')
+      ElMessage.info(t('content.cancelDelete'))
     })
 }
 

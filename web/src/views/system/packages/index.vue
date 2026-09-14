@@ -4,15 +4,13 @@
       <template #header>
         <div class="card-header">
           <div>
-            <div class="page-title">套餐</div>
-            <div class="page-sub">
-              定义资源套餐（磁盘配额 / 站点数 / 单站点域名数 / 流量 / 数据库与 FTP 账号数 / FPM 规格 / SSH / 反向代理），创建客户时选择并自动继承；自定义目录已全量开放，不再受套餐限制
-            </div>
+            <div class="page-title">{{ t('packages.title') }}</div>
+            <div class="page-sub">{{ t('packages.subtitle') }}</div>
           </div>
           <div class="head-right">
             <el-button :icon="Refresh" circle :disabled="loading" @click="load" />
             <el-button type="primary" @click="openAdd">
-              <el-icon><Plus /></el-icon>新增套餐
+              <el-icon><Plus /></el-icon>{{ t('packages.add') }}
             </el-button>
           </div>
         </div>
@@ -20,73 +18,83 @@
 
       <el-table :data="filtered" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column label="套餐名" min-width="150">
+        <el-table-column :label="t('packages.name')" min-width="150">
           <template #default="{ row }">
             <span class="pkg-name">{{ row.name }}</span>
-            <el-tag v-if="row.owner_id === 0" size="small" type="info" effect="plain">全局</el-tag>
-            <el-tag v-else size="small" effect="plain">私有</el-tag>
+            <el-tag v-if="row.owner_id === 0" size="small" type="info" effect="plain">
+              {{ t('packages.scopeGlobal') }}
+            </el-tag>
+            <el-tag v-else size="small" effect="plain">{{ t('packages.scopePrivate') }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="磁盘配额" width="120">
+        <el-table-column :label="t('packages.diskQuota')" width="120">
           <template #default="{ row }">
-            <span>{{ row.disk_quota_mb > 0 ? `${row.disk_quota_mb} MB` : '不限' }}</span>
+            <span>{{
+              row.disk_quota_mb > 0 ? `${row.disk_quota_mb} MB` : t('packages.unlimited')
+            }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="站点数" width="100">
+        <el-table-column :label="t('packages.maxSites')" width="100">
           <template #default="{ row }">
-            <span>{{ row.max_sites > 0 ? row.max_sites : '不限' }}</span>
+            <span>{{ row.max_sites > 0 ? row.max_sites : t('packages.unlimited') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="单站点域名数" width="120">
+        <el-table-column :label="t('packages.maxDomains')" width="120">
           <template #default="{ row }">
-            <span>{{ row.max_domains > 0 ? row.max_domains : '不限' }}</span>
+            <span>{{ row.max_domains > 0 ? row.max_domains : t('packages.unlimited') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="月流量" width="120">
+        <el-table-column :label="t('packages.maxBandwidth')" width="120">
           <template #default="{ row }">
             <span class="muted">
-              {{ row.max_bandwidth_mb > 0 ? `${row.max_bandwidth_mb} MB` : '不限' }}
+              {{
+                row.max_bandwidth_mb > 0 ? `${row.max_bandwidth_mb} MB` : t('packages.unlimited')
+              }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="MySQL 库" width="100" align="center">
+        <el-table-column :label="t('packages.mysqlDbs')" width="100" align="center">
           <template #default="{ row }">
-            <span>{{ row.max_mysql_dbs > 0 ? row.max_mysql_dbs : '不限' }}</span>
+            <span>{{ row.max_mysql_dbs > 0 ? row.max_mysql_dbs : t('packages.unlimited') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="PG 库" width="90" align="center">
+        <el-table-column :label="t('packages.pgsqlDbs')" width="90" align="center">
           <template #default="{ row }">
-            <span class="muted">{{ row.max_pgsql_dbs > 0 ? row.max_pgsql_dbs : '不限' }}</span>
+            <span class="muted">
+              {{ row.max_pgsql_dbs > 0 ? row.max_pgsql_dbs : t('packages.unlimited') }}
+            </span>
           </template>
         </el-table-column>
-        <el-table-column label="FTP 用户" width="100" align="center">
+        <el-table-column :label="t('packages.ftpUsers')" width="100" align="center">
           <template #default="{ row }">
-            <span class="muted">{{ row.max_ftp_users > 0 ? row.max_ftp_users : '不限' }}</span>
+            <span class="muted">
+              {{ row.max_ftp_users > 0 ? row.max_ftp_users : t('packages.unlimited') }}
+            </span>
           </template>
         </el-table-column>
-        <el-table-column label="FPM 规格" min-width="140" show-overflow-tooltip>
+        <el-table-column :label="t('packages.fpmSpec')" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="!row.fpm_spec_ref" size="small" type="info" effect="plain">
-              面板默认
+              {{ t('users.fpmDefault') }}
             </el-tag>
             <span v-else class="spec-name">{{ row.fpm_spec_ref }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="SSH" width="90" align="center">
+        <el-table-column :label="t('packages.ssh')" width="90" align="center">
           <template #default="{ row }">
             <el-tag :type="row.allow_ssh ? 'success' : 'info'" size="small" effect="plain">
-              {{ row.allow_ssh ? '允许' : '禁止' }}
+              {{ row.allow_ssh ? t('packages.allow') : t('packages.deny') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="反向代理" width="110" align="center">
+        <el-table-column :label="t('packages.proxy')" width="110" align="center">
           <template #default="{ row }">
             <el-tag :type="row.allow_proxy ? 'success' : 'info'" size="small" effect="plain">
-              {{ row.allow_proxy ? '允许' : '禁止' }}
+              {{ row.allow_proxy ? t('packages.allow') : t('packages.deny') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="客户数" width="90" align="center">
+        <el-table-column :label="t('packages.usersCount')" width="90" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.users_count > 0" size="small" effect="dark" type="primary">
               {{ row.users_count }}
@@ -94,29 +102,35 @@
             <span v-else class="muted">0</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column :label="t('common.status')" width="90">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-              {{ row.status === 1 ? '启用' : '停用' }}
+              {{ row.status === 1 ? t('common.enable') : t('packages.stop') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="备注" min-width="160" show-overflow-tooltip>
+        <el-table-column :label="t('packages.remark')" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="muted">{{ row.remark || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column :label="t('common.operation')" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link :type="row.status === 1 ? 'warning' : 'success'" @click="toggleStatus(row)">
-              {{ row.status === 1 ? '停用' : '启用' }}
+            <el-button link type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+            <el-button
+              link
+              :type="row.status === 1 ? 'warning' : 'success'"
+              @click="toggleStatus(row)"
+            >
+              {{ row.status === 1 ? t('packages.stop') : t('common.enable') }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+            <el-button link type="danger" @click="handleDelete(row)">
+              {{ t('common.delete') }}
+            </el-button>
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暂无套餐，点击右上角「新增套餐」创建" :image-size="80" />
+          <el-empty :description="t('packages.empty')" :image-size="80" />
         </template>
       </el-table>
     </el-card>
@@ -124,22 +138,35 @@
     <!-- 新增 / 编辑 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="editingId ? '编辑套餐' : '新增套餐'"
+      :title="editingId ? t('packages.edit') : t('packages.add')"
       width="560px"
       @closed="resetForm"
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" @submit.prevent>
-        <el-form-item label="套餐名" prop="name">
-          <el-input v-model="form.name" placeholder="如：基础型 / 企业型" maxlength="64" />
+        <el-form-item :label="t('packages.name')" prop="name">
+          <el-input
+            v-model="form.name"
+            :placeholder="t('packages.namePlaceholder')"
+            maxlength="64"
+          />
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可选说明" />
+        <el-form-item :label="t('packages.remark')">
+          <el-input
+            v-model="form.remark"
+            type="textarea"
+            :rows="2"
+            :placeholder="t('packages.remarkPlaceholder')"
+          />
         </el-form-item>
 
-        <el-divider content-position="left">资源限制</el-divider>
+        <el-divider content-position="left">{{ t('packages.resourceLimits') }}</el-divider>
 
-        <el-form-item label="磁盘配额">
-          <el-switch v-model="unlimitedDisk" active-text="不限" inactive-text="限额" />
+        <el-form-item :label="t('packages.diskQuota')">
+          <el-switch
+            v-model="unlimitedDisk"
+            :active-text="t('packages.switchUnlimited')"
+            :inactive-text="t('packages.switchLimited')"
+          />
           <el-input-number
             v-if="!unlimitedDisk"
             v-model="form.disk_quota_mb"
@@ -148,10 +175,14 @@
             :step="128"
             style="margin-left: 12px; width: 160px"
           />
-          <span v-if="!unlimitedDisk" class="form-hint">MB（1024 MB = 1 GB）</span>
+          <span v-if="!unlimitedDisk" class="form-hint">{{ t('packages.diskUnit') }}</span>
         </el-form-item>
-        <el-form-item label="最大站点数">
-          <el-switch v-model="unlimitedSites" active-text="不限" inactive-text="限额" />
+        <el-form-item :label="t('packages.maxSites')">
+          <el-switch
+            v-model="unlimitedSites"
+            :active-text="t('packages.switchUnlimited')"
+            :inactive-text="t('packages.switchLimited')"
+          />
           <el-input-number
             v-if="!unlimitedSites"
             v-model="form.max_sites"
@@ -159,10 +190,14 @@
             :max="100000"
             style="margin-left: 12px; width: 160px"
           />
-          <span v-if="!unlimitedSites" class="form-hint">个（超限时拒绝创建站点）</span>
+          <span v-if="!unlimitedSites" class="form-hint">{{ t('packages.sitesUnit') }}</span>
         </el-form-item>
-        <el-form-item label="单站点域名数">
-          <el-switch v-model="unlimitedDomains" active-text="不限" inactive-text="限额" />
+        <el-form-item :label="t('packages.maxDomains')">
+          <el-switch
+            v-model="unlimitedDomains"
+            :active-text="t('packages.switchUnlimited')"
+            :inactive-text="t('packages.switchLimited')"
+          />
           <el-input-number
             v-if="!unlimitedDomains"
             v-model="form.max_domains"
@@ -170,10 +205,14 @@
             :max="1000"
             style="margin-left: 12px; width: 160px"
           />
-          <span v-if="!unlimitedDomains" class="form-hint">个/站点（超限时拒绝保存）</span>
+          <span v-if="!unlimitedDomains" class="form-hint">{{ t('packages.domainsUnit') }}</span>
         </el-form-item>
-        <el-form-item label="月流量上限">
-          <el-switch v-model="unlimitedBw" active-text="不限" inactive-text="限额" />
+        <el-form-item :label="t('packages.maxBandwidth')">
+          <el-switch
+            v-model="unlimitedBw"
+            :active-text="t('packages.switchUnlimited')"
+            :inactive-text="t('packages.switchLimited')"
+          />
           <el-input-number
             v-if="!unlimitedBw"
             v-model="form.max_bandwidth_mb"
@@ -182,10 +221,14 @@
             :step="1024"
             style="margin-left: 12px; width: 160px"
           />
-          <span v-if="!unlimitedBw" class="form-hint">MB（面板暂不统计流量，仅记录）</span>
+          <span v-if="!unlimitedBw" class="form-hint">{{ t('packages.bandwidthUnit') }}</span>
         </el-form-item>
-        <el-form-item label="MySQL 库数">
-          <el-switch v-model="unlimitedMysql" active-text="不限" inactive-text="限额" />
+        <el-form-item :label="t('packages.mysqlDbs')">
+          <el-switch
+            v-model="unlimitedMysql"
+            :active-text="t('packages.switchUnlimited')"
+            :inactive-text="t('packages.switchLimited')"
+          />
           <el-input-number
             v-if="!unlimitedMysql"
             v-model="form.max_mysql_dbs"
@@ -193,10 +236,14 @@
             :max="100000"
             style="margin-left: 12px; width: 160px"
           />
-          <span v-if="!unlimitedMysql" class="form-hint">个（超限时拒绝创建数据库）</span>
+          <span v-if="!unlimitedMysql" class="form-hint">{{ t('packages.mysqlUnit') }}</span>
         </el-form-item>
-        <el-form-item label="PostgreSQL 库数">
-          <el-switch v-model="unlimitedPgsql" active-text="不限" inactive-text="限额" />
+        <el-form-item :label="t('packages.pgsqlDbs')">
+          <el-switch
+            v-model="unlimitedPgsql"
+            :active-text="t('packages.switchUnlimited')"
+            :inactive-text="t('packages.switchLimited')"
+          />
           <el-input-number
             v-if="!unlimitedPgsql"
             v-model="form.max_pgsql_dbs"
@@ -204,10 +251,14 @@
             :max="100000"
             style="margin-left: 12px; width: 160px"
           />
-          <span v-if="!unlimitedPgsql" class="form-hint">个（面向 PostgreSQL 数据库数量）</span>
+          <span v-if="!unlimitedPgsql" class="form-hint">{{ t('packages.pgsqlUnit') }}</span>
         </el-form-item>
-        <el-form-item label="FTP 用户数">
-          <el-switch v-model="unlimitedFtp" active-text="不限" inactive-text="限额" />
+        <el-form-item :label="t('packages.ftpUsers')">
+          <el-switch
+            v-model="unlimitedFtp"
+            :active-text="t('packages.switchUnlimited')"
+            :inactive-text="t('packages.switchLimited')"
+          />
           <el-input-number
             v-if="!unlimitedFtp"
             v-model="form.max_ftp_users"
@@ -215,46 +266,43 @@
             :max="100000"
             style="margin-left: 12px; width: 160px"
           />
-          <span v-if="!unlimitedFtp" class="form-hint">个（面向 FTP 账号数量）</span>
+          <span v-if="!unlimitedFtp" class="form-hint">{{ t('packages.ftpUnit') }}</span>
         </el-form-item>
 
-        <el-divider content-position="left">能力</el-divider>
+        <el-divider content-position="left">{{ t('packages.capabilities') }}</el-divider>
 
-        <el-form-item label="FPM 规格">
+        <el-form-item :label="t('packages.fpmSpec')">
           <el-select
             v-model="form.fpm_spec_ref"
             :loading="specsLoading"
-            placeholder="面板默认"
+            :placeholder="t('users.fpmDefault')"
             clearable
             style="width: 100%"
           >
-            <el-option
-              v-for="s in specs"
-              :key="s.name"
-              :label="s.name"
-              :value="s.name"
-            />
+            <el-option v-for="s in specs" :key="s.name" :label="s.name" :value="s.name" />
           </el-select>
-          <div class="form-hint">留空 = 使用面板默认规格</div>
+          <div class="form-hint">{{ t('packages.fpmSpecHint') }}</div>
         </el-form-item>
-        <el-form-item label="SSH 终端">
+        <el-form-item :label="t('packages.ssh')">
           <el-switch v-model="form.allow_ssh" />
-          <span class="form-hint">关闭后该套餐客户无法使用 SSH 终端</span>
+          <span class="form-hint">{{ t('packages.sshHint') }}</span>
         </el-form-item>
-        <el-form-item label="反向代理">
+        <el-form-item :label="t('packages.proxy')">
           <el-switch v-model="form.allow_proxy" />
-          <span class="form-hint">开启后该套餐客户可创建 / 编辑反向代理站点（upstream / location）</span>
+          <span class="form-hint">{{ t('packages.proxyHint') }}</span>
         </el-form-item>
-        <el-form-item label="状态">
+        <el-form-item :label="t('common.status')">
           <el-radio-group v-model="form.status">
-            <el-radio :value="1">启用</el-radio>
-            <el-radio :value="0">停用</el-radio>
+            <el-radio :value="1">{{ t('common.enable') }}</el-radio>
+            <el-radio :value="0">{{ t('packages.stop') }}</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitForm">确定</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="submitForm">
+          {{ t('common.confirm') }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -262,6 +310,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Plus, Refresh } from '@/icons'
@@ -273,6 +322,8 @@ import {
   type PackageItem,
 } from '@/api/package'
 import { getFpmSpecs, type FpmSpecItem } from '@/api/serverEnv'
+
+const { t } = useI18n()
 
 const list = ref<PackageItem[]>([])
 const loading = ref(false)
@@ -307,9 +358,10 @@ const unlimitedMysql = ref(true)
 const unlimitedPgsql = ref(true)
 const unlimitedFtp = ref(true)
 
-const rules: FormRules = {
-  name: [{ required: true, message: '请输入套餐名', trigger: 'blur' }],
-}
+// computed：切换语言时校验提示跟着变
+const rules = computed<FormRules>(() => ({
+  name: [{ required: true, message: t('packages.nameRequired'), trigger: 'blur' }],
+}))
 
 const specs = ref<FpmSpecItem[]>([])
 const specsLoading = ref(false)
@@ -318,8 +370,7 @@ const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   if (!kw) return list.value
   return list.value.filter(
-    (i) =>
-      i.name.toLowerCase().includes(kw) || (i.remark || '').toLowerCase().includes(kw),
+    (i) => i.name.toLowerCase().includes(kw) || (i.remark || '').toLowerCase().includes(kw),
   )
 })
 
@@ -429,10 +480,10 @@ async function submitForm() {
   try {
     if (editingId.value) {
       await updatePackage({ id: editingId.value, ...payload })
-      ElMessage.success('套餐已更新')
+      ElMessage.success(t('packages.updated'))
     } else {
       await createPackage(payload)
-      ElMessage.success('套餐已创建')
+      ElMessage.success(t('packages.created'))
     }
     dialogVisible.value = false
     await load()
@@ -447,7 +498,7 @@ async function toggleStatus(row: PackageItem) {
   const next = row.status === 1 ? 0 : 1
   try {
     await updatePackage({ id: row.id, status: next })
-    ElMessage.success(next === 1 ? '套餐已启用' : '套餐已停用')
+    ElMessage.success(next === 1 ? t('packages.enabled') : t('packages.disabled'))
     await load()
   } catch {
     // 拦截器已提示
@@ -456,23 +507,25 @@ async function toggleStatus(row: PackageItem) {
 
 async function handleDelete(row: PackageItem) {
   if (row.users_count > 0) {
-    ElMessage.warning(
-      `套餐「${row.name}」仍被 ${row.users_count} 个客户使用，请先变更这些客户的套餐`,
-    )
+    ElMessage.warning(t('packages.inUse', { name: row.name, count: row.users_count }))
     return
   }
   try {
-    await ElMessageBox.confirm(`确定删除套餐「${row.name}」？`, '删除确认', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      t('packages.deleteConfirm', { name: row.name }),
+      t('common.warning'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
   } catch {
     return
   }
   try {
     await deletePackage(row.id)
-    ElMessage.success('套餐已删除')
+    ElMessage.success(t('packages.deleted'))
     await load()
   } catch {
     // 拦截器已提示

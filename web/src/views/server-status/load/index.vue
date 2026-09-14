@@ -6,7 +6,9 @@
           <div class="stat-card">
             <div class="stat-title">{{ item.label }}</div>
             <div class="stat-value" :style="{ color: item.color }">{{ item.value }}</div>
-            <div class="stat-sub">CPU 核数 {{ sysinfo.cpu_num || '-' }}</div>
+            <div class="stat-sub">
+              {{ t('statusLoad.cpuCores', { n: sysinfo.cpu_num || '-' }) }}
+            </div>
           </div>
         </el-card>
       </el-col>
@@ -15,7 +17,7 @@
     <el-card shadow="hover" class="mt-4">
       <template #header>
         <div class="card-header">
-          <span>系统负载趋势（最近 5 分钟）</span>
+          <span>{{ t('statusLoad.trend') }}</span>
         </div>
       </template>
       <canvas id="loadavg_chart" style="width: 100%; height: 320px"></canvas>
@@ -26,14 +28,18 @@
 <script setup lang="ts">
 import Chart from 'chart.js/auto'
 import { applyChartTheme, watchChartTheme } from '@/utils/chart-theme'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getRTStatus, getSystemInfo } from '@/api/dashboard.ts'
 
+const { t } = useI18n()
+
 const sysinfo: Record<string, any> = ref({})
-const loadCards = ref([
-  { label: 'Load Avg 1 分钟', value: '-', color: '#f56c6c' },
-  { label: 'Load Avg 5 分钟', value: '-', color: '#e6a23c' },
-  { label: 'Load Avg 15 分钟', value: '-', color: '#67c23a' },
+const loadValues = ref(['-', '-', '-'])
+const loadCards = computed(() => [
+  { label: t('statusLoad.load1'), value: loadValues.value[0], color: '#f56c6c' },
+  { label: t('statusLoad.load5'), value: loadValues.value[1], color: '#e6a23c' },
+  { label: t('statusLoad.load15'), value: loadValues.value[2], color: '#67c23a' },
 ])
 
 let loadavg_chart: Chart
@@ -108,9 +114,9 @@ const loadSystemInfo = async () => {
   if (destroyed) return
   if (resp.code === 0) {
     sysinfo.value = resp.data
-    loadCards.value[0].value = fmtLoad(resp.data.loadavg_one)
-    loadCards.value[1].value = fmtLoad(resp.data.loadavg_five)
-    loadCards.value[2].value = fmtLoad(resp.data.loadavg_fifteen)
+    loadValues.value[0] = fmtLoad(resp.data.loadavg_one)
+    loadValues.value[1] = fmtLoad(resp.data.loadavg_five)
+    loadValues.value[2] = fmtLoad(resp.data.loadavg_fifteen)
   }
 }
 
@@ -120,9 +126,9 @@ const FetchRTStatus = async () => {
   {
     const data = resp.data
     sysinfo.value = { ...sysinfo.value, ...data }
-    loadCards.value[0].value = fmtLoad(data.loadavg_one)
-    loadCards.value[1].value = fmtLoad(data.loadavg_five)
-    loadCards.value[2].value = fmtLoad(data.loadavg_fifteen)
+    loadValues.value[0] = fmtLoad(data.loadavg_one)
+    loadValues.value[1] = fmtLoad(data.loadavg_five)
+    loadValues.value[2] = fmtLoad(data.loadavg_fifteen)
 
     const labels: string[] = []
     const one: any[] = []

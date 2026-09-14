@@ -6,15 +6,16 @@
         <div class="head-left">
           <el-icon :size="22" color="#409eff"><Box /></el-icon>
           <div>
-            <div class="head-title">已安装应用</div>
+            <div class="head-title">{{ t('appstoreInstalled.headTitle') }}</div>
             <div class="head-sub">
-              编译安装的应用实例 · 展示安装目录 / expose / 配置文件等基础信息，可一键启停
+              {{ t('appstoreInstalled.headSub') }}
             </div>
           </div>
         </div>
         <div class="head-right">
           <span class="auto-tip">
-            <el-switch v-model="autoRefresh" size="small" /> 自动刷新
+            <el-switch v-model="autoRefresh" size="small" />
+            {{ t('appstoreInstalled.autoRefresh') }}
           </span>
           <el-button :icon="Refresh" circle :disabled="loading" @click="load(true)" />
         </div>
@@ -27,48 +28,52 @@
         <el-select
           v-model="filterCategory"
           clearable
-          placeholder="全部分类"
+          :placeholder="t('appstoreInstalled.allCategories')"
           style="width: 150px"
           @change="keyword = keyword"
         >
           <el-option v-for="c in categories" :key="c" :label="catLabel(c)" :value="c" />
         </el-select>
-        <el-select v-model="filterState" clearable placeholder="全部状态" style="width: 130px">
-          <el-option
-            v-for="(m, key) in stateMeta"
-            :key="key"
-            :label="m.label"
-            :value="key"
-          />
+        <el-select
+          v-model="filterState"
+          clearable
+          :placeholder="t('appstoreInstalled.allStates')"
+          style="width: 130px"
+        >
+          <el-option v-for="(m, key) in stateMeta" :key="key" :label="m.label" :value="key" />
         </el-select>
         <el-input
           v-model="keyword"
           clearable
-          placeholder="搜索名称 / 实例 / 目录"
+          :placeholder="t('appstoreInstalled.searchPlaceholder')"
           style="width: 240px"
           :prefix-icon="Search"
         />
-        <span class="count">共 {{ filtered.length }} 个实例</span>
+        <span class="count">{{
+          t('appstoreInstalled.countInstances', { n: filtered.length })
+        }}</span>
       </div>
 
       <el-table :data="filtered" v-loading="loading" stripe>
-        <el-table-column label="应用" min-width="200">
+        <el-table-column :label="t('appstoreInstalled.colApp')" min-width="200">
           <template #default="{ row }">
             <div class="cell-name">
               <div class="app-name">{{ row.name }}</div>
               <div class="app-sub">
                 <span class="mono">{{ row.instance }}</span>
-                <span v-if="row.upgraded_from"> · 升级自 {{ row.upgraded_from }}</span>
+                <span v-if="row.upgraded_from">{{
+                  t('appstoreInstalled.upgradedFrom', { from: row.upgraded_from })
+                }}</span>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="分类" width="120">
+        <el-table-column :label="t('appstoreInstalled.colCategory')" width="120">
           <template #default="{ row }">
             <el-tag size="small" effect="plain">{{ catLabel(row.category) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="version" label="版本" width="110" />
+        <el-table-column prop="version" :label="t('appstoreInstalled.colVersion')" width="110" />
         <el-table-column label="expose" min-width="180">
           <template #default="{ row }">
             <span class="mono">{{ exposeOf(row) }}</span>
@@ -78,20 +83,24 @@
               type="danger"
               effect="plain"
               style="margin-left: 6px"
-            >已停用</el-tag>
+              >{{ t('appstoreInstalled.disabledTag') }}</el-tag
+            >
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column :label="t('appstoreInstalled.colState')" width="110">
           <template #default="{ row }">
             <span class="state-cell">
-              <i class="state-dot" :style="{ background: (stateMeta[row.state] || stateMeta.unknown).color }" />
+              <i
+                class="state-dot"
+                :style="{ background: (stateMeta[row.state] || stateMeta.unknown).color }"
+              />
               <span :style="{ color: (stateMeta[row.state] || stateMeta.unknown).color }">
                 {{ (stateMeta[row.state] || stateMeta.unknown).label }}
               </span>
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column :label="t('common.operation')" width="240" fixed="right">
           <template #default="{ row }">
             <template v-if="canControl(row)">
               <template v-if="isAdmin">
@@ -101,74 +110,90 @@
                   plain
                   :disabled="busy === row.pkg_path || !canStart(row)"
                   @click="handleAction(row, 'start')"
-                >启动</el-button>
+                  >{{ t('appstoreInstalled.actStart') }}</el-button
+                >
                 <el-button
                   size="small"
                   type="warning"
                   plain
                   :disabled="busy === row.pkg_path || !canStop(row)"
                   @click="handleAction(row, 'stop')"
-                >停止</el-button>
+                  >{{ t('appstoreInstalled.actStop') }}</el-button
+                >
                 <el-button
                   size="small"
                   type="primary"
                   plain
                   :disabled="busy === row.pkg_path || !canRestart(row)"
                   @click="handleAction(row, 'restart')"
-                >重启</el-button>
+                  >{{ t('appstoreInstalled.actRestart') }}</el-button
+                >
               </template>
-              <el-tooltip v-else content="仅管理员可启停实例" placement="top">
-                <el-button size="small" type="primary" plain disabled>启停</el-button>
+              <el-tooltip v-else :content="t('appstoreInstalled.adminOnlyTooltip')" placement="top">
+                <el-button size="small" type="primary" plain disabled>{{
+                  t('appstoreInstalled.actControl')
+                }}</el-button>
               </el-tooltip>
             </template>
-            <el-tooltip
-              v-else
-              content="脚本未登记 systemd 服务（info.yaml 缺 svc_name），无法面板启停"
-              placement="top"
-            >
-              <el-button size="small" type="primary" plain disabled>启停</el-button>
+            <el-tooltip v-else :content="t('appstoreInstalled.noSvcTooltip')" placement="top">
+              <el-button size="small" type="primary" plain disabled>{{
+                t('appstoreInstalled.actControl')
+              }}</el-button>
             </el-tooltip>
-            <el-button size="small" text type="primary" @click="showDetail(row)">详情</el-button>
+            <el-button size="small" text type="primary" @click="showDetail(row)">{{
+              t('appstoreInstalled.detail')
+            }}</el-button>
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暂无已安装应用，可去「应用商店」安装" :image-size="80" />
+          <el-empty :description="t('appstoreInstalled.empty')" :image-size="80" />
         </template>
       </el-table>
     </el-card>
 
     <!-- 详情抽屉 -->
-    <el-drawer
-      v-model="drawerVisible"
-      :title="detailTitle"
-      size="480px"
-      destroy-on-close
-    >
+    <el-drawer v-model="drawerVisible" :title="detailTitle" size="480px" destroy-on-close>
       <div v-if="current" class="detail-body">
         <div class="detail-state">
           <el-tag :type="(stateMeta[current.state] || stateMeta.unknown).tag" effect="dark">
             {{ (stateMeta[current.state] || stateMeta.unknown).label }}
           </el-tag>
-          <el-tag v-if="current.info.enabled === false" type="danger">已停用</el-tag>
-          <el-tag v-if="current.info.instance" type="primary" effect="plain">实例 {{ current.info.instance }}</el-tag>
+          <el-tag v-if="current.info.enabled === false" type="danger">{{
+            t('appstoreInstalled.disabledTag')
+          }}</el-tag>
+          <el-tag v-if="current.info.instance" type="primary" effect="plain">{{
+            t('appstoreInstalled.instanceTag', { name: current.info.instance })
+          }}</el-tag>
         </div>
 
         <el-descriptions :column="1" border size="small" class="detail-desc">
-          <el-descriptions-item label="包路径">{{ current.pkg_path }}</el-descriptions-item>
-          <el-descriptions-item label="版本">{{ current.version }}</el-descriptions-item>
-          <el-descriptions-item label="分类">{{ catLabel(current.category) }}</el-descriptions-item>
-          <el-descriptions-item label="来源">
+          <el-descriptions-item :label="t('appstoreInstalled.pkgPath')">{{
+            current.pkg_path
+          }}</el-descriptions-item>
+          <el-descriptions-item :label="t('appstoreInstalled.colVersion')">{{
+            current.version
+          }}</el-descriptions-item>
+          <el-descriptions-item :label="t('appstoreInstalled.colCategory')">{{
+            catLabel(current.category)
+          }}</el-descriptions-item>
+          <el-descriptions-item :label="t('appstoreInstalled.source')">
             {{ current.source }}{{ current.repo_id ? ` / ${current.repo_id}` : '' }}
           </el-descriptions-item>
-          <el-descriptions-item label="安装时间">{{ fmtTime(current.installed_at) }}</el-descriptions-item>
-          <el-descriptions-item label="最近任务">{{ current.run_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('appstoreInstalled.installedAt')">{{
+            fmtTime(current.installed_at)
+          }}</el-descriptions-item>
+          <el-descriptions-item :label="t('appstoreInstalled.lastRun')">{{
+            current.run_id || '-'
+          }}</el-descriptions-item>
         </el-descriptions>
 
         <!-- 配置文件快捷编辑（info.yaml: config_files 列表 / 兼容单值 config_file） -->
         <div v-if="editableFilesOf(current).length" class="cfg-block">
           <div class="cfg-head">
-            <span class="info-title">配置文件</span>
-            <span v-if="!isAdmin" class="cfg-ro-tip">仅管理员可编辑</span>
+            <span class="info-title">{{ t('appstoreInstalled.configFiles') }}</span>
+            <span v-if="!isAdmin" class="cfg-ro-tip">{{
+              t('appstoreInstalled.adminOnlyEdit')
+            }}</span>
           </div>
           <template v-if="editableFilesOf(current).length === 1">
             <div class="cfg-single">
@@ -179,12 +204,17 @@
                 @command="(c: string) => onEditCommand(editableFilesOf(current)[0], c)"
               >
                 <el-button size="small" type="primary" plain>
-                  编辑配置<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  {{ t('appstoreInstalled.editConfig')
+                  }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="edit">直接编辑</el-dropdown-item>
-                    <el-dropdown-item command="backup">备份后编辑</el-dropdown-item>
+                    <el-dropdown-item command="edit">{{
+                      t('appstoreInstalled.editDirect')
+                    }}</el-dropdown-item>
+                    <el-dropdown-item command="backup">{{
+                      t('appstoreInstalled.editAfterBackup')
+                    }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -202,12 +232,17 @@
                 @command="(c: string) => onEditCommand(f, c)"
               >
                 <el-button size="small" type="primary" plain>
-                  编辑<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  {{ t('appstoreInstalled.edit')
+                  }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="edit">直接编辑</el-dropdown-item>
-                    <el-dropdown-item command="backup">备份后编辑</el-dropdown-item>
+                    <el-dropdown-item command="edit">{{
+                      t('appstoreInstalled.editDirect')
+                    }}</el-dropdown-item>
+                    <el-dropdown-item command="backup">{{
+                      t('appstoreInstalled.editAfterBackup')
+                    }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -215,10 +250,10 @@
           </template>
         </div>
 
-        <div class="info-title">运行 / 安装信息（info.yaml）</div>
+        <div class="info-title">{{ t('appstoreInstalled.infoTitle') }}</div>
         <el-empty
           v-if="!Object.keys(current.info || {}).length"
-          description="安装脚本未登记额外信息"
+          :description="t('appstoreInstalled.noExtraInfo')"
           :image-size="50"
         />
         <div v-else class="info-grid">
@@ -236,22 +271,25 @@
             plain
             :disabled="busy === current.pkg_path || !canStart(current)"
             @click="handleAction(current, 'start')"
-          >启动</el-button>
+            >{{ t('appstoreInstalled.actStart') }}</el-button
+          >
           <el-button
             type="warning"
             plain
             :disabled="busy === current.pkg_path || !canStop(current)"
             @click="handleAction(current, 'stop')"
-          >停止</el-button>
+            >{{ t('appstoreInstalled.actStop') }}</el-button
+          >
           <el-button
             type="primary"
             plain
             :disabled="busy === current.pkg_path || !canRestart(current)"
             @click="handleAction(current, 'restart')"
-          >重启</el-button>
+            >{{ t('appstoreInstalled.actRestart') }}</el-button
+          >
         </div>
         <p v-else-if="!canControl(current)" class="no-svc-tip">
-          该实例未登记 systemd 服务（info.yaml 缺 svc_name），无法通过面板启停，请在安装脚本中登记并 enable。
+          {{ t('appstoreInstalled.noSvcTip') }}
         </p>
       </div>
     </el-drawer>
@@ -309,21 +347,27 @@
           </template>
         </div>
         <div v-if="activeCfg" class="cfg-save-bar">
-          <span v-if="dirtyCount === 0" class="cfg-hint">未修改</span>
-          <span v-else class="cfg-hint">{{ dirtyCount }} 个文件有未保存修改</span>
-          <el-button @click="requestClose()">取消</el-button>
+          <span v-if="dirtyCount === 0" class="cfg-hint">{{
+            t('appstoreInstalled.cfgUnchanged')
+          }}</span>
+          <span v-else class="cfg-hint">{{
+            t('appstoreInstalled.cfgDirty', { n: dirtyCount })
+          }}</span>
+          <el-button @click="requestClose()">{{ t('common.cancel') }}</el-button>
           <el-button
             v-if="cfgTabs.length > 1 && dirtyCount > 0"
             type="primary"
             :loading="cfgSaving"
             @click="saveAllCfg"
-          >保存全部</el-button>
+            >{{ t('appstoreInstalled.saveAll') }}</el-button
+          >
           <el-button
             type="primary"
             :loading="cfgSaving"
             :disabled="!activeCfg.dirty"
             @click="saveCfg"
-          >保存</el-button>
+            >{{ t('common.save') }}</el-button
+          >
         </div>
       </div>
     </el-dialog>
@@ -332,6 +376,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Box, Refresh, Search } from '@/icons'
 import { useUserStore } from '@/stores/user'
@@ -339,35 +384,43 @@ import { getInstalledApps, instanceAction, type InstalledApp } from '@/api/appst
 import { readFile, writeFile } from '@/api/file'
 import CodeEditor from '@/components/CodeEditor.vue'
 
+const { t } = useI18n()
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 
-const CATEGORY_LABELS: Record<string, string> = {
-  infra: '基础设施',
-  application: '应用程序',
-  webapps: 'Web 应用程序',
-  database: '数据层',
-  library: '基础库',
-}
+const categoryLabels = computed<Record<string, string>>(() => ({
+  infra: t('appstoreInstalled.catInfra'),
+  application: t('appstoreInstalled.catApplication'),
+  webapps: t('appstoreInstalled.catWebapps'),
+  database: t('appstoreInstalled.catDatabase'),
+  library: t('appstoreInstalled.catLibrary'),
+}))
 const CATEGORY_ORDER = ['infra', 'application', 'webapps', 'database', 'library']
 
-const stateMeta: Record<
-  string,
-  { label: string; tag: 'success' | 'info' | 'danger' | 'warning'; color: string }
-> = {
-  running: { label: '运行中', tag: 'success', color: '#67c23a' },
-  stopped: { label: '已停止', tag: 'info', color: 'var(--el-text-color-secondary)' },
-  failed: { label: '异常', tag: 'danger', color: '#f56c6c' },
-  starting: { label: '启动中', tag: 'warning', color: '#e6a23c' },
-  stopping: { label: '停止中', tag: 'warning', color: '#e6a23c' },
-  unknown: { label: '未知', tag: 'info', color: 'var(--el-text-color-placeholder)' },
-}
+const stateMeta = computed<
+  Record<string, { label: string; tag: 'success' | 'info' | 'danger' | 'warning'; color: string }>
+>(() => ({
+  running: { label: t('appstoreInstalled.stateRunning'), tag: 'success', color: '#67c23a' },
+  stopped: {
+    label: t('appstoreInstalled.stateStopped'),
+    tag: 'info',
+    color: 'var(--el-text-color-secondary)',
+  },
+  failed: { label: t('appstoreInstalled.stateFailed'), tag: 'danger', color: '#f56c6c' },
+  starting: { label: t('appstoreInstalled.stateStarting'), tag: 'warning', color: '#e6a23c' },
+  stopping: { label: t('appstoreInstalled.stateStopping'), tag: 'warning', color: '#e6a23c' },
+  unknown: {
+    label: t('appstoreInstalled.stateUnknown'),
+    tag: 'info',
+    color: 'var(--el-text-color-placeholder)',
+  },
+}))
 
-const ACT_LABELS: Record<string, string> = {
-  start: '启动',
-  stop: '停止',
-  restart: '重启',
-}
+const actLabels = computed<Record<string, string>>(() => ({
+  start: t('appstoreInstalled.actStart'),
+  stop: t('appstoreInstalled.actStop'),
+  restart: t('appstoreInstalled.actRestart'),
+}))
 
 const list = ref<InstalledApp[]>([])
 const loading = ref(false)
@@ -396,7 +449,8 @@ const filtered = computed(() => {
     if (filterCategory.value && i.category !== filterCategory.value) return false
     if (filterState.value && i.state !== filterState.value) return false
     if (!kw) return true
-    const hay = `${i.name} ${i.instance} ${i.pkg_path} ${i.info.install_dir || ''} ${i.info.expose || ''}`.toLowerCase()
+    const hay =
+      `${i.name} ${i.instance} ${i.pkg_path} ${i.info.install_dir || ''} ${i.info.expose || ''}`.toLowerCase()
     return hay.includes(kw)
   })
 })
@@ -407,7 +461,7 @@ const detailTitle = computed(() => {
 })
 
 function catLabel(cat: string): string {
-  return CATEGORY_LABELS[cat] || cat || '-'
+  return categoryLabels.value[cat] || cat || '-'
 }
 
 function exposeOf(app: InstalledApp): string {
@@ -417,7 +471,7 @@ function exposeOf(app: InstalledApp): string {
 }
 
 function fmtVal(v: unknown): string {
-  if (typeof v === 'boolean') return v ? '是' : '否'
+  if (typeof v === 'boolean') return v ? t('common.yes') : t('common.no')
   if (v === null || v === undefined || v === '') return '-'
   return String(v)
 }
@@ -454,7 +508,7 @@ async function load(force = false) {
       current.value = items.find((i) => i.pkg_path === current.value!.pkg_path) || current.value
     }
   } catch (e: any) {
-    ElMessage.error(e.message || '加载已安装应用失败')
+    ElMessage.error(e.message || t('appstoreInstalled.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -462,9 +516,10 @@ async function load(force = false) {
 
 async function handleAction(app: InstalledApp, action: string) {
   try {
+    const act = actLabels.value[action] || action
     await ElMessageBox.confirm(
-      `确定${ACT_LABELS[action]} ${app.name}（${app.instance}）？`,
-      `${ACT_LABELS[action]}确认`,
+      t('appstoreInstalled.confirmAction', { action: act, name: app.name, instance: app.instance }),
+      t('appstoreInstalled.confirmTitle', { action: act }),
       { type: action === 'stop' ? 'warning' : 'info' },
     )
   } catch {
@@ -474,13 +529,20 @@ async function handleAction(app: InstalledApp, action: string) {
   try {
     const resp = await instanceAction({ pkg_path: app.pkg_path, action })
     const st = resp.data?.state
-    const meta = stateMeta[st]
+    const meta = stateMeta.value[st]
     ElMessage.success(
-      `${ACT_LABELS[action]}成功（${app.instance} 现为 ${meta ? meta.label : st || '未知'}）`,
+      t('appstoreInstalled.actionOk', {
+        action: actLabels.value[action] || action,
+        instance: app.instance,
+        state: meta ? meta.label : st || t('appstoreInstalled.stateUnknown'),
+      }),
     )
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message || `${ACT_LABELS[action]}失败`)
+    ElMessage.error(
+      e.message ||
+        t('appstoreInstalled.actionFailed', { action: actLabels.value[action] || action }),
+    )
   } finally {
     busy.value = ''
   }
@@ -537,15 +599,14 @@ const cfgActive = ref('')
 const cfgTabs = ref<CfgTab[]>([])
 const cfgSaving = ref(false)
 
-const activeCfg = computed(
-  () => cfgTabs.value.find((t) => t.path === cfgActive.value) || null,
-)
+const activeCfg = computed(() => cfgTabs.value.find((t) => t.path === cfgActive.value) || null)
 const dirtyCount = computed(() => cfgTabs.value.filter((t) => t.dirty).length)
 const cfgTitle = computed(() => {
-  const name = cfgTabs.value.length > 1
-    ? `${cfgTabs.value.length} 个配置文件`
-    : activeCfg.value?.label || 'file'
-  return `编辑配置 · ${name}`
+  const name =
+    cfgTabs.value.length > 1
+      ? t('appstoreInstalled.cfgFileCount', { n: cfgTabs.value.length })
+      : activeCfg.value?.label || 'file'
+  return t('appstoreInstalled.cfgTitle', { name })
 })
 
 function tabLabel(t: CfgTab): string {
@@ -592,16 +653,20 @@ async function backupPath(path: string): Promise<boolean> {
     const resp = await readFile(path)
     content = resp.data?.content ?? ''
     if (content.includes('\u0000')) {
-      ElMessage.warning('原文件疑似二进制，跳过备份，直接编辑')
+      ElMessage.warning(t('appstoreInstalled.binWarn'))
       return true
     }
   } catch (e: any) {
     try {
-      await ElMessageBox.confirm('原文件读取失败（可能不存在），无法备份。仍要继续编辑吗？', '提示', {
-        type: 'warning',
-        confirmButtonText: '继续编辑',
-        cancelButtonText: '取消',
-      })
+      await ElMessageBox.confirm(
+        t('appstoreInstalled.readFailedBackup'),
+        t('appstoreInstalled.notice'),
+        {
+          type: 'warning',
+          confirmButtonText: t('appstoreInstalled.continueEdit'),
+          cancelButtonText: t('common.cancel'),
+        },
+      )
     } catch {
       return false
     }
@@ -610,10 +675,10 @@ async function backupPath(path: string): Promise<boolean> {
   const bakPath = `${path}.bak.${tsStamp()}`
   try {
     await writeFile(bakPath, content)
-    ElMessage.success(`已备份原文件 → ${bakPath}`)
+    ElMessage.success(t('appstoreInstalled.backupOk', { path: bakPath }))
     return true
   } catch (e: any) {
-    ElMessage.error(`备份失败：${e?.message || ''}`)
+    ElMessage.error(t('appstoreInstalled.backupFailed', { msg: e?.message || '' }))
     return false
   }
 }
@@ -635,14 +700,14 @@ async function loadTab(path: string) {
     const resp = await readFile(path)
     const content = resp.data?.content ?? ''
     if (content.includes('\u0000')) {
-      tab.error = '该文件疑似二进制文件，无法在文本编辑器中修改'
+      tab.error = t('appstoreInstalled.binFile')
       return
     }
     tab.content = content
     tab.original = content
     tab.loaded = true
   } catch (e: any) {
-    tab.error = e.message || '读取配置文件失败'
+    tab.error = e.message || t('appstoreInstalled.readCfgFailed')
   } finally {
     tab.loading = false
   }
@@ -662,7 +727,7 @@ async function saveCfg() {
     await saveTab(tab)
     finishSave()
   } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
+    ElMessage.error(e.message || t('appstoreInstalled.saveFailed'))
   } finally {
     cfgSaving.value = false
   }
@@ -675,7 +740,7 @@ async function saveAllCfg() {
     for (const t of dirtyTabs) await saveTab(t)
     finishSave()
   } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
+    ElMessage.error(e.message || t('appstoreInstalled.saveFailed'))
   } finally {
     cfgSaving.value = false
   }
@@ -684,14 +749,14 @@ async function saveAllCfg() {
 function finishSave() {
   const left = cfgTabs.value.filter((t) => t.dirty)
   if (left.length === 0) {
-    ElMessage.success('配置已保存')
+    ElMessage.success(t('appstoreInstalled.cfgSaved'))
     cfgVisible.value = false
     ElMessage.info({
-      message: '如为服务型应用（php / nginx 等），请重启对应实例使配置生效',
+      message: t('appstoreInstalled.cfgRestartTip'),
       duration: 3500,
     })
   } else {
-    ElMessage.success(`已保存，仍有 ${left.length} 个文件未保存`)
+    ElMessage.success(t('appstoreInstalled.cfgSavedLeft', { n: left.length }))
   }
 }
 
@@ -699,11 +764,15 @@ function finishSave() {
 async function requestClose(done?: () => void) {
   if (dirtyCount.value > 0) {
     try {
-      await ElMessageBox.confirm('存在未保存的修改，确定放弃并关闭？', '未保存', {
-        type: 'warning',
-        confirmButtonText: '放弃修改',
-        cancelButtonText: '继续编辑',
-      })
+      await ElMessageBox.confirm(
+        t('appstoreInstalled.unsavedClose'),
+        t('appstoreInstalled.unsavedTitle'),
+        {
+          type: 'warning',
+          confirmButtonText: t('appstoreInstalled.discard'),
+          cancelButtonText: t('appstoreInstalled.continueEdit'),
+        },
+      )
     } catch {
       return
     }

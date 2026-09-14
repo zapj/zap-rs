@@ -4,14 +4,14 @@
       <template #header>
         <div class="card-header">
           <div>
-            <span>数据迁移</span>
-            <span class="card-sub">把用户家目录数据从旧挂载点整体搬迁到新挂载点（如 /home → /home2）</span>
+            <span>{{ t('serverMigrate.title') }}</span>
+            <span class="card-sub">{{ t('serverMigrate.sub') }}</span>
           </div>
         </div>
       </template>
 
       <el-alert
-        title="当 /home 磁盘容量不足时使用：先把新磁盘挂载到新目录（如 /home2），再执行本迁移。迁移会搬移目录数据、更新记录并重建站点配置；请确认目标磁盘空间充足，且迁移期间站点流量尽量低。"
+        :title="t('serverMigrate.warningAlert')"
         type="warning"
         :closable="false"
         show-icon
@@ -20,16 +20,16 @@
 
       <!-- 挂载点设置 -->
       <el-form inline :model="form" @submit.prevent>
-        <el-form-item label="源挂载点">
+        <el-form-item :label="t('serverMigrate.srcMount')">
           <el-input v-model="form.src" placeholder="/home" style="width: 180px" />
         </el-form-item>
-        <el-form-item label="目标挂载点">
+        <el-form-item :label="t('serverMigrate.destMount')">
           <el-input v-model="form.dest" placeholder="/home2" style="width: 180px" />
-          <div class="form-tip" style="margin-left: 8px">须已挂载好磁盘、目录存在可写</div>
+          <div class="form-tip" style="margin-left: 8px">{{ t('serverMigrate.destTip') }}</div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="previewLoading" @click="loadPreview">
-            查询可迁移用户
+            {{ t('serverMigrate.queryUsers') }}
           </el-button>
           <el-button
             type="danger"
@@ -37,7 +37,7 @@
             :loading="migrating"
             @click="confirmMigrate"
           >
-            开始迁移所选
+            {{ t('serverMigrate.startMigrate') }}
           </el-button>
         </el-form-item>
       </el-form>
@@ -52,14 +52,23 @@
       >
         <el-table-column type="selection" width="46" :selectable="() => !migrating" />
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="username" label="用户名" width="150" />
-        <el-table-column prop="linux_user" label="系统账号" width="140" show-overflow-tooltip>
+        <el-table-column prop="username" :label="t('serverMigrate.colUsername')" width="150" />
+        <el-table-column
+          prop="linux_user"
+          :label="t('serverMigrate.colLinuxUser')"
+          width="140"
+          show-overflow-tooltip
+        >
           <template #default="{ row }">{{ row.linux_user || '—' }}</template>
         </el-table-column>
-        <el-table-column prop="home_dir" label="当前家目录" min-width="220" />
-        <el-table-column label="站点数" width="100" align="center">
+        <el-table-column prop="home_dir" :label="t('serverMigrate.colHomeDir')" min-width="220" />
+        <el-table-column :label="t('serverMigrate.colSiteCount')" width="100" align="center">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.site_count > 0 ? 'warning' : 'info'" disable-transitions>
+            <el-tag
+              size="small"
+              :type="row.site_count > 0 ? 'warning' : 'info'"
+              disable-transitions
+            >
               {{ row.site_count }}
             </el-tag>
           </template>
@@ -67,45 +76,64 @@
       </el-table>
       <el-empty
         v-if="!previewLoading && previewLoaded && candidates.length === 0"
-        description="没有位于该源挂载点下的用户"
+        :description="t('serverMigrate.empty')"
         :image-size="70"
       />
     </el-card>
 
     <!-- 迁移结果 -->
-    <el-dialog v-model="resultVisible" title="迁移结果" width="820px" top="8vh">
+    <el-dialog
+      v-model="resultVisible"
+      :title="t('serverMigrate.resultTitle')"
+      width="820px"
+      top="8vh"
+    >
       <template v-if="result">
         <el-alert
-          :title="`${result.src} → ${result.dest}：成功 ${result.ok.length}，失败 ${result.fail.length}`"
+          :title="
+            t('serverMigrate.resultSummary', {
+              src: result.src,
+              dest: result.dest,
+              ok: result.ok.length,
+              fail: result.fail.length,
+            })
+          "
           :type="result.fail.length ? 'warning' : 'success'"
           :closable="false"
           show-icon
           style="margin-bottom: 12px"
         />
         <el-table v-if="result.ok.length" :data="result.ok" size="small" border max-height="260">
-          <el-table-column prop="username" label="用户名" width="140" />
-          <el-table-column prop="old_home" label="原家目录" min-width="180" />
-          <el-table-column prop="new_home" label="新家目录" min-width="180" />
-          <el-table-column label="站点同步" width="110" align="center">
+          <el-table-column prop="username" :label="t('serverMigrate.colUsername')" width="140" />
+          <el-table-column prop="old_home" :label="t('serverMigrate.colOldHome')" min-width="180" />
+          <el-table-column prop="new_home" :label="t('serverMigrate.colNewHome')" min-width="180" />
+          <el-table-column :label="t('serverMigrate.colSiteSync')" width="110" align="center">
             <template #default="{ row }">
               <span v-if="row.sites > 0">
                 {{ row.sites_synced }}/{{ row.sites }}
                 <el-tooltip
                   v-if="row.site_errors.length"
-                  :content="row.site_errors.join('；')"
+                  :content="row.site_errors.join(t('serverMigrate.listSeparator'))"
                   placement="top"
                 >
-                  <span class="warn-text">（部分失败）</span>
+                  <span class="warn-text">{{ t('serverMigrate.partialFailed') }}</span>
                 </el-tooltip>
               </span>
-              <span v-else class="dim-text">无</span>
+              <span v-else class="dim-text">{{ t('serverMigrate.none') }}</span>
             </template>
           </el-table-column>
         </el-table>
-        <el-table v-if="result.fail.length" :data="result.fail" size="small" border max-height="200" style="margin-top: 12px">
-          <el-table-column prop="username" label="用户名" width="140" />
-          <el-table-column prop="home_dir" label="家目录" min-width="200" />
-          <el-table-column prop="error" label="原因" min-width="240" />
+        <el-table
+          v-if="result.fail.length"
+          :data="result.fail"
+          size="small"
+          border
+          max-height="200"
+          style="margin-top: 12px"
+        >
+          <el-table-column prop="username" :label="t('serverMigrate.colUsername')" width="140" />
+          <el-table-column prop="home_dir" :label="t('serverMigrate.colHome')" min-width="200" />
+          <el-table-column prop="error" :label="t('serverMigrate.colReason')" min-width="240" />
         </el-table>
       </template>
     </el-dialog>
@@ -115,8 +143,11 @@
 <script setup lang="ts">
 import { reactive, ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { getMigrateUsers, runMigrate } from '@/api/serverMigrate'
 import type { MigrateCandidate, MigrateResult } from '@/api/serverMigrate'
+
+const { t } = useI18n()
 
 const form = reactive({ src: '/home', dest: '/home2' })
 const candidates = ref<MigrateCandidate[]>([])
@@ -137,7 +168,7 @@ function onSelect(rows: MigrateCandidate[]) {
 
 async function loadPreview() {
   if (!form.src.trim().startsWith('/')) {
-    ElMessage.warning('请输入正确的源挂载点（如 /home）')
+    ElMessage.warning(t('serverMigrate.invalidSrc'))
     return
   }
   previewLoading.value = true
@@ -145,7 +176,7 @@ async function loadPreview() {
     const res = await getMigrateUsers(form.src.trim())
     candidates.value = res.data.candidates ?? []
     previewLoaded.value = true
-    ElMessage.success(`共 ${res.data.count} 个用户位于 ${res.data.src} 挂载点下`)
+    ElMessage.success(t('serverMigrate.loaded', { count: res.data.count, src: res.data.src }))
   } catch {
     /* handled */
   } finally {
@@ -155,16 +186,19 @@ async function loadPreview() {
 
 async function confirmMigrate() {
   if (!form.dest.trim().startsWith('/') || form.dest.trim() === form.src.trim()) {
-    ElMessage.warning('请填写正确的目标挂载点（须与源不同，如 /home2）')
+    ElMessage.warning(t('serverMigrate.invalidDest'))
     return
   }
-  const names = selected.value.map(u => u.username).join('、')
+  const names = selected.value.map((u) => u.username).join(t('serverMigrate.nameSeparator'))
   try {
     await ElMessageBox.confirm(
-      `将把以下 ${selected.value.length} 个用户的家目录数据迁移到 ${form.dest.trim()}：\n${names}\n\n` +
-        '迁移期间建议暂停站点写入；目标磁盘空间不足或数据量较大时耗时可能较长。确认开始？',
-      '确认执行数据迁移',
-      { type: 'warning', confirmButtonText: '开始迁移' },
+      t('serverMigrate.confirmBody', {
+        n: selected.value.length,
+        dest: form.dest.trim(),
+        names,
+      }),
+      t('serverMigrate.confirmTitle'),
+      { type: 'warning', confirmButtonText: t('serverMigrate.confirmStart') },
     )
   } catch {
     return
@@ -174,11 +208,11 @@ async function confirmMigrate() {
     const res = await runMigrate({
       src: form.src.trim(),
       dest: form.dest.trim(),
-      user_ids: selected.value.map(u => u.id),
+      user_ids: selected.value.map((u) => u.id),
     })
     result.value = res.data
     resultVisible.value = true
-    ElMessage.success(res.message || '迁移完成')
+    ElMessage.success(res.message || t('serverMigrate.migrated'))
     // 迁移后刷新候选（已迁移用户将不再出现在源挂载点下）
     loadPreview()
   } catch {

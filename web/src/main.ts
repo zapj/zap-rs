@@ -11,6 +11,8 @@ import 'virtual:uno.css'
 import './assets/styles/index.css'
 // 使用Element Plus的消息提示
 import { ElMessage } from 'element-plus'
+// 国际化：语言包 / 切换逻辑见 @/i18n，这里只负责挂载
+import { setupI18n, t } from './i18n'
 
 // 图标统一由 @/icons 提供（Material Symbols，构建期按需打包，离线可用），
 // 不注册任何在线图标集合，内网部署下也不会发起图标请求。
@@ -22,6 +24,7 @@ const pinia = createPinia()
 pinia.use(piniaPluginPersistedstate)
 app.use(pinia)
 app.use(router)
+setupI18n(app)
 
 // 全局错误处理
 app.config.errorHandler = (err, instance, info) => {
@@ -29,16 +32,16 @@ app.config.errorHandler = (err, instance, info) => {
   console.error('[错误组件]', instance)
   console.error('[错误信息]', info)
 
-  // 错误分类处理
+  // 错误分类处理（这里在组件上下文之外，用 @/i18n 的全局 t；语言切换后新报错即为新语言）
   if (err instanceof Error) {
     if (err.message.includes('Network Error')) {
-      ElMessage.error('网络连接错误，请检查网络后重试')
+      ElMessage.error(t('error.networkRetry'))
     } else if (err.message.includes('timeout')) {
-      ElMessage.error('请求超时，请稍后再试')
+      ElMessage.error(t('error.timeout'))
     } else if (info.includes('component')) {
-      ElMessage.error('组件渲染错误，请联系管理员')
+      ElMessage.error(t('error.renderFailed'))
     } else {
-      ElMessage.error('系统错误，请稍后再试')
+      ElMessage.error(t('error.system'))
     }
   }
 

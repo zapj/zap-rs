@@ -81,6 +81,7 @@ import IconSort from '~icons/material-symbols/sort'
 import IconSpeed from '~icons/material-symbols/speed'
 import IconStorefront from '~icons/material-symbols/storefront'
 import IconTimer from '~icons/material-symbols/timer'
+import IconTranslate from '~icons/material-symbols/translate'
 import IconTune from '~icons/material-symbols/tune'
 import IconUpload from '~icons/material-symbols/upload'
 import IconViewList from '~icons/material-symbols/view-list'
@@ -160,6 +161,7 @@ export const ICON_MAP: Record<string, Component> = {
   speed: IconSpeed,
   storefront: IconStorefront,
   timer: IconTimer,
+  translate: IconTranslate,
   tune: IconTune,
   upload: IconUpload,
   'view-list': IconViewList,
@@ -226,6 +228,7 @@ export const Setting = IconSettings
 export const Sunny = IconLightMode
 export const SwitchButton = IconLogout
 export const Timer = IconTimer
+export const Translate = IconTranslate
 export const Upload = IconUpload
 export const User = IconPerson
 export const UserFilled = IconAccountCircle

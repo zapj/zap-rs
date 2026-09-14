@@ -9,8 +9,30 @@
     <breadcrumb class="breadcrumb-container" />
 
     <div class="right-menu">
+      <!-- 语言切换：选项用语言自称，英文界面下也能找到「简体中文」 -->
+      <el-dropdown trigger="click" @command="handleLocaleCommand">
+        <div class="icon-button theme-trigger" :title="t('layout.language')">
+          <el-icon :size="18">
+            <Translate />
+          </el-icon>
+        </div>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="item in localeOptions" :key="item.value" :command="item.value">
+              <span class="theme-item">
+                <el-icon><Check v-if="locale === item.value" /></el-icon>
+                <span>{{ item.label }}</span>
+              </span>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
       <el-dropdown trigger="click" @command="handleThemeCommand">
-        <div class="icon-button theme-trigger" :title="`主题：${currentThemeLabel}`">
+        <div
+          class="icon-button theme-trigger"
+          :title="`${t('layout.theme')}：${currentThemeLabel}`"
+        >
           <el-icon :size="18">
             <Sunny v-if="themeMode === 'light'" />
             <Moon v-else-if="themeMode === 'dark'" />
@@ -23,21 +45,21 @@
               <span class="theme-item">
                 <el-icon><Check v-if="themeMode === 'light'" /></el-icon>
                 <el-icon><Sunny /></el-icon>
-                <span>浅色 Light</span>
+                <span>{{ t('layout.themeLight') }}</span>
               </span>
             </el-dropdown-item>
             <el-dropdown-item command="dark">
               <span class="theme-item">
                 <el-icon><Check v-if="themeMode === 'dark'" /></el-icon>
                 <el-icon><Moon /></el-icon>
-                <span>深色 Dark</span>
+                <span>{{ t('layout.themeDark') }}</span>
               </span>
             </el-dropdown-item>
             <el-dropdown-item command="auto">
               <span class="theme-item">
                 <el-icon><Check v-if="themeMode === 'auto'" /></el-icon>
                 <el-icon><Monitor /></el-icon>
-                <span>跟随系统 Auto</span>
+                <span>{{ t('layout.themeAuto') }}</span>
               </span>
             </el-dropdown-item>
           </el-dropdown-menu>
@@ -53,7 +75,7 @@
         @show="loadRecent"
       >
         <template #reference>
-          <div class="notice-trigger" title="通知">
+          <div class="notice-trigger" :title="t('layout.notification')">
             <el-badge :value="unread" :hidden="unread <= 0" :max="99">
               <el-icon :size="18"><Bell /></el-icon>
             </el-badge>
@@ -62,35 +84,26 @@
 
         <div class="notice-pop">
           <div class="notice-pop__head">
-            <span class="notice-pop__heading">通知</span>
-            <el-button
-              v-if="unread > 0"
-              link
-              type="primary"
-              size="small"
-              @click="markAllRead"
-            >
-              全部已读
+            <span class="notice-pop__heading">{{ t('layout.notification') }}</span>
+            <el-button v-if="unread > 0" link type="primary" size="small" @click="markAllRead">
+              {{ t('layout.noticeAllRead') }}
             </el-button>
           </div>
-          <el-empty v-if="!recent.length" :image-size="56" description="暂无通知" />
+          <el-empty v-if="!recent.length" :image-size="56" :description="t('layout.noticeEmpty')" />
           <template v-else>
-            <div
-              v-for="m in recent"
-              :key="m.id"
-              class="notice-pop__item"
-              @click="openMessage(m)"
-            >
+            <div v-for="m in recent" :key="m.id" class="notice-pop__item" @click="openMessage(m)">
               <span class="notice-pop__dot" :class="{ read: !!m.is_read }"></span>
               <div class="notice-pop__main">
                 <div class="notice-pop__row">
-                  <span class="notice-pop__title" :class="{ unread: !m.is_read }">{{ m.title }}</span>
+                  <span class="notice-pop__title" :class="{ unread: !m.is_read }">{{
+                    m.title
+                  }}</span>
                   <span class="notice-pop__time">{{ fmtTime(m.created_at) }}</span>
                 </div>
                 <div class="notice-pop__body">{{ m.body }}</div>
               </div>
             </div>
-            <div class="notice-pop__more" @click="goMessages">查看全部消息</div>
+            <div class="notice-pop__more" @click="goMessages">{{ t('layout.noticeViewAll') }}</div>
           </template>
         </div>
       </el-popover>
@@ -107,11 +120,11 @@
           <el-dropdown-menu>
             <el-dropdown-item @click="handleProfile">
               <el-icon><UserFilled /></el-icon>
-              个人中心
+              {{ t('layout.profile') }}
             </el-dropdown-item>
             <el-dropdown-item divided @click="handleLogout">
               <el-icon><SwitchButton /></el-icon>
-              退出登录
+              {{ t('layout.logout') }}
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -123,6 +136,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { useAppStore } from '@/stores/app'
@@ -132,15 +146,38 @@ import type { NoticeMessage } from '@/api/notice'
 import Breadcrumb from '@/components/Breadcrumb/index.vue'
 import Hamburger from '@/components/Hamburger/index.vue'
 import { setThemeMode, themeMode, type ThemeMode } from '@/composables/useTheme'
-import { ArrowDown, Bell, Check, Monitor, Moon, Sunny, SwitchButton, UserFilled } from '@/icons'
+import { useLocale } from '@/composables/useLocale'
+import {
+  ArrowDown,
+  Bell,
+  Check,
+  Monitor,
+  Moon,
+  Sunny,
+  SwitchButton,
+  Translate,
+  UserFilled,
+} from '@/icons'
+import type { Locale } from '@/i18n'
 
-const THEME_LABELS: Record<ThemeMode, string> = {
-  light: '浅色',
-  dark: '深色',
-  auto: '跟随系统',
+// 组件内用 useI18n 的 t（绑定当前 locale，切换语言时模板会自动重渲染），
+// 不用 @/i18n 的全局 t（那个不参与响应式追踪）。
+const { t } = useI18n()
+
+// ── 语言切换 ────────────────────────────────────────────────
+const { locale, options: localeOptions, change: changeLocale } = useLocale()
+
+function handleLocaleCommand(next: unknown) {
+  changeLocale(next as Locale)
 }
 
-const currentThemeLabel = computed(() => THEME_LABELS[themeMode.value])
+const THEME_LABEL_KEYS: Record<ThemeMode, string> = {
+  light: 'layout.themeLight',
+  dark: 'layout.themeDark',
+  auto: 'layout.themeAuto',
+}
+
+const currentThemeLabel = computed(() => t(THEME_LABEL_KEYS[themeMode.value]))
 
 function handleThemeCommand(mode: ThemeMode) {
   setThemeMode(mode)
@@ -251,9 +288,9 @@ function handleProfile() {
 
 async function handleLogout() {
   try {
-    await ElMessageBox.confirm('确认退出登录吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('layout.logoutConfirm'), t('common.tip'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
     })
     await userStore.logout()

@@ -5,7 +5,7 @@
     <span
       class="version verlink"
       :class="{ 'no-cursor': !canGoUpdate }"
-      :title="canGoUpdate ? '系统设置 → 系统更新' : ''"
+      :title="canGoUpdate ? t('layout.goUpdateTip') : ''"
       @click="goUpdate"
     >
       v{{ APP_VERSION }}
@@ -15,7 +15,7 @@
       <span
         class="web-version verlink"
         :class="{ 'no-cursor': !canGoUpdate }"
-        :title="canGoUpdate ? '系统设置 → 系统更新' : ''"
+        :title="canGoUpdate ? t('layout.goUpdateTip') : ''"
         @click="goUpdate"
       >
         Web v{{ WEB_VERSION }}
@@ -28,8 +28,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { getUpdateStatus } from '@/api/systemUpdate'
+
+const { t } = useI18n()
 
 // zap 版本：优先展示**运行时**版本（zapd 实际运行的二进制版本），
 // 取不到时回退到构建时注入的 VITE_APP_VERSION（根 Cargo.toml [workspace.package]）。

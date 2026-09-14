@@ -3,24 +3,26 @@
     <el-card shadow="hover">
       <template #header>
         <div class="card-header">
-          <span>硬盘使用情况</span>
+          <span>{{ t('statusDisk.title') }}</span>
           <el-button size="small" :icon="Refresh" circle @click="loadDisks" />
         </div>
       </template>
       <el-table :data="disks" v-loading="loading" border stripe>
-        <el-table-column prop="name" label="设备" width="180" />
-        <el-table-column prop="file_system" label="文件系统" width="120" />
-        <el-table-column prop="mount_point" label="挂载点" width="180" />
-        <el-table-column label="容量" width="120">
+        <el-table-column prop="name" :label="t('statusDisk.device')" width="180" />
+        <el-table-column prop="file_system" :label="t('statusDisk.fileSystem')" width="120" />
+        <el-table-column prop="mount_point" :label="t('statusDisk.mountPoint')" width="180" />
+        <el-table-column :label="t('statusDisk.capacity')" width="120">
           <template #default="{ row }">{{ formatBytes(row.total_space) }}</template>
         </el-table-column>
-        <el-table-column label="已用" width="120">
-          <template #default="{ row }">{{ formatBytes(row.total_space - row.available_space) }}</template>
+        <el-table-column :label="t('statusDisk.used')" width="120">
+          <template #default="{ row }">{{
+            formatBytes(row.total_space - row.available_space)
+          }}</template>
         </el-table-column>
-        <el-table-column label="可用" width="120">
+        <el-table-column :label="t('statusDisk.available')" width="120">
           <template #default="{ row }">{{ formatBytes(row.available_space) }}</template>
         </el-table-column>
-        <el-table-column label="使用率" min-width="220">
+        <el-table-column :label="t('statusDisk.usage')" min-width="220">
           <template #default="{ row }">
             <el-progress
               :percentage="usagePct(row)"
@@ -37,10 +39,13 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Refresh } from '@/icons'
 import { getSystemInfo } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt'
 import { isArray } from '@/utils/validate'
+
+const { t } = useI18n()
 
 const loading = ref(false)
 const disks = ref<any[]>([])

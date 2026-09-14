@@ -3,20 +3,22 @@
     <!-- 页头 -->
     <div class="page-head">
       <div class="head-left">
-        <h2 class="page-title">数据库</h2>
+        <h2 class="page-title">{{ t('database.title') }}</h2>
         <div class="page-sub">
-          {{ dbList.length }} 个数据库 · 已用 {{ formatSize(totalSize) }}
+          {{ t('database.summary', { count: dbList.length, size: formatSize(totalSize) }) }}
           <template v-if="prefix">
-            · 仅显示 <code>{{ prefix }}*</code> 前缀的库
+            {{ t('database.prefixFilter', { prefix }) }}
           </template>
-          <template v-else>· 管理员视图（全部数据库）</template>
+          <template v-else>{{ t('database.adminView') }}</template>
         </div>
       </div>
       <div class="head-actions">
         <el-button :icon="Link" @click="openPhpMyAdmin">phpMyAdmin</el-button>
-        <el-button :icon="User" @click="openUsers">数据库用户</el-button>
-        <el-button :icon="Connection" @click="openRemote">远程访问</el-button>
-        <el-button :icon="Refresh" :loading="loadingList" @click="reload">刷新</el-button>
+        <el-button :icon="User" @click="openUsers">{{ t('database.btnUsers') }}</el-button>
+        <el-button :icon="Connection" @click="openRemote">{{ t('database.btnRemote') }}</el-button>
+        <el-button :icon="Refresh" :loading="loadingList" @click="reload">{{
+          t('common.refresh')
+        }}</el-button>
       </div>
     </div>
 
@@ -24,36 +26,51 @@
     <el-card shadow="never" class="block">
       <template #header>
         <div class="card-header">
-          <span class="card-title">数据库列表</span>
+          <span class="card-title">{{ t('database.listTitle') }}</span>
           <div class="header-right">
             <el-checkbox
               v-model="lightMode"
               :disabled="loadingList"
-              title="不统计大小时列表返回更快，适合库多/表大的场景"
+              :title="t('database.fastModeTip')"
               @change="loadList"
             >
-              快速模式（跳过容量统计）
+              {{ t('database.fastMode') }}
             </el-checkbox>
-            <el-button type="primary" :icon="Plus" @click="scrollToCreate">新建数据库</el-button>
+            <el-button type="primary" :icon="Plus" @click="scrollToCreate">{{
+              t('database.newDb')
+            }}</el-button>
           </div>
         </div>
       </template>
 
-      <el-table v-loading="loadingList" :data="dbList" border size="small" empty-text="暂无数据库">
-        <el-table-column prop="name" label="数据库名" min-width="220" show-overflow-tooltip>
+      <el-table
+        v-loading="loadingList"
+        :data="dbList"
+        border
+        size="small"
+        :empty-text="t('database.emptyDb')"
+      >
+        <el-table-column
+          prop="name"
+          :label="t('database.colDbName')"
+          min-width="220"
+          show-overflow-tooltip
+        >
           <template #default="{ row }">
             <span class="db-name">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="charset" label="字符集" width="110" />
-        <el-table-column label="大小" width="110" align="right">
+        <el-table-column prop="charset" :label="t('database.colCharset')" width="110" />
+        <el-table-column :label="t('database.colSize')" width="110" align="right">
           <template #default="{ row }">{{ formatSize(row.size) }}</template>
         </el-table-column>
-        <el-table-column prop="users" label="用户数" width="90" align="center" />
-        <el-table-column prop="tables" label="表数量" width="90" align="center" />
-        <el-table-column label="操作" width="90" fixed="right" align="center">
+        <el-table-column prop="users" :label="t('database.colUsers')" width="90" align="center" />
+        <el-table-column prop="tables" :label="t('database.colTables')" width="90" align="center" />
+        <el-table-column :label="t('common.operation')" width="90" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button link type="danger" @click="handleDrop(row)">删除</el-button>
+            <el-button link type="danger" @click="handleDrop(row)">{{
+              t('common.delete')
+            }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -63,10 +80,10 @@
     <el-card ref="createCardRef" shadow="never" class="block">
       <template #header>
         <div class="card-header">
-          <span class="card-title">新建数据库</span>
+          <span class="card-title">{{ t('database.newDb') }}</span>
           <span class="card-hint">
-            默认同时创建「同名数据库用户」并授予该库全部权限
-            <template v-if="prefix">（库名与用户名均以 <code>{{ prefix }}</code> 开头）</template>
+            {{ t('database.createHint1') }}
+            <template v-if="prefix">{{ t('database.createHint2', { prefix }) }}</template>
           </span>
         </div>
       </template>
@@ -79,30 +96,37 @@
         class="create-form"
         @submit.prevent
       >
-        <el-form-item label="数据库名" prop="name">
+        <el-form-item :label="t('database.colDbName')" prop="name">
           <div class="field-block">
-            <el-input v-model="createForm.name" maxlength="64" placeholder="my_app" style="max-width: 420px">
+            <el-input
+              v-model="createForm.name"
+              maxlength="64"
+              placeholder="my_app"
+              style="max-width: 420px"
+            >
               <template v-if="prefix" #prepend>{{ prefix }}</template>
             </el-input>
-            <div class="field-tip">完整库名：<code>{{ fullDbName || '-' }}</code></div>
+            <div class="field-tip">
+              {{ t('database.fullDbNameLabel') }}<code>{{ fullDbName || '-' }}</code>
+            </div>
           </div>
         </el-form-item>
 
-        <el-form-item label="字符集">
+        <el-form-item :label="t('database.charset')">
           <el-select v-model="createForm.charset" style="width: 200px">
-            <el-option label="utf8mb4（推荐）" value="utf8mb4" />
+            <el-option :label="t('database.charsetRecommend')" value="utf8mb4" />
             <el-option label="utf8mb3" value="utf8mb3" />
             <el-option label="latin1" value="latin1" />
           </el-select>
         </el-form-item>
 
-        <el-form-item label="高级模式">
+        <el-form-item :label="t('database.advancedMode')">
           <el-switch v-model="advanced" />
-          <span class="field-tip inline">自定义用户名、密码与允许连接的主机（默认同名 + 随机密码）</span>
+          <span class="field-tip inline">{{ t('database.advancedHint') }}</span>
         </el-form-item>
 
         <template v-if="advanced">
-          <el-form-item label="数据库用户">
+          <el-form-item :label="t('database.dbUser')">
             <div class="field-block">
               <el-input
                 v-model="createForm.user"
@@ -112,28 +136,30 @@
               >
                 <template v-if="prefix" #prepend>{{ prefix }}</template>
               </el-input>
-              <div class="field-tip">完整用户名：<code>{{ fullUserName }}</code></div>
+              <div class="field-tip">
+                {{ t('database.fullUserNameLabel') }}<code>{{ fullUserName }}</code>
+              </div>
             </div>
           </el-form-item>
-          <el-form-item label="密码">
+          <el-form-item :label="t('database.password')">
             <el-input
               v-model="createForm.password"
               type="password"
               show-password
-              placeholder="留空则自动生成 16 位随机密码"
+              :placeholder="t('database.passwordPlaceholder')"
               style="max-width: 420px"
             />
           </el-form-item>
-          <el-form-item label="允许主机">
+          <el-form-item :label="t('database.allowHost')">
             <el-input v-model="createForm.host" placeholder="localhost" style="max-width: 220px" />
           </el-form-item>
         </template>
 
         <el-form-item>
           <el-button type="primary" :icon="Plus" :loading="creating" @click="handleCreate">
-            创建数据库
+            {{ t('database.createDb') }}
           </el-button>
-          <el-button @click="resetCreate">重置</el-button>
+          <el-button @click="resetCreate">{{ t('common.reset') }}</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -142,85 +168,93 @@
     <el-card shadow="never" class="block">
       <template #header>
         <div class="card-header">
-          <span class="card-title">服务器信息</span>
+          <span class="card-title">{{ t('database.serverInfo') }}</span>
           <el-tag :type="status?.ok ? 'success' : 'danger'" size="small">
-            {{ status?.ok ? '运行中' : '不可用' }}
+            {{ status?.ok ? t('database.running') : t('database.unavailable') }}
           </el-tag>
         </div>
       </template>
       <el-descriptions :column="2" border size="small">
-        <el-descriptions-item label="版本">{{ status?.version || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="连接地址">
+        <el-descriptions-item :label="t('database.version')">{{
+          status?.version || '-'
+        }}</el-descriptions-item>
+        <el-descriptions-item :label="t('database.connAddr')">
           <code>{{ status?.addr || '-' }}</code>
-          <span class="muted">（管理账号 {{ status?.user || '-' }}）</span>
+          <span class="muted">{{ t('database.adminAccount', { user: status?.user || '-' }) }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="Socket">{{ status?.socket || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="可见范围">
-          <el-tag v-if="!prefix" size="small" type="warning">全部（管理员）</el-tag>
-          <el-tag v-else size="small">仅 {{ prefix }}* 前缀</el-tag>
+        <el-descriptions-item :label="t('database.visibleScope')">
+          <el-tag v-if="!prefix" size="small" type="warning">{{ t('database.scopeAll') }}</el-tag>
+          <el-tag v-else size="small">{{ t('database.scopePrefix', { prefix }) }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="SQL 模式" :span="2">
+        <el-descriptions-item :label="t('database.sqlMode')" :span="2">
           {{ status?.sql_mode || '-' }}
         </el-descriptions-item>
       </el-descriptions>
     </el-card>
 
     <!-- 创建成功：凭据只展示一次 -->
-    <el-dialog v-model="credVisible" title="数据库创建成功" width="560px">
+    <el-dialog v-model="credVisible" :title="t('database.credCreated')" width="560px">
       <el-alert
         type="warning"
         :closable="false"
         show-icon
-        title="密码只显示这一次，请立即保存"
+        :title="t('database.credAlert')"
         style="margin-bottom: 12px"
       />
       <el-descriptions :column="1" border size="small">
-        <el-descriptions-item label="数据库名">{{ cred.name }}</el-descriptions-item>
-        <el-descriptions-item label="用户名">{{ cred.user }}@{{ cred.host }}</el-descriptions-item>
-        <el-descriptions-item label="密码"><code>{{ cred.password }}</code></el-descriptions-item>
+        <el-descriptions-item :label="t('database.colDbName')">{{
+          cred.name
+        }}</el-descriptions-item>
+        <el-descriptions-item :label="t('database.userName')"
+          >{{ cred.user }}@{{ cred.host }}</el-descriptions-item
+        >
+        <el-descriptions-item :label="t('database.password')"
+          ><code>{{ cred.password }}</code></el-descriptions-item
+        >
       </el-descriptions>
       <template #footer>
-        <el-button @click="copyCred">复制连接信息</el-button>
-        <el-button type="primary" @click="credVisible = false">完成</el-button>
+        <el-button @click="copyCred">{{ t('database.copyCred') }}</el-button>
+        <el-button type="primary" @click="credVisible = false">{{ t('database.done') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 数据库用户 -->
-    <el-drawer v-model="usersVisible" title="数据库用户" size="60%">
+    <el-drawer v-model="usersVisible" :title="t('database.btnUsers')" size="60%">
       <el-alert
         type="info"
         :closable="false"
         show-icon
-        title="这里管理 MySQL / MariaDB 的数据库账号；勾选「授权数据库」可同时授予该库的全部权限"
+        :title="t('database.usersAlert')"
         style="margin-bottom: 12px"
       />
 
       <el-form :model="userForm" inline class="remote-form" @submit.prevent>
-        <el-form-item label="用户名">
+        <el-form-item :label="t('database.userName')">
           <el-input
             v-model="userForm.user"
             :placeholder="userNamePlaceholder"
             style="width: 180px"
           />
         </el-form-item>
-        <el-form-item label="密码">
+        <el-form-item :label="t('database.password')">
           <el-input
             v-model="userForm.password"
             type="password"
             show-password
-            placeholder="至少 8 位"
+            :placeholder="t('database.pwdMin')"
             style="width: 180px"
           />
         </el-form-item>
-        <el-form-item label="允许主机">
+        <el-form-item :label="t('database.allowHost')">
           <el-input v-model="userForm.host" placeholder="localhost" style="width: 140px" />
         </el-form-item>
-        <el-form-item label="授权数据库">
+        <el-form-item :label="t('database.grantDb')">
           <el-select
             v-model="userForm.schema"
             clearable
             filterable
-            placeholder="可不选"
+            :placeholder="t('database.notSelected')"
             style="width: 180px"
           >
             <el-option v-for="d in dbList" :key="d.name" :label="d.name" :value="d.name" />
@@ -228,83 +262,112 @@
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :icon="Plus" :loading="creatingUser" @click="handleCreateUser">
-            创建用户
+            {{ t('database.createUser') }}
           </el-button>
         </el-form-item>
       </el-form>
 
       <el-table v-loading="loadingUsers" :data="userList" border size="small">
-        <el-table-column prop="user" label="用户" min-width="140">
+        <el-table-column prop="user" :label="t('database.colUser')" min-width="140">
           <template #default="{ row }">
             <span class="db-name">{{ row.user }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="host" label="允许主机" width="160" />
-        <el-table-column prop="grants" label="授权" min-width="260" show-overflow-tooltip />
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column prop="host" :label="t('database.allowHost')" width="160" />
+        <el-table-column
+          prop="grants"
+          :label="t('database.colGrant')"
+          min-width="260"
+          show-overflow-tooltip
+        />
+        <el-table-column :label="t('common.operation')" width="90" fixed="right">
           <template #default="{ row }">
-            <el-button link type="danger" @click="handleDropUser(row)">删除</el-button>
+            <el-button link type="danger" @click="handleDropUser(row)">{{
+              t('common.delete')
+            }}</el-button>
           </template>
         </el-table-column>
-        <template #empty>暂无数据库用户</template>
+        <template #empty>{{ t('database.emptyUsers') }}</template>
       </el-table>
     </el-drawer>
 
     <!-- 远程访问 -->
-    <el-drawer v-model="remoteVisible" title="远程数据库访问" size="65%">
+    <el-drawer v-model="remoteVisible" :title="t('database.remoteTitle')" size="65%">
       <el-alert
         type="warning"
         :closable="false"
         show-icon
-        title="允许远程主机连接存在风险，建议只放行明确的 IP，不要轻易使用 %"
+        :title="t('database.remoteAlert')"
         style="margin-bottom: 12px"
       />
 
       <el-form :model="remoteForm" inline class="remote-form" @submit.prevent>
-        <el-form-item label="用户">
+        <el-form-item :label="t('database.user')">
           <el-select
             v-model="remoteForm.user"
             filterable
             allow-create
             default-first-option
-            placeholder="选择或输入"
+            :placeholder="t('database.selectOrInput')"
             style="width: 180px"
           >
-            <el-option v-for="u in userList" :key="`${u.user}@${u.host}`" :label="u.user" :value="u.user" />
+            <el-option
+              v-for="u in userList"
+              :key="`${u.user}@${u.host}`"
+              :label="u.user"
+              :value="u.user"
+            />
           </el-select>
         </el-form-item>
-        <el-form-item label="数据库">
-          <el-select v-model="remoteForm.schema" placeholder="选择库" style="width: 160px">
+        <el-form-item :label="t('database.db')">
+          <el-select
+            v-model="remoteForm.schema"
+            :placeholder="t('database.selectDb')"
+            style="width: 160px"
+          >
             <el-option v-for="d in dbList" :key="d.name" :label="d.name" :value="d.name" />
           </el-select>
         </el-form-item>
-        <el-form-item label="远程主机">
-          <el-input v-model="remoteForm.host" placeholder="192.168.1.10 或 %" style="width: 160px" />
+        <el-form-item :label="t('database.remoteHost')">
+          <el-input
+            v-model="remoteForm.host"
+            :placeholder="t('database.remoteHostPlaceholder')"
+            style="width: 160px"
+          />
         </el-form-item>
-        <el-form-item label="密码">
+        <el-form-item :label="t('database.password')">
           <el-input
             v-model="remoteForm.password"
             type="password"
             show-password
-            placeholder="用户不存在时必填"
+            :placeholder="t('database.pwdWhenNewUser')"
             style="width: 160px"
           />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="granting" @click="handleGrant">授权</el-button>
+          <el-button type="primary" :loading="granting" @click="handleGrant">{{
+            t('database.grant')
+          }}</el-button>
         </el-form-item>
       </el-form>
 
       <el-table v-loading="loadingRemote" :data="remoteList" border size="small">
-        <el-table-column prop="user" label="用户" min-width="140" />
-        <el-table-column prop="host" label="允许主机" width="160" />
-        <el-table-column prop="grants" label="授权" min-width="200" show-overflow-tooltip />
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column prop="user" :label="t('database.user')" min-width="140" />
+        <el-table-column prop="host" :label="t('database.allowHost')" width="160" />
+        <el-table-column
+          prop="grants"
+          :label="t('database.colGrant')"
+          min-width="200"
+          show-overflow-tooltip
+        />
+        <el-table-column :label="t('common.operation')" width="90" fixed="right">
           <template #default="{ row }">
-            <el-button link type="danger" @click="handleRevoke(row)">撤销</el-button>
+            <el-button link type="danger" @click="handleRevoke(row)">{{
+              t('database.revoke')
+            }}</el-button>
           </template>
         </el-table-column>
-        <template #empty>暂无远程授权</template>
+        <template #empty>{{ t('database.emptyRemote') }}</template>
       </el-table>
     </el-drawer>
   </div>
@@ -312,10 +375,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Connection, Link, Plus, Refresh, User } from '@/icons'
 import { databaseApi, type DbItem, type DbStatus, type DbUser } from '@/api/database'
+
+const { t } = useI18n()
 
 const status = ref<DbStatus | null>(null)
 const dbList = ref<DbItem[]>([])
@@ -349,7 +415,7 @@ async function loadStatus() {
   try {
     status.value = await databaseApi.status()
   } catch (e: any) {
-    ElMessage.error(e?.message || '读取数据库状态失败')
+    ElMessage.error(e?.message || t('database.statusFailed'))
   } finally {
     loadingStatus.value = false
   }
@@ -362,7 +428,7 @@ async function loadList() {
     dbList.value = res.list || []
     prefix.value = res.prefix ?? null
   } catch (e: any) {
-    ElMessage.error(e?.message || '读取数据库列表失败')
+    ElMessage.error(e?.message || t('database.listFailed'))
   } finally {
     loadingList.value = false
   }
@@ -384,7 +450,7 @@ async function loadRemote() {
   try {
     remoteList.value = (await databaseApi.remoteList()).list || []
   } catch (e: any) {
-    ElMessage.error(e?.message || '读取远程授权失败')
+    ElMessage.error(e?.message || t('database.remoteFailed'))
   } finally {
     loadingRemote.value = false
   }
@@ -421,25 +487,32 @@ const creating = ref(false)
 /** 高级模式：自定义用户名 / 密码 / 允许主机 */
 const advanced = ref(false)
 
-const createForm = reactive({ name: '', charset: 'utf8mb4', user: '', password: '', host: 'localhost' })
+const createForm = reactive({
+  name: '',
+  charset: 'utf8mb4',
+  user: '',
+  password: '',
+  host: 'localhost',
+})
 
-const nameRule = {
+const nameRule = computed(() => ({
   pattern: /^[A-Za-z0-9_-]{1,64}$/,
-  message: '只能包含字母、数字、下划线和连字符，最长 64 位',
+  message: t('database.nameRule'),
   trigger: 'blur' as const,
-}
-const createRules: FormRules = {
-  name: [{ required: true, message: '请输入数据库名', trigger: 'blur' }, nameRule],
-}
+}))
+const createRules = computed<FormRules>(() => ({
+  name: [{ required: true, message: t('database.nameRequired'), trigger: 'blur' }, nameRule.value],
+}))
 
 /** 数据库名（含前缀） */
 const fullDbName = computed(() => `${prefix.value || ''}${createForm.name.trim()}`)
 /** 数据库用户名（含前缀）：未自定义时与库名同名 */
 const fullUserName = computed(() => {
-  const base = advanced.value && createForm.user.trim() ? createForm.user.trim() : createForm.name.trim()
+  const base =
+    advanced.value && createForm.user.trim() ? createForm.user.trim() : createForm.name.trim()
   return `${prefix.value || ''}${base}`
 })
-const userPlaceholder = computed(() => createForm.name.trim() || '与库名同名')
+const userPlaceholder = computed(() => createForm.name.trim() || t('database.userSameAsDb'))
 
 function resetCreate() {
   createForm.name = ''
@@ -473,23 +546,28 @@ async function handleCreate() {
     cred.host = res.host || 'localhost'
     cred.password = res.password || ''
     credVisible.value = true
-    ElMessage.success(`数据库 ${res.name} 创建成功`)
+    ElMessage.success(t('database.created', { name: res.name }))
     resetCreate()
     await Promise.all([loadList(), loadUsers()])
   } catch (e: any) {
-    ElMessage.error(e?.message || '创建失败')
+    ElMessage.error(e?.message || t('database.createFailed'))
   } finally {
     creating.value = false
   }
 }
 
 async function copyCred() {
-  const text = `数据库：${cred.name}\n用户：${cred.user}@${cred.host}\n密码：${cred.password}`
+  const text = t('database.credText', {
+    name: cred.name,
+    user: cred.user,
+    host: cred.host,
+    password: cred.password,
+  })
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制连接信息')
+    ElMessage.success(t('database.copiedCred'))
   } catch {
-    ElMessage.warning('复制失败，请手动选择复制')
+    ElMessage.warning(t('database.copyFailedManual'))
   }
 }
 
@@ -497,8 +575,8 @@ async function copyCred() {
 async function handleDrop(row: DbItem) {
   try {
     await ElMessageBox.confirm(
-      `删除数据库 ${row.name} 将同时删除其中的所有数据，且不可恢复。`,
-      '确认删除',
+      t('database.dropConfirm', { name: row.name }),
+      t('database.confirmDelete'),
       { type: 'warning' },
     )
   } catch {
@@ -506,10 +584,10 @@ async function handleDrop(row: DbItem) {
   }
   try {
     await databaseApi.drop({ name: row.name })
-    ElMessage.success('已删除')
+    ElMessage.success(t('database.deleted'))
     await Promise.all([loadList(), loadUsers()])
   } catch (e: any) {
-    ElMessage.error(e?.message || '删除失败')
+    ElMessage.error(e?.message || t('database.deleteFailed'))
   }
 }
 
@@ -518,7 +596,7 @@ const granting = ref(false)
 
 async function handleGrant() {
   if (!remoteForm.user.trim() || !remoteForm.schema || !remoteForm.host.trim()) {
-    ElMessage.warning('请填写用户、数据库与远程主机')
+    ElMessage.warning(t('database.grantFillAll'))
     return
   }
   granting.value = true
@@ -529,11 +607,11 @@ async function handleGrant() {
       host: remoteForm.host.trim(),
       password: remoteForm.password || undefined,
     })
-    ElMessage.success('授权成功')
+    ElMessage.success(t('database.grantOk'))
     remoteForm.password = ''
     loadRemote()
   } catch (e: any) {
-    ElMessage.error(e?.message || '授权失败')
+    ElMessage.error(e?.message || t('database.grantFailed'))
   } finally {
     granting.value = false
   }
@@ -541,25 +619,29 @@ async function handleGrant() {
 
 async function handleRevoke(row: DbUser) {
   try {
-    await ElMessageBox.confirm(`撤销 ${row.user}@${row.host} 的远程访问？`, '确认撤销', {
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      t('database.revokeConfirm', { user: row.user, host: row.host }),
+      t('database.confirmRevoke'),
+      { type: 'warning' },
+    )
   } catch {
     return
   }
   try {
     await databaseApi.remoteRevoke({ user: row.user, host: row.host })
-    ElMessage.success('已撤销')
+    ElMessage.success(t('database.revoked'))
     loadRemote()
   } catch (e: any) {
-    ElMessage.error(e?.message || '撤销失败')
+    ElMessage.error(e?.message || t('database.revokeFailed'))
   }
 }
 
 // ── 数据库用户 ─────────────────────────────────────────────
 const creatingUser = ref(false)
 const userForm = reactive({ user: '', password: '', host: 'localhost', schema: '' })
-const userNamePlaceholder = computed(() => (prefix.value ? `以 ${prefix.value} 开头` : '如 app_user'))
+const userNamePlaceholder = computed(() =>
+  prefix.value ? t('database.userPrefixHint', { prefix: prefix.value }) : t('database.userExample'),
+)
 
 function openUsers() {
   usersVisible.value = true
@@ -569,11 +651,11 @@ function openUsers() {
 
 async function handleCreateUser() {
   if (!userForm.user.trim()) {
-    ElMessage.warning('请输入用户名')
+    ElMessage.warning(t('database.userNameRequired'))
     return
   }
   if (userForm.password.length < 8) {
-    ElMessage.warning('密码长度不能少于 8 位')
+    ElMessage.warning(t('database.pwdTooShort'))
     return
   }
   creatingUser.value = true
@@ -585,12 +667,12 @@ async function handleCreateUser() {
       host: userForm.host.trim() || 'localhost',
       schema: userForm.schema || undefined,
     })
-    ElMessage.success(`用户 ${prefix.value || ''}${base} 创建成功`)
+    ElMessage.success(t('database.userCreated', { user: `${prefix.value || ''}${base}` }))
     userForm.user = ''
     userForm.password = ''
     await loadUsers()
   } catch (e: any) {
-    ElMessage.error(e?.message || '创建用户失败')
+    ElMessage.error(e?.message || t('database.createUserFailed'))
   } finally {
     creatingUser.value = false
   }
@@ -599,8 +681,8 @@ async function handleCreateUser() {
 async function handleDropUser(row: DbUser) {
   try {
     await ElMessageBox.confirm(
-      `删除用户 ${row.user}@${row.host}？该账号的授权将一并失效，且不可恢复。`,
-      '确认删除',
+      t('database.dropUserConfirm', { user: row.user, host: row.host }),
+      t('database.confirmDelete'),
       { type: 'warning' },
     )
   } catch {
@@ -608,10 +690,10 @@ async function handleDropUser(row: DbUser) {
   }
   try {
     await databaseApi.dropUser({ user: row.user, host: row.host })
-    ElMessage.success('已删除')
+    ElMessage.success(t('database.deleted'))
     await loadUsers()
   } catch (e: any) {
-    ElMessage.error(e?.message || '删除失败')
+    ElMessage.error(e?.message || t('database.deleteFailed'))
   }
 }
 </script>

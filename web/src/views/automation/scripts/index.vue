@@ -3,9 +3,9 @@
     <!-- 左侧脚本树 -->
     <div class="scripts-sidebar">
       <div class="sidebar-header">
-        <span class="sidebar-title">自定义脚本</span>
+        <span class="sidebar-title">{{ t('automationScripts.title') }}</span>
         <el-button type="primary" size="small" :icon="Plus" @click="handleNewScript">
-          新建
+          {{ t('automationScripts.newScript') }}
         </el-button>
       </div>
       <el-scrollbar class="sidebar-tree">
@@ -29,20 +29,30 @@
       </el-scrollbar>
       <div class="sidebar-tip">
         <el-icon><InfoFilled /></el-icon>
-        <span>脚本位于 custom/scripts/（仅管理员可见），更新 Git 源时不会被覆盖，可被「计划任务」定时执行</span>
+        <span>{{ t('automationScripts.sidebarTip') }}</span>
       </div>
     </div>
 
     <!-- 右侧编辑器 -->
     <div class="editor-main">
       <div class="editor-toolbar">
-        <span class="editor-path">{{ currentPath || '请选择或新建脚本' }}</span>
+        <span class="editor-path">{{ currentPath || t('automationScripts.selectOrNew') }}</span>
         <div class="toolbar-actions">
-          <el-button size="small" type="primary" :disabled="!dirty || !currentPath" @click="handleSave">
-            保存
+          <el-button
+            size="small"
+            type="primary"
+            :disabled="!dirty || !currentPath"
+            @click="handleSave"
+          >
+            {{ t('automationScripts.save') }}
           </el-button>
-          <el-button size="small" type="success" :disabled="!currentPath || running" @click="handleRun">
-            运行
+          <el-button
+            size="small"
+            type="success"
+            :disabled="!currentPath || running"
+            @click="handleRun"
+          >
+            {{ t('automationScripts.run') }}
           </el-button>
         </div>
       </div>
@@ -51,7 +61,11 @@
         class="editor-area"
         :lang="editorLang"
         :readonly="!currentPath"
-        :placeholder="currentPath ? '在此编辑脚本…' : '选择左侧脚本进行编辑，或新建脚本'"
+        :placeholder="
+          currentPath
+            ? t('automationScripts.placeholderEdit')
+            : t('automationScripts.placeholderSelect')
+        "
       />
     </div>
 
@@ -62,19 +76,16 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Folder, Document, InfoFilled } from '@/icons'
 import { useUserStore } from '@/stores/user'
-import {
-  getScriptsTree,
-  readScript,
-  writeScript,
-  runScript,
-} from '@/api/appstore'
+import { getScriptsTree, readScript, writeScript, runScript } from '@/api/appstore'
 import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { langFromPath } from '@/utils/editorLang'
 
+const { t } = useI18n()
 const userStore = useUserStore()
 
 interface TreeNode {
@@ -116,7 +127,13 @@ function handleNodeClick(data: TreeNode) {
 async function openScript(path: string) {
   if (dirty.value && currentPath.value !== path) {
     try {
-      await ElMessageBox.confirm('当前脚本有未保存的修改，是否放弃？', '提示', { type: 'warning' })
+      await ElMessageBox.confirm(
+        t('automationScripts.unsavedSwitch'),
+        t('automationScripts.notice'),
+        {
+          type: 'warning',
+        },
+      )
     } catch {
       return
     }
@@ -127,7 +144,7 @@ async function openScript(path: string) {
     content.value = resp.data?.content || ''
     originalContent.value = content.value
   } catch (e: any) {
-    ElMessage.error(e.message || '读取脚本失败')
+    ElMessage.error(e.message || t('automationScripts.readFailed'))
   }
 }
 
@@ -135,26 +152,30 @@ async function handleNewScript() {
   const username = userStore.name || 'admin'
   const defaultPath = `scripts/${username}/new-script.sh`
   try {
-    const { value } = await ElMessageBox.prompt('请输入脚本路径（相对 custom/）', '新建脚本', {
-      inputValue: defaultPath,
-      inputPlaceholder: '例如 scripts/admin/backup.sh',
-      inputValidator: (v: string) => {
-        if (!v.trim()) return '路径不能为空'
-        if (!v.endsWith('.sh')) return '脚本必须以 .sh 结尾'
-        if (v.includes('..') || v.startsWith('/')) return '路径不合法'
-        return true
+    const { value } = await ElMessageBox.prompt(
+      t('automationScripts.pathPrompt'),
+      t('automationScripts.newTitle'),
+      {
+        inputValue: defaultPath,
+        inputPlaceholder: t('automationScripts.pathPlaceholder'),
+        inputValidator: (v: string) => {
+          if (!v.trim()) return t('automationScripts.pathEmpty')
+          if (!v.endsWith('.sh')) return t('automationScripts.mustBeSh')
+          if (v.includes('..') || v.startsWith('/')) return t('automationScripts.pathInvalid')
+          return true
+        },
       },
-    })
+    )
     const path = value.trim()
-    const shebang = '#!/bin/bash\n\n# 在此编写你的脚本\nset -e\n\necho "Hello ZAP AppStore"\n'
+    const shebang = t('automationScripts.newScriptTemplate')
     const resp = await writeScript({ path, content: shebang })
-    ElMessage.success('脚本已创建')
+    ElMessage.success(t('automationScripts.created'))
     currentPath.value = path
     content.value = shebang
     originalContent.value = shebang
     await loadTree()
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '创建失败')
+    if (e !== 'cancel') ElMessage.error(e.message || t('automationScripts.createFailed'))
   }
 }
 
@@ -163,9 +184,9 @@ async function handleSave() {
   try {
     await writeScript({ path: currentPath.value, content: content.value })
     originalContent.value = content.value
-    ElMessage.success('保存成功')
+    ElMessage.success(t('automationScripts.saved'))
   } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
+    ElMessage.error(e.message || t('automationScripts.saveFailed'))
   }
 }
 
@@ -177,18 +198,18 @@ async function handleRun() {
       await writeScript({ path: currentPath.value, content: content.value })
       originalContent.value = content.value
     } catch (e: any) {
-      ElMessage.error(e.message || '保存失败，无法运行')
+      ElMessage.error(e.message || t('automationScripts.saveFailedRun'))
       return
     }
   }
   running.value = true
   try {
     const resp = await runScript({ path: currentPath.value })
-    ElMessage.success('脚本已启动')
-    const name = currentPath.value.split('/').pop() || '脚本'
-    logDrawerRef.value?.openDrawer(resp.data.run_id, `运行 ${name}`)
+    ElMessage.success(t('automationScripts.started'))
+    const name = currentPath.value.split('/').pop() || t('automationScripts.fallbackName')
+    logDrawerRef.value?.openDrawer(resp.data.run_id, t('automationScripts.runLogTitle', { name }))
   } catch (e: any) {
-    ElMessage.error(e.message || '运行失败')
+    ElMessage.error(e.message || t('automationScripts.runFailed'))
   } finally {
     running.value = false
   }

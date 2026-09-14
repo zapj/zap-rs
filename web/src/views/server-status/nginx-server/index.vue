@@ -4,11 +4,11 @@
     <el-result
       v-if="!installed"
       icon="warning"
-      title="Nginx 未安装"
-      sub-title="请在应用商店安装 Nginx 后，再来这里查看运行状态"
+      :title="t('statusNginx.notInstalled')"
+      :sub-title="t('statusNginx.installTip')"
     >
       <template #extra>
-        <el-button type="primary" @click="goAppstore">前往应用商店</el-button>
+        <el-button type="primary" @click="goAppstore">{{ t('statusNginx.goAppstore') }}</el-button>
       </template>
     </el-result>
 
@@ -18,9 +18,11 @@
         <div class="hero-left">
           <span class="hero-dot"></span>
           <div>
-            <div class="hero-title">{{ running ? 'Nginx 正在运行' : 'Nginx 未运行' }}</div>
+            <div class="hero-title">
+              {{ running ? t('statusNginx.titleRunning') : t('statusNginx.titleStopped') }}
+            </div>
             <div class="hero-sub">
-              {{ status.systemd ? 'systemd: nginx.service' : '二进制守护进程' }}
+              {{ status.systemd ? t('statusNginx.systemdUnit') : t('statusNginx.binDaemon') }}
               <template v-if="status.pid"> · PID {{ status.pid }}</template>
               <template v-if="versionText && versionText !== '-'"> · {{ versionText }}</template>
             </div>
@@ -29,7 +31,7 @@
         <div class="hero-right">
           <span class="updated">
             <el-icon><Timer /></el-icon>
-            上次更新 {{ lastUpdated }}
+            {{ t('statusNginx.updatedAt', { time: lastUpdated }) }}
           </span>
           <el-button size="small" :loading="loading" circle @click="load">
             <el-icon><Refresh /></el-icon>
@@ -41,27 +43,37 @@
       <el-row :gutter="16" class="mt-3">
         <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="never" class="info-card">
-            <div class="info-label"><el-icon><Odometer /></el-icon>运行状态</div>
+            <div class="info-label">
+              <el-icon><Odometer /></el-icon>{{ t('statusNginx.runState') }}
+            </div>
             <div class="info-value">
-              <el-tag :type="running ? 'success' : 'danger'">{{ running ? '运行中' : '未运行' }}</el-tag>
+              <el-tag :type="running ? 'success' : 'danger'">
+                {{ running ? t('statusNginx.stateRunning') : t('statusNginx.stateStopped') }}
+              </el-tag>
             </div>
           </el-card>
         </el-col>
         <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="never" class="info-card">
-            <div class="info-label"><el-icon><InfoFilled /></el-icon>版本</div>
+            <div class="info-label">
+              <el-icon><InfoFilled /></el-icon>{{ t('statusNginx.version') }}
+            </div>
             <div class="info-value mono">{{ versionText }}</div>
           </el-card>
         </el-col>
         <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="never" class="info-card">
-            <div class="info-label"><el-icon><Document /></el-icon>主配置</div>
+            <div class="info-label">
+              <el-icon><Document /></el-icon>{{ t('statusNginx.mainConf') }}
+            </div>
             <div class="info-value mono sm">{{ status.conf_file || '-' }}</div>
           </el-card>
         </el-col>
         <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="never" class="info-card">
-            <div class="info-label"><el-icon><Cpu /></el-icon>可执行文件</div>
+            <div class="info-label">
+              <el-icon><Cpu /></el-icon>{{ t('statusNginx.binary') }}
+            </div>
             <div class="info-value mono sm">{{ status.bin || '-' }}</div>
           </el-card>
         </el-col>
@@ -71,23 +83,44 @@
       <el-card shadow="never" class="mt-3">
         <template #header>
           <div class="card-header">
-            <span>服务控制</span>
+            <span>{{ t('statusNginx.ctrlTitle') }}</span>
           </div>
         </template>
         <div class="ctrl-row">
-          <el-button type="primary" :disabled="!!(!running || acting)" :loading="acting === 'reload'" @click="control('reload')">
-            重载配置
+          <el-button
+            type="primary"
+            :disabled="!!(!running || acting)"
+            :loading="acting === 'reload'"
+            @click="control('reload')"
+          >
+            {{ t('statusNginx.reload') }}
           </el-button>
-          <el-button type="warning" :disabled="!!(!running || acting)" :loading="acting === 'restart'" @click="control('restart')">
-            重启
+          <el-button
+            type="warning"
+            :disabled="!!(!running || acting)"
+            :loading="acting === 'restart'"
+            @click="control('restart')"
+          >
+            {{ t('statusNginx.restart') }}
           </el-button>
-          <el-button type="success" :disabled="!!(running || acting)" :loading="acting === 'start'" @click="control('start')">
-            启动
+          <el-button
+            type="success"
+            :disabled="!!(running || acting)"
+            :loading="acting === 'start'"
+            @click="control('start')"
+          >
+            {{ t('statusNginx.start') }}
           </el-button>
-          <el-button type="danger" plain :disabled="!!(!running || acting)" :loading="acting === 'stop'" @click="control('stop')">
-            停止
+          <el-button
+            type="danger"
+            plain
+            :disabled="!!(!running || acting)"
+            :loading="acting === 'stop'"
+            @click="control('stop')"
+          >
+            {{ t('statusNginx.stop') }}
           </el-button>
-          <span class="ctrl-tip">配置变更请前往「服务配置 → Nginx 配置」保存（保存时会自动校验并重载）。</span>
+          <span class="ctrl-tip">{{ t('statusNginx.ctrlTip') }}</span>
         </div>
       </el-card>
 
@@ -95,16 +128,16 @@
       <el-card shadow="never" class="mt-3">
         <template #header>
           <div class="card-header">
-            <span>性能监控</span>
-            <span class="header-tip">基于 Nginx 官方 stub_status 状态页 · 数据仅本机采集</span>
+            <span>{{ t('statusNginx.perfTitle') }}</span>
+            <span class="header-tip">{{ t('statusNginx.perfSub') }}</span>
           </div>
         </template>
 
         <!-- 启用开关 -->
         <div class="stub-head">
           <div>
-            <div class="stub-title">启用 Nginx 状态页（stub_status）</div>
-            <div class="stub-desc">提供请求统计、活动连接、进程分布等运行数据。状态页仅监听本机 127.0.0.1，不对公网暴露。</div>
+            <div class="stub-title">{{ t('statusNginx.stubTitle') }}</div>
+            <div class="stub-desc">{{ t('statusNginx.stubDesc') }}</div>
           </div>
           <el-switch v-model="stubEnabled" :loading="savingStub" @change="toggleStub" />
         </div>
@@ -113,24 +146,24 @@
           <!-- 性能指标 -->
           <div class="metric-grid">
             <div class="metric">
-              <div class="metric-label">每秒最大请求次数</div>
+              <div class="metric-label">{{ t('statusNginx.metricMaxRps') }}</div>
               <div class="metric-value">{{ fmt(maxRps) }}</div>
-              <div class="metric-tip">worker_processes × worker_connections</div>
+              <div class="metric-tip">{{ t('statusNginx.metricMaxRpsTip') }}</div>
             </div>
             <div class="metric">
-              <div class="metric-label">最大并发连接数</div>
+              <div class="metric-label">{{ t('statusNginx.metricMaxConn') }}</div>
               <div class="metric-value">{{ fmt(maxConn) }}</div>
               <div class="metric-tip">worker_connections</div>
             </div>
             <div class="metric">
-              <div class="metric-label">每次连接请求数</div>
+              <div class="metric-label">{{ t('statusNginx.metricPerConn') }}</div>
               <div class="metric-value">{{ perConn }}</div>
-              <div class="metric-tip">总请求数 ÷ 握手成功数</div>
+              <div class="metric-tip">{{ t('statusNginx.metricPerConnTip') }}</div>
             </div>
             <div class="metric">
-              <div class="metric-label">Nginx 进程总数</div>
+              <div class="metric-label">{{ t('statusNginx.metricProcTotal') }}</div>
               <div class="metric-value">{{ processes.total }}</div>
-              <div class="metric-tip">主进程 + 工作进程 + 缓存进程</div>
+              <div class="metric-tip">{{ t('statusNginx.metricProcTotalTip') }}</div>
             </div>
           </div>
 
@@ -139,8 +172,10 @@
             <el-col :xs="24" :sm="8">
               <div class="mini">
                 <div class="mini-head">
-                  <span>当前活动连接</span>
-                  <span class="mini-num">{{ metrics.active }} <span class="mini-total">/ {{ fmt(maxConn) }}</span></span>
+                  <span>{{ t('statusNginx.activeConn') }}</span>
+                  <span class="mini-num"
+                    >{{ metrics.active }} <span class="mini-total">/ {{ fmt(maxConn) }}</span></span
+                  >
                 </div>
                 <el-progress :percentage="activeRatio" :show-text="false" :stroke-width="8" />
               </div>
@@ -148,19 +183,38 @@
             <el-col :xs="24" :sm="8">
               <div class="mini">
                 <div class="mini-head">
-                  <span>工作进程</span>
-                  <span class="mini-num">{{ processes.workers }} <span class="mini-total">/ {{ wpNum || '-' }}</span></span>
+                  <span>{{ t('statusNginx.workers') }}</span>
+                  <span class="mini-num"
+                    >{{ processes.workers }}
+                    <span class="mini-total">/ {{ wpNum || '-' }}</span></span
+                  >
                 </div>
-                <el-progress :percentage="workersRatio" :show-text="false" :stroke-width="8" status="success" />
+                <el-progress
+                  :percentage="workersRatio"
+                  :show-text="false"
+                  :stroke-width="8"
+                  status="success"
+                />
               </div>
             </el-col>
             <el-col :xs="24" :sm="8">
               <div class="mini">
-                <div class="mini-head"><span>读取 / 写入 / 等待</span></div>
+                <div class="mini-head">
+                  <span>{{ t('statusNginx.rwTitle') }}</span>
+                </div>
                 <div class="rw-row">
-                  <span class="rw"><span class="rw-dot rw-r"></span>读取 {{ metrics.reading }}</span>
-                  <span class="rw"><span class="rw-dot rw-w"></span>写入 {{ metrics.writing }}</span>
-                  <span class="rw"><span class="rw-dot rw-wa"></span>等待 {{ metrics.waiting }}</span>
+                  <span class="rw"
+                    ><span class="rw-dot rw-r"></span
+                    >{{ t('statusNginx.reading', { n: metrics.reading }) }}</span
+                  >
+                  <span class="rw"
+                    ><span class="rw-dot rw-w"></span
+                    >{{ t('statusNginx.writing', { n: metrics.writing }) }}</span
+                  >
+                  <span class="rw"
+                    ><span class="rw-dot rw-wa"></span
+                    >{{ t('statusNginx.waiting', { n: metrics.waiting }) }}</span
+                  >
                 </div>
               </div>
             </el-col>
@@ -168,16 +222,19 @@
 
           <!-- 详情 tabs -->
           <el-tabs type="border-card" class="mt-3 detail-tabs">
-            <el-tab-pane label="请求统计">
+            <el-tab-pane :label="t('statusNginx.tabRequests')">
               <el-table :data="stubRows" size="small">
-                <el-table-column prop="label" label="指标" min-width="160" />
-                <el-table-column prop="value" label="值" min-width="160" />
+                <el-table-column prop="label" :label="t('statusNginx.colMetric')" min-width="160" />
+                <el-table-column prop="value" :label="t('statusNginx.colValue')" min-width="160" />
               </el-table>
             </el-tab-pane>
-            <el-tab-pane label="进程信息">
+            <el-tab-pane :label="t('statusNginx.tabProcesses')">
               <div class="proc-list">
                 <div v-for="p in procBars" :key="p.label" class="proc-item">
-                  <span class="proc-name"><span class="proc-dot" :style="{ background: p.color }"></span>{{ p.label }}</span>
+                  <span class="proc-name"
+                    ><span class="proc-dot" :style="{ background: p.color }"></span
+                    >{{ p.label }}</span
+                  >
                   <el-progress
                     :percentage="p.pct"
                     :show-text="false"
@@ -187,20 +244,29 @@
                   />
                   <span class="proc-num">{{ p.value }}</span>
                 </div>
-                <div class="proc-note">共 {{ processes.total }} 个 Nginx 进程</div>
+                <div class="proc-note">
+                  {{ t('statusNginx.procTotal', { n: processes.total }) }}
+                </div>
               </div>
             </el-tab-pane>
-            <el-tab-pane label="配置信息">
+            <el-tab-pane :label="t('statusNginx.tabConfig')">
               <el-table :data="confRows" size="small">
-                <el-table-column prop="label" label="指标" min-width="160" />
-                <el-table-column prop="value" label="值" min-width="160" />
+                <el-table-column prop="label" :label="t('statusNginx.colMetric')" min-width="160" />
+                <el-table-column prop="value" :label="t('statusNginx.colValue')" min-width="160" />
               </el-table>
               <div class="ideal">
-                <div class="ideal-title">Nginx 理论最高性能</div>
-                <div class="ideal-row">理论最大并发连接数：<b>{{ fmt(maxConn) }}</b></div>
-                <div class="ideal-row">理论最大 RPS（每秒请求次数）：<b>{{ fmt(maxRps) }}</b></div>
-                <div class="ideal-row">最大工作进程数：<b>{{ wpNum }}</b>（{{ workerProcessesText }}）</div>
-                <div class="ideal-tip">提示：可通过增加 worker_processes 或 worker_connections 提高并发处理能力。</div>
+                <div class="ideal-title">{{ t('statusNginx.idealTitle') }}</div>
+                <div class="ideal-row">
+                  {{ t('statusNginx.idealMaxConn') }}<b>{{ fmt(maxConn) }}</b>
+                </div>
+                <div class="ideal-row">
+                  {{ t('statusNginx.idealMaxRps') }}<b>{{ fmt(maxRps) }}</b>
+                </div>
+                <div class="ideal-row">
+                  {{ t('statusNginx.idealMaxWorkers') }}<b>{{ wpNum }}</b
+                  >（{{ workerProcessesText }}）
+                </div>
+                <div class="ideal-tip">{{ t('statusNginx.idealTip') }}</div>
               </div>
             </el-tab-pane>
           </el-tabs>
@@ -208,7 +274,7 @@
 
         <template v-else>
           <el-empty
-            :description="running ? '状态页已在配置中启用，但暂未采集到数据' : 'Nginx 尚未运行，启动后可采集状态数据'"
+            :description="running ? t('statusNginx.emptyRunning') : t('statusNginx.emptyStopped')"
             :image-size="80"
           />
         </template>
@@ -219,6 +285,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Odometer, InfoFilled, Document, Cpu, Refresh, Timer } from '@/icons'
@@ -242,6 +309,7 @@ const EMPTY_METRICS: NginxStubMetrics = {
   waiting: 0,
 }
 
+const { t } = useI18n()
 const router = useRouter()
 const loading = ref(false)
 const acting = ref('')
@@ -283,7 +351,7 @@ const wpNum = computed<number>(() => {
 const wcNum = computed<number>(() => Number(stub.value.worker_connections) || 0)
 const workerProcessesText = computed(() => {
   const wp = stub.value.worker_processes || ''
-  return wp ? (wp.toLowerCase() === 'auto' ? '自动（= CPU 线程数）' : wp) : '—'
+  return wp ? (wp.toLowerCase() === 'auto' ? t('statusNginx.workerAuto') : wp) : '—'
 })
 const maxRps = computed(() => wpNum.value * wcNum.value)
 const maxConn = computed(() => wcNum.value)
@@ -306,28 +374,43 @@ const stubRows = computed(() => {
   const m = metrics.value
   const fmt = (n?: number) => (n == null ? '-' : n.toLocaleString())
   return [
-    { label: '活跃连接', value: fmt(m?.active) },
-    { label: '握手总数', value: fmt(m?.accepts) },
-    { label: '连接总数', value: fmt(m?.handled) },
-    { label: '总请求数', value: fmt(m?.requests) },
-    { label: '读取请求数', value: fmt(m?.reading) },
-    { label: '响应', value: fmt(m?.writing) },
-    { label: '等待处理', value: fmt(m?.waiting) },
+    { label: t('statusNginx.stubRowActive'), value: fmt(m?.active) },
+    { label: t('statusNginx.stubRowAccepts'), value: fmt(m?.accepts) },
+    { label: t('statusNginx.stubRowHandled'), value: fmt(m?.handled) },
+    { label: t('statusNginx.stubRowRequests'), value: fmt(m?.requests) },
+    { label: t('statusNginx.stubRowReading'), value: fmt(m?.reading) },
+    { label: t('statusNginx.stubRowWriting'), value: fmt(m?.writing) },
+    { label: t('statusNginx.stubRowWaiting'), value: fmt(m?.waiting) },
   ]
 })
 
 const confRows = computed(() => [
-  { label: '工作进程数量', value: workerProcessesText.value },
-  { label: '每个工作进程的最大连接数', value: wcNum.value ? String(wcNum.value) : '—' },
+  { label: t('statusNginx.confWorkerProcesses'), value: workerProcessesText.value },
+  { label: t('statusNginx.confWorkerConn'), value: wcNum.value ? String(wcNum.value) : '—' },
 ])
 
 const procBars = computed(() => {
   const scale = Math.max(processes.value.total, 1)
   const pct = (n: number) => Math.round((n / scale) * 100)
   return [
-    { label: '主进程', value: processes.value.master, color: '#409EFF', pct: pct(processes.value.master) },
-    { label: '工作进程', value: processes.value.workers, color: '#67C23A', pct: pct(processes.value.workers) },
-    { label: '缓存进程', value: processes.value.cache, color: '#E6A23C', pct: pct(processes.value.cache) },
+    {
+      label: t('statusNginx.procMaster'),
+      value: processes.value.master,
+      color: '#409EFF',
+      pct: pct(processes.value.master),
+    },
+    {
+      label: t('statusNginx.procWorkers'),
+      value: processes.value.workers,
+      color: '#67C23A',
+      pct: pct(processes.value.workers),
+    },
+    {
+      label: t('statusNginx.procCache'),
+      value: processes.value.cache,
+      color: '#E6A23C',
+      pct: pct(processes.value.cache),
+    },
   ]
 })
 
@@ -354,18 +437,18 @@ async function load() {
   loading.value = false
 }
 
-const controlLabels: Record<string, string> = {
-  reload: '重载配置',
-  restart: '重启',
-  start: '启动',
-  stop: '停止',
-}
+const controlLabels = computed<Record<string, string>>(() => ({
+  reload: t('statusNginx.reload'),
+  restart: t('statusNginx.restart'),
+  start: t('statusNginx.start'),
+  stop: t('statusNginx.stop'),
+}))
 
 async function control(action: 'reload' | 'restart' | 'start' | 'stop') {
-  const tip = controlLabels[action]
+  const tip = controlLabels.value[action]
   const warn = action === 'stop'
   try {
-    await ElMessageBox.confirm(`确认对 Nginx 执行「${tip}」操作？`, '提示', {
+    await ElMessageBox.confirm(t('statusNginx.confirmAction', { action: tip }), t('common.tip'), {
       type: warn ? 'warning' : 'info',
     })
   } catch {
@@ -374,7 +457,7 @@ async function control(action: 'reload' | 'restart' | 'start' | 'stop') {
   acting.value = action
   try {
     const res = await controlNginx(action)
-    ElMessage.success(res.message ?? `${tip}成功`)
+    ElMessage.success(res.message ?? t('statusNginx.actionOk', { action: tip }))
     await load()
   } catch {
     /* handled by interceptor */
@@ -388,7 +471,7 @@ async function toggleStub(v: boolean | string | number) {
   savingStub.value = true
   try {
     await setNginxStubStatus(enable)
-    ElMessage.success(enable ? '已启用 Nginx 状态页' : '已关闭 Nginx 状态页')
+    ElMessage.success(t(enable ? 'statusNginx.stubOn' : 'statusNginx.stubOff'))
     await load()
   } catch {
     /* handled by interceptor */
@@ -609,9 +692,15 @@ onUnmounted(() => {
   border-radius: 50%;
   margin-right: 6px;
 }
-.rw-r { background: #409eff; }
-.rw-w { background: #e6a23c; }
-.rw-wa { background: #909399; }
+.rw-r {
+  background: #409eff;
+}
+.rw-w {
+  background: #e6a23c;
+}
+.rw-wa {
+  background: #909399;
+}
 
 .detail-tabs {
   margin-top: 16px;

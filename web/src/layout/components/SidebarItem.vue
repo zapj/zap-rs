@@ -14,7 +14,7 @@
             <Icon :icon="resolvedIcon" />
           </el-icon>
           <template #title>
-            <span>{{ onlyOneChild.meta.title }}</span>
+            <span>{{ translateTitle(onlyOneChild.meta.title) }}</span>
           </template>
         </el-menu-item>
       </app-link>
@@ -26,7 +26,7 @@
         <el-icon v-if="item.meta && item.meta.icon">
           <Icon :icon="item.meta.icon" />
         </el-icon>
-        <span>{{ item.meta.title }}</span>
+        <span>{{ translateTitle(item.meta.title) }}</span>
       </template>
 
       <!-- 递归渲染子菜单 -->
@@ -46,6 +46,8 @@ import { computed, ref } from 'vue'
 import { isExternal } from '@/utils/validate'
 import AppLink from './AppLink.vue'
 import path from 'path-browserify'
+// 菜单标题来自后端菜单表（中文），由 translateTitle 按当前语言翻译
+import { translateTitle } from '@/i18n'
 // 离线图标：图标名为字符串，由 <Icon> 解析成对应图标组件（见 @/icons）
 import { Icon } from '@/icons'
 
@@ -69,9 +71,7 @@ const onlyOneChild = ref<any>(null)
 
 // 单子菜单显示时：优先子菜单图标，缺失则回退父菜单图标。
 // 菜单图标来自数据库，可能是不认识的名字，由 <Icon> 内部解析并兜底。
-const resolvedIcon = computed(
-  () => onlyOneChild.value?.meta?.icon || props.item.meta?.icon || '',
-)
+const resolvedIcon = computed(() => onlyOneChild.value?.meta?.icon || props.item.meta?.icon || '')
 
 /**
  * 判断是否只有一个显示的子菜单

@@ -5,7 +5,7 @@
         <el-card shadow="hover">
           <div class="stat-card">
             <el-progress type="dashboard" :percentage="cpuPct" :color="cpuColor" />
-            <div class="stat-title">CPU 使用率</div>
+            <div class="stat-title">{{ t('statusCpu.usage') }}</div>
             <div class="stat-sub">{{ cpuPct }}%</div>
           </div>
         </el-card>
@@ -13,15 +13,29 @@
       <el-col :sm="16">
         <el-card shadow="hover">
           <template #header>
-            <div class="card-header"><span>CPU 信息</span></div>
+            <div class="card-header">
+              <span>{{ t('statusCpu.infoTitle') }}</span>
+            </div>
           </template>
           <el-descriptions :column="3" border>
-            <el-descriptions-item label="物理核数">{{ sysinfo.physical_core_count ?? '-' }}</el-descriptions-item>
-            <el-descriptions-item label="逻辑核数">{{ sysinfo.cpu_num ?? '-' }}</el-descriptions-item>
-            <el-descriptions-item label="架构">{{ sysinfo.arch || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="产品型号">{{ sysinfo.product_name || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="运行时间">{{ sysinfo.uptime || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="操作系统">{{ sysinfo.os_name_version || '-' }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusCpu.physicalCores')">{{
+              sysinfo.physical_core_count ?? '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusCpu.logicalCores')">{{
+              sysinfo.cpu_num ?? '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusCpu.arch')">{{
+              sysinfo.arch || '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusCpu.productName')">{{
+              sysinfo.product_name || '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusCpu.uptime')">{{
+              sysinfo.uptime || '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusCpu.os')">{{
+              sysinfo.os_name_version || '-'
+            }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -30,7 +44,7 @@
     <el-card shadow="hover" class="mt-4">
       <template #header>
         <div class="card-header">
-          <span>CPU 使用率趋势（最近 5 分钟）</span>
+          <span>{{ t('statusCpu.trend') }}</span>
         </div>
       </template>
       <canvas id="cpu_chart" style="width: 100%; height: 320px"></canvas>
@@ -42,7 +56,10 @@
 import Chart from 'chart.js/auto'
 import { applyChartTheme, watchChartTheme } from '@/utils/chart-theme'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getRTStatus, getSystemInfo } from '@/api/dashboard.ts'
+
+const { t } = useI18n()
 
 const sysinfo: Record<string, any> = ref({})
 const cpuPct = ref(0)
@@ -63,7 +80,7 @@ onMounted(async () => {
       labels: [],
       datasets: [
         {
-          label: 'CPU 使用率',
+          label: t('statusCpu.usage'),
           data: [],
           fill: false,
           borderColor: 'rgba(245, 158, 11, 1)',

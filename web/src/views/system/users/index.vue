@@ -7,108 +7,124 @@
 
       <!-- 搜索 -->
       <el-form :inline="true" :model="searchForm" @submit.prevent>
-        <el-form-item label="用户名">
-          <el-input v-model="searchForm.username" placeholder="请输入" clearable style="width: 180px" />
+        <el-form-item :label="t('users.username')">
+          <el-input
+            v-model="searchForm.username"
+            :placeholder="t('common.inputPlaceholder', { field: t('users.username') })"
+            clearable
+            style="width: 180px"
+          />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button @click="resetSearch">重置</el-button>
+          <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+          <el-button @click="resetSearch">{{ t('common.reset') }}</el-button>
         </el-form-item>
       </el-form>
 
       <div style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center">
         <el-button type="primary" @click="handleAdd">
-          <el-icon><Plus /></el-icon>{{ isAdmin ? '新增用户' : '新增客户' }}
+          <el-icon><Plus /></el-icon>{{ isAdmin ? t('users.addUser') : t('users.addReseller') }}
         </el-button>
       </div>
 
       <el-table :data="tableData" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="username" label="用户名" width="120" />
-        <el-table-column prop="nickname" label="昵称" width="120" />
-        <el-table-column prop="email" label="邮箱" min-width="180" />
-        <el-table-column label="家目录" min-width="200">
+        <el-table-column prop="username" :label="t('users.username')" width="120" />
+        <el-table-column prop="nickname" :label="t('users.nickname')" width="120" />
+        <el-table-column prop="email" :label="t('users.email')" min-width="180" />
+        <el-table-column :label="t('users.homeDir')" min-width="200">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.home_dir"
-              :content="`站点文档根：${row.home_dir}/www/站点名-ID；站点日志：${row.home_dir}/logs/站点名-ID（access.log / error.log）`"
+              :content="t('users.homeDirTip', { dir: row.home_dir })"
               placement="top"
             >
               <code class="home-dir">{{ row.home_dir }}</code>
             </el-tooltip>
-            <el-tag v-else size="small" type="warning">未设置</el-tag>
+            <el-tag v-else size="small" type="warning">{{ t('users.notSet') }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="系统账号" width="150">
+        <el-table-column :label="t('users.linuxUser')" width="150">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.linux_user"
-              :content="`独立系统用户模式：站点文件 owner=${row.linux_user}，PHP-FPM pool 以该账号运行（${row.home_dir || '/home'}）`"
+              :content="
+                t('users.linuxUserTip', {
+                  user: row.linux_user,
+                  dir: row.home_dir || '/home',
+                })
+              "
               placement="top"
             >
               <code class="linux-user">{{ row.linux_user }}</code>
             </el-tooltip>
-            <span v-else class="muted">—</span>
+            <span v-else class="muted">{{ t('users.emptyValue') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="角色" width="120">
+        <el-table-column :label="t('users.roles')" width="120">
           <template #default="{ row }">
             <el-tag v-for="r in row.roles" :key="r" size="small" style="margin-right: 4px">
               {{ roleLabel(r) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="FPM 规格" width="170" show-overflow-tooltip>
+        <el-table-column :label="t('users.fpmSpec')" width="170" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag v-if="fpmSpecLabel(row) === '面板默认'" size="small" type="info" effect="plain">
-              面板默认
+            <el-tag v-if="fpmSpecKind(row) === 'default'" size="small" type="info" effect="plain">
+              {{ t('users.fpmDefault') }}
             </el-tag>
-            <el-tag v-else-if="fpmSpecLabel(row) === '继承 reseller 默认'" size="small" type="success">
-              继承 reseller
+            <el-tag v-else-if="fpmSpecKind(row) === 'inherit'" size="small" type="success">
+              {{ t('users.fpmInheritTag') }}
             </el-tag>
-            <el-tag v-else-if="fpmSpecLabel(row) === '自定义 JSON'" size="small" type="warning">
-              自定义 JSON
+            <el-tag v-else-if="fpmSpecKind(row) === 'custom'" size="small" type="warning">
+              {{ t('users.fpmCustomJson') }}
             </el-tag>
-            <span v-else class="spec-name">{{ fpmSpecLabel(row) }}</span>
+            <span v-else class="spec-name">{{ row.fpm_spec_ref }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="套餐" width="140">
+        <el-table-column :label="t('users.package')" width="140">
           <template #default="{ row }">
             <el-tag v-if="row.package_name" size="small" type="primary" effect="plain">
               {{ row.package_name }}
             </el-tag>
-            <span v-else class="muted">—</span>
+            <span v-else class="muted">{{ t('users.emptyValue') }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" label="归属" width="120">
+        <el-table-column v-if="isAdmin" :label="t('users.owner')" width="120">
           <template #default="{ row }">
-            <el-tag v-if="row.owner_id === 0" size="small" type="info">系统</el-tag>
+            <el-tag v-if="row.owner_id === 0" size="small" type="info">
+              {{ t('users.ownerSystemTag') }}
+            </el-tag>
             <el-tag v-else size="small">{{ ownerName(row.owner_id) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="80">
+        <el-table-column :label="t('common.status')" width="80">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
-              {{ row.status === 1 ? '启用' : '禁用' }}
+              {{ row.status === 1 ? t('common.enable') : t('common.disable') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" width="170">
+        <el-table-column :label="t('common.createdAt')" width="170">
           <template #default="{ row }">
             {{ fmtTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column :label="t('common.operation')" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
+            <el-button type="primary" link @click="handleEdit(row)">{{
+              t('common.edit')
+            }}</el-button>
             <el-button
               :type="row.status === 1 ? 'warning' : 'success'"
               link
               @click="handleToggleStatus(row)"
             >
-              {{ row.status === 1 ? '禁用' : '启用' }}
+              {{ row.status === 1 ? t('common.disable') : t('common.enable') }}
             </el-button>
-            <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
+            <el-button type="danger" link @click="handleDelete(row)">
+              {{ t('common.delete') }}
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -117,34 +133,40 @@
     <!-- 新增 / 编辑 对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="dialogType === 'add' ? (isAdmin ? '新增用户' : '新增客户') : '编辑'"
+      :title="
+        dialogType === 'add'
+          ? isAdmin
+            ? t('users.addUser')
+            : t('users.addReseller')
+          : t('common.edit')
+      "
       width="480px"
       @closed="resetForm"
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="70px" @submit.prevent>
-        <el-form-item label="用户名" prop="username">
+        <el-form-item :label="t('users.username')" prop="username">
           <el-input v-model="form.username" :disabled="dialogType === 'edit'" />
         </el-form-item>
-        <el-form-item label="昵称" prop="nickname">
+        <el-form-item :label="t('users.nickname')" prop="nickname">
           <el-input v-model="form.nickname" />
         </el-form-item>
-        <el-form-item label="邮箱" prop="email">
+        <el-form-item :label="t('users.email')" prop="email">
           <el-input v-model="form.email" />
         </el-form-item>
-        <el-form-item v-if="dialogType === 'add'" label="密码" prop="password">
+        <el-form-item v-if="dialogType === 'add'" :label="t('users.password')" prop="password">
           <el-input v-model="form.password" type="password" show-password />
         </el-form-item>
-        <el-form-item v-if="isAdmin" label="角色" prop="roles">
+        <el-form-item v-if="isAdmin" :label="t('users.roles')" prop="roles">
           <el-select v-model="form.roles">
             <el-option
-              v-for="opt in ROLE_OPTIONS"
+              v-for="opt in roleOptions()"
               :key="opt.value"
               :label="opt.label"
               :value="opt.value"
             />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="isAdmin" label="附加权限">
+        <el-form-item v-if="isAdmin" :label="t('users.extraPerm')">
           <el-select
             v-model="form.permissions"
             multiple
@@ -152,42 +174,38 @@
             clearable
             collapse-tags
             collapse-tags-tooltip
-            placeholder="在角色权限之外单独授予（可选）"
+            :placeholder="t('users.extraPermPlaceholder')"
             style="width: 100%"
           >
-            <el-option-group v-for="g in permCatalog" :key="g.ns" :label="g.label">
+            <!-- 权限点文案按 ns / action 标识符翻译，见 utils/perm.ts -->
+            <el-option-group v-for="g in permCatalog" :key="g.ns" :label="permGroupLabel(g.ns)">
               <el-option
                 v-for="a in g.actions"
                 :key="a.key"
-                :label="`${g.label} · ${a.label}`"
+                :label="permKeyLabel(a.key)"
                 :value="a.key"
               />
             </el-option-group>
           </el-select>
-          <div class="form-tip">只做加法：不能收回角色已授予的权限，建议仅用于临时授权</div>
+          <div class="form-tip">{{ t('users.extraPermTip') }}</div>
         </el-form-item>
-        <el-form-item v-if="isAdmin && dialogType === 'add'" label="归属">
+        <el-form-item v-if="isAdmin && dialogType === 'add'" :label="t('users.owner')">
           <el-select v-model="form.owner_id" @change="onOwnerChange">
-            <el-option label="系统直属" :value="0" />
-            <el-option
-              v-for="r in resellerList"
-              :key="r.id"
-              :label="r.username"
-              :value="r.id"
-            />
+            <el-option :label="t('users.ownerSystem')" :value="0" />
+            <el-option v-for="r in resellerList" :key="r.id" :label="r.username" :value="r.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="isAdmin || isReseller" label="FPM 规格">
+        <el-form-item v-if="isAdmin || isReseller" :label="t('users.fpmSpec')">
           <el-select
             v-model="fpmMode"
             :loading="fpmLoading"
-            placeholder="面板默认"
+            :placeholder="t('users.fpmDefault')"
             style="width: 100%"
           >
             <el-option
               v-if="inheritOwnerName"
               :value="'inherit'"
-              :label="`继承 ${inheritOwnerName} 名下默认规格`"
+              :label="t('users.fpmInheritOption', { owner: inheritOwnerName })"
             />
             <el-option
               v-for="opt in fpmOptions"
@@ -195,7 +213,7 @@
               :value="opt.value"
               :label="opt.label"
             />
-            <el-option v-if="isAdmin" :value="'custom'" label="自定义 JSON（高级）" />
+            <el-option v-if="isAdmin" :value="'custom'" :label="t('users.fpmCustomOption')" />
           </el-select>
           <div class="form-tip">{{ fpmModeTip() }}</div>
           <el-input
@@ -205,25 +223,25 @@
             :rows="4"
             spellcheck="false"
             style="margin-top: 8px"
-            placeholder='覆盖面板默认的 JSON，如 {"max_children": 16, "memory_limit": "512M"}'
+            :placeholder="t('users.fpmCustomPlaceholder')"
           />
           <el-alert
             v-else-if="fpmMode === '__keep__'"
-            :title="`保留该用户原自定义规格（${fpmCustomJson.slice(0, 120)}${fpmCustomJson.length > 120 ? '…' : ''}）。如需修改请改选模板或自定义。`"
+            :title="t('users.fpmKeepTip', { json: keepJsonPreview })"
             type="info"
             :closable="false"
             show-icon
             style="margin-top: 8px"
           />
         </el-form-item>
-        <el-form-item label="套餐">
+        <el-form-item :label="t('users.package')">
           <el-select
             v-model="form.package_id"
             :loading="pkgLoading"
-            placeholder="不绑定套餐"
+            :placeholder="t('users.packageNone')"
             style="width: 100%"
           >
-            <el-option label="不绑定套餐（不受套餐限制）" :value="0" />
+            <el-option :label="t('users.packageNoneOption')" :value="0" />
             <el-option
               v-for="p in packageOptions"
               :key="p.value"
@@ -233,16 +251,18 @@
           </el-select>
           <div class="form-tip">{{ packageTip() }}</div>
         </el-form-item>
-        <el-form-item label="状态">
+        <el-form-item :label="t('common.status')">
           <el-radio-group v-model="form.status">
-            <el-radio :value="1">启用</el-radio>
-            <el-radio :value="0">禁用</el-radio>
+            <el-radio :value="1">{{ t('common.enable') }}</el-radio>
+            <el-radio :value="0">{{ t('common.disable') }}</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitForm">
+          {{ t('common.confirm') }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -250,6 +270,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -264,11 +285,15 @@ import {
   type CreateUserPayload,
   type UpdateUserPayload,
 } from '@/api/user'
-import { roleLabel, ROLE_OPTIONS } from '@/utils/role'
+import { roleLabel, roleOptions } from '@/utils/role'
 import { useUserStore } from '@/stores/user'
 import { getFpmSpecs, type FpmSpecItem } from '@/api/serverEnv'
 import { getPackageList, type PackageItem } from '@/api/package'
 import { getPermissionCatalog, type PermGroupItem } from '@/api/role'
+import { permGroupLabel, permKeyLabel } from '@/utils/perm'
+import { getLocale } from '@/i18n'
+
+const { t } = useI18n()
 
 /** 权限点目录：附加权限下拉用（admin 才加载） */
 const permCatalog = ref<PermGroupItem[]>([])
@@ -276,7 +301,7 @@ const permCatalog = ref<PermGroupItem[]>([])
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 const isReseller = computed(() => userStore.roles.includes('reseller'))
-const pageTitle = computed(() => (isReseller.value ? '客户管理' : '用户管理'))
+const pageTitle = computed(() => t(isReseller.value ? 'users.titleReseller' : 'users.title'))
 
 // ── 搜索 ───────────────────────────────────────────────────
 const searchForm = reactive({ username: '' })
@@ -339,9 +364,7 @@ async function loadSpecs() {
  */
 function targetResellerName(): string {
   if (dialogType.value === 'edit') {
-    const row = editingId.value
-      ? tableData.value.find((r) => r.id === editingId.value)
-      : undefined
+    const row = editingId.value ? tableData.value.find((r) => r.id === editingId.value) : undefined
     if (!row) return ''
     if (!isAdmin.value) return userStore.name
     if (!row.owner_id) return ''
@@ -366,10 +389,12 @@ const inheritOwnerName = computed(() => targetResellerName())
 
 /** 下拉选项：面板默认 → 可用模板（全局 + 名下） */
 const fpmOptions = computed(() => [
-  { value: '', label: '面板默认（使用服务器运行环境中的全局默认规格）' },
+  { value: '', label: t('users.fpmDefaultOption') },
   ...targetTemplates.value.map((s) => ({
     value: s.name,
-    label: s.owner ? `${s.name}（${s.owner} 名下）` : `${s.name}（全局）`,
+    label: s.owner
+      ? t('users.fpmOwnerTemplate', { name: s.name, owner: s.owner })
+      : t('users.fpmGlobalTemplate', { name: s.name }),
   })),
 ])
 
@@ -385,19 +410,25 @@ const fpmCustomJson = ref('')
 
 function fpmModeTip(): string {
   if (fpmMode.value === 'inherit') {
-    return `选用「${inheritOwnerName.value}」名下默认规格：优先 ${inheritOwnerName.value}_default 模板，其次名下最新模板；若名下没有模板则回退面板默认。`
+    return t('users.fpmTipInherit', { owner: inheritOwnerName.value })
   }
   if (fpmMode.value === 'custom') {
-    return '按 JSON 覆盖全局默认规格（独立系统用户模式下，每用户每 PHP 版本生成独立 pool）。'
+    return t('users.fpmTipCustom')
   }
   if (fpmMode.value === KEEP_CUSTOM) {
-    return '保留该用户旧的自定义规格，不修改。'
+    return t('users.fpmTipKeep')
   }
   if (fpmMode.value) {
-    return '模板字段覆盖于全局默认之上，未填字段沿用全局默认；改名/删除模板后此用户将回退面板默认。'
+    return t('users.fpmTipTemplate')
   }
-  return '用户未指定规格时，建站将使用全局默认规格；独立系统用户模式下每用户每 PHP 版本生成独立 pool。'
+  return t('users.fpmTipDefault')
 }
+
+/** 「保留原自定义规格」提示里的 JSON 预览（超长截断，避免撑破 alert） */
+const keepJsonPreview = computed(() => {
+  const raw = fpmCustomJson.value
+  return raw.length > 120 ? `${raw.slice(0, 120)}…` : raw
+})
 
 /** 编辑回显：根据 row 的 fpm_pool / fpm_spec_ref 计算下拉初始值 */
 function fpmEditInitial(row: UserListItem): string {
@@ -407,13 +438,17 @@ function fpmEditInitial(row: UserListItem): string {
   return ''
 }
 
-/** 行 FPM 规格展示标签 */
-function fpmSpecLabel(row: UserListItem): string {
+/**
+ * 行 FPM 规格的**类型标识**（不是展示文案）。
+ *
+ * 用标识而非中文串做比较：文案要随语言变，比较不能依赖它。
+ */
+function fpmSpecKind(row: UserListItem): 'default' | 'inherit' | 'custom' | 'template' {
   const ref = row.fpm_spec_ref ?? ''
-  if (ref === 'inherit') return '继承 reseller 默认'
-  if (ref) return ref
-  if (row.fpm_pool && row.fpm_pool.trim()) return '自定义 JSON'
-  return '面板默认'
+  if (ref === 'inherit') return 'inherit'
+  if (ref) return 'template'
+  if (row.fpm_pool && row.fpm_pool.trim()) return 'custom'
+  return 'default'
 }
 
 // ── 套餐（Packages）选择 ────────────────────────────────────
@@ -438,11 +473,15 @@ async function loadPackages() {
 /** 套餐摘要：磁盘 / 站点 / SSH */
 function describePackage(p: PackageItem): string {
   const parts = [
-    p.disk_quota_mb > 0 ? `磁盘 ${p.disk_quota_mb}MB` : '磁盘不限',
-    p.max_sites > 0 ? `${p.max_sites} 站点` : '站点不限',
-    p.allow_ssh ? '允许 SSH' : '禁用 SSH',
+    p.disk_quota_mb > 0
+      ? t('users.packageDisk', { mb: p.disk_quota_mb })
+      : t('users.packageDiskUnlimited'),
+    p.max_sites > 0
+      ? t('users.packageSites', { count: p.max_sites })
+      : t('users.packageSitesUnlimited'),
+    p.allow_ssh ? t('users.packageSshAllow') : t('users.packageSshDeny'),
   ]
-  if (p.max_bandwidth_mb > 0) parts.push(`流量 ${p.max_bandwidth_mb}MB`)
+  if (p.max_bandwidth_mb > 0) parts.push(t('users.packageBandwidth', { mb: p.max_bandwidth_mb }))
   return parts.join(' · ')
 }
 
@@ -452,10 +491,12 @@ const packageOptions = computed(() =>
 
 /** 当前所选套餐的提示文案 */
 function packageTip(): string {
-  if (!form.package_id) return '不绑定套餐：该客户不受套餐限制（磁盘、站点数、SSH 均不拦截）。'
+  if (!form.package_id) return t('users.packageTipNone')
   const p = packages.value.find((x) => x.id === form.package_id)
-  if (!p) return '所选套餐已不可用，请重新选择。'
-  return `继承：${describePackage(p)}${p.fpm_spec_ref ? ` · FPM ${p.fpm_spec_ref}` : ''}`
+  if (!p) return t('users.packageTipMissing')
+  return t('users.packageTipInherit', {
+    summary: `${describePackage(p)}${p.fpm_spec_ref ? ` · FPM ${p.fpm_spec_ref}` : ''}`,
+  })
 }
 
 /** 校验自定义 FPM JSON（空 = 不允许，自定义模式必须填对象） */
@@ -524,21 +565,22 @@ const defaultForm = (): FormData => ({
 
 const form = reactive<FormData>(defaultForm())
 
-const rules: FormRules<FormData> = {
+// computed：切换语言时校验提示跟着变（普通对象只在 setup 时求值一次）
+const rules = computed<FormRules<FormData>>(() => ({
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 2, max: 50, message: '2-50 个字符', trigger: 'blur' },
+    { required: true, message: t('users.usernameRequired'), trigger: 'blur' },
+    { min: 2, max: 50, message: t('users.usernameLength'), trigger: 'blur' },
   ],
-  nickname: [{ required: true, message: '请输入昵称', trigger: 'blur' }],
+  nickname: [{ required: true, message: t('users.nicknameRequired'), trigger: 'blur' }],
   email: [
-    { required: true, message: '请输入邮箱', trigger: 'blur' },
-    { type: 'email', message: '邮箱格式不正确', trigger: 'blur' },
+    { required: true, message: t('users.emailRequired'), trigger: 'blur' },
+    { type: 'email', message: t('users.emailInvalid'), trigger: 'blur' },
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '至少 6 个字符', trigger: 'blur' },
+    { required: true, message: t('users.passwordRequired'), trigger: 'blur' },
+    { min: 6, message: t('users.passwordLength'), trigger: 'blur' },
   ],
-}
+}))
 
 function handleAdd() {
   dialogType.value = 'add'
@@ -565,8 +607,7 @@ function handleEdit(row: UserListItem) {
     permissions: (row.permissions ?? []).filter(Boolean),
   })
   fpmMode.value = fpmEditInitial(row)
-  fpmCustomJson.value =
-    row.fpm_pool && row.fpm_pool.trim() ? row.fpm_pool : ''
+  fpmCustomJson.value = row.fpm_pool && row.fpm_pool.trim() ? row.fpm_pool : ''
   dialogVisible.value = true
 }
 
@@ -583,7 +624,7 @@ function resolveFpmPayload(): Record<string, string> | null {
   if (m === CUSTOM) {
     if (!isAdmin.value) return {}
     if (!fpmCustomValid(fpmCustomJson.value)) {
-      ElMessage.warning('自定义规格必须是 JSON 对象')
+      ElMessage.warning(t('users.fpmInvalidJson'))
       return null
     }
     return { fpm_pool: fpmCustomJson.value.trim() }
@@ -624,7 +665,9 @@ async function submitForm() {
       }
       const res = await createUser(payload)
       ElMessage.success(
-        res.data?.home_dir ? `新增成功，家目录：${res.data.home_dir}` : '新增成功',
+        res.data?.home_dir
+          ? t('users.createSuccessHome', { dir: res.data.home_dir })
+          : t('common.createSuccess'),
       )
     } else {
       const payload: UpdateUserPayload = {
@@ -645,7 +688,7 @@ async function submitForm() {
         payload.fpm_pool = fpmPayload.fpm_pool
       }
       await updateUser(payload)
-      ElMessage.success('更新成功')
+      ElMessage.success(t('common.updateSuccess'))
     }
     dialogVisible.value = false
     loadList()
@@ -659,18 +702,20 @@ async function submitForm() {
 // ── 状态切换 ───────────────────────────────────────────────
 async function handleToggleStatus(row: UserListItem) {
   const newStatus = row.status === 1 ? 0 : 1
-  const label = newStatus === 1 ? '启用' : '禁用'
+  const action = newStatus === 1 ? t('common.enable') : t('common.disable')
   try {
-    await ElMessageBox.confirm(`确认${label}用户「${row.username}」？`, '提示', {
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      t('users.toggleConfirm', { action, name: row.username }),
+      t('common.tip'),
+      { type: 'warning' },
+    )
   } catch {
     return
   }
   try {
     await updateUser({ id: row.id, status: newStatus })
     row.status = newStatus
-    ElMessage.success(`${label}成功`)
+    ElMessage.success(t('users.toggleSuccess', { action }))
   } catch {
     // 拦截器已弹窗
   }
@@ -679,16 +724,17 @@ async function handleToggleStatus(row: UserListItem) {
 // ── 删除 ───────────────────────────────────────────────────
 async function handleDelete(row: UserListItem) {
   try {
-    await ElMessageBox.confirm(`确认删除用户「${row.username}」？此操作不可恢复。`, '警告', {
-      type: 'warning',
-      confirmButtonText: '确认删除',
-    })
+    await ElMessageBox.confirm(
+      t('users.deleteConfirm', { name: row.username }),
+      t('common.warning'),
+      { type: 'warning', confirmButtonText: t('users.confirmDeleteBtn') },
+    )
   } catch {
     return
   }
   try {
     await deleteUser(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('common.deleteSuccess'))
     loadList()
   } catch {
     // 拦截器已弹窗
@@ -696,9 +742,10 @@ async function handleDelete(row: UserListItem) {
 }
 
 // ── 工具 ───────────────────────────────────────────────────
+/** 时间按当前界面语言格式化（切换语言后列表会重渲染） */
 function fmtTime(ts: number) {
   if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleString('zh-CN')
+  return new Date(ts * 1000).toLocaleString(getLocale())
 }
 
 async function loadPermCatalog() {
@@ -706,7 +753,9 @@ async function loadPermCatalog() {
   try {
     const res = await getPermissionCatalog()
     permCatalog.value = res.data?.groups ?? []
-  } catch { /* handled by interceptor */ }
+  } catch {
+    /* handled by interceptor */
+  }
 }
 
 onMounted(() => {

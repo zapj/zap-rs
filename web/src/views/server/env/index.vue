@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import type { EnvConf, EnvData, FpmSpecItem } from '@/api/serverEnv'
 import {
   addFpmSpec,
@@ -11,6 +12,8 @@ import {
   saveServerEnvDefaults,
   updateFpmSpec,
 } from '@/api/serverEnv'
+
+const { t } = useI18n()
 
 const env = ref<EnvData | null>(null)
 const loading = ref(false)
@@ -59,7 +62,7 @@ const conf = computed(() => env.value?.conf ?? null)
 
 const phpOptions = computed<string[]>(() => {
   const list = payload.value?.php?.instances ?? []
-  const arr = list.map(i => shortOf(i.version)).filter(Boolean)
+  const arr = list.map((i) => shortOf(i.version)).filter(Boolean)
   return [...new Set(arr)]
 })
 function shortOf(v: string): string {
@@ -68,7 +71,7 @@ function shortOf(v: string): string {
 
 const dbOptions = computed<string[]>(() => {
   const list = payload.value?.databases ?? []
-  const names = list.map(d => d.name)
+  const names = list.map((d) => d.name)
   const common = ['mysql', 'mariadb', 'postgresql', 'redis', 'mongodb']
   return [...new Set([...names, ...common])]
 })
@@ -90,7 +93,7 @@ async function refresh() {
   try {
     const res = await refreshServerEnv()
     env.value = res.data
-    ElMessage.success(res.message || '运行环境已刷新')
+    ElMessage.success(res.message || t('serverEnv.refreshed'))
   } catch {
     /* 拦截器已提示 */
   } finally {
@@ -111,12 +114,13 @@ function openDefaultsDialog() {
   if (raw) {
     try {
       const obj = JSON.parse(raw) as Record<string, unknown>
-      Object.keys(fpmNum).forEach(k => {
+      Object.keys(fpmNum).forEach((k) => {
         const v = obj[k]
         const n = Number(v)
-        if (v !== undefined && v !== null && Number.isFinite(n)) fpmNum[k as keyof typeof fpmNum] = n
+        if (v !== undefined && v !== null && Number.isFinite(n))
+          fpmNum[k as keyof typeof fpmNum] = n
       })
-      Object.keys(fpmStr).forEach(k => {
+      Object.keys(fpmStr).forEach((k) => {
         const v = obj[k]
         if (v !== undefined && v !== null) fpmStr[k as keyof typeof fpmStr] = String(v)
       })
@@ -128,10 +132,10 @@ function openDefaultsDialog() {
 }
 
 function resetFpmForm() {
-  Object.keys(fpmNum).forEach(k => {
+  Object.keys(fpmNum).forEach((k) => {
     fpmNum[k as keyof typeof fpmNum] = FPM_NUM_DEFAULTS[k]
   })
-  Object.keys(fpmStr).forEach(k => {
+  Object.keys(fpmStr).forEach((k) => {
     fpmStr[k as keyof typeof fpmStr] = FPM_STR_DEFAULTS[k]
   })
 }
@@ -150,7 +154,7 @@ async function saveDefaults() {
       fpm_pool_defaults: fpmSpecJson(),
       user_home_root: form.user_home_root.trim(),
     })
-    ElMessage.success(res.message || '默认配置已保存')
+    ElMessage.success(res.message || t('serverEnv.defaultsSaved'))
     dialogVisible.value = false
     loadEnv()
   } catch {
@@ -208,81 +212,81 @@ interface FpmFieldMeta {
   options?: string[]
 }
 /** 与全局默认 pool 规格一致的字段元数据（新增字段按此渲染控件与帮助提示） */
-const FPM_FIELDS: Record<string, FpmFieldMeta> = {
+const fpmFields = computed<Record<string, FpmFieldMeta>>(() => ({
   pm: {
-    label: '进程管理模式',
+    label: t('serverEnv.fpmField.pm'),
     kind: 'pm',
     options: ['dynamic', 'static', 'ondemand'],
-    help: 'pm：dynamic 动态增减进程（推荐）；static 固定常驻；ondemand 有请求才拉起、空闲即回收。模板选 static/ondemand 时下方的空闲进程、回收等 dynamic 专属项可删除。',
+    help: t('serverEnv.fpmHelp.pm'),
   },
   max_children: {
-    label: '最大子进程数 pm.max_children',
+    label: t('serverEnv.fpmField.maxChildren'),
     kind: 'number',
     min: 1,
     max: 512,
-    help: 'pm.max_children：worker 进程数量上限，决定并发能力。建议 ≈ 可用内存(MB) ÷ 单进程约 50~100MB。设太小易 502/超时，太大易 OOM。',
+    help: t('serverEnv.fpmHelp.maxChildren'),
   },
   start_servers: {
-    label: '启动子进程数',
+    label: t('serverEnv.fpmField.startServers'),
     kind: 'number',
     min: 1,
     max: 128,
-    help: 'dynamic 模式：启动时预拉起的子进程数，通常取 min_spare_servers 与 max_children 之间的一个值（如 min 与 max 的均值）。',
+    help: t('serverEnv.fpmHelp.startServers'),
   },
   min_spare_servers: {
-    label: '空闲子进程下限',
+    label: t('serverEnv.fpmField.minSpare'),
     kind: 'number',
     min: 1,
     max: 128,
-    help: 'dynamic 模式：空闲子进程低于该值时会自动补拉起进程，保证响应速度。建议 ≥ 4。',
+    help: t('serverEnv.fpmHelp.minSpare'),
   },
   max_spare_servers: {
-    label: '空闲子进程上限',
+    label: t('serverEnv.fpmField.maxSpare'),
     kind: 'number',
     min: 1,
     max: 256,
-    help: 'dynamic 模式：空闲子进程超过该值会被回收，防止资源浪费。需大于 min_spare_servers。',
+    help: t('serverEnv.fpmHelp.maxSpare'),
   },
   max_requests: {
-    label: '单进程最大请求数（0=不回收）',
+    label: t('serverEnv.fpmField.maxRequests'),
     kind: 'number',
     min: 0,
     max: 100000,
-    help: 'pm.max_requests：worker 处理完该数量请求后自动重启，防脚本内存泄漏累积。0 = 永不重启。常见 500~5000。',
+    help: t('serverEnv.fpmHelp.maxRequests'),
   },
   request_terminate_timeout: {
-    label: '请求超时(秒)',
+    label: t('serverEnv.fpmField.requestTimeout'),
     kind: 'number',
     min: 1,
     max: 86400,
-    help: 'pm.request_terminate_timeout：单个请求执行超时即被强杀（不占满 worker）。建议 300（5 分钟），长任务脚本可放宽。',
+    help: t('serverEnv.fpmHelp.requestTimeout'),
   },
   max_execution_time: {
-    label: '最大执行时间(秒)',
+    label: t('serverEnv.fpmField.maxExecTime'),
     kind: 'number',
     min: 1,
     max: 86400,
-    help: '对应 php.ini max_execution_time：脚本最长执行时间，超时抛 Fatal Error。建议 300。',
+    help: t('serverEnv.fpmHelp.maxExecTime'),
   },
   memory_limit: {
-    label: '内存限制',
+    label: t('serverEnv.fpmField.memoryLimit'),
     kind: 'size',
     options: ['128M', '256M', '512M', '1G', '2G'],
-    help: 'php.ini memory_limit：单个 PHP 进程脚本可用内存上限，建议 ≈ 单进程预估内存（与 max_children 相乘估算总占用）。',
+    help: t('serverEnv.fpmHelp.memoryLimit'),
   },
   post_max_size: {
-    label: 'POST 大小上限',
+    label: t('serverEnv.fpmField.postMax'),
     kind: 'size',
     options: ['64M', '128M', '256M', '512M', '1G'],
-    help: 'php.ini post_max_size：POST 请求体上限，需 ≥ upload_max_filesize，否则大文件上传会被截断报错。',
+    help: t('serverEnv.fpmHelp.postMax'),
   },
   upload_max_filesize: {
-    label: '上传大小上限',
+    label: t('serverEnv.fpmField.uploadMax'),
     kind: 'size',
     options: ['64M', '128M', '256M', '512M', '1G'],
-    help: 'php.ini upload_max_filesize：单个文件上传上限。若走 nginx 还需同步调大 client_max_body_size。',
+    help: t('serverEnv.fpmHelp.uploadMax'),
   },
-}
+}))
 
 interface SpecRow {
   field: string
@@ -298,21 +302,23 @@ const specJsonRaw = ref('')
 
 /** 字段提示（无 meta 返回 null） */
 function fpmMeta(field: string): FpmFieldMeta | null {
-  return FPM_FIELDS[field] ?? null
+  return fpmFields.value[field] ?? null
 }
 
 /** 字段下拉（预设 + 自定义） */
-const FIELD_OPTIONS = Object.keys(FPM_FIELDS).map((f) => ({
-  value: f,
-  label: `${f}（${FPM_FIELDS[f].label}）`,
-}))
+const fieldOptions = computed(() =>
+  Object.keys(fpmFields.value).map((f) => ({
+    value: f,
+    label: t('serverEnv.fieldOption', { field: f, label: fpmFields.value[f].label }),
+  })),
+)
 
 /** JSON 文本 → 表格行（未知/旧字段也保留；解析失败则空表） */
 function specToRows(jsonText: string) {
   const rows: SpecRow[] = []
   try {
     const obj = JSON.parse(jsonText) as Record<string, unknown>
-    const known = Object.keys(FPM_FIELDS)
+    const known = Object.keys(fpmFields.value)
     const keys = Object.keys(obj).sort((a, b) => {
       const ia = known.indexOf(a)
       const ib = known.indexOf(b)
@@ -411,16 +417,16 @@ function applyJsonToTable() {
     const obj = JSON.parse(specJsonRaw.value) as Record<string, unknown>
     if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) throw new Error()
     specToRows(specJsonRaw.value)
-    ElMessage.success('已从 JSON 更新表格')
+    ElMessage.success(t('serverEnv.jsonApplied'))
   } catch {
-    ElMessage.warning('规格 JSON 格式不正确，请检查后重试')
+    ElMessage.warning(t('serverEnv.jsonInvalid'))
   }
 }
 
 async function saveSpec() {
   const name = specForm.name.trim()
   if (!name) {
-    ElMessage.warning('请填写模板名')
+    ElMessage.warning(t('serverEnv.needTemplateName'))
     return
   }
   const specRaw = rowsToSpec()
@@ -429,7 +435,7 @@ async function saveSpec() {
     const remark = specForm.remark.trim()
     if (editingSpecId.value === null) {
       const res = await addFpmSpec({ name, spec: specRaw, remark })
-      ElMessage.success(res.message || '规格模板已创建')
+      ElMessage.success(res.message || t('serverEnv.specCreated'))
     } else {
       const res = await updateFpmSpec({
         id: editingSpecId.value,
@@ -437,7 +443,7 @@ async function saveSpec() {
         spec: specRaw,
         remark,
       })
-      ElMessage.success(res.message || '规格模板已更新')
+      ElMessage.success(res.message || t('serverEnv.specUpdated'))
     }
     specDialogVisible.value = false
     loadSpecs()
@@ -450,13 +456,13 @@ async function saveSpec() {
 
 function removeSpec(row: FpmSpecItem) {
   ElMessageBox.confirm(
-    `删除规格模板「${row.name}」？\n已引用该模板的用户将自动回退到全局默认规格。`,
-    '删除确认',
-    { type: 'warning', confirmButtonText: '删除' },
+    t('serverEnv.deleteSpecConfirm', { name: row.name }),
+    t('serverEnv.deleteSpecTitle'),
+    { type: 'warning', confirmButtonText: t('common.delete') },
   )
     .then(async () => {
       const res = await deleteFpmSpec(row.id)
-      ElMessage.success(res.message || '规格模板已删除')
+      ElMessage.success(res.message || t('serverEnv.specDeleted'))
       loadSpecs()
     })
     .catch(() => {
@@ -475,23 +481,27 @@ onMounted(() => {
     <el-card shadow="never" v-loading="loading">
       <template #header>
         <div class="card-header">
-          <span>服务器运行环境</span>
+          <span>{{ t('serverEnv.title') }}</span>
           <div class="header-actions">
             <el-tag v-if="env?.refreshed" size="small" type="success" style="margin-right: 8px">
-              已自动刷新
+              {{ t('serverEnv.autoRefreshed') }}
             </el-tag>
-            <span class="detected-at" v-if="payload">检测于 {{ fmtTime(env?.detected_at) }}</span>
+            <span class="detected-at" v-if="payload">
+              {{ t('serverEnv.detectedAt', { time: fmtTime(env?.detected_at) }) }}
+            </span>
             <el-button type="primary" size="small" :loading="refreshing" @click="refresh">
-              重新检测
+              {{ t('serverEnv.redetect') }}
             </el-button>
-            <el-button size="small" @click="openDefaultsDialog">默认配置</el-button>
+            <el-button size="small" @click="openDefaultsDialog">
+              {{ t('serverEnv.defaults') }}
+            </el-button>
           </div>
         </div>
       </template>
 
       <el-alert
         v-if="env?.error"
-        :title="`自动探测暂不可用（${env.error}），当前展示上次缓存快照。可稍后手动重新检测。`"
+        :title="t('serverEnv.probeFailed', { error: env.error })"
         type="warning"
         :closable="false"
         show-icon
@@ -500,40 +510,59 @@ onMounted(() => {
 
       <template v-if="payload">
         <!-- 操作系统 -->
-        <el-descriptions title="操作系统" :column="2" border class="env-section">
-          <el-descriptions-item label="主机名">{{ payload.hostname || '--' }}</el-descriptions-item>
-          <el-descriptions-item label="系统">
+        <el-descriptions :title="t('serverEnv.osTitle')" :column="2" border class="env-section">
+          <el-descriptions-item :label="t('serverEnv.hostname')">
+            {{ payload.hostname || '--' }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('serverEnv.system')">
             {{ payload.os.name }} {{ payload.os.version }}
           </el-descriptions-item>
-          <el-descriptions-item label="内核">{{ payload.os.kernel || '--' }}</el-descriptions-item>
-          <el-descriptions-item label="架构">{{ payload.os.arch || '--' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('serverEnv.kernel')">
+            {{ payload.os.kernel || '--' }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('serverEnv.arch')">
+            {{ payload.os.arch || '--' }}
+          </el-descriptions-item>
         </el-descriptions>
 
         <!-- Web 服务器 -->
-        <el-descriptions title="Web 服务器" :column="1" border class="env-section">
-          <el-descriptions-item label="类型">
+        <el-descriptions
+          :title="t('serverEnv.webserverTitle')"
+          :column="1"
+          border
+          class="env-section"
+        >
+          <el-descriptions-item :label="t('common.type')">
             <template v-if="payload.webserver?.flavor && payload.webserver.flavor !== 'none'">
-              <el-tag :type="payload.webserver.flavor === 'openresty' ? 'warning' : 'success'" size="small">
+              <el-tag
+                :type="payload.webserver.flavor === 'openresty' ? 'warning' : 'success'"
+                size="small"
+              >
                 {{ payload.webserver.flavor }}
               </el-tag>
-              <el-tag size="small" style="margin-left: 8px">v{{ payload.webserver.version || '--' }}</el-tag>
+              <el-tag size="small" style="margin-left: 8px"
+                >v{{ payload.webserver.version || '--' }}</el-tag
+              >
               <el-tag
                 size="small"
                 :type="payload.webserver.running ? 'success' : 'info'"
                 style="margin-left: 8px"
               >
-                {{ payload.webserver.running ? '运行中' : '未运行' }}
+                {{ payload.webserver.running ? t('serverEnv.running') : t('serverEnv.notRunning') }}
               </el-tag>
             </template>
-            <el-tag v-else size="small" type="info">未检测到 Nginx / OpenResty</el-tag>
+            <el-tag v-else size="small" type="info">{{ t('serverEnv.noWebserver') }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item v-if="payload.webserver?.binary" label="可执行文件">
+          <el-descriptions-item v-if="payload.webserver?.binary" :label="t('serverEnv.binary')">
             {{ payload.webserver.binary }}
           </el-descriptions-item>
-          <el-descriptions-item v-if="payload.webserver?.conf" label="主配置">
+          <el-descriptions-item v-if="payload.webserver?.conf" :label="t('serverEnv.mainConf')">
             {{ payload.webserver.conf }}
           </el-descriptions-item>
-          <el-descriptions-item v-if="payload.webserver?.sites_dir" label="站点配置目录">
+          <el-descriptions-item
+            v-if="payload.webserver?.sites_dir"
+            :label="t('serverEnv.sitesDir')"
+          >
             {{ payload.webserver.sites_dir }}
           </el-descriptions-item>
         </el-descriptions>
@@ -542,25 +571,35 @@ onMounted(() => {
         <div class="env-section">
           <div class="section-title">
             PHP
-            <el-tag v-if="payload.php?.default" size="small" type="primary" style="margin-left: 8px">
-              默认 {{ payload.php.default }}
+            <el-tag
+              v-if="payload.php?.default"
+              size="small"
+              type="primary"
+              style="margin-left: 8px"
+            >
+              {{ t('serverEnv.defaultTag', { v: payload.php.default }) }}
             </el-tag>
           </div>
-          <el-table :data="payload.php?.instances ?? []" size="small" border style="margin-top: 8px">
-            <el-table-column label="版本" width="110">
+          <el-table
+            :data="payload.php?.instances ?? []"
+            size="small"
+            border
+            style="margin-top: 8px"
+          >
+            <el-table-column :label="t('serverEnv.phpVersion')" width="110">
               <template #default="{ row }">
                 <el-tag v-if="row.default" type="primary" size="small">{{ row.version }}</el-tag>
                 <span v-else>{{ row.version }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="binary" label="可执行文件" show-overflow-tooltip />
+            <el-table-column prop="binary" :label="t('serverEnv.binary')" show-overflow-tooltip />
             <el-table-column prop="socket" label="FPM Socket" show-overflow-tooltip>
               <template #default="{ row }">{{ row.socket || '--' }}</template>
             </el-table-column>
-            <el-table-column label="状态" width="90">
+            <el-table-column :label="t('common.status')" width="90">
               <template #default="{ row }">
                 <el-tag :type="row.running ? 'success' : 'info'" size="small">
-                  {{ row.running ? '运行中' : '未运行' }}
+                  {{ row.running ? t('serverEnv.running') : t('serverEnv.notRunning') }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -569,19 +608,19 @@ onMounted(() => {
 
         <!-- 数据库 -->
         <div class="env-section">
-          <div class="section-title">数据库</div>
+          <div class="section-title">{{ t('serverEnv.dbTitle') }}</div>
           <el-table :data="payload.databases ?? []" size="small" border style="margin-top: 8px">
-            <el-table-column label="实例" width="160">
+            <el-table-column :label="t('serverEnv.instance')" width="160">
               <template #default="{ row }">
                 <el-tag size="small">{{ row.name }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="version" label="版本" />
-            <el-table-column prop="binary" label="路径" show-overflow-tooltip />
-            <el-table-column label="状态" width="110">
+            <el-table-column prop="version" :label="t('serverEnv.phpVersion')" />
+            <el-table-column prop="binary" :label="t('serverEnv.path')" show-overflow-tooltip />
+            <el-table-column :label="t('common.status')" width="110">
               <template #default="{ row }">
                 <el-tag :type="row.running ? 'success' : 'info'" size="small">
-                  {{ row.running ? '运行中' : '未运行' }}
+                  {{ row.running ? t('serverEnv.running') : t('serverEnv.notRunning') }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -590,19 +629,19 @@ onMounted(() => {
 
         <!-- 工具链 -->
         <div class="env-section">
-          <div class="section-title">常用工具</div>
+          <div class="section-title">{{ t('serverEnv.toolsTitle') }}</div>
           <el-table :data="payload.tools ?? []" size="small" border style="margin-top: 8px">
-            <el-table-column label="名称" width="160">
+            <el-table-column :label="t('common.name')" width="160">
               <template #default="{ row }">
                 <el-tag size="small" type="info">{{ row.name }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="version" label="版本" />
+            <el-table-column prop="version" :label="t('serverEnv.phpVersion')" />
           </el-table>
         </div>
       </template>
 
-      <el-empty v-else description="暂无运行环境数据，请点击右上角「重新检测」" :image-size="80" />
+      <el-empty v-else :description="t('serverEnv.empty')" :image-size="80" />
     </el-card>
 
     <!-- PHP-FPM 规格模板 -->
@@ -610,56 +649,73 @@ onMounted(() => {
       <template #header>
         <div class="card-header">
           <div>
-            <span>PHP-FPM 规格模板</span>
-            <span class="card-sub">添加用户时可从中选择（模板名以「用户名_」开头即归该用户名下，可被其客户继承）</span>
+            <span>{{ t('serverEnv.specTitle') }}</span>
+            <span class="card-sub">{{ t('serverEnv.specSub') }}</span>
           </div>
-          <el-button type="primary" size="small" @click="openSpecDialog()">新增模板</el-button>
+          <el-button type="primary" size="small" @click="openSpecDialog()">
+            {{ t('serverEnv.addSpec') }}
+          </el-button>
         </div>
       </template>
       <el-alert
-        title="命名建议：归某用户名下的模板用「用户名_default」作为其默认规格（客户选择「继承 reseller」时优先使用）；不带用户名前缀（如 high-io）为全局通用模板，所有用户添加时都可见。模板中的字段会覆盖全局默认规格，未填字段沿用全局默认。"
+        :title="t('serverEnv.specNamingAlert')"
         type="info"
         :closable="false"
         show-icon
         style="margin-bottom: 12px"
       />
       <el-table :data="specs" size="small" border style="width: 100%">
-        <el-table-column label="模板名" width="220">
+        <el-table-column :label="t('serverEnv.templateName')" width="220">
           <template #default="{ row }">
             <el-tag :type="row.owner ? 'success' : 'info'" size="small">{{ row.name }}</el-tag>
             <el-tag v-if="row.owner" type="warning" size="small" style="margin-left: 6px">
-              {{ row.owner }} 名下
+              {{ t('serverEnv.ownerUnder', { owner: row.owner }) }}
             </el-tag>
-            <el-tag v-else type="info" size="small" style="margin-left: 6px" effect="plain">全局</el-tag>
+            <el-tag v-else type="info" size="small" style="margin-left: 6px" effect="plain">
+              {{ t('serverEnv.globalTag') }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="规格摘要" min-width="240">
+        <el-table-column :label="t('serverEnv.specSummary')" min-width="240">
           <template #default="{ row }">
             <el-popover placement="top-start" :width="420" trigger="click">
               <template #reference>
-                <span class="spec-preview-trigger" :title="'点击预览完整 JSON'">
+                <span class="spec-preview-trigger" :title="t('serverEnv.previewTip')">
                   {{ specPreview(row.spec) }}
                 </span>
               </template>
               <template #default>
                 <div class="spec-popover-head">
-                  <el-tag size="small" :type="row.owner ? 'success' : 'info'">{{ row.name }}</el-tag>
+                  <el-tag size="small" :type="row.owner ? 'success' : 'info'">{{
+                    row.name
+                  }}</el-tag>
                   <span class="spec-popover-sub">{{ row.remark || '—' }}</span>
-                  <el-button link type="primary" size="small" @click="openSpecDialog(row)">编辑</el-button>
+                  <el-button link type="primary" size="small" @click="openSpecDialog(row)">
+                    {{ t('common.edit') }}
+                  </el-button>
                 </div>
                 <pre class="spec-json-view">{{ prettySpec(row.spec) }}</pre>
               </template>
             </el-popover>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="更新时间" width="160">
+        <el-table-column
+          prop="remark"
+          :label="t('common.remark')"
+          min-width="140"
+          show-overflow-tooltip
+        />
+        <el-table-column :label="t('common.updatedAt')" width="160">
           <template #default="{ row }">{{ fmtTime(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="130" align="center">
+        <el-table-column :label="t('common.operation')" width="130" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openSpecDialog(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="removeSpec(row)">删除</el-button>
+            <el-button link type="primary" size="small" @click="openSpecDialog(row)">
+              {{ t('common.edit') }}
+            </el-button>
+            <el-button link type="danger" size="small" @click="removeSpec(row)">
+              {{ t('common.delete') }}
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -668,43 +724,41 @@ onMounted(() => {
     <!-- 规格模板编辑 -->
     <el-dialog
       v-model="specDialogVisible"
-      :title="editingSpecId === null ? '新增 FPM 规格模板' : '编辑 FPM 规格模板'"
+      :title="editingSpecId === null ? t('serverEnv.addSpecTitle') : t('serverEnv.editSpecTitle')"
       width="800px"
       top="6vh"
       destroy-on-close
     >
       <el-form label-width="110px" @submit.prevent>
-        <el-form-item label="模板名" required>
+        <el-form-item :label="t('serverEnv.templateName')" required>
           <el-input
             v-model="specForm.name"
-            placeholder="全局通用直接命名，如 high-io；归用户/经销商以 用户名_ 开头，如 resellerA_default"
+            :placeholder="t('serverEnv.templateNamePlaceholder')"
             maxlength="64"
             show-word-limit
           />
-          <div class="form-tip">
-            建议：{用户名}_default 作为该用户名下的默认规格（供客户「继承」）；{用户名}_xxx 为名下可选规格；无前缀为全局通用。
-          </div>
+          <div class="form-tip">{{ t('serverEnv.templateNameTip') }}</div>
         </el-form-item>
-        <el-form-item label="规格字段">
+        <el-form-item :label="t('serverEnv.specFields')">
           <el-table :data="specRows" size="small" border style="width: 100%">
-            <el-table-column label="启用" width="56" align="center">
+            <el-table-column :label="t('common.enable')" width="56" align="center">
               <template #default="{ row }">
                 <el-checkbox v-model="row.enabled" />
               </template>
             </el-table-column>
-            <el-table-column label="字段" width="250">
+            <el-table-column :label="t('serverEnv.fieldCol')" width="250">
               <template #default="{ row }">
                 <el-select
                   v-model="row.field"
                   filterable
                   allow-create
                   default-first-option
-                  placeholder="选择或输入字段名"
+                  :placeholder="t('serverEnv.fieldPlaceholder')"
                   style="width: 100%"
                   @change="onFieldPicked(row)"
                 >
                   <el-option
-                    v-for="opt in FIELD_OPTIONS"
+                    v-for="opt in fieldOptions"
                     :key="opt.value"
                     :label="opt.label"
                     :value="opt.value"
@@ -712,17 +766,22 @@ onMounted(() => {
                 </el-select>
               </template>
             </el-table-column>
-            <el-table-column label="值" min-width="200">
+            <el-table-column :label="t('serverEnv.valueCol')" min-width="200">
               <template #default="{ row }">
                 <div class="value-cell">
                   <div class="value-control">
                     <el-select
                       v-if="fpmMeta(row.field)?.kind === 'pm'"
                       v-model="row.value"
-                      placeholder="进程管理模式"
+                      :placeholder="t('serverEnv.pmPlaceholder')"
                       style="width: 100%"
                     >
-                      <el-option v-for="v in ['dynamic', 'static', 'ondemand']" :key="v" :label="v" :value="v" />
+                      <el-option
+                        v-for="v in ['dynamic', 'static', 'ondemand']"
+                        :key="v"
+                        :label="v"
+                        :value="v"
+                      />
                     </el-select>
                     <el-input-number
                       v-else-if="fpmMeta(row.field)?.kind === 'number'"
@@ -739,7 +798,7 @@ onMounted(() => {
                       filterable
                       allow-create
                       default-first-option
-                      placeholder="如 256M / 1G"
+                      :placeholder="t('serverEnv.sizePlaceholder')"
                       style="width: 100%"
                     >
                       <el-option
@@ -749,7 +808,11 @@ onMounted(() => {
                         :value="v"
                       />
                     </el-select>
-                    <el-input v-else v-model="row.value" placeholder="值（勾选启用后生效）" />
+                    <el-input
+                      v-else
+                      v-model="row.value"
+                      :placeholder="t('serverEnv.valuePlaceholder')"
+                    />
                   </div>
                   <el-tooltip
                     v-if="fpmMeta(row.field)"
@@ -765,18 +828,20 @@ onMounted(() => {
             </el-table-column>
             <el-table-column label="" width="60" align="center">
               <template #default="{ $index }">
-                <el-button link type="danger" size="small" @click="removeSpecRow($index)">删</el-button>
+                <el-button link type="danger" size="small" @click="removeSpecRow($index)">
+                  {{ t('serverEnv.removeRow') }}
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
           <div class="field-toolbar">
-            <el-button size="small" type="primary" plain @click="addSpecRow">添加字段</el-button>
-            <span class="form-tip">
-              仅「启用」且已填值的字段会写入模板；未列出的字段生成 pool 时沿用全局默认规格。
-            </span>
+            <el-button size="small" type="primary" plain @click="addSpecRow">
+              {{ t('serverEnv.addField') }}
+            </el-button>
+            <span class="form-tip">{{ t('serverEnv.specFieldsTip') }}</span>
           </div>
           <el-collapse v-model="jsonPanel" class="json-collapse">
-            <el-collapse-item title="原始 JSON（默认折叠，点击展开预览 / 批量粘贴编辑）" name="json">
+            <el-collapse-item :title="t('serverEnv.rawJsonPanel')" name="json">
               <el-input
                 v-model="specJsonRaw"
                 type="textarea"
@@ -785,141 +850,217 @@ onMounted(() => {
                 spellcheck="false"
               />
               <div class="json-actions">
-                <el-button size="small" @click="jsonFromTable">从表格生成</el-button>
+                <el-button size="small" @click="jsonFromTable">
+                  {{ t('serverEnv.genFromTable') }}
+                </el-button>
                 <el-button size="small" type="primary" plain @click="applyJsonToTable">
-                  应用 JSON 到表格
+                  {{ t('serverEnv.applyJson') }}
                 </el-button>
               </div>
             </el-collapse-item>
           </el-collapse>
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="specForm.remark" placeholder="用途说明，如：高配站点 / 静态站小内存" maxlength="200" />
+        <el-form-item :label="t('common.remark')">
+          <el-input
+            v-model="specForm.remark"
+            :placeholder="t('serverEnv.remarkPlaceholder')"
+            maxlength="200"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="specDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="specSaving" @click="saveSpec">保存</el-button>
+        <el-button @click="specDialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="specSaving" @click="saveSpec">
+          {{ t('common.save') }}
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 全局默认配置 -->
-    <el-dialog v-model="dialogVisible" title="全局默认配置" width="640px">
+    <el-dialog v-model="dialogVisible" :title="t('serverEnv.defaultsTitle')" width="640px">
       <el-form label-width="130px" @submit.prevent>
-        <el-form-item label="默认 Web 服务器">
-          <el-select v-model="form.webserver" clearable placeholder="跟随自动探测" style="width: 100%">
-            <el-option label="跟随自动探测（自动）" value="" />
+        <el-form-item :label="t('serverEnv.defaultWebserver')">
+          <el-select
+            v-model="form.webserver"
+            clearable
+            :placeholder="t('serverEnv.followAuto')"
+            style="width: 100%"
+          >
+            <el-option :label="t('serverEnv.followAutoOption')" value="" />
             <el-option label="nginx" value="nginx" />
             <el-option label="openresty" value="openresty" />
           </el-select>
         </el-form-item>
-        <el-form-item label="默认 PHP 版本">
+        <el-form-item :label="t('serverEnv.defaultPhp')">
           <el-select
             v-model="form.php_default"
             clearable
             filterable
             allow-create
             default-first-option
-            placeholder="不指定（站点可单独选择）"
+            :placeholder="t('serverEnv.phpUnset')"
             style="width: 100%"
           >
             <el-option v-for="v in phpOptions" :key="v" :label="v" :value="v" />
           </el-select>
-          <div class="form-tip">新建站点/部署时的默认 PHP 版本预选（如 8.3 / php83）</div>
+          <div class="form-tip">{{ t('serverEnv.defaultPhpTip') }}</div>
         </el-form-item>
-        <el-form-item label="默认数据库">
+        <el-form-item :label="t('serverEnv.defaultDb')">
           <el-select
             v-model="form.database"
             clearable
             filterable
             allow-create
             default-first-option
-            placeholder="不指定"
+            :placeholder="t('serverEnv.unset')"
             style="width: 100%"
           >
             <el-option v-for="d in dbOptions" :key="d" :label="d" :value="d" />
           </el-select>
         </el-form-item>
 
-        <el-divider content-position="left">用户家目录挂载点</el-divider>
-        <el-form-item label="挂载点">
+        <el-divider content-position="left">{{ t('serverEnv.homeMountTitle') }}</el-divider>
+        <el-form-item :label="t('serverEnv.mountPoint')">
           <el-input v-model="form.user_home_root" placeholder="/home" style="max-width: 360px" />
-          <div class="form-tip">
-            新建面板用户的家目录根目录。默认 /home；当 /home 磁盘不足时，可把新磁盘挂载到
-            /home2 等目录并在此设置新挂载点，此后新用户的数据即落到新挂载点；
-            存量用户不受影响，需要搬迁时请到「服务器配置 → 数据迁移」整体迁移。
-          </div>
+          <div class="form-tip">{{ t('serverEnv.homeRootTip') }}</div>
         </el-form-item>
 
-        <el-divider content-position="left">虚拟主机运行模式</el-divider>
-        <el-form-item label="运行模式">
-          <el-tag type="success" size="large">独立系统用户</el-tag>
-          <div class="form-tip">
-            每个面板用户对应一个专属 Linux 账号（nologin）：站点文件归该账号，
-            PHP-FPM 以「该用户 × 该 PHP 版本」独立 pool 运行，用户之间完全隔离。
-          </div>
+        <el-divider content-position="left">{{ t('serverEnv.vhostModeTitle') }}</el-divider>
+        <el-form-item :label="t('serverEnv.runMode')">
+          <el-tag type="success" size="large">{{ t('serverEnv.standaloneUser') }}</el-tag>
+          <div class="form-tip">{{ t('serverEnv.standaloneTip') }}</div>
         </el-form-item>
         <el-form-item label=" ">
           <el-alert
-            title="系统固定使用独立系统用户模式（已移除「统一 www 用户」模式）。新建用户会自动生成专属 Linux 账号（nologin）并赋权家目录；存量用户请到「服务器配置 → 同步运行环境」点击「一键修复/同步」补齐（幂等、不影响已有站点）；站点同步后自动生成每用户每 PHP 版本的独立 PHP-FPM pool。"
+            :title="t('serverEnv.fixedModeAlert')"
             type="info"
             :closable="false"
             show-icon
           />
         </el-form-item>
 
-        <el-divider content-position="left">PHP-FPM 默认 pool 规格</el-divider>
-        <el-form-item label="进程管理模式">
+        <el-divider content-position="left">{{ t('serverEnv.fpmDefaultsTitle') }}</el-divider>
+        <el-form-item :label="t('serverEnv.fpmField.pm')">
           <el-radio-group v-model="fpmStr.pm">
-            <el-radio value="dynamic">dynamic（动态）</el-radio>
-            <el-radio value="static">static（固定）</el-radio>
-            <el-radio value="ondemand">ondemand（按需）</el-radio>
+            <el-radio value="dynamic">{{ t('serverEnv.pmDynamic') }}</el-radio>
+            <el-radio value="static">{{ t('serverEnv.pmStatic') }}</el-radio>
+            <el-radio value="ondemand">{{ t('serverEnv.pmOndemand') }}</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="fpmStr.pm !== 'ondemand'" label="最大子进程数">
-          <el-input-number v-model="fpmNum.max_children" :min="1" :max="512" controls-position="right" />
-          <div class="form-tip">pm.max_children：常驻 worker 上限（建议 = 可用内存 MB ÷ 单进程约 50-100MB）</div>
+        <el-form-item v-if="fpmStr.pm !== 'ondemand'" :label="t('serverEnv.maxChildren')">
+          <el-input-number
+            v-model="fpmNum.max_children"
+            :min="1"
+            :max="512"
+            controls-position="right"
+          />
+          <div class="form-tip">{{ t('serverEnv.maxChildrenTip') }}</div>
         </el-form-item>
-        <el-form-item v-if="fpmStr.pm === 'dynamic'" label="启动子进程数">
-          <el-input-number v-model="fpmNum.start_servers" :min="1" :max="128" controls-position="right" />
+        <el-form-item v-if="fpmStr.pm === 'dynamic'" :label="t('serverEnv.fpmField.startServers')">
+          <el-input-number
+            v-model="fpmNum.start_servers"
+            :min="1"
+            :max="128"
+            controls-position="right"
+          />
         </el-form-item>
-        <el-form-item v-if="fpmStr.pm === 'dynamic'" label="空闲下限 / 上限">
-          <el-input-number v-model="fpmNum.min_spare_servers" :min="1" :max="128" controls-position="right" />
+        <el-form-item v-if="fpmStr.pm === 'dynamic'" :label="t('serverEnv.spareRange')">
+          <el-input-number
+            v-model="fpmNum.min_spare_servers"
+            :min="1"
+            :max="128"
+            controls-position="right"
+          />
           <span style="margin: 0 8px; color: var(--el-text-color-secondary)">~</span>
-          <el-input-number v-model="fpmNum.max_spare_servers" :min="1" :max="256" controls-position="right" />
+          <el-input-number
+            v-model="fpmNum.max_spare_servers"
+            :min="1"
+            :max="256"
+            controls-position="right"
+          />
         </el-form-item>
-        <el-form-item label="单进程最大请求数">
-          <el-input-number v-model="fpmNum.max_requests" :min="0" :max="100000" controls-position="right" />
-          <div class="form-tip">pm.max_requests：达到后自动回收（0 = 不回收），防内存泄漏</div>
+        <el-form-item :label="t('serverEnv.maxRequests')">
+          <el-input-number
+            v-model="fpmNum.max_requests"
+            :min="0"
+            :max="100000"
+            controls-position="right"
+          />
+          <div class="form-tip">{{ t('serverEnv.maxRequestsTip') }}</div>
         </el-form-item>
-        <el-form-item label="请求超时(秒)">
-          <el-input-number v-model="fpmNum.request_terminate_timeout" :min="1" :max="86400" controls-position="right" />
+        <el-form-item :label="t('serverEnv.fpmField.requestTimeout')">
+          <el-input-number
+            v-model="fpmNum.request_terminate_timeout"
+            :min="1"
+            :max="86400"
+            controls-position="right"
+          />
         </el-form-item>
-        <el-form-item label="内存限制">
-          <el-select v-model="fpmStr.memory_limit" filterable allow-create default-first-option style="width: 180px">
-            <el-option v-for="m in ['128M', '256M', '512M', '1G', '2G']" :key="m" :label="m" :value="m" />
+        <el-form-item :label="t('serverEnv.fpmField.memoryLimit')">
+          <el-select
+            v-model="fpmStr.memory_limit"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 180px"
+          >
+            <el-option
+              v-for="m in ['128M', '256M', '512M', '1G', '2G']"
+              :key="m"
+              :label="m"
+              :value="m"
+            />
           </el-select>
         </el-form-item>
-        <el-form-item label="上传大小上限">
-          <el-select v-model="fpmStr.upload_max_filesize" filterable allow-create default-first-option style="width: 180px">
-            <el-option v-for="m in ['64M', '128M', '256M', '512M', '1G']" :key="m" :label="m" :value="m" />
+        <el-form-item :label="t('serverEnv.fpmField.uploadMax')">
+          <el-select
+            v-model="fpmStr.upload_max_filesize"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 180px"
+          >
+            <el-option
+              v-for="m in ['64M', '128M', '256M', '512M', '1G']"
+              :key="m"
+              :label="m"
+              :value="m"
+            />
           </el-select>
         </el-form-item>
-        <el-form-item label="POST 大小上限">
-          <el-select v-model="fpmStr.post_max_size" filterable allow-create default-first-option style="width: 180px">
-            <el-option v-for="m in ['64M', '128M', '256M', '512M', '1G']" :key="m" :label="m" :value="m" />
+        <el-form-item :label="t('serverEnv.fpmField.postMax')">
+          <el-select
+            v-model="fpmStr.post_max_size"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 180px"
+          >
+            <el-option
+              v-for="m in ['64M', '128M', '256M', '512M', '1G']"
+              :key="m"
+              :label="m"
+              :value="m"
+            />
           </el-select>
         </el-form-item>
-        <el-form-item label="最大执行时间(秒)">
-          <el-input-number v-model="fpmNum.max_execution_time" :min="1" :max="86400" controls-position="right" />
+        <el-form-item :label="t('serverEnv.fpmField.maxExecTime')">
+          <el-input-number
+            v-model="fpmNum.max_execution_time"
+            :min="1"
+            :max="86400"
+            controls-position="right"
+          />
         </el-form-item>
         <el-form-item label=" ">
-          <el-button size="small" @click="resetFpmForm">恢复默认规格</el-button>
+          <el-button size="small" @click="resetFpmForm">{{ t('serverEnv.resetSpec') }}</el-button>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveDefaults">保存</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="saveDefaults">
+          {{ t('common.save') }}
+        </el-button>
       </template>
     </el-dialog>
   </div>

@@ -2,7 +2,12 @@
   <div class="cpanel-home">
     <!-- 搜索 -->
     <div class="search-bar">
-      <el-input v-model="keyword" placeholder="搜索功能..." clearable class="search-input">
+      <el-input
+        v-model="keyword"
+        :placeholder="t('dashboardCpanel.searchPlaceholder')"
+        clearable
+        class="search-input"
+      >
         <template #prefix>
           <el-icon><Icon icon="material-symbols:search" /></el-icon>
         </template>
@@ -15,19 +20,35 @@
       <el-col :xs="24" :sm="12">
         <el-card shadow="hover" class="info-card">
           <template #header>
-            <div class="card-header"><span>常规信息</span></div>
+            <div class="card-header">
+              <span>{{ t('dashboardCpanel.generalInfo') }}</span>
+            </div>
           </template>
           <el-descriptions :column="1" label-width="110px">
-            <el-descriptions-item label="当前用户">
+            <el-descriptions-item :label="t('dashboardCpanel.currentUser')">
               {{ account.nickname || account.username || '—'
-              }}<span v-if="account.username" class="muted">（{{ account.username }}）</span>
+              }}<span v-if="account.username" class="muted">{{
+                t('dashboardCpanel.usernameParen', { name: account.username })
+              }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="登录邮箱">{{ account.email || '—' }}</el-descriptions-item>
-            <el-descriptions-item label="家目录">{{ account.home_dir || '—' }}</el-descriptions-item>
-            <el-descriptions-item label="上次登录 IP">{{ account.last_login_ip || '—' }}</el-descriptions-item>
-            <el-descriptions-item label="上次登录时间">{{ fmtTime(account.last_login_time) }}</el-descriptions-item>
-            <el-descriptions-item label="共享 IP">{{ server.public_ip || '—' }}</el-descriptions-item>
-            <el-descriptions-item label="服务器">{{ server.host_name || '—' }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.loginEmail')">{{
+              account.email || '—'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.homeDir')">{{
+              account.home_dir || '—'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.lastLoginIp')">{{
+              account.last_login_ip || '—'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.lastLoginTime')">{{
+              fmtTime(account.last_login_time)
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.sharedIp')">{{
+              server.public_ip || '—'
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.server')">{{
+              server.host_name || '—'
+            }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -36,33 +57,53 @@
       <el-col :xs="24" :sm="12">
         <el-card shadow="hover" class="info-card">
           <template #header>
-            <div class="card-header"><span>使用情况</span></div>
+            <div class="card-header">
+              <span>{{ t('dashboardCpanel.usage') }}</span>
+            </div>
           </template>
           <el-descriptions :column="1" label-width="110px">
-            <el-descriptions-item label="套餐">
-              {{ pkg.name || '未绑定套餐' }}
-              <span v-if="pkg.name && !packageBound" class="muted">（未绑定，按全局默认）</span>
+            <el-descriptions-item :label="t('dashboardCpanel.package')">
+              {{ pkg.name || t('dashboardCpanel.packageUnbound') }}
+              <span v-if="pkg.name && !packageBound" class="muted">{{
+                t('dashboardCpanel.packageUnboundGlobal')
+              }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="站点数量">
-              {{ stats.total }} 个
-              <span class="muted">（上限 {{ fmtLimit(pkg.max_sites) }}）</span>
+            <el-descriptions-item :label="t('dashboardCpanel.siteCount')">
+              {{ t('dashboardCpanel.countUnit', { n: stats.total }) }}
+              <span class="muted">{{
+                t('dashboardCpanel.siteLimit', { n: fmtLimit(pkg.max_sites) })
+              }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="域名数量">
-              {{ stats.domains }} 个
-              <span class="muted">（单站上限 {{ fmtLimit(pkg.max_domains) }}）</span>
+            <el-descriptions-item :label="t('dashboardCpanel.domainCount')">
+              {{ t('dashboardCpanel.countUnit', { n: stats.domains }) }}
+              <span class="muted">{{
+                t('dashboardCpanel.domainLimit', { n: fmtLimit(pkg.max_domains) })
+              }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="磁盘配额">{{ fmtMb(pkg.disk_quota_mb) }}</el-descriptions-item>
-            <el-descriptions-item label="带宽">{{ fmtMb(pkg.max_bandwidth_mb) }}</el-descriptions-item>
-            <el-descriptions-item label="FPM 规格">
+            <el-descriptions-item :label="t('dashboardCpanel.diskQuota')">{{
+              fmtMb(pkg.disk_quota_mb)
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.bandwidth')">{{
+              fmtMb(pkg.max_bandwidth_mb)
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.fpmSpec')">
               <el-tag v-if="!pkg.fpm_spec_ref" size="small" type="info" effect="plain">
-                面板默认
+                {{ t('dashboardCpanel.panelDefault') }}
               </el-tag>
               <span v-else>{{ pkg.fpm_spec_ref }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="SSH 终端">
-              {{ packageBound ? (pkg.allow_ssh ? '允许' : '禁止') : '允许（未绑定）' }}
+            <el-descriptions-item :label="t('dashboardCpanel.sshTerminal')">
+              {{
+                packageBound
+                  ? pkg.allow_ssh
+                    ? t('dashboardCpanel.allow')
+                    : t('dashboardCpanel.deny')
+                  : t('dashboardCpanel.allowUnbound')
+              }}
             </el-descriptions-item>
-            <el-descriptions-item label="反向代理">{{ pkg.allow_proxy ? '允许' : '禁止' }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.reverseProxy')">{{
+              pkg.allow_proxy ? t('dashboardCpanel.allow') : t('dashboardCpanel.deny')
+            }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -72,14 +113,7 @@
     <div v-for="group in visibleGroups" :key="group.title" class="group">
       <div class="group-title">{{ group.title }}</div>
       <el-row :gutter="16">
-        <el-col
-          :xs="12"
-          :sm="8"
-          :md="6"
-          :lg="4"
-          v-for="item in group.items"
-          :key="item.title"
-        >
+        <el-col :xs="12" :sm="8" :md="6" :lg="4" v-for="item in group.items" :key="item.title">
           <div class="app-tile" @click="handleClick(item)">
             <el-icon class="app-icon"><Icon :icon="item.icon" /></el-icon>
             <div class="app-title">{{ item.title }}</div>
@@ -92,6 +126,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Icon } from '@/icons'
@@ -114,6 +149,7 @@ interface AppGroup {
   items: AppEntry[]
 }
 
+const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 const roles = userStore.roles
@@ -121,32 +157,67 @@ const roles = userStore.roles
 const keyword = ref('')
 
 // 功能入口：roles 控制哪些角色可见
-const groups: AppGroup[] = [
+const groups = computed<AppGroup[]>(() => [
   {
-    title: '常用功能',
+    title: t('dashboardCpanel.groupCommon'),
     items: [
-      { title: '文件管理', icon: 'material-symbols:folder', path: '/files', roles: ['user', 'reseller'] },
-      { title: '站点', icon: 'material-symbols:public', path: '/site', roles: ['user', 'reseller'] },
+      {
+        title: t('dashboardCpanel.itemFiles'),
+        icon: 'material-symbols:folder',
+        path: '/files',
+        roles: ['user', 'reseller'],
+      },
+      {
+        title: t('dashboardCpanel.itemSite'),
+        icon: 'material-symbols:public',
+        path: '/site',
+        roles: ['user', 'reseller'],
+      },
       { title: 'SSL/TLS', icon: 'material-symbols:lock', path: '/ssl-tls', roles: ['user'] },
-      { title: '终端', icon: 'material-symbols:monitor', path: '/terminal', roles: ['user', 'reseller'] },
-      { title: '个人中心', icon: 'material-symbols:person', path: '/profile', roles: ['user', 'reseller'] },
+      {
+        title: t('dashboardCpanel.itemTerminal'),
+        icon: 'material-symbols:monitor',
+        path: '/terminal',
+        roles: ['user', 'reseller'],
+      },
+      {
+        title: t('dashboardCpanel.itemProfile'),
+        icon: 'material-symbols:person',
+        path: '/profile',
+        roles: ['user', 'reseller'],
+      },
     ],
   },
   {
-    title: '经销商功能',
+    title: t('dashboardCpanel.groupReseller'),
     items: [
-      { title: '客户管理', icon: 'material-symbols:account-circle', path: '/reseller/users', roles: ['reseller'] },
-      { title: '配额管理', icon: 'material-symbols:speed', roles: ['reseller'], coming: true },
-      { title: '资源分配', icon: 'material-symbols:tune', roles: ['reseller'], coming: true },
+      {
+        title: t('dashboardCpanel.itemCustomers'),
+        icon: 'material-symbols:account-circle',
+        path: '/reseller/users',
+        roles: ['reseller'],
+      },
+      {
+        title: t('dashboardCpanel.itemQuota'),
+        icon: 'material-symbols:speed',
+        roles: ['reseller'],
+        coming: true,
+      },
+      {
+        title: t('dashboardCpanel.itemAllocation'),
+        icon: 'material-symbols:tune',
+        roles: ['reseller'],
+        coming: true,
+      },
     ],
   },
-]
+])
 
 const hasRole = (entryRoles: string[]) => entryRoles.some((r) => roles.includes(r))
 
 const visibleGroups = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
-  return groups
+  return groups.value
     .map((g) => ({
       ...g,
       items: g.items.filter(
@@ -158,7 +229,7 @@ const visibleGroups = computed(() => {
 
 function handleClick(item: AppEntry) {
   if (item.coming) {
-    ElMessage.info('该功能即将上线')
+    ElMessage.info(t('dashboardCpanel.comingSoon'))
     return
   }
   if (item.path) {
@@ -176,11 +247,12 @@ const pkg = ref<Record<string, any>>({})
 
 const fmtTime = (ts: number) => (ts ? new Date(ts * 1000).toLocaleString() : '—')
 /** 数值上限展示：<=0 表示不限 */
-const fmtLimit = (v?: number) => (!Number(v) ? '不限' : `${v} 个`)
+const fmtLimit = (v?: number) =>
+  !Number(v) ? t('dashboardCpanel.noLimit') : t('dashboardCpanel.countUnit', { n: v })
 /** MB 容量展示：>= 1024 换算成 GB */
 const fmtMb = (v?: number) => {
   const mb = Number(v) || 0
-  if (mb <= 0) return '不限'
+  if (mb <= 0) return t('dashboardCpanel.noLimit')
   return mb >= 1024 ? `${(mb / 1024).toFixed(1).replace(/\.0$/, '')} GB` : `${mb} MB`
 }
 

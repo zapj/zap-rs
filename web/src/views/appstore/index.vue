@@ -6,12 +6,12 @@
         <div class="repo-title-wrap">
           <el-icon :size="24" color="#409eff"><Goods /></el-icon>
           <div class="repo-detail">
-            <div class="repo-title">应用商店软件库（Git 源）</div>
-            <div class="repo-sub">包数据来自多个 Git 源，可随时添加 / 删除 / 更新</div>
+            <div class="repo-title">{{ t('appstore.repoTitle') }}</div>
+            <div class="repo-sub">{{ t('appstore.repoSub') }}</div>
           </div>
         </div>
         <el-button type="primary" :disabled="!isAdmin" @click="showAddDialog = true">
-          添加源
+          {{ t('appstore.addSource') }}
         </el-button>
       </div>
 
@@ -20,15 +20,19 @@
           <div class="repo-item-left">
             <div class="repo-item-name">
               {{ r.name || r.id }}
-              <el-tag v-if="r.builtin" size="small" type="primary" effect="plain">内置</el-tag>
-              <el-tag v-if="!r.exists" size="small" type="danger" effect="plain">目录缺失</el-tag>
+              <el-tag v-if="r.builtin" size="small" type="primary" effect="plain">{{
+                t('appstore.tagBuiltin')
+              }}</el-tag>
+              <el-tag v-if="!r.exists" size="small" type="danger" effect="plain">{{
+                t('appstore.tagDirMissing')
+              }}</el-tag>
             </div>
             <div class="repo-item-url">{{ r.url }}</div>
             <div class="repo-item-meta">
               <span>id: {{ r.id }}</span>
-              <span v-if="r.version">版本: {{ r.version }}</span>
+              <span v-if="r.version">{{ t('appstore.versionColon') }} {{ r.version }}</span>
               <span v-if="r.commit">commit: {{ r.commit.slice(0, 7) }}</span>
-              <span>更新时间: {{ fmtTime(r.updated_at) }}</span>
+              <span>{{ t('appstore.updatedAtColon', { time: fmtTime(r.updated_at) }) }}</span>
             </div>
           </div>
           <div class="repo-item-actions">
@@ -38,7 +42,8 @@
               plain
               :disabled="!isAdmin"
               @click="handleUpdateRepo(r)"
-            >更新</el-button>
+              >{{ t('appstore.update') }}</el-button
+            >
             <el-button
               v-if="!r.builtin"
               size="small"
@@ -46,31 +51,34 @@
               plain
               :disabled="!isAdmin"
               @click="handleRemoveRepo(r)"
-            >删除</el-button>
+              >{{ t('common.delete') }}</el-button
+            >
           </div>
         </div>
-        <el-empty v-if="repos.length === 0" description="暂无 Git 源" :image-size="60" />
+        <el-empty v-if="repos.length === 0" :description="t('appstore.noRepo')" :image-size="60" />
       </div>
     </el-card>
 
     <!-- 分类 + 搜索 -->
     <div class="filter-bar">
       <el-radio-group v-model="activeCategory" size="small">
-        <el-radio-button value="all">全部</el-radio-button>
-        <el-radio-button value="infra">基础设施</el-radio-button>
-        <el-radio-button value="application">应用程序</el-radio-button>
-        <el-radio-button value="webapps">Web 应用</el-radio-button>
-        <el-radio-button value="database">数据库</el-radio-button>
-        <el-radio-button value="library">基础库</el-radio-button>
+        <el-radio-button value="all">{{ t('appstore.catAll') }}</el-radio-button>
+        <el-radio-button value="infra">{{ t('appstore.catInfra') }}</el-radio-button>
+        <el-radio-button value="application">{{ t('appstore.catApplication') }}</el-radio-button>
+        <el-radio-button value="webapps">{{ t('appstore.catWebapps') }}</el-radio-button>
+        <el-radio-button value="database">{{ t('appstore.catDatabase') }}</el-radio-button>
+        <el-radio-button value="library">{{ t('appstore.catLibrary') }}</el-radio-button>
       </el-radio-group>
       <el-input
         v-model="keyword"
-        placeholder="搜索包名称 / 描述"
+        :placeholder="t('appstore.searchPlaceholder')"
         clearable
         style="width: 240px"
         size="small"
       >
-        <template #prefix><el-icon><Search /></el-icon></template>
+        <template #prefix
+          ><el-icon><Search /></el-icon
+        ></template>
       </el-input>
     </div>
 
@@ -80,25 +88,34 @@
         <div class="pkg-head">
           <div class="pkg-name">
             {{ pkg.name }}
-            <el-tag v-if="pkg.installed" size="small" type="success" effect="light">已安装</el-tag>
-            <el-tag v-else size="small" type="info" effect="plain">未安装</el-tag>
+            <el-tag v-if="pkg.installed" size="small" type="success" effect="light">{{
+              t('appstore.tagInstalled')
+            }}</el-tag>
+            <el-tag v-else size="small" type="info" effect="plain">{{
+              t('appstore.tagNotInstalled')
+            }}</el-tag>
             <el-tag
               v-if="pkg.allow_multiple_instances"
               size="small"
               type="primary"
               effect="plain"
-            >多版本</el-tag>
+              >{{ t('appstore.tagMultiVersion') }}</el-tag
+            >
           </div>
           <div class="pkg-tags">
-            <el-tag v-if="pkg.source === 'custom'" size="small" type="warning" effect="light">自定义</el-tag>
-            <el-tag v-else-if="pkg.repo_id" size="small" type="info" effect="plain">{{ pkg.repo_id }}</el-tag>
+            <el-tag v-if="pkg.source === 'custom'" size="small" type="warning" effect="light">{{
+              t('appstore.tagCustom')
+            }}</el-tag>
+            <el-tag v-else-if="pkg.repo_id" size="small" type="info" effect="plain">{{
+              pkg.repo_id
+            }}</el-tag>
           </div>
         </div>
         <div class="pkg-title">{{ pkg.title || pkg.name }}</div>
-        <div class="pkg-desc">{{ pkg.description || '暂无描述' }}</div>
+        <div class="pkg-desc">{{ pkg.description || t('appstore.noDescription') }}</div>
         <div class="pkg-meta">
           <span v-if="pkg.versions && pkg.versions.length > 1" class="pkg-ver-sel">
-            版本:
+            {{ t('appstore.versionColon') }}
             <el-select
               size="small"
               :style="{ width: versionGroups(pkg).length ? '210px' : '130px' }"
@@ -106,11 +123,7 @@
               @change="onSelVersion(pkg, $event)"
             >
               <template v-if="versionGroups(pkg).length">
-                <el-option-group
-                  v-for="g in versionGroups(pkg)"
-                  :key="g.family"
-                  :label="g.label"
-                >
+                <el-option-group v-for="g in versionGroups(pkg)" :key="g.family" :label="g.label">
                   <el-option v-for="ver in g.versions" :key="ver" :label="ver" :value="ver">
                     <div class="ver-opt-row">
                       <span>{{ ver }}</span>
@@ -129,22 +142,32 @@
               :type="familyTagType(familyOf(pkg, curVersion(pkg)))"
               size="small"
               effect="light"
-            >{{ familyLabelOf(pkg, curVersion(pkg)) }}</el-tag>
+              >{{ familyLabelOf(pkg, curVersion(pkg)) }}</el-tag
+            >
           </span>
-          <span v-else>版本: <b>{{ pkg.version || '-' }}</b></span>
-          <span v-if="depList(pkg).length" class="pkg-deps">依赖: {{ depList(pkg).join('、') }}</span>
-          <span v-if="pkg.default_port" class="pkg-port">端口: {{ pkg.default_port }}</span>
+          <span v-else
+            >{{ t('appstore.versionColon') }} <b>{{ pkg.version || '-' }}</b></span
+          >
+          <span v-if="depList(pkg).length" class="pkg-deps">{{
+            t('appstore.depColon', { list: depList(pkg).join(t('appstore.depSep')) })
+          }}</span>
+          <span v-if="pkg.default_port" class="pkg-port">{{
+            t('appstore.portColon', { port: pkg.default_port })
+          }}</span>
         </div>
         <div v-if="pkg.installed" class="pkg-installed-meta">
-          已安装版本:
+          {{ t('appstore.installedVersionColon') }}
           <b>{{ pkg.installed_version || '-' }}</b>
           <el-tag
             v-if="familyOf(pkg, pkg.installed_version)"
             size="small"
             :type="familyTagType(familyOf(pkg, pkg.installed_version))"
             effect="plain"
-          >{{ familyLabelOf(pkg, pkg.installed_version) }}</el-tag>
-          <span v-if="pkg.upgraded_from">（升级自 {{ pkg.upgraded_from }}）</span>
+            >{{ familyLabelOf(pkg, pkg.installed_version) }}</el-tag
+          >
+          <span v-if="pkg.upgraded_from">{{
+            t('appstore.upgradedFrom', { from: pkg.upgraded_from })
+          }}</span>
         </div>
         <div class="pkg-actions">
           <template v-if="!pkg.installed">
@@ -156,7 +179,8 @@
                 type="primary"
                 :disabled="!canOperatePkg(pkg)"
                 @click="handleInstall(pkg, key)"
-              >{{ label }}</el-button>
+                >{{ label }}</el-button
+              >
             </template>
             <el-button
               v-else
@@ -164,7 +188,8 @@
               type="primary"
               :disabled="!canOperatePkg(pkg)"
               @click="handleInstall(pkg)"
-            >安装</el-button>
+              >{{ t('appstore.btnInstall') }}</el-button
+            >
           </template>
           <template v-else>
             <el-button
@@ -174,7 +199,8 @@
               plain
               :disabled="!canOperatePkg(pkg)"
               @click="handleInstall(pkg)"
-            >重装</el-button>
+              >{{ t('appstore.btnReinstall') }}</el-button
+            >
             <el-button
               v-if="pkg.allow_multiple_instances && !actionEntries(pkg).length"
               size="small"
@@ -182,7 +208,8 @@
               plain
               :disabled="!canOperatePkg(pkg)"
               @click="handleInstall(pkg)"
-            >再次安装</el-button>
+              >{{ t('appstore.btnInstallAgain') }}</el-button
+            >
             <el-button
               v-for="[key, label] in actionEntries(pkg)"
               :key="key"
@@ -191,7 +218,8 @@
               plain
               :disabled="!canOperatePkg(pkg)"
               @click="handleInstall(pkg, key)"
-            >{{ label }}</el-button>
+              >{{ label }}</el-button
+            >
             <el-button
               v-if="!pkg.allow_multiple_instances"
               size="small"
@@ -199,44 +227,58 @@
               plain
               :disabled="!canOperatePkg(pkg)"
               @click="handleUpgrade(pkg)"
-            >升级</el-button>
+              >{{ t('appstore.btnUpgrade') }}</el-button
+            >
             <el-button
               size="small"
               type="danger"
               plain
               :disabled="!canOperatePkg(pkg)"
               @click="handleUninstall(pkg)"
-            >卸载</el-button>
+              >{{ t('appstore.btnUninstall') }}</el-button
+            >
           </template>
         </div>
       </el-card>
     </div>
-    <el-empty v-if="!loading && filteredPackages.length === 0" description="未找到匹配的软件包" />
+    <el-empty
+      v-if="!loading && filteredPackages.length === 0"
+      :description="t('appstore.noPackages')"
+    />
 
     <!-- 运行记录 -->
     <el-card shadow="never" class="runs-card">
       <template #header>
         <div class="runs-header">
-          <span>运行记录</span>
-          <el-button size="small" text @click="loadRuns">刷新</el-button>
+          <span>{{ t('appstore.runsTitle') }}</span>
+          <el-button size="small" text @click="loadRuns">{{ t('appstore.refresh') }}</el-button>
         </div>
       </template>
       <el-table :data="runs" size="small" v-loading="runsLoading">
-        <el-table-column prop="action" label="操作" width="130" />
-        <el-table-column prop="pkg" label="对象" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="username" label="发起人" width="110" />
-        <el-table-column label="状态" width="100">
+        <el-table-column prop="action" :label="t('appstore.colAction')" width="130" />
+        <el-table-column
+          prop="pkg"
+          :label="t('appstore.colTarget')"
+          min-width="180"
+          show-overflow-tooltip
+        />
+        <el-table-column prop="username" :label="t('appstore.colInitiator')" width="110" />
+        <el-table-column :label="t('appstore.colStatus')" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+            <el-tag :type="statusType(row.status)" size="small">{{
+              statusText(row.status)
+            }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="exit_code" label="退出码" width="90" />
-        <el-table-column label="开始时间" width="170">
+        <el-table-column prop="exit_code" :label="t('appstore.colExitCode')" width="90" />
+        <el-table-column :label="t('appstore.colStartedAt')" width="170">
           <template #default="{ row }">{{ fmtTime(row.started_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column :label="t('common.operation')" width="170" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="viewRunLog(row)">查看日志</el-button>
+            <el-button size="small" text type="primary" @click="viewRunLog(row)">{{
+              t('appstore.viewLog')
+            }}</el-button>
             <el-button
               v-if="isAdmin && row.status === 'failed'"
               size="small"
@@ -245,7 +287,7 @@
               :loading="retryId === row.run_id"
               @click="handleRetryRun(row)"
             >
-              重跑
+              {{ t('appstore.retry') }}
             </el-button>
           </template>
         </el-table-column>
@@ -262,21 +304,24 @@
     </el-card>
 
     <!-- 添加源对话框 -->
-    <el-dialog v-model="showAddDialog" title="添加 Git 源" width="520px">
+    <el-dialog v-model="showAddDialog" :title="t('appstore.addRepoTitle')" width="520px">
       <el-form label-width="80px" @submit.prevent>
-        <el-form-item label="名称" required>
-          <el-input v-model="addForm.name" placeholder="例如: 我的应用商店" maxlength="32" />
-        </el-form-item>
-        <el-form-item label="Git 地址" required>
+        <el-form-item :label="t('appstore.nameLabel')" required>
           <el-input
-            v-model="addForm.url"
-            placeholder="https://github.com/org/repo.git"
+            v-model="addForm.name"
+            :placeholder="t('appstore.namePlaceholder')"
+            maxlength="32"
           />
+        </el-form-item>
+        <el-form-item :label="t('appstore.gitUrlLabel')" required>
+          <el-input v-model="addForm.url" placeholder="https://github.com/org/repo.git" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button type="primary" :loading="adding" @click="handleAddRepo">添加并拉取</el-button>
+        <el-button @click="showAddDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="adding" @click="handleAddRepo">{{
+          t('appstore.addAndPull')
+        }}</el-button>
       </template>
     </el-dialog>
 
@@ -306,7 +351,7 @@
           <template v-else-if="optType(o) === 'number'">
             <el-input-number
               v-model="optValues[o.name]"
-              :placeholder="o.placeholder || '请输入数值'"
+              :placeholder="o.placeholder || t('appstore.optNumberPlaceholder')"
               controls-position="right"
               style="width: 100%"
             />
@@ -319,9 +364,14 @@
               v-model="optValues[o.name]"
               style="width: 100%"
               clearable
-              :placeholder="o.placeholder || '请选择'"
+              :placeholder="o.placeholder || t('appstore.optSelectPlaceholder')"
             >
-              <el-option v-for="c in choicesOf(o)" :key="c.value" :label="c.label" :value="c.value" />
+              <el-option
+                v-for="c in choicesOf(o)"
+                :key="c.value"
+                :label="c.label"
+                :value="c.value"
+              />
             </el-select>
           </template>
           <template v-else>
@@ -330,9 +380,14 @@
               multiple
               collapse-tags
               style="width: 100%"
-              :placeholder="o.placeholder || '可多选'"
+              :placeholder="o.placeholder || t('appstore.optMultiPlaceholder')"
             >
-              <el-option v-for="c in choicesOf(o)" :key="c.value" :label="c.label" :value="c.value" />
+              <el-option
+                v-for="c in choicesOf(o)"
+                :key="c.value"
+                :label="c.label"
+                :value="c.value"
+              />
             </el-select>
           </template>
           <div v-if="o.desc" class="opt-tip">{{ o.desc }}</div>
@@ -343,7 +398,7 @@
         <span>{{ optIntro }}</span>
       </div>
       <template #footer>
-        <el-button @click="optDialogVisible = false">取消</el-button>
+        <el-button @click="optDialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="optSubmitting" @click="submitOptions">
           {{ optConfirmLabel }}
         </el-button>
@@ -358,6 +413,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { Goods, Search, InfoFilled } from '@/icons'
 import { useUserStore } from '@/stores/user'
 import {
@@ -382,6 +438,7 @@ import {
 } from '@/api/appstore'
 import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
 
+const { t } = useI18n()
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 
@@ -419,7 +476,7 @@ async function loadRepos() {
     const resp = await getRepos()
     repos.value = resp.data.repos || []
   } catch (e: any) {
-    ElMessage.error(e.message || '加载 Git 源失败')
+    ElMessage.error(e.message || t('appstore.loadReposFailed'))
   }
 }
 
@@ -427,26 +484,26 @@ async function handleAddRepo() {
   const name = addForm.value.name.trim()
   const url = addForm.value.url.trim()
   if (!name) {
-    ElMessage.warning('请输入源名称')
+    ElMessage.warning(t('appstore.nameRequired'))
     return
   }
   if (!url) {
-    ElMessage.warning('请输入 Git 地址')
+    ElMessage.warning(t('appstore.urlRequired'))
     return
   }
   adding.value = true
   try {
     const resp = await addRepo({ name, url })
-    ElMessage.success('添加源已启动')
+    ElMessage.success(t('appstore.addStarted'))
     showAddDialog.value = false
     addForm.value = { name: '', url: '' }
-    logDrawerRef.value?.openDrawer(resp.data.run_id, '添加 Git 源')
+    logDrawerRef.value?.openDrawer(resp.data.run_id, t('appstore.addRepoLogTitle'))
     setTimeout(() => {
       loadRepos()
       loadPackages()
     }, 3000)
   } catch (e: any) {
-    ElMessage.error(e.message || '添加失败')
+    ElMessage.error(e.message || t('appstore.addFailed'))
   } finally {
     adding.value = false
   }
@@ -456,14 +513,17 @@ async function handleUpdateRepo(r: RepoSource) {
   updatingId.value = r.id
   try {
     const resp = await updateRepo({ id: r.id })
-    ElMessage.success('更新源已启动')
-    logDrawerRef.value?.openDrawer(resp.data.run_id, `更新源 ${r.name || r.id}`)
+    ElMessage.success(t('appstore.updateStarted'))
+    logDrawerRef.value?.openDrawer(
+      resp.data.run_id,
+      t('appstore.updateLogTitle', { name: r.name || r.id }),
+    )
     setTimeout(() => {
       loadRepos()
       loadPackages()
     }, 3000)
   } catch (e: any) {
-    ElMessage.error(e.message || '更新失败')
+    ElMessage.error(e.message || t('appstore.updateFailed'))
   } finally {
     updatingId.value = ''
   }
@@ -472,16 +532,16 @@ async function handleUpdateRepo(r: RepoSource) {
 async function handleRemoveRepo(r: RepoSource) {
   try {
     await ElMessageBox.confirm(
-      `确定删除源「${r.name || r.id}」？该源目录将被删除，包将不再显示。`,
-      '删除源确认',
+      t('appstore.removeConfirm', { name: r.name || r.id }),
+      t('appstore.removeTitle'),
       { type: 'warning' },
     )
     const resp = await removeRepo({ id: r.id })
-    ElMessage.success(resp.message || '源已删除')
+    ElMessage.success(resp.message || t('appstore.removed'))
     loadRepos()
     loadPackages()
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '删除失败')
+    if (e !== 'cancel') ElMessage.error(e.message || t('appstore.removeFailed'))
   }
 }
 
@@ -516,7 +576,7 @@ async function loadPackages() {
     const resp = await getPackages()
     packages.value = resp.data.packages || []
   } catch (e: any) {
-    ElMessage.error(e.message || '加载软件包失败')
+    ElMessage.error(e.message || t('appstore.loadPkgsFailed'))
   } finally {
     loading.value = false
   }
@@ -638,27 +698,32 @@ const optIntro = ref('')
 
 /** 对话框动作中文名（已安装时：多版本=再次安装，单版本=重装） */
 function optModeName(m: OptMode, pkg: AppPackage): string {
-  if (m === 'upgrade') return '升级'
-  if (m === 'uninstall') return '卸载'
-  if (!pkg.installed) return '安装'
-  return pkg.allow_multiple_instances ? '再次安装' : '重装'
+  if (m === 'upgrade') return t('appstore.btnUpgrade')
+  if (m === 'uninstall') return t('appstore.btnUninstall')
+  if (!pkg.installed) return t('appstore.btnInstall')
+  return pkg.allow_multiple_instances ? t('appstore.btnInstallAgain') : t('appstore.btnReinstall')
 }
 
 const optDialogTitle = computed(() => {
   const pkg = optPkg.value
   if (!pkg) return ''
-  const act = optMode.value === 'install' && optActionKey.value
-    ? ` · ${actionLabel(pkg, optActionKey.value)}`
-    : ''
-  return `${optModeName(optMode.value, pkg)} ${pkg.title || pkg.name}${act} — 选项`
+  const extra =
+    optMode.value === 'install' && optActionKey.value
+      ? t('appstore.optActionExtra', { label: actionLabel(pkg, optActionKey.value) })
+      : ''
+  return t('appstore.optDialogTitle', {
+    action: optModeName(optMode.value, pkg),
+    name: pkg.title || pkg.name,
+    extra,
+  })
 })
 
 const optConfirmLabel = computed(() =>
   optMode.value === 'uninstall'
-    ? '确认卸载'
+    ? t('appstore.confirmUninstallBtn')
     : optMode.value === 'upgrade'
-      ? '确认升级'
-      : '确认安装',
+      ? t('appstore.confirmUpgradeBtn')
+      : t('appstore.confirmInstallBtn'),
 )
 
 /** 解析单个动作键下的选项定义：兼容「选项数组」与「{ items, intro } 对象」两种写法 */
@@ -674,7 +739,11 @@ function parseActionOptions(v: unknown): { items: AppOption[]; intro: string } {
 
 /** 命中当前动作键的选项定义（含整组介绍）；顶层数组作用于所有动作。
  * strict=true 时不回退 install 键（卸载场景：未声明 options.uninstall 即视为无卸载选项） */
-function actionOptions(pkg: AppPackage, actionKey?: string, strict = false): { items: AppOption[]; intro: string } {
+function actionOptions(
+  pkg: AppPackage,
+  actionKey?: string,
+  strict = false,
+): { items: AppOption[]; intro: string } {
   const o = pkg.options as unknown
   if (!o) return { items: [], intro: '' }
   if (Array.isArray(o)) return parseActionOptions(o)
@@ -720,7 +789,11 @@ function optDefault(o: AppOption): any {
   const d = o.default
   if (optType(o) === 'multiselect') {
     if (Array.isArray(d)) return d.map(String)
-    if (typeof d === 'string' && d) return d.split(o.separator || ' ').map((s) => s.trim()).filter(Boolean)
+    if (typeof d === 'string' && d)
+      return d
+        .split(o.separator || ' ')
+        .map((s) => s.trim())
+        .filter(Boolean)
     return []
   }
   if (optType(o) === 'bool') return !!d
@@ -756,24 +829,26 @@ function collectOptions(): FormOptions | null {
   const out: FormOptions = {}
   const errors: Record<string, string> = {}
   for (const o of optList.value) {
-    const t = optType(o)
+    const type = optType(o)
     const name = o.name
     const v = optValues.value[name]
-    if (t === 'multiselect') {
+    if (type === 'multiselect') {
       const arr = (Array.isArray(v) ? v : []) as string[]
-      if (o.required && !arr.length) errors[name] = '至少选择一项'
+      if (o.required && !arr.length) errors[name] = t('appstore.errMultiRequired')
       else out[name] = arr.join(o.separator || ' ')
-    } else if (t === 'bool') {
+    } else if (type === 'bool') {
       out[name] = v ? 'true' : 'false'
-    } else if (t === 'number') {
-      if (o.required && (v === undefined || v === null || v === '')) errors[name] = '请填写数值'
+    } else if (type === 'number') {
+      if (o.required && (v === undefined || v === null || v === ''))
+        errors[name] = t('appstore.errNumberRequired')
       else out[name] = v === undefined || v === null ? '' : String(v)
-    } else if (t === 'select') {
-      if (o.required && (v === undefined || v === null || v === '')) errors[name] = '请选择一项'
+    } else if (type === 'select') {
+      if (o.required && (v === undefined || v === null || v === ''))
+        errors[name] = t('appstore.errSelectRequired')
       else out[name] = v === undefined || v === null ? '' : String(v)
     } else {
       const s = typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v)
-      if (o.required && !s.trim()) errors[name] = '请填写'
+      if (o.required && !s.trim()) errors[name] = t('appstore.errTextRequired')
       else out[name] = s
     }
   }
@@ -810,20 +885,30 @@ async function handleInstall(pkg: AppPackage, actionKey?: string) {
 }
 
 /** 真正发起安装;成功返回 true（关闭选项对话框） */
-async function doInstall(pkg: AppPackage, actionKey?: string, options?: FormOptions): Promise<boolean> {
+async function doInstall(
+  pkg: AppPackage,
+  actionKey?: string,
+  options?: FormOptions,
+): Promise<boolean> {
   const ver = curVersion(pkg)
   const label = actionLabel(pkg, actionKey)
-  const actName = pkg.installed ? '重新安装' : '安装'
+  const actName = pkg.installed ? t('appstore.actReinstall') : t('appstore.actInstall')
   try {
     // 已安装时区分提示：多版本强调选版本；单版本「重装」会覆盖当前安装
     const hint = !pkg.installed
       ? ''
       : pkg.allow_multiple_instances && pkg.versions && pkg.versions.length > 1
-        ? '（允许多版本共存，如需安装其他版本请先在卡片上选择）'
-        : '（将重新执行安装脚本并覆盖当前安装，请确认数据已备份）'
+        ? t('appstore.hintMultiVersion')
+        : t('appstore.hintOverwrite')
     await ElMessageBox.confirm(
-      `确定${actName} ${pkg.title || pkg.name} ${ver ? `(${verLabel(pkg, ver)})` : ''}${actionKey ? `，操作: ${label}` : ''}？${hint}`,
-      `${actName}确认`,
+      t('appstore.confirmBody', {
+        action: actName,
+        name: pkg.title || pkg.name,
+        version: ver ? t('appstore.confirmVersionPart', { version: verLabel(pkg, ver) }) : '',
+        actionPart: actionKey ? t('appstore.confirmActionPart', { label }) : '',
+        hint,
+      }),
+      t('appstore.confirmTitle', { action: actName }),
       { type: 'info' },
     )
     const resp = await installPackage({
@@ -834,12 +919,12 @@ async function doInstall(pkg: AppPackage, actionKey?: string, options?: FormOpti
       action: actionKey || undefined,
       options,
     })
-    ElMessage.success(`${actName}已启动`)
+    ElMessage.success(t('appstore.started', { action: actName }))
     logDrawerRef.value?.openDrawer(resp.data.run_id, `${actName} ${pkg.name}`)
     trackRun(resp.data.run_id, `${pkg.title || pkg.name} ${actName}`)
     return true
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || `${actName}失败`)
+    if (e !== 'cancel') ElMessage.error(e.message || t('appstore.startFailed', { action: actName }))
     return false
   }
 }
@@ -856,16 +941,18 @@ async function handleUninstall(pkg: AppPackage) {
 /** 真正发起卸载;成功返回 true（关闭选项对话框） */
 async function doUninstall(pkg: AppPackage, options?: FormOptions): Promise<boolean> {
   try {
-    await ElMessageBox.confirm(`确定卸载 ${pkg.title || pkg.name}？此操作可能删除数据。`, '卸载确认', {
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      t('appstore.uninstallConfirm', { name: pkg.title || pkg.name }),
+      t('appstore.uninstallTitle'),
+      { type: 'warning' },
+    )
     const resp = await uninstallPackage({ pkg_path: pkg.pkg_path, options })
-    ElMessage.success('卸载已启动')
-    logDrawerRef.value?.openDrawer(resp.data.run_id, `卸载 ${pkg.name}`)
-    trackRun(resp.data.run_id, `${pkg.title || pkg.name} 卸载`)
+    ElMessage.success(t('appstore.uninstallStarted'))
+    logDrawerRef.value?.openDrawer(resp.data.run_id, `${t('appstore.btnUninstall')} ${pkg.name}`)
+    trackRun(resp.data.run_id, `${pkg.title || pkg.name} ${t('appstore.btnUninstall')}`)
     return true
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '卸载失败')
+    if (e !== 'cancel') ElMessage.error(e.message || t('appstore.uninstallFailed'))
     return false
   }
 }
@@ -885,8 +972,10 @@ async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolea
   // 升级目标与当前已装版本一致时直接拦截(后端亦拒绝),避免无意义的重复执行
   if (pkg.installed && ver && ver === pkg.installed_version) {
     // 多版本包提供「再次安装」，单版本包提供「重装」
-    const redo = pkg.allow_multiple_instances ? '再次安装' : '重装'
-    ElMessage.warning(`已安装 v${ver}，无需重复升级（如需重装请使用「${redo}」）`)
+    const redo = pkg.allow_multiple_instances
+      ? t('appstore.btnInstallAgain')
+      : t('appstore.btnReinstall')
+    ElMessage.warning(t('appstore.upgradeSameVersion', { v: ver, redo }))
     return false
   }
   // 合并入口（version_meta 声明家族）：跨家族不能升级（mariadb → mysql 等），须先卸载再装目标版本
@@ -894,19 +983,24 @@ async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolea
   const tgtFam = familyOf(pkg, ver)
   if (instFam && tgtFam && instFam !== tgtFam) {
     ElMessage.warning(
-      `${familyLabelOf(pkg, pkg.installed_version)} 与 ${familyLabelOf(pkg, ver)} 不能互相升级，请先卸载后重新安装目标版本`,
+      t('appstore.crossFamily', {
+        from: familyLabelOf(pkg, pkg.installed_version),
+        to: familyLabelOf(pkg, ver),
+      }),
     )
     return false
   }
   try {
     // 未提供 upgrade.sh 时后端按「uninstall → install」兜底执行，需提示数据备份
-    const fallbackHint =
-      pkg.has_upgrade === false
-        ? '。该包未提供 upgrade.sh，将按「卸载 → 安装」方式升级，请确认 uninstall.sh 已自带数据备份'
-        : ''
+    const fallbackHint = pkg.has_upgrade === false ? t('appstore.upgradeFallbackHint') : ''
     await ElMessageBox.confirm(
-      `确定升级 ${pkg.title || pkg.name} 到 ${verLabel(pkg, ver || pkg.version)}？当前已安装 ${verLabel(pkg, pkg.installed_version || '')}${fallbackHint}`,
-      '升级确认',
+      t('appstore.upgradeConfirm', {
+        name: pkg.title || pkg.name,
+        to: verLabel(pkg, ver || pkg.version),
+        from: verLabel(pkg, pkg.installed_version || ''),
+        hint: fallbackHint,
+      }),
+      t('appstore.upgradeTitle'),
       { type: 'warning' },
     )
     const resp = await upgradePackage({
@@ -916,12 +1010,12 @@ async function doUpgrade(pkg: AppPackage, options?: FormOptions): Promise<boolea
       version: ver || pkg.version,
       options,
     })
-    ElMessage.success('升级已启动')
-    logDrawerRef.value?.openDrawer(resp.data.run_id, `升级 ${pkg.name}`)
-    trackRun(resp.data.run_id, `${pkg.title || pkg.name} 升级`)
+    ElMessage.success(t('appstore.upgradeStarted'))
+    logDrawerRef.value?.openDrawer(resp.data.run_id, `${t('appstore.btnUpgrade')} ${pkg.name}`)
+    trackRun(resp.data.run_id, `${pkg.title || pkg.name} ${t('appstore.btnUpgrade')}`)
     return true
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '升级失败')
+    if (e !== 'cancel') ElMessage.error(e.message || t('appstore.upgradeFailed'))
     return false
   }
 }
@@ -940,10 +1034,11 @@ function trackRun(runId: string, label: string) {
       window.clearInterval(timer)
       runPolls.delete(runId)
       if (item.status === 'success') {
-        ElMessage.success(`${label}成功`)
+        ElMessage.success(t('appstore.runSuccess', { label }))
       } else {
-        const code = item.exit_code !== -1 ? `，退出码 ${item.exit_code}` : ''
-        ElMessage.error(`${label}未成功（状态: ${statusText(item.status)}${code}），详见运行日志`)
+        const code =
+          item.exit_code !== -1 ? t('appstore.exitCodePart', { code: item.exit_code }) : ''
+        ElMessage.error(t('appstore.runFailed', { label, status: statusText(item.status), code }))
       }
       loadPackages()
     } catch {
@@ -989,12 +1084,12 @@ async function handleRetryRun(row: RunItem) {
   try {
     const files = await getRunFiles(row.run_id)
     if (!(files.data?.files || []).length) {
-      ElMessage.warning('该运行没有可编辑的脚本快照，无法重跑（手动脚本运行或快照已清理）')
+      ElMessage.warning(t('appstore.retryNoFiles'))
       return
     }
     await ElMessageBox.confirm(
-      `将复用该次${row.action}运行的脚本快照重新执行，并生成新的运行记录。确定重跑？`,
-      '重跑确认',
+      t('appstore.retryConfirm', { action: row.action }),
+      t('appstore.retryTitle'),
       { type: 'warning' },
     )
   } catch (e: any) {
@@ -1004,11 +1099,14 @@ async function handleRetryRun(row: RunItem) {
   retryId.value = row.run_id
   try {
     const resp = await retryRun(row.run_id)
-    ElMessage.success('重跑已启动')
-    logDrawerRef.value?.openDrawer(resp.data.run_id, `${row.action} ${row.pkg}（重跑）`)
+    ElMessage.success(t('appstore.retryStarted'))
+    logDrawerRef.value?.openDrawer(
+      resp.data.run_id,
+      `${row.action} ${row.pkg}${t('appstore.retrySuffix')}`,
+    )
     setTimeout(loadRuns, 1500)
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '重跑失败')
+    if (e !== 'cancel') ElMessage.error(e.message || t('appstore.retryFailed'))
   } finally {
     retryId.value = ''
   }
@@ -1023,9 +1121,9 @@ function statusType(s: string): 'info' | 'success' | 'danger' | 'warning' {
 
 function statusText(s: string) {
   const map: Record<string, string> = {
-    running: '运行中',
-    success: '成功',
-    failed: '失败',
+    running: t('appstore.statusRunning'),
+    success: t('appstore.statusSuccess'),
+    failed: t('appstore.statusFailed'),
   }
   return map[s] || s
 }

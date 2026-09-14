@@ -20,8 +20,8 @@
         <el-card shadow="never" class="auth-card">
           <template #header>
             <div class="auth-title">
-              <el-tag type="danger" effect="dark" size="small">认证</el-tag>
-              <span style="margin-left: 8px; font-weight: 600">调用说明</span>
+              <el-tag type="danger" effect="dark" size="small">{{ t('devApiDocs.auth') }}</el-tag>
+              <span style="margin-left: 8px; font-weight: 600">{{ t('devApiDocs.usage') }}</span>
             </div>
           </template>
           <ol class="auth-list">
@@ -44,14 +44,8 @@
                 {{ ep.method }}
               </el-tag>
               <code class="ep-path">{{ basePath }}{{ ep.path }}</code>
-              <el-button
-                link
-                type="primary"
-                size="small"
-                class="ep-copy"
-                @click="copyPath(ep)"
-              >
-                复制路径
+              <el-button link type="primary" size="small" class="ep-copy" @click="copyPath(ep)">
+                {{ t('devApiDocs.copyPath') }}
               </el-button>
             </div>
             <div class="ep-summary">{{ ep.summary }}</div>
@@ -62,20 +56,22 @@
               border
               class="ep-params"
             >
-              <el-table-column prop="name" label="参数" width="150">
-                <template #default="{ row }"><code>{{ row.name }}</code></template>
+              <el-table-column prop="name" :label="t('devApiDocs.colParam')" width="150">
+                <template #default="{ row }"
+                  ><code>{{ row.name }}</code></template
+                >
               </el-table-column>
-              <el-table-column prop="type" label="类型" width="90" />
-              <el-table-column label="必填" width="70">
+              <el-table-column prop="type" :label="t('devApiDocs.colType')" width="90" />
+              <el-table-column :label="t('devApiDocs.colRequired')" width="70">
                 <template #default="{ row }">
                   <el-tag :type="row.required ? 'danger' : 'info'" size="small">
-                    {{ row.required ? '是' : '否' }}
+                    {{ row.required ? t('common.yes') : t('common.no') }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="desc" label="说明" />
+              <el-table-column prop="desc" :label="t('devApiDocs.colDesc')" />
             </el-table>
-            <div v-if="ep.note" class="ep-note">备注：{{ ep.note }}</div>
+            <div v-if="ep.note" class="ep-note">{{ t('devApiDocs.note', { note: ep.note }) }}</div>
           </div>
         </el-card>
       </div>
@@ -85,8 +81,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getApiDocs, type ApiDocsData } from '@/api/dev'
+
+const { t } = useI18n()
 
 const loading = ref(false)
 const docs = ref<ApiDocsData | null>(null)
@@ -100,12 +99,18 @@ const currentGroup = computed(() => {
 
 function methodType(m: string) {
   switch (m.toUpperCase()) {
-    case 'GET': return 'success'
-    case 'POST': return 'warning'
-    case 'PUT': return 'primary'
-    case 'DELETE': return 'danger'
-    case 'WS': return 'info'
-    default: return 'info'
+    case 'GET':
+      return 'success'
+    case 'POST':
+      return 'warning'
+    case 'PUT':
+      return 'primary'
+    case 'DELETE':
+      return 'danger'
+    case 'WS':
+      return 'info'
+    default:
+      return 'info'
   }
 }
 
@@ -113,7 +118,7 @@ async function copyPath(ep: { method: string; path: string }) {
   const full = `${basePath.value}${ep.path}`
   try {
     await navigator.clipboard.writeText(full)
-    ElMessage.success(`已复制 ${full}`)
+    ElMessage.success(t('devApiDocs.copied', { path: full }))
   } catch {
     ElMessage.info(full)
   }
@@ -124,34 +129,113 @@ onMounted(async () => {
   try {
     const res = await getApiDocs()
     docs.value = res.data ?? null
-  } catch { /* handled */ }
-  finally { loading.value = false }
+  } catch {
+    /* handled */
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 
 <style scoped>
-.api-docs-container { padding: 20px; min-height: calc(100vh - 200px); }
-.docs-layout { display: flex; gap: 16px; align-items: flex-start; }
+.api-docs-container {
+  padding: 20px;
+  min-height: calc(100vh - 200px);
+}
+.docs-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
 
-.docs-nav { width: 230px; flex-shrink: 0; position: sticky; top: 8px; }
-.nav-title { padding: 4px 8px 10px; border-bottom: 1px solid var(--el-border-color-lighter); margin-bottom: 8px; }
-.nav-title .title { font-size: 15px; font-weight: 700; }
-.nav-title .sub { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 2px; }
+.docs-nav {
+  width: 230px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 8px;
+}
+.nav-title {
+  padding: 4px 8px 10px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  margin-bottom: 8px;
+}
+.nav-title .title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.nav-title .sub {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 2px;
+}
 
-.docs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-.auth-card .auth-list { margin: 0; padding-left: 20px; line-height: 1.9; color: var(--el-text-color-primary); }
-.auth-list code { background: var(--el-fill-color); border-radius: 3px; padding: 1px 5px; }
+.docs-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.auth-card .auth-list {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.9;
+  color: var(--el-text-color-primary);
+}
+.auth-list code {
+  background: var(--el-fill-color);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
 
-.group-card .group-head { display: flex; align-items: baseline; gap: 10px; }
-.group-name { font-weight: 700; font-size: 15px; }
-.group-desc { color: var(--el-text-color-secondary); font-size: 13px; }
+.group-card .group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.group-name {
+  font-weight: 700;
+  font-size: 15px;
+}
+.group-desc {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
 
-.endpoint { padding: 12px 0; border-bottom: 1px dashed var(--el-border-color-lighter); }
-.endpoint:last-child { border-bottom: none; padding-bottom: 0; }
-.ep-head { display: flex; align-items: center; gap: 10px; }
-.ep-method { width: 64px; text-align: center; font-weight: 700; }
-.ep-path { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: var(--el-text-color-primary); }
-.ep-summary { margin: 8px 0 0; color: var(--el-text-color-regular); font-size: 13px; }
-.ep-params { margin-top: 10px; }
-.ep-note { margin-top: 8px; font-size: 12px; color: #e6a23c; }
+.endpoint {
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+.endpoint:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.ep-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ep-method {
+  width: 64px;
+  text-align: center;
+  font-weight: 700;
+}
+.ep-path {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+}
+.ep-summary {
+  margin: 8px 0 0;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+}
+.ep-params {
+  margin-top: 10px;
+}
+.ep-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #e6a23c;
+}
 </style>

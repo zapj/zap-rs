@@ -7,14 +7,16 @@
           <el-icon :size="18"><Document /></el-icon>
           <span class="t-name">Nginx</span>
           <el-tag v-if="installed" size="small" :type="running ? 'success' : 'danger'">
-            {{ running ? '运行中' : '未运行' }}
+            {{ running ? t('servicesNginx.running') : t('servicesNginx.notRunning') }}
           </el-tag>
           <el-tag v-if="installed" size="small" type="info">{{ versionText }}</el-tag>
           <el-tag v-if="installed && status.systemd" size="small" type="warning">systemd</el-tag>
         </div>
         <div class="actions" v-if="installed">
           <span class="path mono">{{ status.conf_file }}</span>
-          <el-button size="small" :loading="busy" @click="refreshAll">刷新状态</el-button>
+          <el-button size="small" :loading="busy" @click="refreshAll">{{
+            t('servicesNginx.refreshStatus')
+          }}</el-button>
           <el-button
             size="small"
             type="primary"
@@ -22,7 +24,8 @@
             :disabled="!running || busy"
             :loading="acting === 'reload'"
             @click="doControl('reload')"
-          >重载</el-button>
+            >{{ t('servicesNginx.reload') }}</el-button
+          >
           <el-button
             size="small"
             type="warning"
@@ -30,7 +33,8 @@
             :disabled="!running || busy"
             :loading="acting === 'restart'"
             @click="doControl('restart')"
-          >重启</el-button>
+            >{{ t('servicesNginx.restart') }}</el-button
+          >
           <el-button
             size="small"
             type="success"
@@ -38,7 +42,8 @@
             :disabled="running || busy"
             :loading="acting === 'start'"
             @click="doControl('start')"
-          >启动</el-button>
+            >{{ t('servicesNginx.start') }}</el-button
+          >
         </div>
       </div>
     </el-card>
@@ -47,11 +52,13 @@
     <el-card v-if="installed === false && !bootLoading" shadow="never" class="mt-3">
       <el-result
         icon="warning"
-        title="Nginx 未安装"
-        sub-title="请先在应用商店完成 Nginx 的安装与部署，安装后即可在此进行可视化配置与配置文件编辑（保存会自动执行 nginx -t 校验并重载）。"
+        :title="t('servicesNginx.notInstalledTitle')"
+        :sub-title="t('servicesNginx.notInstalledSub')"
       >
         <template #extra>
-          <el-button type="primary" @click="router.push('/appstore')">前往应用商店</el-button>
+          <el-button type="primary" @click="router.push('/appstore')">{{
+            t('servicesNginx.goAppstore')
+          }}</el-button>
         </template>
       </el-result>
     </el-card>
@@ -62,17 +69,16 @@
         <div class="dvh-row">
           <div class="dvh-left">
             <div class="dvh-title">
-              默认站点（IP / 未绑定域名访问）
+              {{ t('servicesNginx.defaultVhostTitle') }}
               <el-tag size="small" :type="ipAccess ? 'success' : 'info'">
-                {{ ipAccess ? 'IP 访问已开启' : 'IP 访问已关闭' }}
+                {{ ipAccess ? t('servicesNginx.ipOn') : t('servicesNginx.ipOff') }}
               </el-tag>
             </div>
             <div class="dvh-desc">
-              未绑定任何站点域名的请求（如通过服务器 IP 直接访问）的兜底行为：关闭时直接断开连接（返回
-              444，避免被其它站点按 default_server 接走造成串站）；开启后展示默认欢迎页。
+              {{ t('servicesNginx.defaultVhostDesc') }}
             </div>
             <div v-if="ipAccess && status.default_page" class="dvh-path mono">
-              欢迎页文件（可直接编辑定制内容）：{{ status.default_page }}
+              {{ t('servicesNginx.welcomePage', { path: status.default_page }) }}
             </div>
           </div>
           <div class="dvh-right">
@@ -80,8 +86,8 @@
               v-model="ipAccess"
               :loading="savingDefaultVhost"
               inline-prompt
-              active-text="开启"
-              inactive-text="关闭"
+              :active-text="t('servicesNginx.on')"
+              :inactive-text="t('servicesNginx.off')"
               @change="saveDefaultVhost"
             />
           </div>
@@ -90,58 +96,70 @@
 
       <el-tabs v-model="mode" type="border-card" class="mt-3">
         <!-- 可视化配置 -->
-        <el-tab-pane label="可视化配置" name="visual">
+        <el-tab-pane :label="t('servicesNginx.tabVisual')" name="visual">
           <div class="visual-body">
             <el-alert
               type="info"
               :closable="false"
               show-icon
               class="visual-tip"
-              title="以下项写入主配置文件，字段统一收敛到带注释标记的托管区；「跟随默认」表示不写入（继承 Nginx 默认）。保存会自动执行 nginx -t 校验，失败自动回滚。"
+              :title="t('servicesNginx.visualTip')"
             />
             <div class="field-grid">
               <div v-for="f in allFields" :key="f.key" class="field">
                 <div class="field-label">
                   <span class="mono">{{ f.key }}</span>
-                  <el-tag v-if="f.key === TOP_LEVEL_KEY" size="small" type="warning">顶层</el-tag>
+                  <el-tag v-if="f.key === TOP_LEVEL_KEY" size="small" type="warning">{{
+                    t('servicesNginx.topLevel')
+                  }}</el-tag>
                   <el-tag v-else size="small" type="info">http</el-tag>
                 </div>
                 <el-input
                   v-if="f.kind === 'input'"
                   v-model="visual[f.key]"
-                  :placeholder="f.placeholder || '跟随默认（留空不写入）'"
+                  :placeholder="f.placeholder || t('servicesNginx.followDefaultPlaceholder')"
                   clearable
                   class="field-ctrl"
                 />
                 <el-select
                   v-else-if="f.kind === 'switch'"
                   v-model="visual[f.key]"
-                  placeholder="跟随默认"
+                  :placeholder="t('servicesNginx.followDefault')"
                   clearable
                   class="field-ctrl"
                 >
-                  <el-option label="开启" value="on" />
-                  <el-option label="关闭" value="off" />
+                  <el-option :label="t('servicesNginx.optionOn')" value="on" />
+                  <el-option :label="t('servicesNginx.optionOff')" value="off" />
                 </el-select>
-                <el-select v-else v-model="visual[f.key]" placeholder="跟随默认" clearable class="field-ctrl">
+                <el-select
+                  v-else
+                  v-model="visual[f.key]"
+                  :placeholder="t('servicesNginx.followDefault')"
+                  clearable
+                  class="field-ctrl"
+                >
                   <el-option v-for="n in 9" :key="n" :label="`${n}`" :value="`${n}`" />
                 </el-select>
                 <div v-if="f.tip" class="field-tip">{{ f.tip }}</div>
               </div>
             </div>
             <div class="save-row">
-              <el-button :loading="savingVisual" type="primary" @click="saveVisual">保存可视化配置</el-button>
-              <el-button :disabled="savingVisual" @click="loadVisualFromFile">从配置文件重新读取</el-button>
+              <el-button :loading="savingVisual" type="primary" @click="saveVisual">{{
+                t('servicesNginx.saveVisual')
+              }}</el-button>
+              <el-button :disabled="savingVisual" @click="loadVisualFromFile">{{
+                t('servicesNginx.reloadFromFile')
+              }}</el-button>
             </div>
           </div>
         </el-tab-pane>
 
         <!-- 文件编辑 -->
-        <el-tab-pane label="文件编辑" name="files">
+        <el-tab-pane :label="t('servicesNginx.tabFiles')" name="files">
           <div class="editor-layout">
             <div class="file-list">
               <div class="list-head">
-                <span>可编辑配置</span>
+                <span>{{ t('servicesNginx.editableConfs') }}</span>
                 <el-tag size="small" type="info">{{ confFiles.length }}</el-tag>
               </div>
               <el-scrollbar class="list-scroll">
@@ -153,16 +171,22 @@
                   @click="openFile(f)"
                 >
                   <el-icon><Document /></el-icon>
-                  <span class="file-name mono">{{ f.is_main ? 'nginx.conf（主配置）' : f.rel }}</span>
+                  <span class="file-name mono">{{
+                    f.is_main ? t('servicesNginx.mainConfName') : f.rel
+                  }}</span>
                 </div>
               </el-scrollbar>
             </div>
             <div class="editor-main">
               <div class="editor-bar">
                 <div class="bar-left">
-                  <span class="mono path">{{ activeFile?.path || '请选择文件' }}</span>
+                  <span class="mono path">{{
+                    activeFile?.path || t('servicesNginx.selectFile')
+                  }}</span>
                   <span v-if="activeFile" class="meta">{{ formatBytes(activeFile.size) }}</span>
-                  <el-tag v-if="activeFile?.is_main" size="small" type="warning">主配置</el-tag>
+                  <el-tag v-if="activeFile?.is_main" size="small" type="warning">{{
+                    t('servicesNginx.mainConfTag')
+                  }}</el-tag>
                 </div>
                 <div class="bar-right">
                   <el-button
@@ -171,16 +195,23 @@
                     :loading="savingFile"
                     type="primary"
                     @click="saveFile"
-                  >保存</el-button>
-                  <el-button size="small" :disabled="!dirty || !activeFile" @click="reloadActiveFile">放弃修改</el-button>
+                    >{{ t('servicesNginx.save') }}</el-button
+                  >
+                  <el-button
+                    size="small"
+                    :disabled="!dirty || !activeFile"
+                    @click="reloadActiveFile"
+                    >{{ t('servicesNginx.discardChanges') }}</el-button
+                  >
                 </div>
               </div>
               <div class="editor-host">
                 <CodeEditor v-model="fileContent" :path="activeFile?.path || ''" />
               </div>
               <div class="editor-tip">
-                保存会自动备份原配置并执行 <code>nginx -t</code> 校验，失败自动回滚；主配置中面板托管的站点
-                <code>include …/sites-enabled/*.conf</code> 行请勿删除。
+                {{ t('servicesNginx.editorTip1') }}<code>nginx -t</code
+                >{{ t('servicesNginx.editorTip2') }} <code>include …/sites-enabled/*.conf</code
+                >{{ t('servicesNginx.editorTip3') }}
               </div>
             </div>
           </div>
@@ -192,6 +223,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document } from '@/icons'
@@ -206,8 +238,14 @@ import {
   type NginxConfFile,
   type NginxStatus,
 } from '@/api/serverNginx.ts'
-import { applyVisualValues, parseVisualValues, TOP_LEVEL_KEY, type VisualValues } from '@/utils/nginxConf.ts'
+import {
+  applyVisualValues,
+  parseVisualValues,
+  TOP_LEVEL_KEY,
+  type VisualValues,
+} from '@/utils/nginxConf.ts'
 
+const { t } = useI18n()
 const router = useRouter()
 const bootLoading = ref(true)
 const busy = ref(false)
@@ -219,7 +257,7 @@ const mode = ref('visual')
 const running = computed(() => !!status.value.running)
 const versionText = computed(() => {
   const m = (status.value.version || '').match(/nginx\/([\d.]+)/)
-  return m ? m[1] : (status.value.version || '-')
+  return m ? m[1] : status.value.version || '-'
 })
 
 /* ---------- 默认站点（IP 访问） ---------- */
@@ -236,10 +274,11 @@ async function saveDefaultVhost(v: boolean | string | number) {
   savingDefaultVhost.value = true
   try {
     const res = await setNginxDefaultVhost(enable)
-    ElMessage.success(
-      (enable ? '已开启默认站点（IP 访问展示欢迎页）' : '已关闭默认站点（IP 访问直接断开）') +
-        (res.data?.reason ? `，${res.data.reason}` : '，nginx -t 校验通过并已重载'),
-    )
+    const stateText = t(enable ? 'servicesNginx.defaultEnabled' : 'servicesNginx.defaultDisabled')
+    const tail = res.data?.reason
+      ? t('servicesNginx.defaultReason', { reason: res.data.reason })
+      : t('servicesNginx.defaultReloaded')
+    ElMessage.success(stateText + tail)
     await refreshStatus()
   } catch {
     /* interceptor：设置失败时刷新状态回退开关 */
@@ -258,25 +297,68 @@ interface FieldDef {
   tip?: string
 }
 
-const allFields: FieldDef[] = [
-  { key: TOP_LEVEL_KEY, kind: 'input', label: '工作进程数', placeholder: 'auto（自动）或 CPU 核数', tip: '顶层指令。auto 表示按 CPU 核心数自动派生' },
-  { key: 'sendfile', kind: 'switch', label: 'sendfile', tip: '开启零拷贝发送静态文件，通常建议开启' },
-  { key: 'tcp_nopush', kind: 'switch', label: 'tcp_nopush', tip: '配合 sendfile 使用，批量发送响应头与文件' },
-  { key: 'keepalive_timeout', kind: 'input', label: 'keepalive_timeout', placeholder: '65（秒）' },
-  { key: 'server_tokens', kind: 'switch', label: 'server_tokens', tip: '隐藏版本号，建议关闭（off）以降低被扫描风险' },
-  { key: 'client_max_body_size', kind: 'input', label: 'client_max_body_size', placeholder: '100m', tip: '请求体上限，如 10m / 100m' },
-  { key: 'gzip', kind: 'switch', label: 'gzip', tip: '开启压缩可显著减小传输体积' },
-  { key: 'gzip_min_length', kind: 'input', label: 'gzip_min_length', placeholder: '1k' },
-  { key: 'gzip_comp_level', kind: 'level', label: 'gzip_comp_level', tip: '1-9，一般 5-6 兼顾体积与 CPU' },
-  { key: 'gzip_types', kind: 'input', label: 'gzip_types', placeholder: 'text/plain text/css application/javascript application/json', tip: '空格分隔的 MIME 类型，留空表示仅压缩 text/html' },
-]
+const allFields = computed<FieldDef[]>(() => [
+  {
+    key: TOP_LEVEL_KEY,
+    kind: 'input',
+    label: t('servicesNginx.fieldWorkers'),
+    placeholder: t('servicesNginx.fieldWorkersPlaceholder'),
+    tip: t('servicesNginx.fieldWorkersTip'),
+  },
+  { key: 'sendfile', kind: 'switch', label: 'sendfile', tip: t('servicesNginx.fieldSendfileTip') },
+  {
+    key: 'tcp_nopush',
+    kind: 'switch',
+    label: 'tcp_nopush',
+    tip: t('servicesNginx.fieldTcpNopushTip'),
+  },
+  {
+    key: 'keepalive_timeout',
+    kind: 'input',
+    label: 'keepalive_timeout',
+    placeholder: t('servicesNginx.fieldKeepalivePlaceholder'),
+  },
+  {
+    key: 'server_tokens',
+    kind: 'switch',
+    label: 'server_tokens',
+    tip: t('servicesNginx.fieldServerTokensTip'),
+  },
+  {
+    key: 'client_max_body_size',
+    kind: 'input',
+    label: 'client_max_body_size',
+    placeholder: t('servicesNginx.fieldClientMaxBodyPlaceholder'),
+    tip: t('servicesNginx.fieldClientMaxBodyTip'),
+  },
+  { key: 'gzip', kind: 'switch', label: 'gzip', tip: t('servicesNginx.fieldGzipTip') },
+  {
+    key: 'gzip_min_length',
+    kind: 'input',
+    label: 'gzip_min_length',
+    placeholder: t('servicesNginx.fieldGzipMinLengthPlaceholder'),
+  },
+  {
+    key: 'gzip_comp_level',
+    kind: 'level',
+    label: 'gzip_comp_level',
+    tip: t('servicesNginx.fieldGzipCompLevelTip'),
+  },
+  {
+    key: 'gzip_types',
+    kind: 'input',
+    label: 'gzip_types',
+    placeholder: t('servicesNginx.fieldGzipTypesPlaceholder'),
+    tip: t('servicesNginx.fieldGzipTypesTip'),
+  },
+])
 
 const visual = reactive<VisualValues>({})
 const mainPath = ref('')
 const savingVisual = ref(false)
 
 function initVisual() {
-  for (const f of allFields) {
+  for (const f of allFields.value) {
     visual[f.key] = null
   }
 }
@@ -305,11 +387,17 @@ async function saveVisual() {
     if (latest.code !== 0) return
     const patched = applyVisualValues(latest.data.content, { ...visual })
     if (patched === null) {
-      ElMessage.error('主配置中未找到 http 块，无法写入可视化设置，请改用文件编辑模式')
+      ElMessage.error(t('servicesNginx.noHttpBlock'))
       return
     }
     const res = await saveNginxConf(mainPath.value, patched)
-    ElMessage.success(res.data?.reloaded ? '保存成功，nginx -t 校验通过并已重载' : `保存成功（${res.data?.reason || '校验通过'}）`)
+    ElMessage.success(
+      res.data?.reloaded
+        ? t('servicesNginx.visualSavedReloaded')
+        : t('servicesNginx.visualSavedReason', {
+            reason: res.data?.reason || t('servicesNginx.passed'),
+          }),
+    )
   } catch {
     /* interceptor */
   } finally {
@@ -347,7 +435,9 @@ async function refreshConfList() {
 async function openFile(f: NginxConfFile) {
   if (activeFile.value && dirty.value) {
     try {
-      await ElMessageBox.confirm('当前文件有未保存的修改，切换后将丢失。继续？', '提示', { type: 'warning' })
+      await ElMessageBox.confirm(t('servicesNginx.unsavedSwitch'), t('common.tip'), {
+        type: 'warning',
+      })
     } catch {
       return
     }
@@ -366,7 +456,7 @@ async function openFile(f: NginxConfFile) {
 function reloadActiveFile() {
   if (activeFile.value) {
     fileContent.value = fileOriginal
-    ElMessage.info('已放弃未保存的修改')
+    ElMessage.info(t('servicesNginx.discarded'))
   }
 }
 
@@ -377,7 +467,11 @@ async function saveFile() {
     const res = await saveNginxConf(activeFile.value.path, fileContent.value)
     fileOriginal = fileContent.value
     ElMessage.success(
-      res.data?.reloaded ? '保存成功，nginx -t 校验通过并已重载' : `保存成功（${res.data?.reason || '校验通过，将在启动时生效'}）`,
+      res.data?.reloaded
+        ? t('servicesNginx.fileSavedReloaded')
+        : t('servicesNginx.fileSavedReason', {
+            reason: res.data?.reason || t('servicesNginx.fileSavedPending'),
+          }),
     )
   } catch {
     /* interceptor */
@@ -412,19 +506,32 @@ async function refreshAll() {
   bootLoading.value = false
 }
 
-const ctrlLabels: Record<string, string> = { reload: '重载', restart: '重启', start: '启动', stop: '停止' }
+const ctrlLabels = computed<Record<string, string>>(() => ({
+  reload: t('servicesNginx.reload'),
+  restart: t('servicesNginx.restart'),
+  start: t('servicesNginx.start'),
+  stop: t('servicesNginx.stop'),
+}))
 
 async function doControl(action: 'reload' | 'restart' | 'start' | 'stop') {
   const warn = action === 'stop' || action === 'restart'
   try {
-    await ElMessageBox.confirm(`确认对 Nginx 执行「${ctrlLabels[action]}」操作？`, '提示', { type: warn ? 'warning' : 'info' })
+    await ElMessageBox.confirm(
+      t('servicesNginx.controlConfirm', { action: ctrlLabels.value[action] }),
+      t('common.tip'),
+      {
+        type: warn ? 'warning' : 'info',
+      },
+    )
   } catch {
     return
   }
   acting.value = action
   try {
     const res = await controlNginx(action)
-    ElMessage.success(res.message ?? `${ctrlLabels[action]}成功`)
+    ElMessage.success(
+      res.message ?? t('servicesNginx.actionOk', { action: ctrlLabels.value[action] }),
+    )
     await refreshStatus()
   } catch {
     /* interceptor */

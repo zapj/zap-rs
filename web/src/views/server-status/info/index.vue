@@ -6,20 +6,49 @@
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
-              <span>System（系统）</span>
-              <span class="card-header-icon"><el-icon><Monitor /></el-icon></span>
+              <span>{{ t('statusInfo.system') }}</span>
+              <span class="card-header-icon"
+                ><el-icon><Monitor /></el-icon
+              ></span>
             </div>
           </template>
           <div class="kv-grid">
-            <div class="kv-item"><span class="kv-label">主机名</span><span class="kv-value">{{ info.host_name || '-' }}</span></div>
-            <div class="kv-item"><span class="kv-label">操作系统</span><span class="kv-value">{{ info.os_name || '-' }} {{ info.os_version || '' }}</span></div>
-            <div class="kv-item"><span class="kv-label">内核版本</span><span class="kv-value">{{ info.kernel_version || '-' }}</span></div>
-            <div class="kv-item"><span class="kv-label">架构</span><span class="kv-value">{{ info.arch || '-' }}</span></div>
-            <div class="kv-item"><span class="kv-label">厂商</span><span class="kv-value">{{ info.vendor || '-' }}</span></div>
-            <div class="kv-item"><span class="kv-label">产品型号</span><span class="kv-value">{{ info.product || '-' }}</span></div>
-            <div class="kv-item"><span class="kv-label">运行时间</span><span class="kv-value">{{ info.uptime || '-' }}</span></div>
-            <div class="kv-item"><span class="kv-label">启动时间</span><span class="kv-value">{{ info.boot_time || '-' }}</span></div>
-            <div class="kv-item"><span class="kv-label">当前时间</span><span class="kv-value">{{ info.current_time || '-' }}</span></div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.hostname') }}</span
+              ><span class="kv-value">{{ info.host_name || '-' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.os') }}</span
+              ><span class="kv-value">{{ info.os_name || '-' }} {{ info.os_version || '' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.kernel') }}</span
+              ><span class="kv-value">{{ info.kernel_version || '-' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.arch') }}</span
+              ><span class="kv-value">{{ info.arch || '-' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.vendor') }}</span
+              ><span class="kv-value">{{ info.vendor || '-' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.product') }}</span
+              ><span class="kv-value">{{ info.product || '-' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.uptime') }}</span
+              ><span class="kv-value">{{ info.uptime || '-' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.bootTime') }}</span
+              ><span class="kv-value">{{ info.boot_time || '-' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.currentTime') }}</span
+              ><span class="kv-value">{{ info.current_time || '-' }}</span>
+            </div>
           </div>
         </el-card>
       </el-col>
@@ -27,19 +56,41 @@
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
-              <span>Processor（处理器）</span>
-              <span class="card-header-icon"><el-icon><Cpu /></el-icon></span>
+              <span>{{ t('statusInfo.processor') }}</span>
+              <span class="card-header-icon"
+                ><el-icon><Cpu /></el-icon
+              ></span>
             </div>
           </template>
           <div class="kv-grid">
-            <div class="kv-item"><span class="kv-label">型号</span><span class="kv-value cpu-model">{{ info.cpu?.model || '-' }}</span></div>
-            <div class="kv-item"><span class="kv-label">物理核心</span><span class="kv-value">{{ info.cpu?.physical_cores ?? '-' }} 个</span></div>
-            <div class="kv-item"><span class="kv-label">逻辑核心</span><span class="kv-value">{{ info.cpu?.logical_cores ?? '-' }} 个</span></div>
-            <div class="kv-item"><span class="kv-label">当前频率</span><span class="kv-value">{{ fmtFreq(info.cpu?.frequency_mhz) }}</span></div>
             <div class="kv-item">
-              <span class="kv-label">使用率</span>
+              <span class="kv-label">{{ t('statusInfo.model') }}</span
+              ><span class="kv-value cpu-model">{{ info.cpu?.model || '-' }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.physicalCores') }}</span
+              ><span class="kv-value">{{
+                t('statusInfo.coreCount', { n: info.cpu?.physical_cores ?? '-' })
+              }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.logicalCores') }}</span
+              ><span class="kv-value">{{
+                t('statusInfo.coreCount', { n: info.cpu?.logical_cores ?? '-' })
+              }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.frequency') }}</span
+              ><span class="kv-value">{{ fmtFreq(info.cpu?.frequency_mhz) }}</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-label">{{ t('statusInfo.usage') }}</span>
               <span class="kv-value">
-                <el-progress :percentage="usagePct(info.cpu?.usage)" :color="usageColor(info.cpu?.usage)" :stroke-width="10" />
+                <el-progress
+                  :percentage="usagePct(info.cpu?.usage)"
+                  :color="usageColor(info.cpu?.usage)"
+                  :stroke-width="10"
+                />
               </span>
             </div>
           </div>
@@ -67,13 +118,15 @@
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
-              <span>Current Memory Usage（当前内存使用）</span>
-              <span class="card-header-icon"><el-icon><DataLine /></el-icon></span>
+              <span>{{ t('statusInfo.memTitle') }}</span>
+              <span class="card-header-icon"
+                ><el-icon><DataLine /></el-icon
+              ></span>
             </div>
           </template>
           <div class="usage-block">
             <div class="usage-bar-row">
-              <span class="usage-label">内存使用率</span>
+              <span class="usage-label">{{ t('statusInfo.memUsage') }}</span>
               <el-progress
                 :percentage="info.memory_usage?.usage_pct ?? 0"
                 :color="usageColor(info.memory_usage?.usage_pct)"
@@ -81,18 +134,53 @@
               />
             </div>
             <div class="stat-row mt-2">
-              <div class="stat-cell"><div class="stat-cell-value">{{ formatBytes(info.memory_usage?.used || 0, 1) }}</div><div class="stat-cell-label">已使用</div></div>
-              <div class="stat-cell"><div class="stat-cell-value">{{ formatBytes(info.memory_usage?.available || 0, 1) }}</div><div class="stat-cell-label">可用</div></div>
-              <div class="stat-cell"><div class="stat-cell-value">{{ formatBytes(info.memory_usage?.free || 0, 1) }}</div><div class="stat-cell-label">空闲</div></div>
-              <div class="stat-cell"><div class="stat-cell-value">{{ formatBytes(info.memory_usage?.total || 0, 1) }}</div><div class="stat-cell-label">总内存</div></div>
+              <div class="stat-cell">
+                <div class="stat-cell-value">
+                  {{ formatBytes(info.memory_usage?.used || 0, 1) }}
+                </div>
+                <div class="stat-cell-label">{{ t('statusInfo.used') }}</div>
+              </div>
+              <div class="stat-cell">
+                <div class="stat-cell-value">
+                  {{ formatBytes(info.memory_usage?.available || 0, 1) }}
+                </div>
+                <div class="stat-cell-label">{{ t('statusInfo.available') }}</div>
+              </div>
+              <div class="stat-cell">
+                <div class="stat-cell-value">
+                  {{ formatBytes(info.memory_usage?.free || 0, 1) }}
+                </div>
+                <div class="stat-cell-label">{{ t('statusInfo.free') }}</div>
+              </div>
+              <div class="stat-cell">
+                <div class="stat-cell-value">
+                  {{ formatBytes(info.memory_usage?.total || 0, 1) }}
+                </div>
+                <div class="stat-cell-label">{{ t('statusInfo.total') }}</div>
+              </div>
             </div>
           </div>
           <div class="swap-block mt-2">
-            <div class="swap-title">Swap（交换分区）</div>
+            <div class="swap-title">{{ t('statusInfo.swap') }}</div>
             <div class="stat-row">
-              <div class="stat-cell"><div class="stat-cell-value">{{ formatBytes(info.memory_usage?.swap_used || 0, 1) }}</div><div class="stat-cell-label">已使用</div></div>
-              <div class="stat-cell"><div class="stat-cell-value">{{ formatBytes(info.memory_usage?.swap_free || 0, 1) }}</div><div class="stat-cell-label">空闲</div></div>
-              <div class="stat-cell"><div class="stat-cell-value">{{ formatBytes(info.memory_usage?.swap_total || 0, 1) }}</div><div class="stat-cell-label">总 Swap</div></div>
+              <div class="stat-cell">
+                <div class="stat-cell-value">
+                  {{ formatBytes(info.memory_usage?.swap_used || 0, 1) }}
+                </div>
+                <div class="stat-cell-label">{{ t('statusInfo.used') }}</div>
+              </div>
+              <div class="stat-cell">
+                <div class="stat-cell-value">
+                  {{ formatBytes(info.memory_usage?.swap_free || 0, 1) }}
+                </div>
+                <div class="stat-cell-label">{{ t('statusInfo.free') }}</div>
+              </div>
+              <div class="stat-cell">
+                <div class="stat-cell-value">
+                  {{ formatBytes(info.memory_usage?.swap_total || 0, 1) }}
+                </div>
+                <div class="stat-cell-label">{{ t('statusInfo.swapTotal') }}</div>
+              </div>
             </div>
           </div>
         </el-card>
@@ -105,20 +193,30 @@
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
-              <span>Physical Disks（物理磁盘）</span>
-              <span class="card-header-icon"><el-icon><Box /></el-icon></span>
+              <span>{{ t('statusInfo.diskTitle') }}</span>
+              <span class="card-header-icon"
+                ><el-icon><Box /></el-icon
+              ></span>
             </div>
           </template>
-          <el-table v-if="info.physical_disks?.length" :data="info.physical_disks" size="small" border max-height="280">
-            <el-table-column prop="device" label="设备" min-width="90" />
-            <el-table-column label="型号" min-width="140" show-overflow-tooltip>
+          <el-table
+            v-if="info.physical_disks?.length"
+            :data="info.physical_disks"
+            size="small"
+            border
+            max-height="280"
+          >
+            <el-table-column prop="device" :label="t('statusInfo.device')" min-width="90" />
+            <el-table-column :label="t('statusInfo.model')" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">{{ row.model || '-' }}</template>
             </el-table-column>
-            <el-table-column label="容量" min-width="90">
-              <template #default="{ row }">{{ row.size ? formatBytes(row.size, 1) : '-' }}</template>
+            <el-table-column :label="t('statusInfo.capacity')" min-width="90">
+              <template #default="{ row }">{{
+                row.size ? formatBytes(row.size, 1) : '-'
+              }}</template>
             </el-table-column>
-            <el-table-column prop="interface" label="接口" min-width="90" />
-            <el-table-column label="类型" min-width="70">
+            <el-table-column prop="interface" :label="t('statusInfo.iface')" min-width="90" />
+            <el-table-column :label="t('statusInfo.diskType')" min-width="70">
               <template #default="{ row }">
                 <el-tag :type="row.rotational ? 'warning' : 'success'" size="small">
                   {{ row.rotational ? 'HDD' : 'SSD' }}
@@ -126,35 +224,69 @@
               </template>
             </el-table-column>
           </el-table>
-          <el-empty v-else description="未检测到物理磁盘" :image-size="60" class="mt-2" />
+          <el-empty
+            v-else
+            :description="t('statusInfo.noPhysicalDisk')"
+            :image-size="60"
+            class="mt-2"
+          />
         </el-card>
       </el-col>
       <el-col :xs="24" :sm="12">
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
-              <span>Current Disk Usage（当前磁盘使用）</span>
-              <span class="card-header-icon"><el-icon><Folder /></el-icon></span>
+              <span>{{ t('statusInfo.diskUsageTitle') }}</span>
+              <span class="card-header-icon"
+                ><el-icon><Folder /></el-icon
+              ></span>
             </div>
           </template>
-          <el-table v-if="info.disk_usage?.length" :data="info.disk_usage" size="small" border max-height="280">
-            <el-table-column prop="mount_point" label="挂载点" min-width="90" show-overflow-tooltip />
-            <el-table-column prop="file_system" label="文件系统" min-width="80" show-overflow-tooltip />
-            <el-table-column label="容量" min-width="80">
+          <el-table
+            v-if="info.disk_usage?.length"
+            :data="info.disk_usage"
+            size="small"
+            border
+            max-height="280"
+          >
+            <el-table-column
+              prop="mount_point"
+              :label="t('statusInfo.mountPoint')"
+              min-width="90"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="file_system"
+              :label="t('statusInfo.fileSystem')"
+              min-width="80"
+              show-overflow-tooltip
+            />
+            <el-table-column :label="t('statusInfo.capacity')" min-width="80">
               <template #default="{ row }">{{ formatBytes(row.total, 1) }}</template>
             </el-table-column>
-            <el-table-column label="已用 / 可用" min-width="120">
+            <el-table-column :label="t('statusInfo.usedAvailable')" min-width="120">
               <template #default="{ row }">
-                <span class="disk-usage-text">{{ formatBytes(row.used, 1) }} / {{ formatBytes(row.available, 1) }}</span>
+                <span class="disk-usage-text"
+                  >{{ formatBytes(row.used, 1) }} / {{ formatBytes(row.available, 1) }}</span
+                >
               </template>
             </el-table-column>
-            <el-table-column label="使用率" min-width="130">
+            <el-table-column :label="t('statusInfo.usageCol')" min-width="130">
               <template #default="{ row }">
-                <el-progress :percentage="usagePct(row.usage_pct)" :color="usageColor(row.usage_pct)" :stroke-width="8" />
+                <el-progress
+                  :percentage="usagePct(row.usage_pct)"
+                  :color="usageColor(row.usage_pct)"
+                  :stroke-width="8"
+                />
               </template>
             </el-table-column>
           </el-table>
-          <el-empty v-else description="未检测到磁盘分区" :image-size="60" class="mt-2" />
+          <el-empty
+            v-else
+            :description="t('statusInfo.noDiskPartition')"
+            :image-size="60"
+            class="mt-2"
+          />
         </el-card>
       </el-col>
     </el-row>
@@ -163,9 +295,12 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Monitor, Cpu, DataLine, Box, Folder } from '@/icons'
 import { getSystemOverview } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt.ts'
+
+const { t } = useI18n()
 
 const info = ref<Record<string, any>>({})
 

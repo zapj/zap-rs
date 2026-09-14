@@ -5,7 +5,9 @@
         <el-tag :type="statusTagType" size="small" effect="dark">
           {{ statusText }}
         </el-tag>
-        <span v-if="exitCode !== null" class="exit-code">退出码: {{ exitCode }}</span>
+        <span v-if="exitCode !== null" class="exit-code">{{
+          t('runLogDrawer.exitCode', { code: exitCode })
+        }}</span>
         <el-button
           size="small"
           type="danger"
@@ -14,24 +16,24 @@
           :loading="stopping"
           @click="handleStop"
         >
-          停止
+          {{ t('runLogDrawer.stop') }}
         </el-button>
         <div class="toolbar-spacer" />
         <template v-if="isAdmin && failedState && probed && snapshotReady">
           <el-button size="small" type="warning" plain :loading="probeLoading" @click="openEditor">
-            编辑脚本
+            {{ t('runLogDrawer.editScript') }}
           </el-button>
           <el-button size="small" type="danger" plain :loading="retrying" @click="handleRetry">
-            重跑
+            {{ t('runLogDrawer.retry') }}
           </el-button>
         </template>
         <el-button size="small" plain :disabled="!done" @click="handleScrollBottom">
-          滚动到底部
+          {{ t('runLogDrawer.scrollBottom') }}
         </el-button>
       </div>
       <div v-if="failedState && probed && !snapshotReady" class="snap-hint">
         <el-icon><InfoFilled /></el-icon>
-        <span>该运行没有可编辑的脚本快照（手动脚本运行或快照已清理），无法查看/重跑</span>
+        <span>{{ t('runLogDrawer.noSnapshotHint') }}</span>
       </div>
       <div ref="termRef" class="term-box"></div>
     </div>
@@ -39,7 +41,7 @@
     <!-- 编辑运行快照脚本 -->
     <el-dialog
       v-model="editorVisible"
-      title="编辑运行快照脚本"
+      :title="t('runLogDrawer.editDialogTitle')"
       width="780px"
       append-to-body
       :close-on-click-modal="false"
@@ -47,8 +49,10 @@
       <div class="snap-editor">
         <div class="snap-files">
           <div class="snap-files-head">
-            <span class="snap-files-title">快照文件</span>
-            <el-button text size="small" :loading="fileLoading" @click="refreshFiles">刷新</el-button>
+            <span class="snap-files-title">{{ t('runLogDrawer.snapshotFiles') }}</span>
+            <el-button text size="small" :loading="fileLoading" @click="refreshFiles">{{
+              t('runLogDrawer.refresh')
+            }}</el-button>
           </div>
           <el-scrollbar class="snap-files-list">
             <div
@@ -56,17 +60,21 @@
               :key="f.path"
               class="snap-file"
               :class="{ active: f.path === currentPath }"
-              :title="`${f.path}（${f.size} 字节）`"
+              :title="t('runLogDrawer.fileTitle', { path: f.path, size: f.size })"
               @click="openFile(f.path)"
             >
               {{ f.path }}
             </div>
-            <el-empty v-if="!files.length" description="快照内无文件" :image-size="44" />
+            <el-empty
+              v-if="!files.length"
+              :description="t('runLogDrawer.noFiles')"
+              :image-size="44"
+            />
           </el-scrollbar>
         </div>
         <div class="snap-main">
           <div class="snap-main-head">
-            <span class="snap-path">{{ currentPath || '请选择左侧文件' }}</span>
+            <span class="snap-path">{{ currentPath || t('runLogDrawer.selectFile') }}</span>
             <el-button
               type="primary"
               size="small"
@@ -74,7 +82,7 @@
               :loading="saving"
               @click="handleSave"
             >
-              保存修改
+              {{ t('runLogDrawer.saveChanges') }}
             </el-button>
           </div>
           <div class="snap-code-wrap">
@@ -83,7 +91,9 @@
               :path="currentPath"
               :readonly="!currentPath || fileLoading"
               :placeholder="
-                currentPath ? '此处可修改脚本内容，保存后点击「重跑」生效' : '请先在左侧选择要编辑的文件'
+                currentPath
+                  ? t('runLogDrawer.editorPlaceholderEdit')
+                  : t('runLogDrawer.editorPlaceholderSelect')
               "
             />
           </div>
@@ -91,7 +101,7 @@
       </div>
       <div class="snap-editor-tip">
         <el-icon><InfoFilled /></el-icon>
-        <span>修改只影响本次运行快照；保存后点主界面"重跑"以新运行记录重新执行</span>
+        <span>{{ t('runLogDrawer.editorTip') }}</span>
       </div>
     </el-dialog>
   </el-drawer>
@@ -103,6 +113,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { InfoFilled } from '@/icons'
 import {
   stopScript,
@@ -116,14 +127,15 @@ import {
 import { useUserStore } from '@/stores/user'
 import CodeEditor from '@/components/CodeEditor.vue'
 
+const { t } = useI18n()
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 
 const visible = ref(false)
 const runId = ref('')
-const drawerTitle = ref('运行日志')
+const drawerTitle = ref(t('runLogDrawer.title'))
 
-const statusText = ref('等待连接')
+const statusText = ref(t('runLogDrawer.statusWaiting'))
 const statusTagType = ref<'info' | 'success' | 'danger' | 'warning'>('info')
 const exitCode = ref<number | null>(null)
 const done = ref(false)
@@ -193,7 +205,7 @@ function resetState() {
   failedState.value = false
   probed.value = false
   snapshotReady.value = false
-  statusText.value = '连接中...'
+  statusText.value = t('runLogDrawer.statusConnecting')
   statusTagType.value = 'info'
 }
 
@@ -205,7 +217,7 @@ function connect() {
 
   ws = new WebSocket(wsLogUrl(runId.value))
   ws.onopen = () => {
-    statusText.value = '运行中'
+    statusText.value = t('runLogDrawer.statusRunning')
   }
   ws.onmessage = (event) => {
     try {
@@ -216,10 +228,10 @@ function connect() {
         done.value = true
         exitCode.value = msg.exit_code
         if (msg.status === 'success') {
-          statusText.value = '成功完成'
+          statusText.value = t('runLogDrawer.statusSuccess')
           statusTagType.value = 'success'
         } else {
-          statusText.value = '执行失败'
+          statusText.value = t('runLogDrawer.statusFailed')
           statusTagType.value = 'danger'
           failedState.value = true
           // 仅管理员需要编辑/重跑入口，且只探测一次
@@ -232,7 +244,7 @@ function connect() {
         }
       } else if (msg.type === 'error') {
         done.value = true
-        statusText.value = msg.message || '错误'
+        statusText.value = msg.message || t('runLogDrawer.statusError')
         statusTagType.value = 'danger'
       }
     } catch {
@@ -242,12 +254,12 @@ function connect() {
   }
   ws.onerror = () => {
     done.value = true
-    statusText.value = '连接错误'
+    statusText.value = t('runLogDrawer.statusConnError')
     statusTagType.value = 'danger'
   }
   ws.onclose = () => {
     if (!done.value) {
-      statusText.value = '连接已断开'
+      statusText.value = t('runLogDrawer.statusDisconnected')
       statusTagType.value = 'warning'
     }
   }
@@ -265,11 +277,11 @@ async function handleStop() {
   stopping.value = true
   try {
     await stopScript({ run_id: runId.value })
-    ElMessage.success('已发送停止信号')
-    statusText.value = '已停止'
+    ElMessage.success(t('runLogDrawer.stopSent'))
+    statusText.value = t('runLogDrawer.statusStopped')
     statusTagType.value = 'warning'
   } catch (e: any) {
-    ElMessage.error(e.message || '停止失败')
+    ElMessage.error(e.message || t('runLogDrawer.stopFailed'))
   } finally {
     stopping.value = false
   }
@@ -293,8 +305,8 @@ function handleTermCopy(e: KeyboardEvent) {
   const selected = term.getSelection()
   if (typeof navigator.clipboard?.writeText === 'function') {
     navigator.clipboard.writeText(selected).then(
-      () => ElMessage.success('已复制选中内容'),
-      () => ElMessage.warning('复制失败，请手动复制'),
+      () => ElMessage.success(t('runLogDrawer.copied')),
+      () => ElMessage.warning(t('runLogDrawer.copyFailed')),
     )
     return
   }
@@ -313,8 +325,8 @@ function handleTermCopy(e: KeyboardEvent) {
     ok = false
   }
   document.body.removeChild(ta)
-  if (ok) ElMessage.success('已复制选中内容')
-  else ElMessage.warning('复制失败，请手动复制')
+  if (ok) ElMessage.success(t('runLogDrawer.copied'))
+  else ElMessage.warning(t('runLogDrawer.copyFailed'))
 }
 
 // ── 运行快照（失败后编辑/重跑）────────────────────────────────
@@ -341,7 +353,7 @@ async function refreshFiles() {
     files.value = resp.data?.files || []
     snapshotReady.value = files.value.length > 0
   } catch (e: any) {
-    ElMessage.error(e.message || '加载快照文件失败')
+    ElMessage.error(e.message || t('runLogDrawer.loadFilesFailed'))
   } finally {
     fileLoading.value = false
   }
@@ -355,7 +367,9 @@ function openEditor() {
 async function openFile(path: string) {
   if (dirty.value && path !== currentPath.value) {
     try {
-      await ElMessageBox.confirm('当前文件有未保存的修改，放弃？', '提示', { type: 'warning' })
+      await ElMessageBox.confirm(t('runLogDrawer.unsavedDiscard'), t('runLogDrawer.notice'), {
+        type: 'warning',
+      })
     } catch {
       return
     }
@@ -367,7 +381,7 @@ async function openFile(path: string) {
     fileContent.value = resp.data?.content ?? ''
     originalContent.value = fileContent.value
   } catch (e: any) {
-    ElMessage.error(e.message || '读取文件失败')
+    ElMessage.error(e.message || t('runLogDrawer.readFileFailed'))
   } finally {
     fileLoading.value = false
   }
@@ -383,9 +397,9 @@ async function handleSave() {
       content: fileContent.value,
     })
     originalContent.value = fileContent.value
-    ElMessage.success('已保存，可点击主界面"重跑"重新执行')
+    ElMessage.success(t('runLogDrawer.savedRetry'))
   } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
+    ElMessage.error(e.message || t('runLogDrawer.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -393,18 +407,16 @@ async function handleSave() {
 
 async function handleRetry() {
   try {
-    await ElMessageBox.confirm(
-      '将复用本次运行的脚本快照（含你已做的修改）重新执行，并生成新的运行记录。确定重跑？',
-      '重跑确认',
-      { type: 'warning' },
-    )
+    await ElMessageBox.confirm(t('runLogDrawer.retryConfirm'), t('runLogDrawer.retryTitle'), {
+      type: 'warning',
+    })
   } catch {
     return
   }
   retrying.value = true
   try {
     const resp = await retryRun(runId.value)
-    ElMessage.success('重跑已启动')
+    ElMessage.success(t('runLogDrawer.retryStarted'))
     // 切换到新运行日志
     closeWs()
     runId.value = resp.data?.run_id
@@ -414,7 +426,7 @@ async function handleRetry() {
     originalContent.value = ''
     connect()
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '重跑失败')
+    if (e !== 'cancel') ElMessage.error(e.message || t('runLogDrawer.retryFailed'))
   } finally {
     retrying.value = false
   }

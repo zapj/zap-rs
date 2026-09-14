@@ -5,7 +5,7 @@
       type="warning"
       :closable="false"
       show-icon
-      title="演示账号仅支持浏览，不能执行任何操作"
+      :title="t('layout.demoTip')"
       class="demo-banner"
     />
     <router-view v-slot="{ Component }">
@@ -18,7 +18,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
+
+const { t } = useI18n()
 
 // AppMain component is a container for the router-view
 const userStore = useUserStore()

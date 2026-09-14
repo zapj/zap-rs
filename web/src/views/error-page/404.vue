@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 const router = useRouter()
+const { t } = useI18n()
 
 const goHome = () => {
   router.push('/')
@@ -12,9 +14,9 @@ const goHome = () => {
   <div class="error-container">
     <div class="error-content">
       <div class="error-image">404</div>
-      <h1 class="error-title">页面不存在</h1>
-      <div class="error-desc">抱歉，您访问的页面不存在或已被删除</div>
-      <el-button type="primary" @click="goHome">返回首页</el-button>
+      <h1 class="error-title">{{ t('app.notFoundTitle') }}</h1>
+      <div class="error-desc">{{ t('app.notFoundDesc') }}</div>
+      <el-button type="primary" @click="goHome">{{ t('app.backHome') }}</el-button>
     </div>
   </div>
 </template>

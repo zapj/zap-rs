@@ -3,7 +3,7 @@
     <!-- 左侧连接管理器 -->
     <div class="terminal-sidebar" :style="{ width: sidebarWidth + 'px' }">
       <div class="sidebar-header">
-        <span class="sidebar-title">连接管理</span>
+        <span class="sidebar-title">{{ t('terminal.connManager') }}</span>
         <div class="sidebar-actions">
           <el-button
             v-if="canUseUserKeys || isAdmin"
@@ -13,10 +13,16 @@
             :icon="Key"
             @click="openKeyManager"
           >
-            我的密钥
+            {{ t('terminal.myKeys') }}
           </el-button>
-          <el-button type="primary" size="small" :icon="Plus" :disabled="isReadOnly" @click="showAddDialog = true">
-            添加
+          <el-button
+            type="primary"
+            size="small"
+            :icon="Plus"
+            :disabled="isReadOnly"
+            @click="showAddDialog = true"
+          >
+            {{ t('common.add') }}
           </el-button>
         </div>
       </div>
@@ -24,7 +30,7 @@
       <div class="sidebar-search">
         <el-input
           v-model="connKeyword"
-          placeholder="搜索名称 / 主机 / 用户"
+          :placeholder="t('terminal.searchPlaceholder')"
           size="small"
           clearable
           :prefix-icon="Search"
@@ -49,46 +55,75 @@
               <span
                 v-if="conn.auth_type === 'password' && !conn.has_password"
                 class="pwd-badge"
-                title="未保存密码：双击连接时会弹窗输入（仅本次会话，不保存）"
+                :title="t('terminal.pwdBadgeTitle')"
               >
-                弹窗输密码
+                {{ t('terminal.pwdBadge') }}
               </span>
             </span>
           </div>
 
           <!-- 行内操作：hover 才出现，避免常驻按钮挤压/遮挡连接信息 -->
           <div class="conn-actions" @click.stop>
-            <el-button class="row-btn" :icon="Link" size="small" text title="连接" @click="openTerminal(conn)" />
+            <el-button
+              class="row-btn"
+              :icon="Link"
+              size="small"
+              text
+              :title="t('terminal.connect')"
+              @click="openTerminal(conn)"
+            />
             <el-dropdown trigger="click" @command="onRowCommand(conn, $event)">
-              <el-button class="row-btn" :icon="MoreFilled" size="small" text title="更多操作" />
+              <el-button
+                class="row-btn"
+                :icon="MoreFilled"
+                size="small"
+                text
+                :title="t('terminal.moreActions')"
+              />
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item :icon="Edit" command="edit" :disabled="isReadOnly">编辑</el-dropdown-item>
+                  <el-dropdown-item :icon="Edit" command="edit" :disabled="isReadOnly">
+                    {{ t('common.edit') }}
+                  </el-dropdown-item>
                   <el-dropdown-item
                     v-if="conn.auth_type === 'key'"
                     :icon="Key"
                     command="pushKey"
                     :disabled="isReadOnly || (isLoopbackHost(conn.host) && !isAdmin)"
                   >
-                    {{ isLoopbackHost(conn.host) ? '写入本机 SSH 授权' : '推送公钥到主机' }}
+                    {{
+                      isLoopbackHost(conn.host) ? t('terminal.localPush') : t('terminal.pushToHost')
+                    }}
                   </el-dropdown-item>
-                  <el-dropdown-item :icon="Monitor" command="test">测试连接</el-dropdown-item>
-                  <el-dropdown-item :icon="Delete" command="delete" divided :disabled="isReadOnly">删除</el-dropdown-item>
+                  <el-dropdown-item :icon="Monitor" command="test">{{
+                    t('terminal.testConn')
+                  }}</el-dropdown-item>
+                  <el-dropdown-item :icon="Delete" command="delete" divided :disabled="isReadOnly">
+                    {{ t('common.delete') }}
+                  </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
           </div>
         </div>
 
-        <el-empty v-if="connections.length === 0" description="暂无连接，点击右上角添加" :image-size="60" />
+        <el-empty
+          v-if="connections.length === 0"
+          :description="t('terminal.emptyConn')"
+          :image-size="60"
+        />
         <div v-else-if="filteredConnections.length === 0" class="search-empty">
           <el-icon><Search /></el-icon>
-          <span>未找到匹配的连接</span>
+          <span>{{ t('terminal.noMatch') }}</span>
         </div>
       </div>
 
       <!-- 拖拽调宽手柄 -->
-      <div class="sidebar-resizer" title="拖拽调整宽度" @mousedown.prevent="startSidebarResize" />
+      <div
+        class="sidebar-resizer"
+        :title="t('terminal.resizeTip')"
+        @mousedown.prevent="startSidebarResize"
+      />
     </div>
 
     <!-- 右侧终端区域 -->
@@ -100,7 +135,14 @@
           :key="tab.id"
           class="tab-item"
           :class="{ active: activeTabId === tab.id }"
-          :title="tab.name + (tab.status === 'connecting' ? '（连接中…）' : tab.status === 'disconnected' ? '（已断开，可重新连接）' : '')"
+          :title="
+            tab.name +
+            (tab.status === 'connecting'
+              ? t('terminal.tabConnecting')
+              : tab.status === 'disconnected'
+                ? t('terminal.tabDisconnected')
+                : '')
+          "
           @click="switchTab(tab.id)"
           @auxclick="onTabAuxClick($event, tab.id)"
         >
@@ -124,7 +166,7 @@
 
         <div v-if="tabs.length === 0" class="terminal-placeholder">
           <el-icon :size="48" style="color: var(--el-text-color-secondary)"><Monitor /></el-icon>
-          <p>双击左侧连接开始 SSH 会话</p>
+          <p>{{ t('terminal.placeholder') }}</p>
         </div>
       </div>
     </div>
@@ -132,53 +174,55 @@
     <!-- 添加/编辑连接对话框 -->
     <el-dialog
       v-model="showAddDialog"
-      :title="editingConn ? '编辑连接' : '添加连接'"
+      :title="editingConn ? t('terminal.editConn') : t('terminal.addConn')"
       width="500px"
       :close-on-click-modal="false"
     >
       <el-form :model="form" label-width="90px" ref="formRef" @submit.prevent>
-        <el-form-item label="连接名称" required>
-          <el-input v-model="form.name" placeholder="如：生产服务器" />
+        <el-form-item :label="t('terminal.formName')" required>
+          <el-input v-model="form.name" :placeholder="t('terminal.namePlaceholder')" />
         </el-form-item>
-        <el-form-item label="主机地址" required>
-          <el-input v-model="form.host" placeholder="如：192.168.1.100" />
+        <el-form-item :label="t('terminal.formHost')" required>
+          <el-input v-model="form.host" :placeholder="t('terminal.hostPlaceholder')" />
         </el-form-item>
-        <el-form-item label="端口">
+        <el-form-item :label="t('terminal.formPort')">
           <el-input-number v-model="form.port" :min="1" :max="65535" />
         </el-form-item>
-        <el-form-item label="用户名">
+        <el-form-item :label="t('terminal.formUsername')">
           <el-input v-model="form.username" placeholder="root" />
         </el-form-item>
-        <el-form-item label="认证方式">
+        <el-form-item :label="t('terminal.formAuth')">
           <el-radio-group v-model="form.auth_type">
-            <el-radio value="password">密码</el-radio>
-            <el-radio value="key">SSH 密钥</el-radio>
+            <el-radio value="password">{{ t('terminal.authPassword') }}</el-radio>
+            <el-radio value="key">{{ t('terminal.authKey') }}</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="form.auth_type === 'password'" label="密码">
+        <el-form-item v-if="form.auth_type === 'password'" :label="t('terminal.formPassword')">
           <el-input
             v-model="form.password"
             type="password"
             show-password
-            placeholder="输入 SSH 密码（留空则连接时弹窗输入，不保存）"
+            :placeholder="t('terminal.passwordPlaceholder')"
           />
         </el-form-item>
-        <el-form-item v-if="form.auth_type === 'key'" label="SSH 密钥">
+        <el-form-item v-if="form.auth_type === 'key'" :label="t('terminal.formKey')">
           <div class="key-select-wrap">
-            <el-select v-model="form.ssh_key_name" placeholder="选择密钥" clearable>
+            <el-select v-model="form.ssh_key_name" :placeholder="t('terminal.selectKey')" clearable>
               <el-option
                 v-for="key in sshKeys"
                 :key="key.scope + ':' + key.name"
-                :label="key.scope === 'system' ? key.name + '（系统级）' : key.name"
+                :label="
+                  key.scope === 'system' ? key.name + t('terminal.keySystemSuffix') : key.name
+                "
                 :value="key.name"
               />
             </el-select>
             <div class="key-tip">
               <span v-if="form.host && isLoopbackHost(form.host)">
-                本地主机连接：写入本机用户 authorized_keys（需 admin 角色）
+                {{ t('terminal.keyTipLocal') }}
               </span>
-              <span v-else-if="form.ssh_key_name">密钥需已添加到主机 ~/.ssh/authorized_keys 才能登录</span>
-              <span v-else>暂无可用密钥，请先在「我的密钥」中生成/导入</span>
+              <span v-else-if="form.ssh_key_name">{{ t('terminal.keyTipSaved') }}</span>
+              <span v-else>{{ t('terminal.keyTipEmpty') }}</span>
               <el-button
                 v-if="canUseUserKeys || isAdmin"
                 type="primary"
@@ -188,7 +232,7 @@
                 :disabled="isReadOnly"
                 @click="openKeyManager"
               >
-                管理我的密钥
+                {{ t('terminal.manageKeys') }}
               </el-button>
               <el-button
                 v-if="form.ssh_key_name"
@@ -198,27 +242,36 @@
                 :disabled="isReadOnly || (form.host && isLoopbackHost(form.host) && !isAdmin)"
                 @click="openPushKeyFromForm"
               >
-                {{ form.host && isLoopbackHost(form.host) ? '写入本机 SSH 授权' : '推送公钥到远程主机' }}
+                {{
+                  form.host && isLoopbackHost(form.host)
+                    ? t('terminal.localPush')
+                    : t('terminal.pushToRemote')
+                }}
               </el-button>
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可选备注" />
+        <el-form-item :label="t('terminal.formRemark')">
+          <el-input
+            v-model="form.remark"
+            type="textarea"
+            :rows="2"
+            :placeholder="t('terminal.remarkPlaceholder')"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddDialog = false">取消</el-button>
+        <el-button @click="showAddDialog = false">{{ t('common.cancel') }}</el-button>
         <el-button
           v-if="editingConn"
           type="success"
           @click="handleTest(editingConn.id)"
           :loading="testing"
         >
-          测试连接
+          {{ t('terminal.testConn') }}
         </el-button>
         <el-button type="primary" @click="handleSave" :loading="saving">
-          {{ editingConn ? '保存' : '添加' }}
+          {{ editingConn ? t('common.save') : t('common.add') }}
         </el-button>
       </template>
     </el-dialog>
@@ -226,53 +279,61 @@
     <!-- 推送公钥到主机对话框 -->
     <el-dialog
       v-model="showPushKeyDialog"
-      :title="pushKeyIsLocal ? '写入本机 SSH 授权' : '推送公钥到远程主机'"
+      :title="pushKeyIsLocal ? t('terminal.localPush') : t('terminal.pushToRemote')"
       width="460px"
       :close-on-click-modal="false"
     >
       <el-alert v-if="!pushKeyIsLocal" type="info" :closable="false" show-icon>
-        将连接绑定的公钥追加到远程主机
+        {{ t('terminal.pushRemoteAlert1') }}
         <b style="margin: 0 4px">{{ pushKeyTarget }}</b>
-        的 ~/.ssh/authorized_keys，之后即可用该密钥免密登录。需要输入远程主机的 SSH
-        密码（仅本次使用，不会保存）。
+        {{ t('terminal.pushRemoteAlert2') }}
       </el-alert>
       <el-alert v-else :type="canLocalPush ? 'warning' : 'error'" :closable="false" show-icon>
-        目标为本地主机（localhost/127.0.0.1），将直接把公钥写入本机用户
+        {{ t('terminal.pushLocalAlert1') }}
         <b style="margin: 0 4px">{{ pushKeyTarget }}</b>
-        的 ~/.ssh/authorized_keys。该操作需要 root 权限，仅 <b>admin</b> 角色可用，无需输入密码。
+        {{ t('terminal.pushLocalAlert2') }}
       </el-alert>
       <el-form v-if="!pushKeyIsLocal" label-width="90px" style="margin-top: 16px" @submit.prevent>
-        <el-form-item label="SSH 密码" required>
+        <el-form-item :label="t('terminal.sshPassword')" required>
           <el-input
             v-model="pushKeyPwd"
             type="password"
             show-password
-            placeholder="输入远程主机密码"
+            :placeholder="t('terminal.remotePwdPlaceholder')"
             @keyup.enter="confirmPushKey"
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showPushKeyDialog = false">取消</el-button>
+        <el-button @click="showPushKeyDialog = false">{{ t('common.cancel') }}</el-button>
         <el-button
           type="primary"
           :loading="pushing"
           :disabled="pushKeyIsLocal && !canLocalPush"
           @click="confirmPushKey"
         >
-          {{ pushKeyIsLocal ? '写入本机' : '推送' }}
+          {{ pushKeyIsLocal ? t('terminal.writeLocal') : t('terminal.push') }}
         </el-button>
       </template>
     </el-dialog>
 
     <!-- 我的 SSH 密钥管理 -->
-    <el-dialog v-model="showKeyManager" title="我的 SSH 密钥" width="780px" @open="loadMyKeys">
-      <el-alert :type="canUseUserKeys ? 'info' : 'warning'" :closable="false" show-icon style="margin-bottom: 12px">
-        密钥保存在你自己的家目录 <code>~/.ssh</code>（<code>zap_</code> 前缀），私钥仅本人可见、不会上传数据库。
-        <template v-if="isAdmin">admin 额外展示系统级密钥（服务器 /etc/zap/ssh，用于本机授权与历史连接）。</template>
+    <el-dialog
+      v-model="showKeyManager"
+      :title="t('terminal.keyManagerTitle')"
+      width="780px"
+      @open="loadMyKeys"
+    >
+      <el-alert
+        :type="canUseUserKeys ? 'info' : 'warning'"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 12px"
+      >
+        {{ t('terminal.keyAlert') }}
+        <template v-if="isAdmin">{{ t('terminal.keyAlertAdmin') }}</template>
         <div v-if="!canUseUserKeys" style="margin-top: 4px">
-          当前为「统一 www」运行模式（用户未创建独立 Linux 账号），个人家目录密钥不可用，生成/导入已禁用；
-          请管理员在「服务器 → 运行环境」切换为「独立系统用户」模式后再使用个人密钥。
+          {{ t('terminal.keyModeDisabled') }}
         </div>
       </el-alert>
       <div class="keymgr-toolbar">
@@ -283,7 +344,7 @@
           :disabled="!canUseUserKeys || isReadOnly"
           @click="openKeyGen"
         >
-          生成密钥
+          {{ t('terminal.genKey') }}
         </el-button>
         <el-button
           size="small"
@@ -291,109 +352,156 @@
           :disabled="!canUseUserKeys || isReadOnly"
           @click="openKeyImport"
         >
-          导入密钥
+          {{ t('terminal.importKey') }}
         </el-button>
         <div style="flex: 1"></div>
-        <el-button size="small" text :loading="keyLoading" @click="loadMyKeys">刷新</el-button>
+        <el-button size="small" text :loading="keyLoading" @click="loadMyKeys">{{
+          t('common.refresh')
+        }}</el-button>
       </div>
-      <el-table :data="myKeys" v-loading="keyLoading" size="small" max-height="400" empty-text="还没有密钥，点击「生成密钥」创建">
-        <el-table-column prop="name" label="名称" min-width="130">
+      <el-table
+        :data="myKeys"
+        v-loading="keyLoading"
+        size="small"
+        max-height="400"
+        :empty-text="t('terminal.noKeys')"
+      >
+        <el-table-column prop="name" :label="t('common.name')" min-width="130">
           <template #default="{ row }">
             <span>{{ row.name }}</span>
-            <el-tag v-if="row.scope === 'system'" size="small" type="warning" effect="plain" style="margin-left: 6px">
-              系统
+            <el-tag
+              v-if="row.scope === 'system'"
+              size="small"
+              type="warning"
+              effect="plain"
+              style="margin-left: 6px"
+            >
+              {{ t('terminal.system') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="comment" label="注释" min-width="120" show-overflow-tooltip />
-        <el-table-column label="指纹" min-width="210" show-overflow-tooltip>
+        <el-table-column
+          prop="comment"
+          :label="t('terminal.comment')"
+          min-width="120"
+          show-overflow-tooltip
+        />
+        <el-table-column :label="t('terminal.fingerprint')" min-width="210" show-overflow-tooltip>
           <template #default="{ row }">
             <code class="fp">{{ row.fingerprint }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" align="right">
+        <el-table-column :label="t('common.operation')" width="220" align="right">
           <template #default="{ row }">
             <template v-if="row.scope === 'user'">
-              <el-button link type="primary" size="small" @click="copyPub(row)">复制公钥</el-button>
-              <el-button link type="primary" size="small" @click="viewPrivate(row)">查看私钥</el-button>
-              <el-button link type="danger" size="small" :disabled="isReadOnly" @click="removeKey(row)">删除</el-button>
+              <el-button link type="primary" size="small" @click="copyPub(row)">{{
+                t('terminal.copyPub')
+              }}</el-button>
+              <el-button link type="primary" size="small" @click="viewPrivate(row)">
+                {{ t('terminal.viewPrivate') }}
+              </el-button>
+              <el-button
+                link
+                type="danger"
+                size="small"
+                :disabled="isReadOnly"
+                @click="removeKey(row)"
+              >
+                {{ t('common.delete') }}
+              </el-button>
             </template>
-            <span v-else class="dim">系统级密钥仅服务器管理</span>
+            <span v-else class="dim">{{ t('terminal.systemKeyOnly') }}</span>
           </template>
         </el-table-column>
       </el-table>
       <template #footer>
-        <el-button type="primary" @click="showKeyManager = false">关闭</el-button>
+        <el-button type="primary" @click="showKeyManager = false">{{
+          t('common.close')
+        }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 生成密钥 -->
-    <el-dialog v-model="showKeyGen" title="生成 SSH 密钥" width="480px" :close-on-click-modal="false">
+    <el-dialog
+      v-model="showKeyGen"
+      :title="t('terminal.genKeyTitle')"
+      width="480px"
+      :close-on-click-modal="false"
+    >
       <el-form label-width="90px" @submit.prevent>
-        <el-form-item label="密钥名称" required>
-          <el-input v-model="keyGenForm.name" placeholder="如：my-server（字母/数字/-/_，最多 64 位）" />
+        <el-form-item :label="t('terminal.keyName')" required>
+          <el-input v-model="keyGenForm.name" :placeholder="t('terminal.keyNamePlaceholder')" />
         </el-form-item>
-        <el-form-item label="密钥类型" required>
+        <el-form-item :label="t('terminal.keyType')" required>
           <el-radio-group v-model="keyGenForm.key_type">
-            <el-radio value="ed25519">ed25519（推荐）</el-radio>
+            <el-radio value="ed25519">{{ t('terminal.typeEd25519') }}</el-radio>
             <el-radio value="rsa">RSA</el-radio>
             <el-radio value="ecdsa">ECDSA</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="keyGenForm.key_type === 'rsa'" label="RSA 位数">
+        <el-form-item v-if="keyGenForm.key_type === 'rsa'" :label="t('terminal.rsaBits')">
           <el-select v-model="keyGenForm.bits" style="width: 120px">
             <el-option :value="2048" label="2048" />
             <el-option :value="4096" label="4096" />
           </el-select>
         </el-form-item>
-        <el-form-item label="注释">
-          <el-input v-model="keyGenForm.comment" placeholder="可选，如 user@example.com" />
+        <el-form-item :label="t('terminal.comment')">
+          <el-input v-model="keyGenForm.comment" :placeholder="t('terminal.commentPlaceholder')" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showKeyGen = false">取消</el-button>
-        <el-button type="primary" :loading="keySaving" @click="submitKeyGen">生成并保存到家目录</el-button>
+        <el-button @click="showKeyGen = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="keySaving" @click="submitKeyGen">{{
+          t('terminal.genAndSave')
+        }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 导入密钥 -->
-    <el-dialog v-model="showKeyImport" title="导入 SSH 密钥" width="560px" :close-on-click-modal="false">
+    <el-dialog
+      v-model="showKeyImport"
+      :title="t('terminal.importKeyTitle')"
+      width="560px"
+      :close-on-click-modal="false"
+    >
       <el-form label-width="90px" @submit.prevent>
-        <el-form-item label="密钥名称" required>
-          <el-input v-model="keyImportForm.name" placeholder="如：my-server（字母/数字/-/_，最多 64 位）" />
+        <el-form-item :label="t('terminal.keyName')" required>
+          <el-input v-model="keyImportForm.name" :placeholder="t('terminal.keyNamePlaceholder')" />
         </el-form-item>
-        <el-form-item label="私钥内容" required>
+        <el-form-item :label="t('terminal.privateKey')" required>
           <el-input
             v-model="keyImportForm.private_key"
             type="textarea"
             :rows="9"
-            placeholder="粘贴 OpenSSH 私钥（BEGIN ... PRIVATE KEY）"
+            :placeholder="t('terminal.privateKeyPlaceholder')"
             style="font-family: monospace"
           />
         </el-form-item>
-        <el-form-item label="公钥内容">
+        <el-form-item :label="t('terminal.publicKey')">
           <el-input
             v-model="keyImportForm.public_key"
             type="textarea"
             :rows="3"
-            placeholder="可选；留空时由服务器从私钥自动推导"
+            :placeholder="t('terminal.publicKeyPlaceholder')"
             style="font-family: monospace"
           />
         </el-form-item>
-        <el-form-item label="注释">
-          <el-input v-model="keyImportForm.comment" placeholder="可选" />
+        <el-form-item :label="t('terminal.comment')">
+          <el-input v-model="keyImportForm.comment" :placeholder="t('common.optional')" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showKeyImport = false">取消</el-button>
-        <el-button type="primary" :loading="keySaving" @click="submitKeyImport">导入并保存到家目录</el-button>
+        <el-button @click="showKeyImport = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="keySaving" @click="submitKeyImport">
+          {{ t('terminal.importAndSave') }}
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 查看私钥 -->
-    <el-dialog v-model="showPrivateView" title="查看私钥" width="620px">
+    <el-dialog v-model="showPrivateView" :title="t('terminal.viewPrivateTitle')" width="620px">
       <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 10px">
-        私钥「{{ privateViewKey?.name }}」仅在你的家目录 ~/.ssh 中，请妥善保管，切勿泄露。
+        {{ t('terminal.privateAlert', { name: privateViewKey?.name }) }}
       </el-alert>
       <el-input
         :model-value="privateViewKey?.content ?? ''"
@@ -403,8 +511,8 @@
         style="font-family: monospace"
       />
       <template #footer>
-        <el-button @click="showPrivateView = false">关闭</el-button>
-        <el-button type="primary" @click="copyPrivate">复制私钥</el-button>
+        <el-button @click="showPrivateView = false">{{ t('common.close') }}</el-button>
+        <el-button type="primary" @click="copyPrivate">{{ t('terminal.copyPrivate') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -438,9 +546,11 @@ import {
 import { getToken } from '@/utils/auth'
 import { wsUrl } from '@/utils/base'
 import { useUserStore } from '@/stores/user'
+import { useI18n } from 'vue-i18n'
 
 // ── 状态 ───────────────────────────────────────────────────
 
+const { t } = useI18n()
 const userStore = useUserStore()
 const isReadOnly = computed(() => userStore.roles.includes('demo'))
 const isAdmin = computed(() => userStore.roles.includes('admin'))
@@ -459,7 +569,7 @@ const connKeyword = ref('')
 const filteredConnections = computed(() => {
   const kw = connKeyword.value.trim().toLowerCase()
   if (!kw) return connections.value
-  return connections.value.filter(c =>
+  return connections.value.filter((c) =>
     [c.name, c.host, c.username, `${c.host}:${c.port}`].join(' ').toLowerCase().includes(kw),
   )
 })
@@ -509,14 +619,17 @@ const pushing = ref(false)
 const canLocalPush = computed(() => pushKeyIsLocal.value && isAdmin.value && !isReadOnly.value)
 
 function isLoopbackHost(host: string): boolean {
-  const h = host.trim().replace(/^\[|\]$/g, '').toLowerCase()
+  const h = host
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase()
   return h === 'localhost' || h === '127.0.0.1' || h === '::1'
 }
 
 /** 行菜单「推送公钥」：基于已保存的连接 */
 function openPushKey(connId?: number | null) {
   if (connId == null) return
-  const conn = connections.value.find(c => c.id === connId)
+  const conn = connections.value.find((c) => c.id === connId)
   if (!conn) return
   pushKeyConnId.value = conn.id
   pushKeyForm.value = null
@@ -530,11 +643,11 @@ function openPushKey(connId?: number | null) {
 function openPushKeyFromForm() {
   const f = form.value
   if (!f.host.trim()) {
-    ElMessage.warning('请先填写主机地址')
+    ElMessage.warning(t('terminal.hostRequired'))
     return
   }
   if (!f.ssh_key_name) {
-    ElMessage.warning('请先选择 SSH 密钥')
+    ElMessage.warning(t('terminal.keyRequired'))
     return
   }
   pushKeyConnId.value = null
@@ -553,11 +666,11 @@ function openPushKeyFromForm() {
 async function confirmPushKey() {
   if (pushKeyConnId.value == null && !pushKeyForm.value) return
   if (!pushKeyIsLocal.value && !pushKeyPwd.value) {
-    ElMessage.warning('请输入远程主机密码')
+    ElMessage.warning(t('terminal.remotePwdRequired'))
     return
   }
   if (pushKeyIsLocal.value && !canLocalPush.value) {
-    ElMessage.warning('仅 admin 角色可以写入本机 SSH 授权')
+    ElMessage.warning(t('terminal.localPushAdminOnly'))
     return
   }
   pushing.value = true
@@ -574,10 +687,10 @@ async function confirmPushKey() {
         password: pushKeyIsLocal.value ? '' : pushKeyPwd.value,
       })
     }
-    ElMessage.success(pushKeyIsLocal.value ? '公钥已写入本机 authorized_keys' : '公钥已推送到远程主机，现在可以尝试连接了')
+    ElMessage.success(pushKeyIsLocal.value ? t('terminal.pushedLocal') : t('terminal.pushedRemote'))
     showPushKeyDialog.value = false
   } catch (e: any) {
-    ElMessage.error(e.message || '推送失败')
+    ElMessage.error(e.message || t('terminal.pushFailed'))
   } finally {
     pushing.value = false
   }
@@ -625,7 +738,7 @@ async function loadConnections() {
     const resp = await getConnections()
     connections.value = resp.data || []
   } catch {
-    ElMessage.error('加载连接列表失败')
+    ElMessage.error(t('terminal.loadConnFailed'))
   }
 }
 
@@ -662,7 +775,7 @@ async function loadMyKeys() {
     userKeysEnabled.value = d?.user_keys_enabled ?? true
     myKeys.value = d?.items || []
   } catch (e: any) {
-    ElMessage.error(e.message || '加载密钥失败')
+    ElMessage.error(e.message || t('terminal.loadKeysFailed'))
   } finally {
     keyLoading.value = false
   }
@@ -674,11 +787,11 @@ async function copyPub(key: UserSshKey) {
   try {
     const resp = await getUserKeyPublic(key.name)
     const pub = resp.data?.public_key
-    if (!pub) throw new Error('公钥为空')
+    if (!pub) throw new Error(t('terminal.pubEmpty'))
     await navigator.clipboard.writeText(pub)
-    ElMessage.success('公钥已复制')
+    ElMessage.success(t('terminal.pubCopied'))
   } catch (e: any) {
-    ElMessage.error(e.message || '复制失败')
+    ElMessage.error(e.message || t('common.copyFailed'))
   }
 }
 
@@ -689,11 +802,11 @@ async function viewPrivate(key: UserSshKey) {
   try {
     const resp = await getUserKeyPrivate(key.name)
     const content = resp.data?.private_key
-    if (!content) throw new Error('私钥为空')
+    if (!content) throw new Error(t('terminal.privEmpty'))
     privateViewKey.value = { name: key.name, content }
     showPrivateView.value = true
   } catch (e: any) {
-    ElMessage.error(e.message || '读取私钥失败')
+    ElMessage.error(e.message || t('terminal.readPrivateFailed'))
   }
 }
 
@@ -702,28 +815,32 @@ async function copyPrivate() {
   if (!k) return
   try {
     await navigator.clipboard.writeText(k.content)
-    ElMessage.success('私钥已复制')
+    ElMessage.success(t('terminal.privCopied'))
   } catch {
-    ElMessage.error('复制失败')
+    ElMessage.error(t('common.copyFailed'))
   }
 }
 
 async function removeKey(key: UserSshKey) {
   try {
-    await ElMessageBox.confirm(`确定删除密钥「${key.name}」？删除后需重新生成/导入。`, '删除密钥', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      t('terminal.delKeyConfirm', { name: key.name }),
+      t('terminal.delKeyTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
   } catch {
     return
   }
   try {
     await deleteUserKey(key.name)
-    ElMessage.success('已删除')
+    ElMessage.success(t('terminal.deleted'))
     await Promise.all([loadMyKeys(), loadSshKeys()])
   } catch (e: any) {
-    ElMessage.error(e.message || '删除失败')
+    ElMessage.error(e.message || t('terminal.deleteFailed'))
   }
 }
 
@@ -740,7 +857,7 @@ async function submitKeyGen() {
   const f = keyGenForm.value
   const name = f.name.trim()
   if (!KEY_NAME_RE.test(name)) {
-    ElMessage.warning('密钥名称仅允许字母/数字/-/_（字母开头，最多 64 字符）')
+    ElMessage.warning(t('terminal.keyNameRule'))
     return
   }
   keySaving.value = true
@@ -751,11 +868,11 @@ async function submitKeyGen() {
       bits: f.key_type === 'rsa' ? f.bits : undefined,
       comment: f.comment.trim() || undefined,
     })
-    ElMessage.success('密钥已生成并保存到家目录 ~/.ssh')
+    ElMessage.success(t('terminal.keyGenerated'))
     showKeyGen.value = false
     await Promise.all([loadMyKeys(), loadSshKeys()])
   } catch (e: any) {
-    ElMessage.error(e.message || '生成失败')
+    ElMessage.error(e.message || t('terminal.genFailed'))
   } finally {
     keySaving.value = false
   }
@@ -774,11 +891,11 @@ async function submitKeyImport() {
   const f = keyImportForm.value
   const name = f.name.trim()
   if (!KEY_NAME_RE.test(name)) {
-    ElMessage.warning('密钥名称仅允许字母/数字/-/_（字母开头，最多 64 字符）')
+    ElMessage.warning(t('terminal.keyNameRule'))
     return
   }
   if (!f.private_key.trim()) {
-    ElMessage.warning('请粘贴私钥内容')
+    ElMessage.warning(t('terminal.privateKeyRequired'))
     return
   }
   keySaving.value = true
@@ -789,11 +906,11 @@ async function submitKeyImport() {
       public_key: f.public_key.trim() || undefined,
       comment: f.comment.trim() || undefined,
     })
-    ElMessage.success('密钥已导入到家目录 ~/.ssh')
+    ElMessage.success(t('terminal.keyImported'))
     showKeyImport.value = false
     await Promise.all([loadMyKeys(), loadSshKeys()])
   } catch (e: any) {
-    ElMessage.error(e.message || '导入失败')
+    ElMessage.error(e.message || t('terminal.importFailed'))
   } finally {
     keySaving.value = false
   }
@@ -832,8 +949,14 @@ function editConnection(conn: SshConnection) {
 
 async function handleSave() {
   const f = form.value
-  if (!f.name.trim()) { ElMessage.warning('请输入连接名称'); return }
-  if (!f.host.trim()) { ElMessage.warning('请输入主机地址'); return }
+  if (!f.name.trim()) {
+    ElMessage.warning(t('terminal.nameRequired'))
+    return
+  }
+  if (!f.host.trim()) {
+    ElMessage.warning(t('terminal.hostRequired'))
+    return
+  }
 
   saving.value = true
   try {
@@ -848,7 +971,7 @@ async function handleSave() {
         ssh_key_name: f.ssh_key_name,
         remark: f.remark,
       })
-      ElMessage.success('更新成功')
+      ElMessage.success(t('common.updateSuccess'))
     } else {
       await createConnection({
         name: f.name,
@@ -860,13 +983,13 @@ async function handleSave() {
         ssh_key_name: f.ssh_key_name,
         remark: f.remark,
       })
-      ElMessage.success('创建成功')
+      ElMessage.success(t('common.createSuccess'))
     }
     showAddDialog.value = false
     resetForm()
     await loadConnections()
   } catch (e: any) {
-    ElMessage.error(e.message || '操作失败')
+    ElMessage.error(e.message || t('terminal.opFailed'))
   } finally {
     saving.value = false
   }
@@ -875,15 +998,15 @@ async function handleSave() {
 async function handleDelete(id: number) {
   try {
     await deleteConnection(id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('common.deleteSuccess'))
     // Close any open tabs for this connection
-    tabs.value = tabs.value.filter(t => t.connId !== id)
-    if (activeTabId.value && !tabs.value.find(t => t.id === activeTabId.value)) {
+    tabs.value = tabs.value.filter((t) => t.connId !== id)
+    if (activeTabId.value && !tabs.value.find((t) => t.id === activeTabId.value)) {
       activeTabId.value = tabs.value.length > 0 ? tabs.value[0].id : null
     }
     await loadConnections()
   } catch (e: any) {
-    ElMessage.error(e.message || '删除失败')
+    ElMessage.error(e.message || t('terminal.deleteFailed'))
   }
 }
 
@@ -892,12 +1015,12 @@ async function handleTest(id: number) {
   try {
     const resp = await testConnection(id)
     if (resp.data?.success) {
-      ElMessage.success('连接成功')
+      ElMessage.success(t('terminal.connOk'))
     } else {
-      ElMessage.error(resp.data?.message || '连接失败')
+      ElMessage.error(resp.data?.message || t('terminal.connFailed'))
     }
   } catch (e: any) {
-    ElMessage.error(e.message || '测试失败')
+    ElMessage.error(e.message || t('terminal.testFailed'))
   } finally {
     testing.value = false
   }
@@ -920,10 +1043,10 @@ function handleRowAction(conn: SshConnection, cmd: string) {
       handleTest(conn.id)
       break
     case 'delete':
-      ElMessageBox.confirm('确定删除此连接？', '提示', {
+      ElMessageBox.confirm(t('terminal.delConnConfirm'), t('common.tip'), {
         type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
       })
         .then(() => handleDelete(conn.id))
         .catch(() => {})
@@ -965,11 +1088,11 @@ function getWsUrl(connId: number): string {
 
 async function openTerminal(conn: SshConnection) {
   if (isReadOnly.value) {
-    ElMessage.warning('演示账号仅支持浏览，不能使用终端')
+    ElMessage.warning(t('terminal.demoTip'))
     return
   }
   // 已存在该连接的标签页
-  const existing = tabs.value.find(t => t.connId === conn.id)
+  const existing = tabs.value.find((t) => t.connId === conn.id)
   if (existing) {
     // 会话仍存活 → 直接切换过去
     if (existing.ws && existing.ws.readyState === WebSocket.OPEN) {
@@ -989,7 +1112,9 @@ async function openTerminal(conn: SshConnection) {
     activeTabId.value = existing.id
     await nextTick()
     existing.term.clear()
-    existing.term.writeln('\r\n\x1b[36m正在重新连接 ' + conn.name + ' ...\x1b[0m')
+    existing.term.writeln(
+      '\r\n\x1b[36m' + t('terminal.reconnecting', { name: conn.name }) + '\x1b[0m',
+    )
     connectTab(existing, conn, tempPwd)
     return
   }
@@ -1077,13 +1202,13 @@ async function askPasswordIfNeeded(conn: SshConnection): Promise<string | null> 
   if (!needTempPassword(conn)) return null
   try {
     const { value } = await ElMessageBox.prompt(
-      `请输入 ${conn.username}@${conn.host} 的 SSH 密码（仅本次会话使用，不会保存）`,
-      `连接 ${conn.name}`,
+      t('terminal.pwdPrompt', { user: conn.username, host: conn.host }),
+      t('terminal.connectTitle', { name: conn.name }),
       {
         inputType: 'password',
-        confirmButtonText: '连接',
-        cancelButtonText: '取消',
-        inputValidator: (v: string) => (v.trim() ? true : '密码不能为空'),
+        confirmButtonText: t('terminal.connect'),
+        cancelButtonText: t('common.cancel'),
+        inputValidator: (v: string) => (v.trim() ? true : t('terminal.pwdNotEmpty')),
       },
     )
     return value ?? null
@@ -1112,10 +1237,14 @@ function connectTab(tab: TerminalTab, conn: SshConnection, authPassword?: string
     tab.status = 'connected'
     if (authPassword) {
       // 后端凭据里无密码：把本次输入的临时密码下发给后端完成 SSH 认证
-      term.writeln('\x1b[36m正在认证（使用本次输入的密码，不会保存）…\x1b[0m')
+      term.writeln('\x1b[36m' + t('terminal.authenticating') + '\x1b[0m')
       ws.send(JSON.stringify({ type: 'auth', password: authPassword }))
     } else {
-      term.writeln('\x1b[32m已连接到 ' + conn.name + ' (' + conn.host + ':' + conn.port + ')\x1b[0m')
+      term.writeln(
+        '\x1b[32m' +
+          t('terminal.connectedTo', { name: conn.name, host: conn.host, port: conn.port }) +
+          '\x1b[0m',
+      )
     }
     // 连接建立后同步一次当前实际窗口尺寸
     fitTerminal(tab)
@@ -1133,19 +1262,19 @@ function connectTab(tab: TerminalTab, conn: SshConnection, authPassword?: string
 
   ws.onerror = () => {
     if (tab.ws !== ws) return
-    term.writeln('\r\n\x1b[31m连接错误\x1b[0m')
+    term.writeln('\r\n\x1b[31m' + t('terminal.connError') + '\x1b[0m')
   }
 
   ws.onclose = () => {
     if (tab.ws !== ws) return
     tab.status = 'disconnected'
-    term.writeln('\r\n\x1b[33m连接已断开，双击左侧连接或点击「连接」可重连\x1b[0m')
+    term.writeln('\r\n\x1b[33m' + t('terminal.connClosed') + '\x1b[0m')
   }
 }
 
 function switchTab(tabId: string) {
   activeTabId.value = tabId
-  const tab = tabs.value.find(t => t.id === tabId)
+  const tab = tabs.value.find((t) => t.id === tabId)
   if (tab?.term) {
     nextTick(() => {
       tab.term.focus()
@@ -1155,7 +1284,7 @@ function switchTab(tabId: string) {
 }
 
 function closeTab(tabId: string) {
-  const idx = tabs.value.findIndex(t => t.id === tabId)
+  const idx = tabs.value.findIndex((t) => t.id === tabId)
   if (idx === -1) return
 
   const tab = tabs.value[idx]
@@ -1170,7 +1299,7 @@ function closeTab(tabId: string) {
     tab.ws.close()
   }
   if ((tab as any)._resizeObserver) {
-    (tab as any)._resizeObserver.disconnect()
+    ;(tab as any)._resizeObserver.disconnect()
   }
   if (tab.term) {
     tab.term.dispose()
@@ -1316,7 +1445,9 @@ onBeforeUnmount(() => {
   margin-bottom: 4px;
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
   border: 1px solid transparent;
 }
 
@@ -1354,12 +1485,24 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 
-.conn-avatar.ac-0 { background: linear-gradient(135deg, #409eff, #2f7fe6); }
-.conn-avatar.ac-1 { background: linear-gradient(135deg, #7c5cf0, #5a3fd6); }
-.conn-avatar.ac-2 { background: linear-gradient(135deg, #13c2c2, #08979c); }
-.conn-avatar.ac-3 { background: linear-gradient(135deg, #fa8c16, #d46b08); }
-.conn-avatar.ac-4 { background: linear-gradient(135deg, #52c41a, #389e0d); }
-.conn-avatar.ac-5 { background: linear-gradient(135deg, #f759ab, #d63096); }
+.conn-avatar.ac-0 {
+  background: linear-gradient(135deg, #409eff, #2f7fe6);
+}
+.conn-avatar.ac-1 {
+  background: linear-gradient(135deg, #7c5cf0, #5a3fd6);
+}
+.conn-avatar.ac-2 {
+  background: linear-gradient(135deg, #13c2c2, #08979c);
+}
+.conn-avatar.ac-3 {
+  background: linear-gradient(135deg, #fa8c16, #d46b08);
+}
+.conn-avatar.ac-4 {
+  background: linear-gradient(135deg, #52c41a, #389e0d);
+}
+.conn-avatar.ac-5 {
+  background: linear-gradient(135deg, #f759ab, #d63096);
+}
 
 .conn-info {
   flex: 1;
@@ -1386,7 +1529,7 @@ onBeforeUnmount(() => {
   gap: 5px;
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1528,7 +1671,9 @@ onBeforeUnmount(() => {
   user-select: none;
   flex-shrink: 0;
   border-right: 1px solid var(--el-border-color-lighter);
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 
 .tab-item:hover {
@@ -1575,8 +1720,13 @@ onBeforeUnmount(() => {
 }
 
 @keyframes tab-dot-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .tab-label {
@@ -1594,7 +1744,9 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   color: var(--el-text-color-secondary);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 
 .tab-item:hover .tab-close {

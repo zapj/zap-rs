@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
-declare module 'element-plus/dist/locale/zh-cn.mjs';
+// Element Plus 语言包走 .mjs 入口（见 composables/useLocale.ts），官方未提供该路径的类型
+declare module 'element-plus/dist/locale/*.mjs'
 
 interface ImportMetaEnv {
   /** API 基础路径（开发环境用，生产由后端注入 window.__ZAP_BASE__ 决定） */

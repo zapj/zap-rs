@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { http } from '@/utils/request'
 import { Search } from '@/icons'
 
@@ -12,6 +13,8 @@ interface ServiceItem {
   description: string
 }
 
+const { t } = useI18n()
+
 const services = ref<ServiceItem[]>([])
 const loading = ref(false)
 const actingName = ref('')
@@ -21,7 +24,7 @@ const filteredServices = computed(() => {
   if (!filter.value) return services.value
   const f = filter.value.toLowerCase()
   return services.value.filter(
-    s => s.name.toLowerCase().includes(f) || s.description.toLowerCase().includes(f),
+    (s) => s.name.toLowerCase().includes(f) || s.description.toLowerCase().includes(f),
   )
 })
 
@@ -32,7 +35,9 @@ async function loadServices() {
       '/system/config/services',
     )
     services.value = res.data?.services ?? []
-  } catch { /* handled */ } finally {
+  } catch {
+    /* handled */
+  } finally {
     loading.value = false
   }
 }
@@ -44,38 +49,56 @@ function activeType(active: string): 'success' | 'danger' | 'warning' | 'info' {
   return 'warning'
 }
 
+/** systemd 的状态是有限枚举，翻不出来的原样回显 */
 function activeLabel(active: string): string {
-  if (active === 'active') return '运行中'
-  if (active === 'failed') return '失败'
-  if (active === 'inactive') return '已停止'
+  if (active === 'active') return t('serverServices.active')
+  if (active === 'failed') return t('serverServices.failed')
+  if (active === 'inactive') return t('serverServices.stopped')
   return active
 }
 
-async function doAction(row: ServiceItem, action: string) {
-  const labels: Record<string, string> = {
-    start: '启动',
-    stop: '停止',
-    restart: '重启',
-    reload: '重载',
-    enable: '启用开机自启',
-    disable: '禁用开机自启',
+function actionLabel(action: string): string {
+  switch (action) {
+    case 'start':
+      return t('serverServices.start')
+    case 'stop':
+      return t('serverServices.stop')
+    case 'restart':
+      return t('serverServices.restart')
+    case 'reload':
+      return t('serverServices.reload')
+    case 'enable':
+      return t('serverServices.enableBoot')
+    case 'disable':
+      return t('serverServices.disableBoot')
+    default:
+      return action
   }
-  const tip = labels[action] ?? action
+}
+
+async function doAction(row: ServiceItem, action: string) {
+  const label = actionLabel(action)
   try {
-    await ElMessageBox.confirm(`确认对 ${row.name} 执行「${tip}」操作？`, '提示', {
-      type: action === 'stop' || action === 'disable' ? 'warning' : 'info',
-    })
-  } catch { return }
+    await ElMessageBox.confirm(
+      t('serverServices.actionConfirm', { name: row.name, action: label }),
+      t('common.tip'),
+      { type: action === 'stop' || action === 'disable' ? 'warning' : 'info' },
+    )
+  } catch {
+    return
+  }
   actingName.value = row.name
   try {
     const res = await http.post<{ code: number; message: string; data: { status?: string } }>(
       '/system/config/services/action',
       { name: row.name, action },
     )
-    ElMessage.success(res.message ?? `${tip}成功`)
+    ElMessage.success(res.message ?? t('serverServices.actionSuccess', { action: label }))
     // 动作完成后刷新列表，保持状态最新
     await loadServices()
-  } catch { /* handled */ } finally {
+  } catch {
+    /* handled */
+  } finally {
     actingName.value = ''
   }
 }
@@ -88,14 +111,21 @@ onMounted(loadServices)
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>系统服务</span>
+          <span>{{ t('serverServices.title') }}</span>
           <div class="header-actions">
-            <el-input v-model="filter" placeholder="搜索服务名或描述..." clearable style="width: 240px">
+            <el-input
+              v-model="filter"
+              :placeholder="t('serverServices.searchPlaceholder')"
+              clearable
+              style="width: 240px"
+            >
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
-            <el-button type="primary" :loading="loading" @click="loadServices">刷新</el-button>
+            <el-button type="primary" :loading="loading" @click="loadServices">
+              {{ t('common.refresh') }}
+            </el-button>
           </div>
         </div>
       </template>
@@ -105,26 +135,41 @@ onMounted(loadServices)
         v-loading="loading"
         stripe
         style="width: 100%"
-        empty-text="暂无服务"
+        :empty-text="t('serverServices.empty')"
       >
-        <el-table-column prop="name" label="服务名称" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="description" label="描述" min-width="260" show-overflow-tooltip />
-        <el-table-column prop="load" label="加载" width="90" align="center">
+        <el-table-column
+          prop="name"
+          :label="t('serverServices.serviceName')"
+          min-width="220"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="description"
+          :label="t('common.description')"
+          min-width="260"
+          show-overflow-tooltip
+        />
+        <el-table-column prop="load" :label="t('serverServices.load')" width="90" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="row.load === 'loaded' ? 'success' : 'info'">
               {{ row.load }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="active" label="状态" width="100" align="center">
+        <el-table-column prop="active" :label="t('common.status')" width="100" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="activeType(row.active)">
               {{ activeLabel(row.active) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="sub" label="子状态" width="110" align="center" />
-        <el-table-column label="操作" width="320" align="center" fixed="right">
+        <el-table-column
+          prop="sub"
+          :label="t('serverServices.subState')"
+          width="110"
+          align="center"
+        />
+        <el-table-column :label="t('common.operation')" width="320" align="center" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
@@ -133,7 +178,7 @@ onMounted(loadServices)
               :disabled="row.active === 'active' || !!actingName"
               @click="doAction(row, 'start')"
             >
-              启动
+              {{ t('serverServices.start') }}
             </el-button>
             <el-button
               size="small"
@@ -142,7 +187,7 @@ onMounted(loadServices)
               :disabled="row.active !== 'active' || !!actingName"
               @click="doAction(row, 'stop')"
             >
-              停止
+              {{ t('serverServices.stop') }}
             </el-button>
             <el-button
               size="small"
@@ -151,7 +196,7 @@ onMounted(loadServices)
               :disabled="!!actingName"
               @click="doAction(row, 'restart')"
             >
-              重启
+              {{ t('serverServices.restart') }}
             </el-button>
           </template>
         </el-table-column>
@@ -161,7 +206,17 @@ onMounted(loadServices)
 </template>
 
 <style scoped>
-.services-container { padding: 20px; }
-.card-header { display: flex; align-items: center; justify-content: space-between; }
-.header-actions { display: flex; align-items: center; gap: 12px; }
+.services-container {
+  padding: 20px;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 </style>

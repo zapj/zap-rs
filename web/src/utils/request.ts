@@ -3,6 +3,8 @@ import type { AxiosInstance, AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import { getToken, getTokenExpire, removeToken, setToken } from './auth'
 import { API_BASE, withBase } from './base'
+// 非组件环境（拦截器）用全局 t：取调用瞬间的语言，无需响应式
+import { t } from '@/i18n'
 
 // 是否正在刷新 token（避免并发刷新）
 let isRefreshing = false
@@ -69,7 +71,8 @@ service.interceptors.response.use(
     const res = response.data
     // 业务错误码：只 reject，由调用方自行处理 UI 提示（错误对象携带 code，供两步验证等场景判断）
     if (res.code !== 0) {
-      const err: Error & { code?: number } = new Error(res.message || '系统错误')
+      // 后端 message 优先（业务错误自带文案），缺失时用前端兜底文案
+      const err: Error & { code?: number } = new Error(res.message || t('error.system'))
       err.code = res.code
       return Promise.reject(err)
     }
@@ -106,7 +109,7 @@ service.interceptors.response.use(
 
         case 403:
           ElMessage({
-            message: data?.message || '无权限执行该操作',
+            message: data?.message || t('error.forbidden'),
             type: 'error',
             duration: 5000,
             grouping: true,
@@ -114,11 +117,11 @@ service.interceptors.response.use(
           break
 
         case 404:
-          ElMessage({ message: '请求的资源不存在', type: 'error', duration: 5000, grouping: true })
+          ElMessage({ message: t('error.notFound'), type: 'error', duration: 5000, grouping: true })
           break
 
         case 500:
-          ElMessage({ message: '服务器内部错误', type: 'error', duration: 5000, grouping: true })
+          ElMessage({ message: t('error.server'), type: 'error', duration: 5000, grouping: true })
           break
 
         default:
@@ -129,11 +132,11 @@ service.interceptors.response.use(
             data?.message &&
             /Missing credentials|Invalid token/i.test(String(data.message))
           ) {
-            handleAuthExpired('登录状态已失效，请重新登录')
+            handleAuthExpired(t('error.credentialsMissing'))
             break
           }
           ElMessage({
-            message: data?.message || `请求错误 (${status})`,
+            message: data?.message || t('error.requestFailed', { status }),
             type: 'error',
             duration: 5000,
             grouping: true,
@@ -141,13 +144,13 @@ service.interceptors.response.use(
       }
     } else if (error.message?.includes('Network Error')) {
       ElMessage({
-        message: '网络连接失败，请检查后端服务是否启动',
+        message: t('error.network'),
         type: 'error',
         duration: 5000,
         grouping: true,
       })
     } else if (error.message?.includes('timeout')) {
-      ElMessage({ message: '请求超时，请稍后重试', type: 'error', duration: 5000, grouping: true })
+      ElMessage({ message: t('error.timeout'), type: 'error', duration: 5000, grouping: true })
     }
     // 其他错误（如业务错误 reject 的 Error）不弹窗，由调用方处理
 
@@ -161,7 +164,7 @@ service.interceptors.response.use(
  * 认证失效统一处理：清空本地凭据并引导重新登录。
  * 避免反复收到 "Missing credentials / Invalid token" 等英文报错却停留在页面上。
  */
-function handleAuthExpired(message = '登录已过期，请重新登录') {
+function handleAuthExpired(message = t('error.sessionExpired')) {
   removeToken()
   ElMessage({ message, type: 'error', duration: 5000, grouping: true })
   setTimeout(() => {
@@ -186,7 +189,7 @@ async function refreshToken(): Promise<string> {
     setToken(resp.data.access_token)
     return resp.data.access_token
   }
-  throw new Error('刷新 token 失败')
+  throw new Error(t('error.refreshFailed'))
 }
 
 // ── 封装 HTTP 方法 ──────────────────────────────────────────

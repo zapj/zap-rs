@@ -11,14 +11,19 @@
               :disabled="toggling"
               @change="toggleDefault"
             />
-            <span class="t-name">全局默认访问</span>
-            <el-tag v-if="inst.is_default" type="success" size="small">系统默认 PHP</el-tag>
-            <el-tag v-else size="small" type="info">未注册</el-tag>
+            <span class="t-name">{{ t('servicesPhpPanel.defaultAccess') }}</span>
+            <el-tag v-if="inst.is_default" type="success" size="small">{{
+              t('servicesPhpPanel.systemDefault')
+            }}</el-tag>
+            <el-tag v-else size="small" type="info">{{
+              t('servicesPhpPanel.notRegistered')
+            }}</el-tag>
           </div>
           <div class="default-desc">
-            开启后把本实例的 <code>php / php-cgi / pear / pecl</code> 注册到
-            <code>/usr/local/bin</code>，所有用户执行 <code>php</code> 命令默认使用
-            PHP {{ inst.version || inst.svc }}。同一时间仅一个实例可处于开启状态，切换会覆盖上一实例的注册。
+            {{ t('servicesPhpPanel.defaultDesc1') }}<code>php / php-cgi / pear / pecl</code
+            >{{ t('servicesPhpPanel.defaultDesc2') }} <code>/usr/local/bin</code
+            >{{ t('servicesPhpPanel.defaultDesc3') }}<code>php</code
+            >{{ t('servicesPhpPanel.defaultDesc4', { version: inst.version || inst.svc }) }}
           </div>
         </div>
       </div>
@@ -29,19 +34,17 @@
       :service="inst.svc"
       :label="`PHP ${inst.version || inst.svc}`"
       :desc="descText"
-      install-hint="该 PHP 实例由应用商店安装；实例被卸载后本页将不再列出。"
+      :install-hint="t('servicesPhpPanel.installHint')"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ServiceConfPage from '../shared/ServiceConfPage.vue'
-import {
-  setServiceConfDefault,
-  type ServiceConfInstance,
-} from '@/api/servicesConf.ts'
+import { setServiceConfDefault, type ServiceConfInstance } from '@/api/servicesConf.ts'
 
 const props = defineProps<{
   inst: ServiceConfInstance
@@ -51,16 +54,20 @@ const emit = defineEmits<{
   (e: 'changed'): void
 }>()
 
+const { t } = useI18n()
 const toggling = ref(false)
 
 const descText = computed(() => {
   const dir = props.inst.dir
   const file = props.inst.conf_file
   const parts: string[] = []
-  if (dir) parts.push(`安装目录 ${dir}`)
-  if (file) parts.push(`主配置 ${file}`)
-  if (props.inst.unit) parts.push(`systemd 单元 ${props.inst.unit}`)
-  return (parts.length ? parts.join('；') + '。' : '') + '保存配置后请「重载 / 重启」对应 php-fpm 生效。'
+  if (dir) parts.push(t('servicesCommon.installDir', { path: dir }))
+  if (file) parts.push(t('servicesCommon.confPath', { path: file }))
+  if (props.inst.unit) parts.push(t('servicesCommon.unitPath', { path: props.inst.unit }))
+  const prefix = parts.length
+    ? parts.join(t('servicesPhpPanel.separator')) + t('servicesPhpPanel.partsSuffix')
+    : ''
+  return prefix + t('servicesPhpPanel.descSuffix')
 })
 
 async function toggleDefault(next: boolean) {
@@ -68,21 +75,23 @@ async function toggleDefault(next: boolean) {
   if (next === props.inst.is_default) return
   const version = props.inst.version || props.inst.svc
   const tip = next
-    ? `确认把 PHP ${version} 设为系统全局默认？\n将覆盖 /usr/local/bin 下的 php / php-cgi / pear / pecl 链接，其他用户的 php 命令将立即默认使用本版本。`
-    : `确认取消 PHP ${version} 的全局默认注册？\n移除后其他用户执行 php 将不再指向本版本（除非其它实例已注册为默认）。`
+    ? t('servicesPhpPanel.confirmOn', { version })
+    : t('servicesPhpPanel.confirmOff', { version })
   try {
-    await ElMessageBox.confirm(tip, '提示', { type: next ? 'warning' : 'info' })
+    await ElMessageBox.confirm(tip, t('common.tip'), { type: next ? 'warning' : 'info' })
   } catch {
     return
   }
   toggling.value = true
   try {
     const res = await setServiceConfDefault(props.inst.svc, next)
-    ElMessage.success(res.data?.registered
-      ? `已注册 ${res.data.registered.join(' / ')} 到 /usr/local/bin`
-      : res.data?.removed
-        ? `已取消注册（${res.data.removed.join(' / ')}）`
-        : res.message || '操作成功')
+    ElMessage.success(
+      res.data?.registered
+        ? t('servicesPhpPanel.registered', { names: res.data.registered.join(' / ') })
+        : res.data?.removed
+          ? t('servicesPhpPanel.unregistered', { names: res.data.removed.join(' / ') })
+          : res.message || t('servicesCommon.opSuccess'),
+    )
     emit('changed')
   } catch {
     /* interceptor 已提示 */

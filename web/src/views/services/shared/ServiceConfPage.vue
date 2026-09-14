@@ -7,14 +7,16 @@
           <span class="t-name">{{ label }}</span>
           <el-tag v-if="engineName" size="small" type="warning">{{ engineName }}</el-tag>
           <el-tag v-if="status.installed" size="small" :type="running ? 'success' : 'danger'">
-            {{ running ? '运行中' : '未运行' }}
+            {{ running ? t('servicesCommon.running') : t('servicesCommon.notRunning') }}
           </el-tag>
           <el-tag v-if="version" size="small" type="info">{{ version }}</el-tag>
           <el-tag v-if="status.unit" size="small" type="warning">systemd</el-tag>
         </div>
         <div v-if="status.installed" class="actions">
           <span v-if="status.conf_file" class="path mono">{{ status.conf_file }}</span>
-          <el-button size="small" :loading="busy" @click="refreshAll">刷新</el-button>
+          <el-button size="small" :loading="busy" @click="refreshAll">{{
+            t('servicesCommon.refresh')
+          }}</el-button>
           <el-button
             size="small"
             type="primary"
@@ -22,7 +24,8 @@
             :disabled="!running || busy"
             :loading="acting === 'reload'"
             @click="doControl('reload')"
-          >重载</el-button>
+            >{{ t('servicesCommon.reload') }}</el-button
+          >
           <el-button
             size="small"
             type="warning"
@@ -30,7 +33,8 @@
             :disabled="!running || busy"
             :loading="acting === 'restart'"
             @click="doControl('restart')"
-          >重启</el-button>
+            >{{ t('servicesCommon.restart') }}</el-button
+          >
           <el-button
             size="small"
             type="success"
@@ -38,7 +42,8 @@
             :disabled="running || busy"
             :loading="acting === 'start'"
             @click="doControl('start')"
-          >启动</el-button>
+            >{{ t('servicesCommon.start') }}</el-button
+          >
         </div>
       </div>
       <div v-if="desc && status.installed" class="desc">{{ desc }}</div>
@@ -49,11 +54,13 @@
     <el-card v-if="status.installed === false && !bootLoading" shadow="never" class="mt-3">
       <el-result
         icon="warning"
-        :title="`${label} 未安装`"
-        :sub-title="`${label} 需通过应用商店安装。请先在应用商店完成安装部署，安装后回到本页即可查看状态并进行配置。${installHint}`"
+        :title="t('servicesCommon.notInstalledTitle', { label })"
+        :sub-title="t('servicesCommon.notInstalledSub', { label, hint: installHint })"
       >
         <template #extra>
-          <el-button type="primary" @click="router.push('/appstore')">前往应用商店</el-button>
+          <el-button type="primary" @click="router.push('/appstore')">{{
+            t('servicesCommon.goAppstore')
+          }}</el-button>
         </template>
       </el-result>
     </el-card>
@@ -61,14 +68,14 @@
     <template v-if="status.installed">
       <el-tabs v-model="mode" type="border-card" class="mt-3">
         <!-- 关键配置 -->
-        <el-tab-pane label="关键配置" name="keys">
+        <el-tab-pane :label="t('servicesCommon.tabKeys')" name="keys">
           <div v-if="keysData.fields.length" class="visual-body">
             <el-alert
               type="info"
               :closable="false"
               show-icon
               class="visual-tip"
-              title="保存的关键项写入主配置文件的托管区（不破坏文件其它内容）；留空表示不写入（沿用服务默认或文件原值）。保存后需「重载 / 重启」服务生效。"
+              :title="t('servicesCommon.keysTip')"
             />
             <div class="field-grid">
               <div v-for="f in keysData.fields" :key="f.key" class="field">
@@ -79,28 +86,34 @@
                 <el-input
                   v-if="f.kind === 'text'"
                   v-model="visual[f.key]"
-                  placeholder="留空不写入"
+                  :placeholder="t('servicesCommon.emptyValue')"
                   clearable
                   class="field-ctrl"
                 />
                 <el-input
                   v-else-if="f.kind === 'number'"
                   v-model="visual[f.key]"
-                  placeholder="留空不写入"
+                  :placeholder="t('servicesCommon.emptyValue')"
                   clearable
                   class="field-ctrl"
                 />
                 <el-select
                   v-else
                   v-model="visual[f.key]"
-                  placeholder="留空不写入"
+                  :placeholder="t('servicesCommon.emptyValue')"
                   clearable
                   class="field-ctrl"
                 >
                   <el-option
-                    v-for="opt in (f.options || [])"
+                    v-for="opt in f.options || []"
                     :key="opt"
-                    :label="opt === 'true' ? '开启' : opt === 'false' ? '关闭' : opt"
+                    :label="
+                      opt === 'true'
+                        ? t('servicesCommon.optionOn')
+                        : opt === 'false'
+                          ? t('servicesCommon.optionOff')
+                          : opt
+                    "
                     :value="opt"
                   />
                 </el-select>
@@ -108,28 +121,36 @@
               </div>
             </div>
             <div class="save-row">
-              <el-button :loading="savingKeys" type="primary" @click="saveKeys">保存关键配置</el-button>
-              <el-button :disabled="savingKeys" @click="loadKeys(true)">从配置文件重新读取</el-button>
+              <el-button :loading="savingKeys" type="primary" @click="saveKeys">{{
+                t('servicesCommon.saveKeys')
+              }}</el-button>
+              <el-button :disabled="savingKeys" @click="loadKeys(true)">{{
+                t('servicesCommon.reloadFromFile')
+              }}</el-button>
             </div>
           </div>
-          <el-empty v-else description="暂无可配置的关键项" />
+          <el-empty v-else :description="t('servicesCommon.noKeys')" />
         </el-tab-pane>
 
         <!-- 配置文件编辑 -->
-        <el-tab-pane label="配置文件" name="files">
+        <el-tab-pane :label="t('servicesCommon.tabFiles')" name="files">
           <el-alert
             v-if="listData.installed && listData.main_exists === false"
             type="warning"
             show-icon
             :closable="false"
             class="detect-warn"
-            :title="`未检测到主配置文件：${listData.conf_file || '未定位到路径'}`"
+            :title="
+              t('servicesCommon.mainConfMissing', {
+                path: listData.conf_file || t('servicesCommon.noPath'),
+              })
+            "
             :description="detectHint"
           />
           <div v-if="confFiles.length" class="editor-layout">
             <div class="file-list">
               <div class="list-head">
-                <span>可编辑配置</span>
+                <span>{{ t('servicesCommon.editableConfs') }}</span>
                 <el-tag size="small" type="info">{{ confFiles.length }}</el-tag>
               </div>
               <el-scrollbar class="list-scroll">
@@ -145,8 +166,12 @@
                     <span>{{ f.rel }}</span>
                   </div>
                   <div class="file-meta">
-                    <el-tag v-if="f.is_main" size="small" type="warning">主配置</el-tag>
-                    <el-tag v-if="!f.exists" size="small" type="danger">不存在</el-tag>
+                    <el-tag v-if="f.is_main" size="small" type="warning">{{
+                      t('servicesCommon.mainConfTag')
+                    }}</el-tag>
+                    <el-tag v-if="!f.exists" size="small" type="danger">{{
+                      t('servicesCommon.notExist')
+                    }}</el-tag>
                     <span class="mono">{{ f.size > 0 ? formatBytes(f.size) : '-' }}</span>
                   </div>
                 </div>
@@ -156,20 +181,21 @@
               <div v-loading="fileLoading" class="editor-wrap">
                 <div v-if="editorContent !== null" class="editor-head">
                   <span class="mono path">{{ activeFile }}</span>
-                  <el-tag v-if="fileMissing" size="small" type="danger">文件不存在，保存后将创建</el-tag>
+                  <el-tag v-if="fileMissing" size="small" type="danger">{{
+                    t('servicesCommon.fileWillCreate')
+                  }}</el-tag>
                   <div class="editor-actions">
-                    <el-button
-                      size="small"
-                      :disabled="!dirty"
-                      @click="reloadFile"
-                    >放弃修改</el-button>
+                    <el-button size="small" :disabled="!dirty" @click="reloadFile">{{
+                      t('servicesCommon.discardChanges')
+                    }}</el-button>
                     <el-button
                       size="small"
                       type="primary"
                       :disabled="!dirty || savingFile"
                       :loading="savingFile"
                       @click="saveFile"
-                    >保存文件</el-button>
+                      >{{ t('servicesCommon.saveFile') }}</el-button
+                    >
                   </div>
                 </div>
                 <CodeEditor
@@ -180,10 +206,7 @@
               </div>
             </div>
           </div>
-          <el-empty
-            v-else
-            description="未能定位该服务的配置文件（请确认安装后配置文件存在）"
-          />
+          <el-empty v-else :description="t('servicesCommon.noConfFiles')" />
         </el-tab-pane>
       </el-tabs>
     </template>
@@ -192,6 +215,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document } from '@/icons'
@@ -219,6 +243,7 @@ const props = defineProps<{
   installHint?: string
 }>()
 
+const { t } = useI18n()
 const router = useRouter()
 const label = computed(() => props.label)
 const desc = computed(() => props.desc || '')
@@ -251,10 +276,11 @@ const engineName = computed(() =>
 const details = computed(() => {
   const dir = status.value.dir
   if (!dir || !status.value.installed) return ''
-  const parts = [`安装目录 ${dir}`]
-  if (status.value.conf_file) parts.push(`主配置 ${status.value.conf_file}`)
-  if (status.value.unit) parts.push(`systemd 单元 ${status.value.unit}`)
-  return `${parts.join('；')}。保存配置后请「重载 / 重启」服务生效。`
+  const parts = [t('servicesCommon.installDir', { path: dir })]
+  if (status.value.conf_file)
+    parts.push(t('servicesCommon.confPath', { path: status.value.conf_file }))
+  if (status.value.unit) parts.push(t('servicesCommon.unitPath', { path: status.value.unit }))
+  return parts.join(t('servicesCommon.separator')) + t('servicesCommon.detailsSuffix')
 })
 
 // ── 关键配置表单 ──────────────────────────────
@@ -283,7 +309,7 @@ async function saveKeys() {
   savingKeys.value = true
   try {
     const res = await saveServiceConfKeys(props.service, payload)
-    ElMessage.success(res.data?.reason || '关键配置已保存')
+    ElMessage.success(res.data?.reason || t('servicesCommon.keysSaved'))
     await loadKeys(true)
     await loadStatus()
   } catch {
@@ -306,15 +332,15 @@ const fileMissing = ref(false)
 /** 未检测到主配置时的排查提示：把后端尝试过的候选路径展示出来 */
 const detectHint = computed(() => {
   const tried = status.value.conf_candidates?.length
-    ? status.value.conf_candidates.join('、')
+    ? status.value.conf_candidates.join(t('servicesCommon.nameSeparator'))
     : ''
-  const base = tried
-    ? `已按以下候选探测：${tried}。`
-    : ''
-  return `${base}常见原因：服务由系统包安装且路径不在候选内、或安装未完成。可在下方编辑器中填写内容后保存以创建该文件，或通过应用商店重新安装。`
+  const base = tried ? t('servicesCommon.detectTried', { tried }) : ''
+  return base + t('servicesCommon.detectReason')
 })
 
-const dirty = computed(() => editorContent.value !== null && editorContent.value !== originalContent.value)
+const dirty = computed(
+  () => editorContent.value !== null && editorContent.value !== originalContent.value,
+)
 const editorLang = computed(() => {
   const name = activeFile.value.toLowerCase()
   if (name.endsWith('.json')) return 'json'
@@ -325,7 +351,9 @@ const editorLang = computed(() => {
 async function selectFile(path: string, force = false) {
   if (dirty.value && !force) {
     try {
-      await ElMessageBox.confirm('当前文件有未保存的修改，切换后修改将丢失。', '提示', { type: 'warning' })
+      await ElMessageBox.confirm(t('servicesCommon.unsavedSwitch'), t('common.tip'), {
+        type: 'warning',
+      })
     } catch {
       return
     }
@@ -349,7 +377,9 @@ async function selectFile(path: string, force = false) {
 async function reloadFile() {
   if (dirty.value) {
     try {
-      await ElMessageBox.confirm('放弃当前修改并从磁盘重新加载？', '提示', { type: 'warning' })
+      await ElMessageBox.confirm(t('servicesCommon.reloadConfirm'), t('common.tip'), {
+        type: 'warning',
+      })
     } catch {
       return
     }
@@ -362,7 +392,7 @@ async function saveFile() {
   savingFile.value = true
   try {
     const res = await saveServiceConf(props.service, activeFile.value, editorContent.value)
-    ElMessage.success(res.data?.reason || '配置文件已保存')
+    ElMessage.success(res.data?.reason || t('servicesCommon.confSaved'))
     originalContent.value = editorContent.value
     await loadList()
   } catch {
@@ -373,18 +403,22 @@ async function saveFile() {
 }
 
 // ── 控制 ────────────────────────────────────
-const controlLabels: Record<string, string> = {
-  reload: '重载',
-  restart: '重启',
-  start: '启动',
-}
+const controlLabels = computed<Record<string, string>>(() => ({
+  reload: t('servicesCommon.reload'),
+  restart: t('servicesCommon.restart'),
+  start: t('servicesCommon.start'),
+}))
 
 async function doControl(action: 'reload' | 'restart' | 'start') {
   const warn = action === 'restart'
   try {
     await ElMessageBox.confirm(
-      `确认对 ${label.value} 执行「${controlLabels[action]}」操作？${action === 'restart' ? '正在运行的服务会被短暂中断。' : ''}`,
-      '提示',
+      t('servicesCommon.controlConfirm', {
+        label: label.value,
+        action: controlLabels.value[action],
+        warn: warn ? t('servicesCommon.restartWarn') : '',
+      }),
+      t('common.tip'),
       { type: warn ? 'warning' : 'info' },
     )
   } catch {
@@ -393,7 +427,7 @@ async function doControl(action: 'reload' | 'restart' | 'start') {
   acting.value = action
   try {
     const res = await controlServiceConf(props.service, action)
-    ElMessage.success(res.message || '操作成功')
+    ElMessage.success(res.message || t('servicesCommon.opSuccess'))
     await new Promise((r) => setTimeout(r, 500))
     await loadStatus()
   } catch {
@@ -437,7 +471,7 @@ async function loadKeys(silent = false) {
     keysData.value = res.data
     resetVisualFromValues(res.data.values)
   } catch {
-    if (!silent) ElMessage.error('读取关键配置失败')
+    if (!silent) ElMessage.error(t('servicesCommon.readKeysFailed'))
   }
 }
 

@@ -19,11 +19,11 @@
         <el-card shadow="hover" class="chart-card">
           <template #header>
             <div class="card-header">
-              <span>访问量统计</span>
+              <span>{{ t('dashboardUser.trafficStats') }}</span>
             </div>
           </template>
           <div class="chart-placeholder">
-            <el-empty description="图表区域 - 访问量统计" />
+            <el-empty :description="t('dashboardUser.trafficPlaceholder')" />
           </div>
         </el-card>
       </el-col>
@@ -31,11 +31,11 @@
         <el-card shadow="hover" class="chart-card">
           <template #header>
             <div class="card-header">
-              <span>销售额趋势</span>
+              <span>{{ t('dashboardUser.salesTrend') }}</span>
             </div>
           </template>
           <div class="chart-placeholder">
-            <el-empty description="图表区域 - 销售额趋势" />
+            <el-empty :description="t('dashboardUser.salesPlaceholder')" />
           </div>
         </el-card>
       </el-col>
@@ -44,16 +44,16 @@
     <el-card shadow="hover" class="table-card">
       <template #header>
         <div class="card-header">
-          <span>最近活动</span>
+          <span>{{ t('dashboardUser.recentActivity') }}</span>
         </div>
       </template>
       <el-table :data="tableData" style="width: 100%">
-        <el-table-column prop="date" label="日期" width="180" />
-        <el-table-column prop="name" label="用户" width="180" />
-        <el-table-column prop="action" label="操作" />
-        <el-table-column prop="status" label="状态">
+        <el-table-column prop="date" :label="t('dashboardUser.colDate')" width="180" />
+        <el-table-column prop="name" :label="t('dashboardUser.colUser')" width="180" />
+        <el-table-column prop="action" :label="t('dashboardUser.colAction')" />
+        <el-table-column prop="status" :label="t('dashboardUser.colStatus')">
           <template #default="scope">
-            <el-tag :type="scope.row.status === '成功' ? 'success' : 'danger'">
+            <el-tag :type="scope.row.status === t('dashboardUser.statusOk') ? 'success' : 'danger'">
               {{ scope.row.status }}
             </el-tag>
           </template>
@@ -64,68 +64,71 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Icon } from '@/icons'
 
 // import('@/views/dashboard/')
 
-const statCards = ref([
+const { t } = useI18n()
+
+const statCards = computed(() => [
   {
-    title: '用户总数',
+    title: t('dashboardUser.totalUsers'),
     value: '1,234',
     icon: 'material-symbols:person',
     color: '#40c9c6',
   },
   {
-    title: '订单总数',
+    title: t('dashboardUser.totalOrders'),
     value: '3,456',
     icon: 'material-symbols:shopping-cart',
     color: '#36a3f7',
   },
   {
-    title: '商品总数',
+    title: t('dashboardUser.totalProducts'),
     value: '5,678',
     icon: 'material-symbols:storefront',
     color: '#f4516c',
   },
   {
-    title: '销售总额',
+    title: t('dashboardUser.totalSales'),
     value: '¥98,765',
     icon: 'material-symbols:payments',
     color: '#34bfa3',
   },
 ])
 
-const tableData = ref([
+const tableData = computed(() => [
   {
     date: '2023-05-01 12:32:00',
-    name: '张三',
-    action: '登录系统',
-    status: '成功',
+    name: t('dashboardUser.mockUser1'),
+    action: t('dashboardUser.mockAction1'),
+    status: t('dashboardUser.statusOk'),
   },
   {
     date: '2023-05-01 12:28:30',
-    name: '李四',
-    action: '创建订单',
-    status: '成功',
+    name: t('dashboardUser.mockUser2'),
+    action: t('dashboardUser.mockAction2'),
+    status: t('dashboardUser.statusOk'),
   },
   {
     date: '2023-05-01 12:25:00',
-    name: '王五',
-    action: '修改商品信息',
-    status: '成功',
+    name: t('dashboardUser.mockUser3'),
+    action: t('dashboardUser.mockAction3'),
+    status: t('dashboardUser.statusOk'),
   },
   {
     date: '2023-05-01 12:20:00',
-    name: '赵六',
-    action: '删除用户',
-    status: '失败',
+    name: t('dashboardUser.mockUser4'),
+    action: t('dashboardUser.mockAction4'),
+    status: t('dashboardUser.statusFail'),
   },
   {
     date: '2023-05-01 12:15:00',
-    name: '钱七',
-    action: '导出报表',
-    status: '成功',
+    name: t('dashboardUser.mockUser5'),
+    action: t('dashboardUser.mockAction5'),
+    status: t('dashboardUser.statusOk'),
   },
 ])
 </script>
@@ -135,7 +138,7 @@ const tableData = ref([
   padding: 20px;
 }
 
-.stat-card ::v-deep(.el-card__body){
+.stat-card ::v-deep(.el-card__body) {
   display: flex;
   align-items: center;
   height: 100px;

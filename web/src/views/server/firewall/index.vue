@@ -3,9 +3,11 @@
     <el-card v-loading="loading">
       <template #header>
         <div class="card-header">
-          <span>防火墙</span>
-          <span class="sub">端口放行 / 拒绝、服务启停（自动适配 firewalld / ufw / nftables / iptables）</span>
-          <el-button class="header-action" size="small" :icon="Refresh" @click="load">刷新</el-button>
+          <span>{{ t('serverFirewall.title') }}</span>
+          <span class="sub">{{ t('serverFirewall.subtitle') }}</span>
+          <el-button class="header-action" size="small" :icon="Refresh" @click="load">
+            {{ t('common.refresh') }}
+          </el-button>
         </div>
       </template>
 
@@ -13,7 +15,7 @@
         type="warning"
         :closable="false"
         show-icon
-        :title="`面板监听端口 ${status.panel_port || '-'} 受保护：不能在该端口上添加拒绝规则，也不能删除它的放行规则，避免把自己锁在外面。`"
+        :title="t('serverFirewall.panelPortAlert', { port: status.panel_port || '-' })"
         style="margin-bottom: 16px"
       />
 
@@ -22,26 +24,28 @@
         type="warning"
         :closable="false"
         show-icon
-        title="检测到 WSL 环境：使用共享内核，iptables / nftables 规则可能不生效或仅当前会话有效，请以实际宿主机防火墙为准。"
+        :title="t('serverFirewall.wslAlert')"
         style="margin-bottom: 12px"
       />
 
       <el-descriptions :column="3" border size="small" style="max-width: 760px">
-        <el-descriptions-item label="后端">
-          <el-tag v-if="status.backend === 'none'" size="small" type="info">未检测到</el-tag>
+        <el-descriptions-item :label="t('serverFirewall.backend')">
+          <el-tag v-if="status.backend === 'none'" size="small" type="info">
+            {{ t('serverFirewall.notDetected') }}
+          </el-tag>
           <el-tag v-else size="small" type="primary">{{ status.backend }}</el-tag>
           <span v-if="status.detected === 'installed'" class="dim" style="margin-left: 6px">
-            （仅检测到命令，当前未生效）
+            {{ t('serverFirewall.installedOnly') }}
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="运行状态">
+        <el-descriptions-item :label="t('serverFirewall.runState')">
           <el-tag size="small" :type="status.active ? 'success' : 'info'">
-            {{ status.active ? '运行中' : '已停止' }}
+            {{ status.active ? t('serverFirewall.running') : t('serverFirewall.stopped') }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="开机自启">
+        <el-descriptions-item :label="t('serverFirewall.bootEnabled')">
           <el-tag size="small" :type="status.enabled ? 'success' : 'info'">
-            {{ status.enabled ? '已启用' : '未启用' }}
+            {{ status.enabled ? t('serverFirewall.enabled') : t('serverFirewall.notEnabled') }}
           </el-tag>
         </el-descriptions-item>
       </el-descriptions>
@@ -54,7 +58,7 @@
           :disabled="status.backend === 'none' || status.active"
           @click="doToggle('start')"
         >
-          启动
+          {{ t('serverFirewall.start') }}
         </el-button>
         <el-button
           type="warning"
@@ -63,7 +67,7 @@
           :disabled="status.backend === 'none' || !status.active"
           @click="confirmToggle('stop')"
         >
-          停止
+          {{ t('serverFirewall.stop') }}
         </el-button>
         <el-button
           size="small"
@@ -71,7 +75,7 @@
           :disabled="status.backend === 'none' || status.enabled"
           @click="doToggle('enable')"
         >
-          设为开机自启
+          {{ t('serverFirewall.enableBoot') }}
         </el-button>
         <el-button
           size="small"
@@ -79,75 +83,112 @@
           :disabled="status.backend === 'none' || !status.enabled"
           @click="doToggle('disable')"
         >
-          取消开机自启
+          {{ t('serverFirewall.disableBoot') }}
         </el-button>
       </div>
 
-      <el-divider content-position="left">端口规则</el-divider>
+      <el-divider content-position="left">{{ t('serverFirewall.portRules') }}</el-divider>
 
       <el-form :inline="true" :model="form" class="rule-form" @submit.prevent>
-        <el-form-item label="端口">
-          <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 140px" />
+        <el-form-item :label="t('serverFirewall.port')">
+          <el-input-number
+            v-model="form.port"
+            :min="1"
+            :max="65535"
+            controls-position="right"
+            style="width: 140px"
+          />
         </el-form-item>
-        <el-form-item label="协议">
+        <el-form-item :label="t('serverFirewall.protocol')">
           <el-select v-model="form.proto" style="width: 100px">
             <el-option label="TCP" value="tcp" />
             <el-option label="UDP" value="udp" />
           </el-select>
         </el-form-item>
-        <el-form-item label="动作">
+        <el-form-item :label="t('serverFirewall.action')">
           <el-select v-model="form.action" style="width: 110px">
-            <el-option label="放行" value="accept" />
-            <el-option label="拒绝" value="drop" />
+            <el-option :label="t('serverFirewall.accept')" value="accept" />
+            <el-option :label="t('serverFirewall.drop')" value="drop" />
           </el-select>
         </el-form-item>
-        <el-form-item label="来源">
-          <el-input v-model="form.source" placeholder="IP 或 CIDR，留空=不限" style="width: 190px" clearable />
+        <el-form-item :label="t('serverFirewall.source')">
+          <el-input
+            v-model="form.source"
+            :placeholder="t('serverFirewall.sourcePlaceholder')"
+            style="width: 190px"
+            clearable
+          />
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.comment" placeholder="可选" style="width: 170px" clearable />
+        <el-form-item :label="t('common.remark')">
+          <el-input
+            v-model="form.comment"
+            :placeholder="t('serverFirewall.commentPlaceholder')"
+            style="width: 170px"
+            clearable
+          />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="saving" @click="addRule">添加规则</el-button>
+          <el-button type="primary" :loading="saving" @click="addRule">
+            {{ t('serverFirewall.addRule') }}
+          </el-button>
         </el-form-item>
       </el-form>
 
       <el-table :data="status.rules" size="small" stripe>
-        <el-table-column prop="port" label="端口" width="100" />
-        <el-table-column label="协议" width="90">
+        <el-table-column prop="port" :label="t('serverFirewall.port')" width="100" />
+        <el-table-column :label="t('serverFirewall.protocol')" width="90">
           <template #default="{ row }">{{ (row.proto || '').toUpperCase() }}</template>
         </el-table-column>
-        <el-table-column label="动作" width="100">
+        <el-table-column :label="t('serverFirewall.action')" width="100">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.action === 'accept' ? 'success' : 'danger'" effect="plain">
-              {{ row.action === 'accept' ? '放行' : '拒绝' }}
+            <el-tag
+              size="small"
+              :type="row.action === 'accept' ? 'success' : 'danger'"
+              effect="plain"
+            >
+              {{ row.action === 'accept' ? t('serverFirewall.accept') : t('serverFirewall.drop') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="来源" min-width="160">
-          <template #default="{ row }">{{ row.source || '不限' }}</template>
+        <el-table-column :label="t('serverFirewall.source')" min-width="160">
+          <template #default="{ row }">
+            {{ row.source || t('serverFirewall.anySource') }}
+          </template>
         </el-table-column>
-        <el-table-column prop="comment" label="备注" min-width="140" show-overflow-tooltip>
+        <el-table-column
+          prop="comment"
+          :label="t('common.remark')"
+          min-width="140"
+          show-overflow-tooltip
+        >
           <template #default="{ row }">
             <span class="dim">{{ row.comment || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column :label="t('common.operation')" width="120" fixed="right">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.protected"
-              content="面板监听端口，已禁止删除"
+              :content="t('serverFirewall.protectedTip')"
               placement="top"
             >
-              <el-button link type="danger" disabled>删除</el-button>
+              <el-button link type="danger" disabled>
+                {{ t('common.delete') }}
+              </el-button>
             </el-tooltip>
-            <el-button v-else link type="danger" :loading="deletingId === row.id" @click="removeRule(row)">
-              删除
+            <el-button
+              v-else
+              link
+              type="danger"
+              :loading="deletingId === row.id"
+              @click="removeRule(row)"
+            >
+              {{ t('common.delete') }}
             </el-button>
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暂无规则" :image-size="70" />
+          <el-empty :description="t('serverFirewall.empty')" :image-size="70" />
         </template>
       </el-table>
     </el-card>
@@ -157,6 +198,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { Refresh } from '@/icons'
 import {
   addFirewallRule,
@@ -166,6 +208,8 @@ import {
   type FirewallRule,
   type FirewallStatus,
 } from '@/api/serverFirewall'
+
+const { t } = useI18n()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -202,13 +246,17 @@ async function load() {
     status.enabled = !!d.enabled
     status.panel_port = d.panel_port || 0
     status.rules = d.rules || []
-  } catch { /* handled */ } finally { loading.value = false }
+  } catch {
+    /* handled */
+  } finally {
+    loading.value = false
+  }
 }
 
 async function addRule() {
   const port = Number(form.port)
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    ElMessage.warning('端口需在 1 - 65535 之间')
+    ElMessage.warning(t('serverFirewall.portRange'))
     return
   }
   saving.value = true
@@ -220,18 +268,26 @@ async function addRule() {
       source: form.source.trim(),
       comment: form.comment.trim(),
     })
-    ElMessage.success(res.message || '规则已添加')
+    ElMessage.success(res.message || t('serverFirewall.ruleAdded'))
     form.comment = ''
     await load()
-  } catch { /* handled */ } finally { saving.value = false }
+  } catch {
+    /* handled */
+  } finally {
+    saving.value = false
+  }
 }
 
 async function removeRule(row: FirewallRule) {
   try {
     await ElMessageBox.confirm(
-      `确认删除 ${(row.proto || '').toUpperCase()} ${row.port} 的${row.action === 'accept' ? '放行' : '拒绝'}规则？`,
-      '删除确认',
-      { type: 'warning', confirmButtonText: '删除' },
+      t('serverFirewall.deleteConfirm', {
+        proto: (row.proto || '').toUpperCase(),
+        port: row.port,
+        action: row.action === 'accept' ? t('serverFirewall.accept') : t('serverFirewall.drop'),
+      }),
+      t('serverFirewall.deleteTitle'),
+      { type: 'warning', confirmButtonText: t('common.delete') },
     )
   } catch {
     return
@@ -239,18 +295,26 @@ async function removeRule(row: FirewallRule) {
   deletingId.value = row.id
   try {
     const res = await deleteFirewallRule(row.id)
-    ElMessage.success(res.message || '规则已删除')
+    ElMessage.success(res.message || t('serverFirewall.ruleDeleted'))
     await load()
-  } catch { /* handled */ } finally { deletingId.value = '' }
+  } catch {
+    /* handled */
+  } finally {
+    deletingId.value = ''
+  }
 }
 
 async function doToggle(action: 'start' | 'stop' | 'enable' | 'disable') {
   acting.value = true
   try {
     const res = await toggleFirewall(action)
-    ElMessage.success(res.message || '操作完成')
+    ElMessage.success(res.message || t('serverFirewall.opDone'))
     await load()
-  } catch { /* handled */ } finally { acting.value = false }
+  } catch {
+    /* handled */
+  } finally {
+    acting.value = false
+  }
 }
 
 async function confirmToggle(action: 'stop' | 'start') {
@@ -259,9 +323,9 @@ async function confirmToggle(action: 'stop' | 'start') {
     return
   }
   try {
-    await ElMessageBox.confirm('停止防火墙会暴露全部端口，确认继续？', '危险操作', {
+    await ElMessageBox.confirm(t('serverFirewall.stopConfirm'), t('serverFirewall.dangerTitle'), {
       type: 'warning',
-      confirmButtonText: '确认停止',
+      confirmButtonText: t('serverFirewall.confirmStop'),
     })
   } catch {
     return

@@ -9,7 +9,7 @@
       <Sidebar />
     </div>
 
-        <!-- 遮罩层 -->
+    <!-- 遮罩层 -->
     <div
       v-if="device === 'mobile' && sidebar.opened"
       class="sidebar-mask"

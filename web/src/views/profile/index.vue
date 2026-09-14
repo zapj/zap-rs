@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, reactive } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import QRCode from 'qrcode'
 import { useUserStore } from '@/stores/user'
@@ -15,6 +16,7 @@ import {
 import type { NoticePrefs } from '@/api/user'
 import { roleLabel } from '@/utils/role'
 
+const { t } = useI18n()
 const userStore = useUserStore()
 const { userInfo } = userStore
 
@@ -39,7 +41,7 @@ onMounted(async () => {
 async function saveInfo() {
   const phone = infoForm.phone.trim()
   if (phone && !/^1[3-9]\d{9}$/.test(phone)) {
-    ElMessage.warning('请输入正确的手机号')
+    ElMessage.warning(t('profilePage.phoneInvalid'))
     return
   }
   try {
@@ -49,7 +51,7 @@ async function saveInfo() {
       email: infoForm.email,
       phone,
     })
-    ElMessage.success('资料更新成功')
+    ElMessage.success(t('profilePage.infoSaved'))
     await userStore.getInfoAction()
   } catch {
     // 拦截器已弹窗
@@ -65,22 +67,22 @@ const pwdLoading = ref(false)
 
 async function changePassword() {
   if (!pwdForm.newPassword) {
-    ElMessage.warning('请输入新密码')
+    ElMessage.warning(t('profilePage.pwdRequired'))
     return
   }
   if (pwdForm.newPassword.length < 6) {
-    ElMessage.warning('密码至少 6 个字符')
+    ElMessage.warning(t('profilePage.pwdTooShort'))
     return
   }
   if (pwdForm.newPassword !== pwdForm.confirmPassword) {
-    ElMessage.warning('两次输入的密码不一致')
+    ElMessage.warning(t('profilePage.pwdMismatch'))
     return
   }
 
   pwdLoading.value = true
   try {
     await updateUser({ id: userInfo.id, password: pwdForm.newPassword })
-    ElMessage.success('密码修改成功，下次登录请使用新密码')
+    ElMessage.success(t('profilePage.pwdChanged'))
     pwdForm.newPassword = ''
     pwdForm.confirmPassword = ''
   } catch {
@@ -125,13 +127,13 @@ async function startTotpSetup() {
 
 async function submitTotpVerify() {
   if (!/^\d{6}$/.test(totpCode.value)) {
-    ElMessage.warning('请输入 6 位验证码')
+    ElMessage.warning(t('profilePage.codeInvalid'))
     return
   }
   totpActionLoading.value = true
   try {
     await totpVerify(totpCode.value)
-    ElMessage.success('两步验证已启用')
+    ElMessage.success(t('profilePage.totpEnableSuccess'))
     totpEnabled.value = true
     totpSetupData.value = null
     qrCodeUrl.value = ''
@@ -145,17 +147,21 @@ async function submitTotpVerify() {
 
 async function disableTotp() {
   try {
-    const { value } = await ElMessageBox.prompt('请输入当前两步验证码以关闭', '关闭两步验证', {
-      inputPlaceholder: '6 位验证码',
-      inputPattern: /^\d{6}$/,
-      inputErrorMessage: '请输入 6 位验证码',
-      confirmButtonText: '关闭',
-      cancelButtonText: '取消',
-    })
+    const { value } = await ElMessageBox.prompt(
+      t('profilePage.disablePrompt'),
+      t('profilePage.disableTitle'),
+      {
+        inputPlaceholder: t('profilePage.disableCodePlaceholder'),
+        inputPattern: /^\d{6}$/,
+        inputErrorMessage: t('profilePage.codeInvalid'),
+        confirmButtonText: t('profilePage.disableConfirm'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
     totpActionLoading.value = true
     try {
       await totpDisable(value)
-      ElMessage.success('两步验证已关闭')
+      ElMessage.success(t('profilePage.disableSuccess'))
       totpEnabled.value = false
       totpCode.value = ''
     } catch {
@@ -172,9 +178,9 @@ async function copySecret() {
   if (!totpSetupData.value) return
   try {
     await navigator.clipboard.writeText(totpSetupData.value.secret)
-    ElMessage.success('密钥已复制')
+    ElMessage.success(t('profilePage.secretCopied'))
   } catch {
-    ElMessage.warning('复制失败，请手动复制')
+    ElMessage.warning(t('profilePage.copyFailed'))
   }
 }
 
@@ -208,7 +214,7 @@ async function savePrefs() {
   prefsSaving.value = true
   try {
     const res = await saveMyPrefs({ ...prefs })
-    ElMessage.success(res.message || '偏好设置已保存')
+    ElMessage.success(res.message || t('profilePage.prefsSaved'))
   } catch {
     // 拦截器已弹窗
   } finally {
@@ -221,111 +227,128 @@ async function savePrefs() {
   <div class="app-container">
     <el-card>
       <template #header>
-        <span>个人中心</span>
+        <span>{{ t('profilePage.title') }}</span>
       </template>
 
       <el-tabs v-model="activeTab">
         <!-- 基本资料 -->
-        <el-tab-pane label="基本资料" name="info">
+        <el-tab-pane :label="t('profilePage.tabInfo')" name="info">
           <el-form label-width="80px" style="max-width: 440px" @submit.prevent>
-            <el-form-item label="用户名">
+            <el-form-item :label="t('profilePage.username')">
               <el-input :model-value="userInfo.username" disabled />
             </el-form-item>
-            <el-form-item label="角色">
-              <el-tag
-                v-for="r in userInfo.roles"
-                :key="r"
-                style="margin-right: 6px"
-              >
+            <el-form-item :label="t('profilePage.role')">
+              <el-tag v-for="r in userInfo.roles" :key="r" style="margin-right: 6px">
                 {{ roleLabel(r) }}
               </el-tag>
-              <span v-if="!userInfo.roles?.length" style="color: var(--el-text-color-secondary)">-</span>
+              <span v-if="!userInfo.roles?.length" style="color: var(--el-text-color-secondary)"
+                >-</span
+              >
             </el-form-item>
-            <el-form-item label="昵称">
-              <el-input v-model="infoForm.nickname" placeholder="请输入昵称" />
+            <el-form-item :label="t('profilePage.nickname')">
+              <el-input
+                v-model="infoForm.nickname"
+                :placeholder="t('profilePage.nicknamePlaceholder')"
+              />
             </el-form-item>
-            <el-form-item label="邮箱">
-              <el-input v-model="infoForm.email" placeholder="请输入邮箱" />
+            <el-form-item :label="t('profilePage.email')">
+              <el-input v-model="infoForm.email" :placeholder="t('profilePage.emailPlaceholder')" />
             </el-form-item>
-            <el-form-item label="手机号">
-              <el-input v-model="infoForm.phone" placeholder="请输入手机号" maxlength="11" />
+            <el-form-item :label="t('profilePage.phone')">
+              <el-input
+                v-model="infoForm.phone"
+                :placeholder="t('profilePage.phonePlaceholder')"
+                maxlength="11"
+              />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveInfo">保存修改</el-button>
+              <el-button type="primary" @click="saveInfo">{{
+                t('profilePage.saveChanges')
+              }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
         <!-- 修改密码 -->
-        <el-tab-pane label="修改密码" name="password">
+        <el-tab-pane :label="t('profilePage.tabPassword')" name="password">
           <el-form label-width="90px" style="max-width: 400px" @submit.prevent>
-            <el-form-item label="新密码">
+            <el-form-item :label="t('profilePage.newPassword')">
               <el-input
                 v-model="pwdForm.newPassword"
                 type="password"
                 show-password
-                placeholder="至少 6 个字符"
+                :placeholder="t('profilePage.passwordPlaceholder')"
               />
             </el-form-item>
-            <el-form-item label="确认密码">
+            <el-form-item :label="t('profilePage.confirmPassword')">
               <el-input
                 v-model="pwdForm.confirmPassword"
                 type="password"
                 show-password
-                placeholder="再次输入新密码"
+                :placeholder="t('profilePage.confirmPlaceholder')"
               />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="pwdLoading" @click="changePassword">
-                修改密码
+                {{ t('profilePage.changePassword') }}
               </el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
         <!-- 两步验证 -->
-        <el-tab-pane label="两步验证" name="totp">
+        <el-tab-pane :label="t('profilePage.tabTotp')" name="totp">
           <div class="totp-panel">
             <template v-if="totpEnabled">
-              <el-tag type="success" size="large" effect="dark">已启用</el-tag>
+              <el-tag type="success" size="large" effect="dark">{{
+                t('profilePage.totpEnabledTag')
+              }}</el-tag>
               <p class="totp-tip">
-                两步验证已开启，登录时需输入身份验证器生成的动态验证码。
+                {{ t('profilePage.totpEnabledTip') }}
               </p>
               <el-button type="danger" plain :loading="totpActionLoading" @click="disableTotp">
-                关闭两步验证
+                {{ t('profilePage.totpDisableBtn') }}
               </el-button>
             </template>
 
             <template v-else-if="!totpSetupData">
               <p class="totp-tip">
-                开启两步验证后，每次登录除密码外还需输入身份验证器（如
-                Google Authenticator、Microsoft Authenticator）中的动态验证码。
+                {{ t('profilePage.totpIntro') }}
               </p>
-              <el-button type="primary" @click="startTotpSetup">启用两步验证</el-button>
+              <el-button type="primary" @click="startTotpSetup">{{
+                t('profilePage.totpEnableBtn')
+              }}</el-button>
             </template>
 
             <template v-else>
               <div class="totp-setup">
-                <img v-if="qrCodeUrl" :src="qrCodeUrl" alt="两步验证二维码" class="totp-qr" />
+                <img
+                  v-if="qrCodeUrl"
+                  :src="qrCodeUrl"
+                  :alt="t('profilePage.qrAlt')"
+                  class="totp-qr"
+                />
                 <div class="totp-secret">
-                  <span class="totp-secret-label">密钥：</span>
+                  <span class="totp-secret-label">{{ t('profilePage.secretLabel') }}</span>
                   <code>{{ totpSetupData.secret }}</code>
-                  <el-button link type="primary" @click="copySecret">复制</el-button>
+                  <el-button link type="primary" @click="copySecret">{{
+                    t('profilePage.copy')
+                  }}</el-button>
                 </div>
                 <p class="totp-tip">
-                  使用身份验证器扫描上方二维码，或手动输入密钥完成绑定。
+                  {{ t('profilePage.totpScanTip') }}
                 </p>
                 <el-input
                   v-model="totpCode"
-                  placeholder="输入 6 位验证码"
+                  :placeholder="t('profilePage.codePlaceholder')"
                   maxlength="6"
                   style="max-width: 220px"
                 />
                 <div style="margin-top: 12px">
                   <el-button type="primary" :loading="totpActionLoading" @click="submitTotpVerify">
-                    确认启用
+                    {{ t('profilePage.confirmEnable') }}
                   </el-button>
-                  <el-button @click="totpSetupData = null">取消</el-button>
+                  <el-button @click="totpSetupData = null">{{ t('common.cancel') }}</el-button>
                 </div>
               </div>
             </template>
@@ -333,46 +356,58 @@ async function savePrefs() {
         </el-tab-pane>
 
         <!-- 偏好设置 -->
-        <el-tab-pane label="偏好设置" name="prefs">
+        <el-tab-pane :label="t('profilePage.tabPrefs')" name="prefs">
           <div class="prefs-panel" v-loading="prefsLoading">
-            <h4 class="prefs-title">通知偏好</h4>
-            <p class="prefs-desc">选择您希望接收的提醒方式。在以下情况发生时通知我：</p>
+            <h4 class="prefs-title">{{ t('profilePage.prefsTitle') }}</h4>
+            <p class="prefs-desc">{{ t('profilePage.prefsDesc') }}</p>
 
             <el-checkbox v-model="prefs.notify_disk_quota" class="prefs-item">
-              我的账户接近磁盘配额。
+              {{ t('profilePage.prefDiskQuota') }}
             </el-checkbox>
 
             <el-checkbox v-model="prefs.notify_bandwidth" class="prefs-item">
-              我的账户接近带宽用量限制。
+              {{ t('profilePage.prefBandwidth') }}
             </el-checkbox>
 
             <el-checkbox v-model="prefs.notify_ssl_expiry" class="prefs-item">
-              SSL 证书将过期。（非 AutoSSL 证书快过期时会提醒。）
+              {{ t('profilePage.prefSslExpiry') }}
             </el-checkbox>
 
             <el-checkbox v-model="prefs.notify_password_change" class="prefs-item">
-              账户密码变更通知
+              {{ t('profilePage.prefPasswordChange') }}
             </el-checkbox>
             <div v-if="prefs.notify_password_change" class="prefs-sub">
-              <el-checkbox v-model="prefs.password_change_disable">不通知</el-checkbox>
+              <el-checkbox v-model="prefs.password_change_disable">{{
+                t('profilePage.prefNoNotify')
+              }}</el-checkbox>
             </div>
 
             <el-checkbox v-model="prefs.notify_login" class="prefs-item">
-              登录成功通知
+              {{ t('profilePage.prefLogin') }}
             </el-checkbox>
             <div v-if="prefs.notify_login" class="prefs-sub">
-              <el-checkbox v-model="prefs.login_disable">不通知</el-checkbox>
+              <el-checkbox v-model="prefs.login_disable">{{
+                t('profilePage.prefNoNotify')
+              }}</el-checkbox>
             </div>
 
-            <h4 class="prefs-title prefs-group-title">AutoSSL 通知</h4>
+            <h4 class="prefs-title prefs-group-title">{{ t('profilePage.autosslTitle') }}</h4>
             <el-radio-group v-model="prefs.autossl_notify_mode" class="prefs-radio-group">
-              <el-radio value="deferrals" class="prefs-radio">AutoSSL 失败及延后时。（默认）</el-radio>
-              <el-radio value="failures" class="prefs-radio">仅 AutoSSL 失败时。</el-radio>
-              <el-radio value="disabled" class="prefs-radio">禁用 AutoSSL 事件通知。</el-radio>
+              <el-radio value="deferrals" class="prefs-radio">{{
+                t('profilePage.autosslDeferrals')
+              }}</el-radio>
+              <el-radio value="failures" class="prefs-radio">{{
+                t('profilePage.autosslFailures')
+              }}</el-radio>
+              <el-radio value="disabled" class="prefs-radio">{{
+                t('profilePage.autosslDisabled')
+              }}</el-radio>
             </el-radio-group>
 
             <div style="margin-top: 28px">
-              <el-button type="primary" :loading="prefsSaving" @click="savePrefs">保存修改</el-button>
+              <el-button type="primary" :loading="prefsSaving" @click="savePrefs">{{
+                t('profilePage.saveChanges')
+              }}</el-button>
             </div>
           </div>
         </el-tab-pane>

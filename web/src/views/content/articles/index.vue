@@ -3,14 +3,14 @@
     <div class="filter-container">
       <el-input
         v-model="listQuery.title"
-        placeholder="标题"
+        :placeholder="t('content.articles.filterTitle')"
         style="width: 200px"
         class="filter-item"
         @keyup.enter="handleFilter"
       />
       <el-select
         v-model="listQuery.status"
-        placeholder="状态"
+        :placeholder="t('content.articles.filterStatus')"
         clearable
         class="filter-item"
         style="width: 130px"
@@ -23,10 +23,10 @@
         />
       </el-select>
       <el-button class="filter-item" type="primary" :icon="Search" @click="handleFilter">
-        搜索
+        {{ t('common.search') }}
       </el-button>
       <el-button class="filter-item" type="primary" :icon="Plus" @click="handleCreate">
-        新增
+        {{ t('common.create') }}
       </el-button>
     </div>
 
@@ -44,19 +44,19 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="标题" min-width="150px">
+      <el-table-column :label="t('content.articles.colTitle')" min-width="150px">
         <template #default="scope">
           <span>{{ scope.row.title }}</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="分类" width="110px" align="center">
+      <el-table-column :label="t('content.articles.colCategory')" width="110px" align="center">
         <template #default="scope">
           <span>{{ scope.row.category }}</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="标签" width="110px" align="center">
+      <el-table-column :label="t('content.articles.colTags')" width="110px" align="center">
         <template #default="scope">
           <el-tag v-for="tag in scope.row.tags" :key="tag" size="small" class="mx-1">
             {{ tag }}
@@ -64,44 +64,50 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="状态" width="110px" align="center">
+      <el-table-column :label="t('content.articles.colStatus')" width="110px" align="center">
         <template #default="scope">
           <el-tag :type="scope.row.status === 1 ? 'success' : 'info'">
-            {{ scope.row.status === 1 ? '已发布' : '草稿' }}
+            {{
+              scope.row.status === 1 ? t('content.articles.published') : t('content.articles.draft')
+            }}
           </el-tag>
         </template>
       </el-table-column>
 
-      <el-table-column label="创建时间" width="160px" align="center">
+      <el-table-column :label="t('common.createdAt')" width="160px" align="center">
         <template #default="scope">
           <span>{{ scope.row.createTime }}</span>
         </template>
       </el-table-column>
 
       <el-table-column
-        label="操作"
+        :label="t('common.operation')"
         align="center"
         width="230"
         class-name="small-padding fixed-width"
       >
         <template #default="scope">
-          <el-button type="primary" size="small" @click="handleUpdate(scope.row)"> 编辑 </el-button>
+          <el-button type="primary" size="small" @click="handleUpdate(scope.row)">
+            {{ t('common.edit') }}
+          </el-button>
           <el-button
             v-if="scope.row.status !== 1"
             size="small"
             type="success"
             @click="handleModifyStatus(scope.row, 1)"
           >
-            发布
+            {{ t('content.articles.publish') }}
           </el-button>
           <el-button
             v-if="scope.row.status === 1"
             size="small"
             @click="handleModifyStatus(scope.row, 0)"
           >
-            下架
+            {{ t('content.articles.unpublish') }}
           </el-button>
-          <el-button size="small" type="danger" @click="handleDelete(scope.row)"> 删除 </el-button>
+          <el-button size="small" type="danger" @click="handleDelete(scope.row)">
+            {{ t('common.delete') }}
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -120,16 +126,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Search, Plus } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type {Article} from '@/types/articles'
+import type { Article } from '@/types/articles'
+
+const { t } = useI18n()
 
 // 状态选项
-const statusOptions = [
-  { label: '已发布', value: 1 },
-  { label: '草稿', value: 0 },
-]
+const statusOptions = computed(() => [
+  { label: t('content.articles.published'), value: 1 },
+  { label: t('content.articles.draft'), value: 0 },
+])
 
 // 列表数据
 const list = ref<Article[]>([])
@@ -151,8 +160,8 @@ const getList = () => {
     list.value = [
       {
         id: 1,
-        title: '示例文章',
-        category: '技术',
+        title: 'Sample Article',
+        category: 'Tech',
         tags: ['Vue', 'TypeScript'],
         status: 1,
         createTime: '2024-01-20 12:00:00',
@@ -172,46 +181,47 @@ const handleFilter = () => {
 // 新增
 const handleCreate = () => {
   // TODO: 跳转到新增页面或打开新增对话框
-  ElMessage.info('新增功能开发中')
+  ElMessage.info(t('content.articles.createWip'))
 }
 
 // 编辑
 const handleUpdate = (row: any) => {
   // TODO: 跳转到编辑页面或打开编辑对话框
-  ElMessage.info('编辑功能开发中')
+  ElMessage.info(t('content.articles.editWip'))
 }
 
 // 修改状态
 const handleModifyStatus = (row: any, status: number) => {
-  ElMessageBox.confirm(`确认要${status === 1 ? '发布' : '下架'}该文章吗？`, '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
+  const action = status === 1 ? t('content.articles.publish') : t('content.articles.unpublish')
+  ElMessageBox.confirm(t('content.articles.statusConfirm', { action }), t('common.tip'), {
+    confirmButtonText: t('common.confirm'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning',
   })
     .then(async () => {
       // TODO: 调用API修改状态
-      ElMessage.success(`${status === 1 ? '发布' : '下架'}成功`)
+      ElMessage.success(t('content.articles.statusDone', { action }))
       getList()
     })
     .catch(() => {
-      ElMessage.info('已取消操作')
+      ElMessage.info(t('content.articles.cancelStatus'))
     })
 }
 
 // 删除
 const handleDelete = (row: any) => {
-  ElMessageBox.confirm('确认要删除该文章吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
+  ElMessageBox.confirm(t('content.articles.deleteConfirm'), t('common.tip'), {
+    confirmButtonText: t('common.confirm'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning',
   })
     .then(async () => {
       // TODO: 调用API删除数据
-      ElMessage.success('删除成功')
+      ElMessage.success(t('common.deleteSuccess'))
       getList()
     })
     .catch(() => {
-      ElMessage.info('已取消删除')
+      ElMessage.info(t('content.cancelDelete'))
     })
 }
 

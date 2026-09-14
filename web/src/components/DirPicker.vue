@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="title"
+    :title="dialogTitle"
     width="600px"
     append-to-body
     :close-on-click-modal="false"
@@ -13,19 +13,21 @@
 
     <div class="dp-toolbar">
       <el-button size="small" :disabled="!home || path === home" @click="fetch(home)">
-        回到首页
+        {{ t('dirPicker.home') }}
       </el-button>
-      <el-button size="small" :disabled="!canGoUp" @click="fetch(parentPath)">返回上级</el-button>
-      <el-button size="small" :icon="Refresh" :disabled="!path" @click="fetch(path)"
-        >刷新</el-button
-      >
+      <el-button size="small" :disabled="!canGoUp" @click="fetch(parentPath)">
+        {{ t('dirPicker.up') }}
+      </el-button>
+      <el-button size="small" :icon="Refresh" :disabled="!path" @click="fetch(path)">
+        {{ t('dirPicker.refresh') }}
+      </el-button>
     </div>
 
     <el-input
       v-model="pathInput"
       size="small"
       class="dp-path"
-      placeholder="绝对路径，回车跳转"
+      :placeholder="t('dirPicker.pathPlaceholder')"
       @keydown.enter.prevent="jump"
     >
       <template #prefix>
@@ -49,16 +51,16 @@
           <span class="dp-item-name" :title="d.path">{{ d.name }}</span>
         </div>
       </template>
-      <el-empty v-else-if="!loading" description="该目录下暂无子目录" :image-size="60" />
+      <el-empty v-else-if="!loading" :description="t('dirPicker.empty')" :image-size="60" />
     </div>
 
     <!-- 调用方可以补一行额外输入（例如打包时的压缩包名称） -->
     <slot name="extra" :path="path" />
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">{{ t('dirPicker.cancel') }}</el-button>
       <el-button type="primary" :disabled="!path" :loading="confirmLoading" @click="confirm">
-        {{ confirmText }}
+        {{ resolvedConfirmText }}
       </el-button>
     </template>
   </el-dialog>
@@ -66,6 +68,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { FolderOpened, Refresh } from '@/icons'
 import { listFiles, type FileEntry } from '@/api/file'
 import { useUserStore } from '@/stores/user'
@@ -87,17 +90,23 @@ const props = withDefaults(
     confirmLoading?: boolean
   }>(),
   {
-    title: '选择目录',
+    title: '',
     startPath: '',
-    confirmText: '选择当前目录',
+    confirmText: '',
     confirmLoading: false,
   },
 )
+
+/** 标题与确认按钮文案：调用方未指定时回落到内置文案（跟随语言切换） */
+const dialogTitle = computed(() => props.title || t('dirPicker.title'))
+const resolvedConfirmText = computed(() => props.confirmText || t('dirPicker.confirm'))
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   (e: 'confirm', path: string): void
 }>()
+
+const { t } = useI18n()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -135,7 +144,7 @@ async function fetch(target: string) {
     parentPath.value = data?.parent_path || ''
     dirs.value = (data?.entries || []).filter((e) => e.is_dir)
   } catch (e: any) {
-    error.value = e?.message || '目录读取失败'
+    error.value = e?.message || t('dirPicker.loadFailed')
     dirs.value = []
   } finally {
     loading.value = false

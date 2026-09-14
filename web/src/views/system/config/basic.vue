@@ -3,64 +3,72 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>基础设置</span>
-          <span class="sub">系统网络、邮件发送与联系信息配置</span>
+          <span>{{ t('basicCfg.title') }}</span>
+          <span class="sub">{{ t('basicCfg.subtitle') }}</span>
         </div>
       </template>
 
       <el-tabs v-model="activeTab">
         <!-- ── 基础设置 ─────────────────────────────────── -->
-        <el-tab-pane label="基础设置" name="basic">
+        <el-tab-pane :label="t('basicCfg.tabBasic')" name="basic">
           <el-alert
             type="info"
             :closable="false"
             show-icon
-            title="创建站点时使用的默认网络参数：地址留空则由系统自动分配。"
+            :title="t('basicCfg.basicHint')"
             style="margin-bottom: 16px"
           />
           <el-form :model="basic" label-width="150px" style="max-width: 660px" @submit.prevent>
-            <el-form-item label="默认 IPv4 地址">
+            <el-form-item :label="t('basicCfg.ipv4')">
               <el-input
                 v-model="basic.ipv4"
-                placeholder="如 192.168.1.100（留空=自动分配）"
+                :placeholder="t('basicCfg.ipv4Placeholder')"
                 clearable
               />
             </el-form-item>
-            <el-form-item label="默认 IPv6 地址">
+            <el-form-item :label="t('basicCfg.ipv6')">
               <el-input
                 v-model="basic.ipv6"
-                placeholder="如 2408:8207::1（留空=自动分配）"
+                :placeholder="t('basicCfg.ipv6Placeholder')"
                 clearable
               />
             </el-form-item>
-            <el-form-item label="网络设备 (Ethernet Device)">
-              <el-input v-model="basic.iface" placeholder="如 eth0 / ens18（默认 eth0）" clearable />
+            <el-form-item :label="t('basicCfg.iface')">
+              <el-input
+                v-model="basic.iface"
+                :placeholder="t('basicCfg.ifacePlaceholder')"
+                clearable
+              />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="savingBasic" @click="saveBasic">
-                保存基础设置
+                {{ t('basicCfg.saveBasic') }}
               </el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
         <!-- ── Mail ─────────────────────────────────────── -->
-        <el-tab-pane label="Mail" name="mail">
+        <el-tab-pane :label="t('basicCfg.tabMail')" name="mail">
           <el-alert
             type="info"
             :closable="false"
             show-icon
-            title="配置发送邮件所需的 SMTP 参数（供系统通知等场景使用）。密码留空表示不修改原密码。"
+            :title="t('basicCfg.mailHint')"
             style="margin-bottom: 16px"
           />
           <el-form :model="mail" label-width="150px" style="max-width: 660px" @submit.prevent>
-            <el-form-item label="SMTP 服务器">
-              <el-input v-model="mail.host" placeholder="如 smtp.example.com" clearable />
+            <el-form-item :label="t('basicCfg.smtpHost')">
+              <el-input
+                v-model="mail.host"
+                :placeholder="t('basicCfg.smtpHostPlaceholder')"
+                clearable
+              />
             </el-form-item>
-            <el-form-item label="端口">
+            <el-form-item :label="t('basicCfg.port')">
               <el-input v-model="mail.port" placeholder="465 / 587 / 25" style="width: 180px" />
             </el-form-item>
-            <el-form-item label="加密方式">
+            <el-form-item :label="t('basicCfg.encryption')">
               <el-select v-model="mail.encryption" style="width: 240px">
                 <el-option
                   v-for="opt in encryptionOptions"
@@ -70,64 +78,88 @@
                 />
               </el-select>
             </el-form-item>
-            <el-form-item label="发件人邮箱">
-              <el-input v-model="mail.from" placeholder="如 noreply@example.com" clearable />
+            <el-form-item :label="t('basicCfg.from')">
+              <el-input
+                v-model="mail.from"
+                :placeholder="t('basicCfg.fromPlaceholder')"
+                clearable
+              />
             </el-form-item>
-            <el-form-item label="账号">
-              <el-input v-model="mail.username" placeholder="SMTP 登录账号" clearable />
+            <el-form-item :label="t('basicCfg.account')">
+              <el-input
+                v-model="mail.username"
+                :placeholder="t('basicCfg.accountPlaceholder')"
+                clearable
+              />
             </el-form-item>
-            <el-form-item label="密码">
+            <el-form-item :label="t('basicCfg.password')">
               <el-input
                 v-model="mail.password"
                 type="password"
                 show-password
-                placeholder="留空=不修改原密码"
+                :placeholder="t('basicCfg.passwordPlaceholder')"
               />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="savingMail" @click="saveMail">
-                保存 Mail 设置
+                {{ t('basicCfg.saveMail') }}
               </el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
         <!-- ── 联系信息 ─────────────────────────────────── -->
-        <el-tab-pane label="联系信息" name="contact">
+        <el-tab-pane :label="t('basicCfg.tabContact')" name="contact">
           <el-alert
             type="info"
             :closable="false"
             show-icon
-            title="面板对外展示的服务商 / 客服联系方式。"
+            :title="t('basicCfg.contactHint')"
             style="margin-bottom: 16px"
           />
           <el-form :model="contact" label-width="150px" style="max-width: 660px" @submit.prevent>
-            <el-form-item label="名称">
-              <el-input v-model="contact.name" placeholder="如 XX 云客服中心" clearable />
+            <el-form-item :label="t('basicCfg.contactName')">
+              <el-input
+                v-model="contact.name"
+                :placeholder="t('basicCfg.contactNamePlaceholder')"
+                clearable
+              />
             </el-form-item>
-            <el-form-item label="Email">
-              <el-input v-model="contact.email" placeholder="联系邮箱" clearable />
+            <el-form-item :label="t('basicCfg.email')">
+              <el-input
+                v-model="contact.email"
+                :placeholder="t('basicCfg.emailPlaceholder')"
+                clearable
+              />
             </el-form-item>
-            <el-form-item label="QQ ID">
-              <el-input v-model="contact.qq" placeholder="QQ 号" clearable />
+            <el-form-item :label="t('basicCfg.qq')">
+              <el-input v-model="contact.qq" :placeholder="t('basicCfg.qqPlaceholder')" clearable />
             </el-form-item>
-            <el-form-item label="微信">
-              <el-input v-model="contact.wechat" placeholder="微信号" clearable />
+            <el-form-item :label="t('basicCfg.wechat')">
+              <el-input
+                v-model="contact.wechat"
+                :placeholder="t('basicCfg.wechatPlaceholder')"
+                clearable
+              />
             </el-form-item>
-            <el-form-item label="电话">
-              <el-input v-model="contact.phone" placeholder="联系电话" clearable />
+            <el-form-item :label="t('basicCfg.phone')">
+              <el-input
+                v-model="contact.phone"
+                :placeholder="t('basicCfg.phonePlaceholder')"
+                clearable
+              />
             </el-form-item>
-            <el-form-item label="备注">
+            <el-form-item :label="t('basicCfg.remark')">
               <el-input
                 v-model="contact.remark"
                 type="textarea"
                 :rows="3"
-                placeholder="其它联系说明，如服务时间 / 工单入口等"
+                :placeholder="t('basicCfg.remarkPlaceholder')"
               />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="savingContact" @click="saveContact">
-                保存联系信息
+                {{ t('basicCfg.saveContact') }}
               </el-button>
             </el-form-item>
           </el-form>
@@ -138,9 +170,12 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getBasicSettings, saveBasicSettings } from '@/api/systemBasic'
+
+const { t } = useI18n()
 
 const activeTab = ref('basic')
 const loading = ref(false)
@@ -159,14 +194,14 @@ const mail = reactive({
 })
 const contact = reactive({ name: '', email: '', qq: '', wechat: '', phone: '', remark: '' })
 
-const encryptionOptions = [
+// 协议名保持英文，只有「无加密」需要本地化
+const encryptionOptions = computed(() => [
   { value: 'ssl', label: 'SSL / TLS (465)' },
   { value: 'tls', label: 'STARTTLS (587)' },
-  { value: 'none', label: '无加密 (25)' },
-]
+  { value: 'none', label: t('basicCfg.encNone') },
+])
 
-const IPV4_RE =
-  /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/
+const IPV4_RE = /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/
 
 function validIPv6(s: string): boolean {
   if (!s.includes(':')) return false
@@ -194,32 +229,40 @@ async function load() {
     contact.wechat = d.contact.wechat ?? ''
     contact.phone = d.contact.phone ?? ''
     contact.remark = d.contact.remark ?? ''
-  } catch { /* handled */ } finally { loading.value = false }
+  } catch {
+    /* handled */
+  } finally {
+    loading.value = false
+  }
 }
 
 async function saveBasic() {
   const ipv4 = basic.ipv4.trim()
   const ipv6 = basic.ipv6.trim()
   if (ipv4 && !IPV4_RE.test(ipv4)) {
-    ElMessage.warning('IPv4 地址格式不正确')
+    ElMessage.warning(t('basicCfg.invalidIpv4'))
     return
   }
   if (ipv6 && !validIPv6(ipv6)) {
-    ElMessage.warning('IPv6 地址格式不正确')
+    ElMessage.warning(t('basicCfg.invalidIpv6'))
     return
   }
   savingBasic.value = true
   try {
     await saveBasicSettings({ basic: { ipv4, ipv6, iface: basic.iface.trim() } })
-    ElMessage.success('基础设置已保存')
-  } catch { /* handled */ } finally { savingBasic.value = false }
+    ElMessage.success(t('basicCfg.basicSaved'))
+  } catch {
+    /* handled */
+  } finally {
+    savingBasic.value = false
+  }
 }
 
 async function saveMail() {
   const port = String(mail.port).trim()
   const num = Number(port)
   if (mail.host.trim() && (!Number.isInteger(num) || num < 1 || num > 65535)) {
-    ElMessage.warning('端口必须是 1 - 65535 之间的数字')
+    ElMessage.warning(t('basicCfg.invalidPort'))
     return
   }
   savingMail.value = true
@@ -235,8 +278,12 @@ async function saveMail() {
       },
     })
     mail.password = ''
-    ElMessage.success('Mail 设置已保存')
-  } catch { /* handled */ } finally { savingMail.value = false }
+    ElMessage.success(t('basicCfg.mailSaved'))
+  } catch {
+    /* handled */
+  } finally {
+    savingMail.value = false
+  }
 }
 
 async function saveContact() {
@@ -252,8 +299,12 @@ async function saveContact() {
         remark: contact.remark.trim(),
       },
     })
-    ElMessage.success('联系信息已保存')
-  } catch { /* handled */ } finally { savingContact.value = false }
+    ElMessage.success(t('basicCfg.contactSaved'))
+  } catch {
+    /* handled */
+  } finally {
+    savingContact.value = false
+  }
 }
 
 onMounted(load)

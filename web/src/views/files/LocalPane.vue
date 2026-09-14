@@ -3,7 +3,7 @@
     <!-- 左侧目录树 -->
     <div class="fm-sidebar">
       <div class="fm-sidebar-header">
-        <span>目录树</span>
+        <span>{{ t('filesLocal.tree') }}</span>
         <el-button :icon="Refresh" size="small" text @click="refreshTree" />
       </div>
       <el-scrollbar class="fm-tree-scroll">
@@ -77,22 +77,22 @@
           <el-upload :show-file-list="false" :http-request="handleUpload" multiple>
             <el-button size="small" :loading="uploadBusy">
               <el-icon><Upload /></el-icon>
-              上传文件
+              {{ t('filesLocal.uploadFile') }}
             </el-button>
           </el-upload>
           <el-upload :show-file-list="false" :http-request="handleUpload" multiple directory>
             <el-button size="small" :loading="uploadBusy">
               <el-icon><FolderOpened /></el-icon>
-              上传目录
+              {{ t('filesLocal.uploadDir') }}
             </el-button>
           </el-upload>
           <el-button size="small" @click="showMkdirDialog">
             <el-icon><FolderAdd /></el-icon>
-            新建目录
+            {{ t('filesLocal.newDir') }}
           </el-button>
           <el-button size="small" @click="showNewFileDialog">
             <el-icon><DocumentAdd /></el-icon>
-            新建文件
+            {{ t('filesLocal.newFile') }}
           </el-button>
           <el-button size="small" @click="refreshList" :loading="loading">
             <el-icon><Refresh /></el-icon>
@@ -102,35 +102,37 @@
 
       <!-- 选中项操作条：常显，避免选中/取消时布局抖动；未选中时按钮禁用 -->
       <div class="fm-selection-bar">
-        <span class="fm-selection-label">已选 {{ selectionCount }} / {{ fileList.length }}</span>
+        <span class="fm-selection-label">
+          {{ t('filesLocal.selectedCount', { n: selectionCount, total: fileList.length }) }}
+        </span>
         <el-button-group class="fm-selection-actions">
           <el-button size="small" :disabled="!canOpen" @click="openSelected">
             <el-icon><Open /></el-icon>
-            打开
+            {{ t('filesLocal.open') }}
           </el-button>
           <el-button size="small" :disabled="!canCopy" @click="showCopyDialog(false)">
             <el-icon><Copy /></el-icon>
-            复制
+            {{ t('filesLocal.copy') }}
           </el-button>
           <el-button size="small" :disabled="!canDuplicate" @click="showDuplicateDialog">
             <el-icon><Copy /></el-icon>
-            复制副本
+            {{ t('filesLocal.duplicate') }}
           </el-button>
           <el-button size="small" :disabled="!canMove" @click="showMoveDialog(false)">
             <el-icon><Move /></el-icon>
-            移动
+            {{ t('filesLocal.move') }}
           </el-button>
           <el-button size="small" :disabled="!canDownload" @click="downloadSelected">
             <el-icon><Download /></el-icon>
-            下载
+            {{ t('filesLocal.download') }}
           </el-button>
           <el-button size="small" :disabled="!canArchive" @click="showArchiveDialog">
             <el-icon><Archive /></el-icon>
-            打包
+            {{ t('filesLocal.archive') }}
           </el-button>
           <el-button size="small" :disabled="!canRename" @click="showRenameDialog(singleSelected!)">
             <el-icon><Edit /></el-icon>
-            重命名
+            {{ t('filesLocal.rename') }}
           </el-button>
           <el-button
             size="small"
@@ -138,7 +140,7 @@
             @click="showPermDialogForSelection"
           >
             <el-icon><Setting /></el-icon>
-            权限
+            {{ t('filesLocal.perm') }}
           </el-button>
           <el-button
             v-if="isAdmin"
@@ -147,15 +149,15 @@
             @click="showOwnerDialogForSelection"
           >
             <el-icon><User /></el-icon>
-            属主
+            {{ t('filesLocal.owner') }}
           </el-button>
           <el-button size="small" type="danger" :disabled="!canRemove" @click="removeSelected">
             <el-icon><Delete /></el-icon>
-            删除
+            {{ t('filesLocal.remove') }}
           </el-button>
         </el-button-group>
         <el-button size="small" text :disabled="!hasSelection" @click="clearSelection">
-          取消选择
+          {{ t('filesLocal.clearSelection') }}
         </el-button>
       </div>
 
@@ -182,7 +184,7 @@
             style="width: 100%"
           >
             <el-table-column type="selection" width="40" />
-            <el-table-column label="名称" min-width="260">
+            <el-table-column :label="t('filesLocal.colName')" min-width="260">
               <template #default="{ row }">
                 <div class="fm-file-name">
                   <el-icon
@@ -198,31 +200,31 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="大小" width="120" align="right">
+            <el-table-column :label="t('filesLocal.colSize')" width="120" align="right">
               <template #default="{ row }">
                 <span v-if="!row.is_dir">{{ formatSize(row.size) }}</span>
                 <span v-else class="text-muted">-</span>
               </template>
             </el-table-column>
-            <el-table-column label="修改时间" width="180">
+            <el-table-column :label="t('filesLocal.colModified')" width="180">
               <template #default="{ row }">
                 {{ row.modified }}
               </template>
             </el-table-column>
-            <el-table-column label="权限" width="110">
+            <el-table-column :label="t('filesLocal.perm')" width="110">
               <template #default="{ row }">
                 <el-button
                   link
                   type="primary"
                   class="mono fm-perm-btn"
-                  title="点击修改权限"
+                  :title="t('filesLocal.tipPerm')"
                   @click.stop="showPermDialog(row)"
                 >
                   {{ row.permissions }}
                 </el-button>
               </template>
             </el-table-column>
-            <el-table-column label="用户" width="110">
+            <el-table-column :label="t('filesLocal.colUser')" width="110">
               <template #default="{ row }">
                 <!-- admin 可点击直接修改属主/属组，其余角色只读展示 -->
                 <el-button
@@ -230,7 +232,7 @@
                   link
                   type="primary"
                   class="mono"
-                  title="点击修改属主 / 属组"
+                  :title="t('filesLocal.tipOwner')"
                   @click.stop="showOwnerDialog(row)"
                 >
                   {{ row.owner || '-' }}
@@ -239,14 +241,14 @@
                 <span v-else class="text-muted">-</span>
               </template>
             </el-table-column>
-            <el-table-column label="组" width="110">
+            <el-table-column :label="t('filesLocal.colGroup')" width="110">
               <template #default="{ row }">
                 <el-button
                   v-if="isAdmin"
                   link
                   type="primary"
                   class="mono"
-                  title="点击修改属主 / 属组"
+                  :title="t('filesLocal.tipOwner')"
                   @click.stop="showOwnerDialog(row)"
                 >
                   {{ row.group || '-' }}
@@ -287,7 +289,9 @@
                 <span class="fm-grid-name" :title="row.name">{{ row.name }}</span>
                 <span v-if="!row.is_dir" class="fm-grid-size">{{ formatSize(row.size) }}</span>
               </div>
-              <div v-if="fileList.length === 0 && !loading" class="fm-grid-empty">此目录为空</div>
+              <div v-if="fileList.length === 0 && !loading" class="fm-grid-empty">
+                {{ t('filesLocal.emptyDir') }}
+              </div>
             </div>
           </el-scrollbar>
         </div>
@@ -298,7 +302,7 @@
           <div class="fm-dropzone-inner">
             <el-icon :size="42"><Upload /></el-icon>
             <div class="fm-dropzone-text">
-              松开鼠标，上传文件或文件夹到 {{ currentPath || '当前目录' }}
+              {{ t('filesLocal.dropHint', { path: currentPath || t('filesLocal.currentDir') }) }}
             </div>
           </div>
         </div>
@@ -324,36 +328,38 @@
           />
           <div v-show="!uploadPanelCollapsed" class="fm-upload-body">
             <div v-if="uploadTotal" class="fm-upload-summary">
-              <span>成功 {{ uploadDone }}</span>
-              <span v-if="uploadFailed" class="failed">失败 {{ uploadFailed }}</span>
-              <span>等待 {{ uploadPendingCount }}</span>
+              <span>{{ t('filesLocal.uploadOk', { n: uploadDone }) }}</span>
+              <span v-if="uploadFailed" class="failed">
+                {{ t('filesLocal.uploadFail', { n: uploadFailed }) }}
+              </span>
+              <span>{{ t('filesLocal.uploadWait', { n: uploadPendingCount }) }}</span>
             </div>
 
             <!-- 正在上传的文件 -->
             <div v-if="activeUploads.length" class="fm-upload-list">
-              <div v-for="t in activeUploads" :key="t.id" class="fm-upload-item">
+              <div v-for="task in activeUploads" :key="task.id" class="fm-upload-item">
                 <el-icon class="fm-upload-item-icon uploading"><Loading /></el-icon>
-                <span class="fm-upload-item-name" :title="t.relPath">{{ t.relPath }}</span>
-                <span class="fm-upload-item-size">{{ formatSize(t.size) }}</span>
-                <span class="fm-upload-item-status uploading">{{ t.percent }}%</span>
+                <span class="fm-upload-item-name" :title="task.relPath">{{ task.relPath }}</span>
+                <span class="fm-upload-item-size">{{ formatSize(task.size) }}</span>
+                <span class="fm-upload-item-status uploading">{{ task.percent }}%</span>
               </div>
             </div>
 
             <!-- 失败的文件：可单个重试或全部重试 -->
             <div v-if="failedUploads.length" class="fm-upload-failed">
               <div class="fm-upload-failed-head">
-                <span>失败 {{ failedUploads.length }}</span>
+                <span>{{ t('filesLocal.uploadFail', { n: failedUploads.length }) }}</span>
                 <el-button size="small" text type="primary" @click.stop="retryAllFailed">
-                  全部重试
+                  {{ t('filesLocal.retryAll') }}
                 </el-button>
               </div>
               <div class="fm-upload-list">
-                <div v-for="t in failedUploads" :key="t.id" class="fm-upload-item">
+                <div v-for="task in failedUploads" :key="task.id" class="fm-upload-item">
                   <el-icon class="fm-upload-item-icon failed"><CircleCloseFilled /></el-icon>
-                  <span class="fm-upload-item-name" :title="t.relPath">{{ t.relPath }}</span>
-                  <span class="fm-upload-item-size">{{ formatSize(t.size) }}</span>
-                  <el-button size="small" text type="primary" @click.stop="retryUpload(t)">
-                    重试
+                  <span class="fm-upload-item-name" :title="task.relPath">{{ task.relPath }}</span>
+                  <span class="fm-upload-item-size">{{ formatSize(task.size) }}</span>
+                  <el-button size="small" text type="primary" @click.stop="retryUpload(task)">
+                    {{ t('filesLocal.retry') }}
                   </el-button>
                 </div>
               </div>
@@ -366,75 +372,77 @@
     <!-- 新建目录对话框 -->
     <!-- el-form 渲染的是原生 form + 单输入框，回车会触发浏览器隐式提交（页面刷新），
          故 @submit.prevent 阻止提交，回车确认交给 @keydown.enter -->
-    <el-dialog v-model="mkdirVisible" title="新建目录" width="400px">
+    <el-dialog v-model="mkdirVisible" :title="t('filesLocal.newDir')" width="400px">
       <el-form @submit.prevent>
-        <el-form-item label="目录名">
+        <el-form-item :label="t('filesLocal.dirName')">
           <el-input
             v-model="mkdirName"
-            placeholder="请输入目录名"
+            :placeholder="t('filesLocal.dirNamePlaceholder')"
             @keydown.enter.prevent="onEnterConfirm($event, doMkdir)"
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="mkdirVisible = false">取消</el-button>
-        <el-button type="primary" @click="doMkdir">确定</el-button>
+        <el-button @click="mkdirVisible = false">{{ t('filesLocal.cancel') }}</el-button>
+        <el-button type="primary" @click="doMkdir">{{ t('filesLocal.ok') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 新建文件对话框 -->
-    <el-dialog v-model="newFileVisible" title="新建文件" width="400px">
+    <el-dialog v-model="newFileVisible" :title="t('filesLocal.newFile')" width="400px">
       <el-form @submit.prevent>
-        <el-form-item label="文件名">
+        <el-form-item :label="t('filesLocal.fileName')">
           <el-input
             v-model="newFileName"
-            placeholder="请输入文件名"
+            :placeholder="t('filesLocal.fileNamePlaceholder')"
             @keydown.enter.prevent="onEnterConfirm($event, doNewFile)"
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="newFileVisible = false">取消</el-button>
-        <el-button type="primary" @click="doNewFile">确定</el-button>
+        <el-button @click="newFileVisible = false">{{ t('filesLocal.cancel') }}</el-button>
+        <el-button type="primary" @click="doNewFile">{{ t('filesLocal.ok') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 重命名对话框 -->
-    <el-dialog v-model="renameVisible" title="重命名" width="400px">
+    <el-dialog v-model="renameVisible" :title="t('filesLocal.rename')" width="400px">
       <el-form @submit.prevent>
-        <el-form-item label="新名称">
+        <el-form-item :label="t('filesLocal.newName')">
           <el-input
             v-model="renameName"
-            placeholder="请输入新名称"
+            :placeholder="t('filesLocal.newNamePlaceholder')"
             @keydown.enter.prevent="onEnterConfirm($event, doRename)"
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="renameVisible = false">取消</el-button>
-        <el-button type="primary" @click="doRename">确定</el-button>
+        <el-button @click="renameVisible = false">{{ t('filesLocal.cancel') }}</el-button>
+        <el-button type="primary" @click="doRename">{{ t('filesLocal.ok') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 复制副本对话框：与重命名一样先确认名字，默认名由 nextCopyName 自动生成 -->
-    <el-dialog v-model="dupVisible" title="复制副本" width="400px">
+    <el-dialog v-model="dupVisible" :title="t('filesLocal.duplicate')" width="400px">
       <el-form @submit.prevent>
-        <el-form-item label="副本名称">
+        <el-form-item :label="t('filesLocal.dupName')">
           <el-input
             v-model="dupName"
-            placeholder="请输入副本名称"
+            :placeholder="t('filesLocal.dupNamePlaceholder')"
             @keydown.enter.prevent="onEnterConfirm($event, doDuplicate)"
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dupVisible = false">取消</el-button>
-        <el-button type="primary" :loading="dupSaving" @click="doDuplicate">确定</el-button>
+        <el-button @click="dupVisible = false">{{ t('filesLocal.cancel') }}</el-button>
+        <el-button type="primary" :loading="dupSaving" @click="doDuplicate">
+          {{ t('filesLocal.ok') }}
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 修改权限对话框（cPanel 风格：八进制数字与 rwx 勾选双向联动） -->
-    <el-dialog v-model="permVisible" title="修改权限" width="480px">
+    <el-dialog v-model="permVisible" :title="t('filesLocal.permTitle')" width="480px">
       <div class="fm-perm-target">
         <el-icon :size="16">
           <Folder v-if="permTarget?.is_dir" />
@@ -442,12 +450,12 @@
         </el-icon>
         <span class="mono">{{ permTarget?.path }}</span>
         <span v-if="permTargets.length > 1" class="fm-perm-count">
-          等 {{ permTargets.length }} 项
+          {{ t('filesLocal.moreItems', { n: permTargets.length }) }}
         </span>
       </div>
 
       <div class="fm-perm-value">
-        <span class="fm-perm-value-label">权限值</span>
+        <span class="fm-perm-value-label">{{ t('filesLocal.permValue') }}</span>
         <el-input
           v-model="permInput"
           class="fm-perm-input mono"
@@ -463,32 +471,32 @@
         <thead>
           <tr>
             <th class="fm-perm-owner"></th>
-            <th>读取</th>
-            <th>写入</th>
-            <th>执行</th>
+            <th>{{ t('filesLocal.permRead') }}</th>
+            <th>{{ t('filesLocal.permWrite') }}</th>
+            <th>{{ t('filesLocal.permExec') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td class="fm-perm-owner">用户</td>
+            <td class="fm-perm-owner">{{ t('filesLocal.permUser') }}</td>
             <td><el-checkbox v-model="permBits.ur" @change="onPermBitsChange" /></td>
             <td><el-checkbox v-model="permBits.uw" @change="onPermBitsChange" /></td>
             <td><el-checkbox v-model="permBits.ux" @change="onPermBitsChange" /></td>
           </tr>
           <tr>
-            <td class="fm-perm-owner">用户组</td>
+            <td class="fm-perm-owner">{{ t('filesLocal.permGroup') }}</td>
             <td><el-checkbox v-model="permBits.gr" @change="onPermBitsChange" /></td>
             <td><el-checkbox v-model="permBits.gw" @change="onPermBitsChange" /></td>
             <td><el-checkbox v-model="permBits.gx" @change="onPermBitsChange" /></td>
           </tr>
           <tr>
-            <td class="fm-perm-owner">其他</td>
+            <td class="fm-perm-owner">{{ t('filesLocal.permOther') }}</td>
             <td><el-checkbox v-model="permBits.or" @change="onPermBitsChange" /></td>
             <td><el-checkbox v-model="permBits.ow" @change="onPermBitsChange" /></td>
             <td><el-checkbox v-model="permBits.ox" @change="onPermBitsChange" /></td>
           </tr>
           <tr v-if="isAdmin" class="fm-perm-special">
-            <td class="fm-perm-owner">特殊位</td>
+            <td class="fm-perm-owner">{{ t('filesLocal.permSpecial') }}</td>
             <td>
               <el-checkbox v-model="permBits.suid" @change="onPermBitsChange">Set UID</el-checkbox>
             </td>
@@ -503,64 +511,72 @@
       </table>
 
       <div v-if="!isAdmin" class="fm-perm-note">
-        特殊位（Set UID / Set GID / Sticky）仅管理员可设置，其余角色仅能修改 rwx 权限。
+        {{ t('filesLocal.permNote') }}
       </div>
 
       <div class="fm-perm-preview">
-        预览：<span class="mono">{{ permOct }}</span>
-        <span class="text-muted">（{{ permRwx }}）</span>
+        {{ t('filesLocal.permPreview') }}<span class="mono">{{ permOct }}</span>
+        <span class="text-muted">({{ permRwx }})</span>
       </div>
 
       <div class="fm-perm-recursive">
-        <el-checkbox v-model="permRecursive">递归修改（包含子目录与文件）</el-checkbox>
+        <el-checkbox v-model="permRecursive">{{ t('filesLocal.recursive') }}</el-checkbox>
       </div>
 
       <template #footer>
-        <el-button @click="permVisible = false">取消</el-button>
-        <el-button type="primary" :loading="permSaving" @click="doChmod">确定</el-button>
+        <el-button @click="permVisible = false">{{ t('filesLocal.cancel') }}</el-button>
+        <el-button type="primary" :loading="permSaving" @click="doChmod">
+          {{ t('filesLocal.ok') }}
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 修改属主/属组对话框（仅 admin）：chown/chgrp，支持递归 -->
-    <el-dialog v-model="ownVisible" title="修改属主 / 属组" width="460px">
+    <el-dialog v-model="ownVisible" :title="t('filesLocal.ownTitle')" width="460px">
       <div class="fm-perm-target">
         <el-icon :size="16">
           <Folder v-if="ownTarget?.is_dir" />
           <Document v-else />
         </el-icon>
         <span class="mono">{{ ownTarget?.path }}</span>
-        <span v-if="ownTargets.length > 1" class="fm-perm-count"
-          >等 {{ ownTargets.length }} 项</span
-        >
+        <span v-if="ownTargets.length > 1" class="fm-perm-count">
+          {{ t('filesLocal.moreItems', { n: ownTargets.length }) }}
+        </span>
       </div>
 
       <el-form label-width="70px" @submit.prevent>
-        <el-form-item label="属主">
-          <el-input v-model="ownUser" placeholder="Linux 用户名，留空表示不修改" clearable />
+        <el-form-item :label="t('filesLocal.ownUser')">
+          <el-input v-model="ownUser" :placeholder="t('filesLocal.ownUserPlaceholder')" clearable />
         </el-form-item>
-        <el-form-item label="属组">
-          <el-input v-model="ownGroup" placeholder="Linux 用户组名，留空表示不修改" clearable />
+        <el-form-item :label="t('filesLocal.ownGroupLabel')">
+          <el-input
+            v-model="ownGroup"
+            :placeholder="t('filesLocal.ownGroupPlaceholder')"
+            clearable
+          />
         </el-form-item>
       </el-form>
 
       <div class="fm-perm-recursive">
-        <el-checkbox v-model="ownRecursive">递归修改（包含子目录与文件）</el-checkbox>
+        <el-checkbox v-model="ownRecursive">{{ t('filesLocal.recursive') }}</el-checkbox>
       </div>
 
       <div class="fm-perm-note">
-        需填写系统已存在的 Linux 用户名 / 用户组名；该操作仅管理员可用。
+        {{ t('filesLocal.ownNote') }}
       </div>
 
       <template #footer>
-        <el-button @click="ownVisible = false">取消</el-button>
-        <el-button type="primary" :loading="ownSaving" @click="doChown">确定</el-button>
+        <el-button @click="ownVisible = false">{{ t('filesLocal.cancel') }}</el-button>
+        <el-button type="primary" :loading="ownSaving" @click="doChown">
+          {{ t('filesLocal.ok') }}
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 文件编辑对话框 -->
     <el-dialog
       v-model="editVisible"
-      :title="'编辑: ' + editingFile"
+      :title="t('filesLocal.editTitle', { name: editingFile })"
       width="70%"
       top="5vh"
       @opened="onEditorOpened"
@@ -569,11 +585,13 @@
         v-model="editContent"
         class="fm-editor"
         :path="editingFullPath"
-        placeholder="文件内容"
+        :placeholder="t('filesLocal.editorPlaceholder')"
       />
       <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="doSaveEdit">保存</el-button>
+        <el-button @click="editVisible = false">{{ t('filesLocal.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="doSaveEdit">
+          {{ t('filesLocal.save') }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -588,14 +606,14 @@
     >
       <template #extra="{ path }">
         <div v-if="pickMode === 'archive'" class="fm-archive-name">
-          <span class="fm-archive-label">压缩包名称</span>
+          <span class="fm-archive-label">{{ t('filesLocal.archiveLabel') }}</span>
           <el-input
             v-model="archiveName"
-            placeholder="例如 backup"
+            :placeholder="t('filesLocal.archivePlaceholder')"
             @keydown.enter.prevent="onPickConfirm(path)"
           />
           <div v-if="archiveFileName" class="fm-archive-hint">
-            将创建：{{ path }}/{{ archiveFileName }}
+            {{ t('filesLocal.archiveWillCreate', { path: `${path}/${archiveFileName}` }) }}
           </div>
         </div>
       </template>
@@ -611,35 +629,35 @@
     >
       <div class="fm-context-item" :class="{ disabled: !canOpen }" @click="openSelectedFromMenu">
         <el-icon><Open /></el-icon>
-        <span>打开</span>
+        <span>{{ t('filesLocal.open') }}</span>
       </div>
       <div class="fm-context-item" :class="{ disabled: !canCopy }" @click="copyFromMenu">
         <el-icon><Copy /></el-icon>
-        <span>复制到...</span>
+        <span>{{ t('filesLocal.copyTo') }}</span>
       </div>
       <div class="fm-context-item" :class="{ disabled: !canDuplicate }" @click="duplicateFromMenu">
         <el-icon><Copy /></el-icon>
-        <span>复制副本</span>
+        <span>{{ t('filesLocal.duplicate') }}</span>
       </div>
       <div class="fm-context-item" :class="{ disabled: !canMove }" @click="moveFromMenu">
         <el-icon><Move /></el-icon>
-        <span>移动到...</span>
+        <span>{{ t('filesLocal.moveTo') }}</span>
       </div>
       <div class="fm-context-item" :class="{ disabled: !canDownload }" @click="downloadFromMenu">
         <el-icon><Download /></el-icon>
-        <span>下载</span>
+        <span>{{ t('filesLocal.download') }}</span>
       </div>
       <div class="fm-context-item" :class="{ disabled: !canArchive }" @click="archiveFromMenu">
         <el-icon><Archive /></el-icon>
-        <span>打包</span>
+        <span>{{ t('filesLocal.archive') }}</span>
       </div>
       <div class="fm-context-item" :class="{ disabled: !canRename }" @click="renameFromMenu">
         <el-icon><Edit /></el-icon>
-        <span>重命名</span>
+        <span>{{ t('filesLocal.rename') }}</span>
       </div>
       <div class="fm-context-item" :class="{ disabled: !canSetPermissions }" @click="permFromMenu">
         <el-icon><Setting /></el-icon>
-        <span>权限</span>
+        <span>{{ t('filesLocal.perm') }}</span>
       </div>
       <div
         v-if="isAdmin"
@@ -648,12 +666,12 @@
         @click="ownFromMenu"
       >
         <el-icon><User /></el-icon>
-        <span>属主 / 属组</span>
+        <span>{{ t('filesLocal.ownerGroup') }}</span>
       </div>
       <div class="fm-context-divider" />
       <div class="fm-context-item danger" :class="{ disabled: !canRemove }" @click="removeFromMenu">
         <el-icon><Delete /></el-icon>
-        <span>删除</span>
+        <span>{{ t('filesLocal.remove') }}</span>
       </div>
     </div>
   </div>
@@ -689,6 +707,7 @@ import {
 } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import {
   listFiles,
@@ -707,6 +726,8 @@ import {
 } from '@/api/file'
 import CodeEditor from '@/components/CodeEditor.vue'
 import DirPicker from '@/components/DirPicker.vue'
+
+const { t } = useI18n()
 
 // ── store ──────────────────────────────────────────────────
 
@@ -834,10 +855,20 @@ const pickMode = ref<PickMode>('copy')
 const pickSaving = ref(false)
 const archiveName = ref('')
 const pickTitle = computed(
-  () => ({ copy: '复制到目录', move: '移动到目录', archive: '打包到目录' })[pickMode.value],
+  () =>
+    ({
+      copy: t('filesLocal.pickCopyTitle'),
+      move: t('filesLocal.pickMoveTitle'),
+      archive: t('filesLocal.pickArchiveTitle'),
+    })[pickMode.value],
 )
 const pickConfirmText = computed(
-  () => ({ copy: '复制到此', move: '移动到此', archive: '打包到此' })[pickMode.value],
+  () =>
+    ({
+      copy: t('filesLocal.pickCopyConfirm'),
+      move: t('filesLocal.pickMoveConfirm'),
+      archive: t('filesLocal.pickArchiveConfirm'),
+    })[pickMode.value],
 )
 /** 打包时最终生成的文件名（后端会自动补 .zip），用于窗口内的预览提示 */
 const archiveFileName = computed(() => {
@@ -875,7 +906,7 @@ const crumbs = computed<Crumb[]>(() => {
   if (home && (current === home || current.startsWith(home + '/'))) {
     const rest = current.slice(home.length).split('/').filter(Boolean)
     return [
-      { label: home, path: home, title: `家目录 ${home}`, icon: 'home' },
+      { label: home, path: home, title: t('filesLocal.crumbHome', { path: home }), icon: 'home' },
       ...rest.map((name, idx) => {
         const path = `${home}/${rest.slice(0, idx + 1).join('/')}`
         return { label: name, path, title: path }
@@ -885,7 +916,7 @@ const crumbs = computed<Crumb[]>(() => {
 
   const segments = current.split('/').filter(Boolean)
   return [
-    { label: '/', path: '/', title: '根目录 /', icon: 'root' },
+    { label: '/', path: '/', title: t('filesLocal.crumbRoot'), icon: 'root' },
     ...segments.map((name, idx) => {
       const path = `/${segments.slice(0, idx + 1).join('/')}`
       return { label: name, path, title: path }
@@ -1137,7 +1168,7 @@ function removeFromMenu() {
 
 async function handleDownload(row: FileEntry) {
   if (row.is_dir) {
-    ElMessage.warning('不能下载目录')
+    ElMessage.warning(t('filesLocal.errDownloadDir'))
     return
   }
   try {
@@ -1148,7 +1179,7 @@ async function handleDownload(row: FileEntry) {
     a.download = row.name
     a.click()
     window.URL.revokeObjectURL(url)
-    ElMessage.success('下载成功')
+    ElMessage.success(t('filesLocal.downloadOk'))
   } catch {
     // handled by interceptor
   }
@@ -1171,7 +1202,7 @@ async function doSaveEdit() {
   try {
     const fullPath = editingFullPath.value || joinCurrent(editingFile.value)
     await writeFile(fullPath, editContent.value)
-    ElMessage.success('保存成功')
+    ElMessage.success(t('filesLocal.saveOk'))
     editVisible.value = false
     loadFileList()
   } catch {
@@ -1202,13 +1233,13 @@ function showMkdirDialog() {
 
 async function doMkdir() {
   if (!mkdirName.value.trim()) {
-    ElMessage.warning('请输入目录名')
+    ElMessage.warning(t('filesLocal.needDirName'))
     return
   }
   const fullPath = joinCurrent(mkdirName.value.trim())
   try {
     await mkdir(fullPath)
-    ElMessage.success('目录创建成功')
+    ElMessage.success(t('filesLocal.dirCreated'))
     mkdirVisible.value = false
     loadFileList()
     refreshTree()
@@ -1224,13 +1255,13 @@ function showNewFileDialog() {
 
 async function doNewFile() {
   if (!newFileName.value.trim()) {
-    ElMessage.warning('请输入文件名')
+    ElMessage.warning(t('filesLocal.needFileName'))
     return
   }
   const fullPath = joinCurrent(newFileName.value.trim())
   try {
     await writeFile(fullPath, '')
-    ElMessage.success('文件创建成功')
+    ElMessage.success(t('filesLocal.fileCreated'))
     newFileVisible.value = false
     loadFileList()
   } catch {
@@ -1246,14 +1277,14 @@ function showRenameDialog(row: FileEntry) {
 
 async function doRename() {
   if (!renameTarget.value || !renameName.value.trim()) {
-    ElMessage.warning('请输入新名称')
+    ElMessage.warning(t('filesLocal.needNewName'))
     return
   }
   const newPath = joinCurrent(renameName.value.trim())
 
   try {
     await renameFile(renameTarget.value.path, newPath)
-    ElMessage.success('重命名成功')
+    ElMessage.success(t('filesLocal.renamed'))
     renameVisible.value = false
     loadFileList()
     refreshTree()
@@ -1414,9 +1445,11 @@ const uploadPercent = computed(() => {
 })
 
 const uploadPanelTitle = computed(() => {
-  if (uploadScanning.value && !uploadTotal.value) return '正在读取待上传的文件…'
-  if (uploadInFlight.value) return `正在上传 ${uploadTotal.value} 个文件`
-  return uploadFailed.value ? '上传结束（有失败）' : '上传完成'
+  if (uploadScanning.value && !uploadTotal.value) return t('filesLocal.uploadingScan')
+  if (uploadInFlight.value) {
+    return t('filesLocal.uploadingCount', { n: uploadTotal.value })
+  }
+  return uploadFailed.value ? t('filesLocal.uploadEndFailed') : t('filesLocal.uploadEndOk')
 })
 
 /** 开始新一轮前清空上一轮的统计与显示 */
@@ -1530,14 +1563,14 @@ function finishUploadRound() {
   loadFileList()
   refreshTree()
   if (failed === 0) {
-    ElMessage.success(`已上传 ${total} 个文件`)
+    ElMessage.success(t('filesLocal.uploadedAll', { n: total }))
     setTimeout(() => {
       if (!uploadBusy.value) uploadPanelVisible.value = false
     }, 3000)
   } else if (failed < total) {
-    ElMessage.warning(`上传完成：成功 ${total - failed} 个，失败 ${failed} 个`)
+    ElMessage.warning(t('filesLocal.uploadSummary', { ok: total - failed, failed }))
   } else {
-    ElMessage.error(`上传失败（${failed} 个文件）`)
+    ElMessage.error(t('filesLocal.uploadAllFailed', { n: failed }))
   }
 }
 
@@ -1643,9 +1676,9 @@ async function downloadSelected() {
     const data = res.data
     if (!data?.content) return
     downloadBlob(data.name, data.content)
-    ElMessage.success('开始下载')
+    ElMessage.success(t('filesLocal.downloadStart'))
   } catch (e: any) {
-    ElMessage.error(e?.message || '下载失败')
+    ElMessage.error(e?.message || t('filesLocal.downloadFailed'))
   }
 }
 
@@ -1680,13 +1713,13 @@ async function doCopy(dir: string) {
   const items = selectedItems.value
   const target = dir.trim()
   if (!items.length || !target) {
-    ElMessage.warning('请选择目标目录')
+    ElMessage.warning(t('filesLocal.needTargetDir'))
     return
   }
   // 目标就是条目当前所在目录时后端会报错，这里提前拦下
   const same = items.find((it) => `${target}/${it.name}` === it.path)
   if (same) {
-    ElMessage.warning(`「${same.name}」已在该目录下，无需复制`)
+    ElMessage.warning(t('filesLocal.alreadyInDir', { name: same.name }))
     return
   }
   pickSaving.value = true
@@ -1694,12 +1727,12 @@ async function doCopy(dir: string) {
     for (const item of items) {
       await copyFile(item.path, `${target}/${item.name}`)
     }
-    ElMessage.success(`已复制 ${items.length} 项到 ${target}`)
+    ElMessage.success(t('filesLocal.copiedTo', { n: items.length, target }))
     pickVisible.value = false
     loadFileList()
     refreshTree()
   } catch (e: any) {
-    ElMessage.error(e?.message || '复制失败')
+    ElMessage.error(e?.message || t('filesLocal.copyFailed'))
   } finally {
     pickSaving.value = false
   }
@@ -1709,11 +1742,11 @@ async function doMove(dir: string) {
   const items = selectedItems.value
   const target = dir.trim()
   if (!items.length || !target) {
-    ElMessage.warning('请选择目标目录')
+    ElMessage.warning(t('filesLocal.needTargetDir'))
     return
   }
   if (target === currentPath.value) {
-    ElMessage.warning('目标目录就是当前目录，无需移动')
+    ElMessage.warning(t('filesLocal.sameDirNoMove'))
     return
   }
   // 目录不能移动到自己或自己的子目录里
@@ -1721,7 +1754,7 @@ async function doMove(dir: string) {
     (it) => it.is_dir && (target === it.path || target.startsWith(`${it.path}/`)),
   )
   if (inside) {
-    ElMessage.warning(`不能把「${inside.name}」移动到它自己里面`)
+    ElMessage.warning(t('filesLocal.moveIntoSelf', { name: inside.name }))
     return
   }
   pickSaving.value = true
@@ -1729,12 +1762,12 @@ async function doMove(dir: string) {
     for (const item of items) {
       await renameFile(item.path, `${target}/${item.name}`)
     }
-    ElMessage.success(`已移动 ${items.length} 项到 ${target}`)
+    ElMessage.success(t('filesLocal.movedTo', { n: items.length, target }))
     pickVisible.value = false
     loadFileList()
     refreshTree()
   } catch (e: any) {
-    ElMessage.error(e?.message || '移动失败')
+    ElMessage.error(e?.message || t('filesLocal.moveFailed'))
   } finally {
     pickSaving.value = false
   }
@@ -1746,11 +1779,11 @@ async function doArchive(dir: string) {
   const target = dir.trim()
   const name = archiveName.value.trim()
   if (!items.length || !target) {
-    ElMessage.warning('请选择目标目录')
+    ElMessage.warning(t('filesLocal.needTargetDir'))
     return
   }
   if (!name) {
-    ElMessage.warning('请输入压缩包名称')
+    ElMessage.warning(t('filesLocal.needArchiveName'))
     return
   }
   pickSaving.value = true
@@ -1761,12 +1794,14 @@ async function doArchive(dir: string) {
       currentPath.value,
       target,
     )
-    ElMessage.success(`已创建压缩包 ${res.data?.path || archiveFileName.value}`)
+    ElMessage.success(
+      t('filesLocal.archiveCreated', { path: res.data?.path || archiveFileName.value }),
+    )
     pickVisible.value = false
     loadFileList()
     refreshTree()
   } catch (e: any) {
-    ElMessage.error(e?.message || '打包失败')
+    ElMessage.error(e?.message || t('filesLocal.archiveFailed'))
   } finally {
     pickSaving.value = false
   }
@@ -1813,30 +1848,30 @@ async function doDuplicate() {
   const item = dupTarget.value
   const name = dupName.value.trim()
   if (!item || !name) {
-    ElMessage.warning('请输入副本名称')
+    ElMessage.warning(t('filesLocal.needDupName'))
     return
   }
   if (name.includes('/')) {
-    ElMessage.warning('副本名称不能包含 /')
+    ElMessage.warning(t('filesLocal.dupNameNoSlash'))
     return
   }
   if (name === item.name) {
-    ElMessage.warning('副本名称不能与原名称相同')
+    ElMessage.warning(t('filesLocal.dupNameSame'))
     return
   }
   if (fileList.value.some((e) => e.name === name)) {
-    ElMessage.warning(`「${name}」已存在，请换一个名称`)
+    ElMessage.warning(t('filesLocal.nameExists', { name }))
     return
   }
   dupSaving.value = true
   try {
     await copyFile(item.path, `${parentDir(item.path)}/${name}`)
-    ElMessage.success('复制副本成功')
+    ElMessage.success(t('filesLocal.dupOk'))
     dupVisible.value = false
     loadFileList()
     refreshTree()
   } catch (e: any) {
-    ElMessage.error(e?.message || '复制失败')
+    ElMessage.error(e?.message || t('filesLocal.copyFailed'))
   } finally {
     dupSaving.value = false
   }
@@ -1846,9 +1881,12 @@ async function removeSelected() {
   if (!hasSelection.value) return
   try {
     await ElMessageBox.confirm(
-      `确认删除选中的 ${selectionCount.value} 项？${hasDirectory.value ? '目录内所有内容将被删除。' : ''}此操作不可恢复。`,
-      '警告',
-      { type: 'warning', confirmButtonText: '确认删除' },
+      t('filesLocal.delConfirm', {
+        n: selectionCount.value,
+        dirTip: hasDirectory.value ? t('filesLocal.delConfirmDirTip') : '',
+      }),
+      t('filesLocal.delWarning'),
+      { type: 'warning', confirmButtonText: t('filesLocal.delConfirmBtn') },
     )
   } catch {
     return
@@ -1857,11 +1895,11 @@ async function removeSelected() {
     for (const item of selectedItems.value) {
       await deleteFile(item.path)
     }
-    ElMessage.success('删除成功')
+    ElMessage.success(t('filesLocal.deleteOk'))
     loadFileList()
     refreshTree()
   } catch (e: any) {
-    ElMessage.error(e?.message || '删除失败')
+    ElMessage.error(e?.message || t('filesLocal.deleteFailed'))
   }
 }
 
@@ -1963,7 +2001,7 @@ function fromOct(text: string): number {
 
 const permInputPlaceholder = computed(() => (isAdmin.value ? '0755' : '755'))
 const permInputHint = computed(() =>
-  isAdmin.value ? '八进制 1-4 位，如 0755 / 0644 / 1777' : '八进制 1-3 位，如 755 / 644 / 777',
+  isAdmin.value ? t('filesLocal.permHintAdmin') : t('filesLocal.permHintUser'),
 )
 
 const permMode = computed(() => bitsToMode())
@@ -2026,7 +2064,10 @@ async function doChmod() {
   const digits = (permInput.value || '').trim()
   if (!/^[0-7]{1,4}$/.test(digits)) {
     ElMessage.warning(
-      `请输入 1-${isAdmin.value ? 4 : 3} 位八进制权限值，如 ${permInputPlaceholder.value}`,
+      t('filesLocal.permInvalid', {
+        n: isAdmin.value ? 4 : 3,
+        example: permInputPlaceholder.value,
+      }),
     )
     return
   }
@@ -2042,7 +2083,9 @@ async function doChmod() {
         target.mode = info.mode
       }
     }
-    ElMessage.success(permRecursive.value ? '权限修改成功（已递归）' : '权限修改成功')
+    ElMessage.success(
+      permRecursive.value ? t('filesLocal.permOkRecursive') : t('filesLocal.permOk'),
+    )
     permVisible.value = false
     loadFileList()
   } catch {
@@ -2089,7 +2132,7 @@ async function doChown() {
   const owner = ownUser.value.trim() || null
   const group = ownGroup.value.trim() || null
   if (!owner && !group) {
-    ElMessage.warning('请至少填写属主或属组')
+    ElMessage.warning(t('filesLocal.needOwnerOrGroup'))
     return
   }
   ownSaving.value = true
@@ -2109,10 +2152,12 @@ async function doChown() {
       changed++
     }
     if (changed === 0) {
-      ElMessage.info('属主/属组没有变化')
+      ElMessage.info(t('filesLocal.ownerNoChange'))
       return
     }
-    ElMessage.success(ownRecursive.value ? '属主修改成功（已递归）' : '属主修改成功')
+    ElMessage.success(
+      ownRecursive.value ? t('filesLocal.ownerOkRecursive') : t('filesLocal.ownerOk'),
+    )
     ownVisible.value = false
     loadFileList()
   } catch {

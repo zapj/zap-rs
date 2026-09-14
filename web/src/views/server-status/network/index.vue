@@ -3,25 +3,25 @@
     <el-card shadow="hover">
       <template #header>
         <div class="card-header">
-          <span>网卡列表</span>
+          <span>{{ t('statusNetwork.cardList') }}</span>
           <el-button size="small" :icon="Refresh" circle @click="FetchRTStatus" />
         </div>
       </template>
       <el-table :data="netCards" v-loading="loading" border stripe>
-        <el-table-column prop="name" label="接口" width="140" />
-        <el-table-column label="IP 地址">
+        <el-table-column prop="name" :label="t('statusNetwork.iface')" width="140" />
+        <el-table-column :label="t('statusNetwork.ipAddr')">
           <template #default="{ row }">{{ row.ipaddrs }}</template>
         </el-table-column>
-        <el-table-column label="接收速率" width="140">
+        <el-table-column :label="t('statusNetwork.downRate')" width="140">
           <template #default="{ row }">{{ row.downRate || '-' }}</template>
         </el-table-column>
-        <el-table-column label="发送速率" width="140">
+        <el-table-column :label="t('statusNetwork.upRate')" width="140">
           <template #default="{ row }">{{ row.upRate || '-' }}</template>
         </el-table-column>
-        <el-table-column label="累计接收" width="140">
+        <el-table-column :label="t('statusNetwork.totalReceived')" width="140">
           <template #default="{ row }">{{ formatBytes(row.total_received) }}</template>
         </el-table-column>
-        <el-table-column label="累计发送" width="140">
+        <el-table-column :label="t('statusNetwork.totalTransmitted')" width="140">
           <template #default="{ row }">{{ formatBytes(row.total_transmitted) }}</template>
         </el-table-column>
       </el-table>
@@ -30,8 +30,13 @@
     <el-card shadow="hover" class="mt-4">
       <template #header>
         <div class="card-header">
-          <span>网络流量趋势（最近 5 分钟）</span>
-          <el-select v-model="selectedNet" size="small" style="width: 180px" @change="rebuildNetworkChart">
+          <span>{{ t('statusNetwork.trend') }}</span>
+          <el-select
+            v-model="selectedNet"
+            size="small"
+            style="width: 180px"
+            @change="rebuildNetworkChart"
+          >
             <el-option v-for="n in netNames" :key="n" :label="n" :value="n" />
           </el-select>
         </div>
@@ -45,9 +50,12 @@
 import Chart from 'chart.js/auto'
 import { applyChartTheme, watchChartTheme } from '@/utils/chart-theme'
 import { onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Refresh } from '@/icons'
 import { getRTStatus } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt'
+
+const { t } = useI18n()
 
 const loading = ref(false)
 const netCards = ref<any[]>([])
@@ -68,7 +76,7 @@ onMounted(async () => {
       labels: [],
       datasets: [
         {
-          label: '接收 Down',
+          label: t('statusNetwork.down'),
           data: [],
           fill: false,
           borderColor: 'rgba(103, 194, 58, 1)',
@@ -76,7 +84,7 @@ onMounted(async () => {
           pointRadius: 0,
         },
         {
-          label: '发送 Up',
+          label: t('statusNetwork.up'),
           data: [],
           fill: false,
           borderColor: 'rgba(245, 108, 108, 1)',

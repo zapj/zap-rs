@@ -122,8 +122,9 @@ cp -f "$CUR_DIR/data/appstore/custom/README.md" "$DIST_DATA/appstore/custom/" 2>
 cp -f "$CUR_DIR/data/apps/README.md" "$DIST_DATA/apps/" 2>/dev/null || true
 # www/：站点骨架模板 skel/index.html 与 IP 默认页 / 维护页 _zap/*.html（运维可直接编辑）
 cp -Rf "$CUR_DIR/data/www" "$DIST_DATA/" 2>/dev/null || true
+mkdir -p "$DIST_DATA/www/html"
+cp -Rf "$CUR_DIR/CHANGELOG.md" "$DIST_DATA/www/html/" 2>/dev/null || true
 
-# 不打包 conf/：zap.yaml 由安装文件(install.sh)创建，升级沿用已有配置，无需内置模板
 ok "资源复制完成"
 
 cd "$DIST_DIR" || die "无法进入 dist 目录"

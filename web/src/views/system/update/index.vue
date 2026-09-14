@@ -4,16 +4,16 @@
     <el-card shadow="never" class="mb">
       <template #header>
         <div class="card-header">
-          <span>版本与升级</span>
+          <span>{{ t('sysUpdate.versionCard') }}</span>
           <el-button v-if="status.upgrading" type="warning" plain :loading="true" size="small">
-            正在升级…
+            {{ t('sysUpdate.upgrading') }}
           </el-button>
           <template v-else>
             <el-button type="primary" plain size="small" :loading="checking" @click="onCheck">
-              {{ hasChecked ? '重新检查更新' : '检查更新' }}
+              {{ hasChecked ? t('sysUpdate.recheck') : t('sysUpdate.check') }}
             </el-button>
             <el-button type="danger" plain size="small" :disabled="!hasChecked" @click="onApply">
-              立即升级
+              {{ t('sysUpdate.applyNow') }}
             </el-button>
           </template>
         </div>
@@ -22,13 +22,12 @@
       <el-descriptions :column="2" border>
         <el-descriptions-item label="Zap">
           <span class="ver-highlight">v{{ status.zapd_version || '-' }}</span>
-          <el-tooltip v-if="!status.zapexec_version" content="zapexec 未响应（RPC 不可达）">
+          <el-tooltip v-if="!status.zapexec_version" :content="t('sysUpdate.zapexecUnreachable')">
             <el-icon class="warn-icon"><Warning /></el-icon>
           </el-tooltip>
-          <span
-            v-else-if="status.zapexec_version !== status.zapd_version"
-            class="ver-sub"
-          >执行器 zapexec v{{ status.zapexec_version }}</span>
+          <span v-else-if="status.zapexec_version !== status.zapd_version" class="ver-sub">
+            {{ t('sysUpdate.zapexecVersion', { version: status.zapexec_version }) }}
+          </span>
         </el-descriptions-item>
         <el-descriptions-item label="Web">
           <span class="ver-highlight">v{{ WEB_VERSION || '-' }}</span>
@@ -49,34 +48,50 @@
     <el-card shadow="never" class="mb">
       <template #header>
         <div class="card-header">
-          <span>自动更新</span>
+          <span>{{ t('sysUpdate.autoCard') }}</span>
           <el-button type="primary" size="small" :loading="saving" @click="onSaveConfig">
-            保存配置
+            {{ t('sysUpdate.saveConfig') }}
           </el-button>
         </div>
       </template>
 
       <el-form label-width="120px" class="auto-form" @submit.prevent>
-        <el-form-item label="启用自动更新">
+        <el-form-item :label="t('sysUpdate.enableAuto')">
           <el-switch v-model="form.auto" />
-          <span class="form-hint">开启后按下方 cron 定时检查；发现新版本自动升级 zapd 与 zapexec</span>
+          <span class="form-hint">{{ t('sysUpdate.enableAutoHint') }}</span>
         </el-form-item>
-        <el-form-item label="更新时刻 (cron)">
-          <el-input v-model="form.cron" class="w-320" placeholder="例：0 3 * * *（每天 03:00）" />
-          <span class="form-hint">标准 5 段 cron：分 时 日 月 周（支持 * / */n a-b a,b）</span>
+        <el-form-item :label="t('sysUpdate.cron')">
+          <el-input
+            v-model="form.cron"
+            class="w-320"
+            :placeholder="t('sysUpdate.cronPlaceholder')"
+          />
+          <span class="form-hint">{{ t('sysUpdate.cronHint') }}</span>
         </el-form-item>
-        <el-form-item label="更新渠道">
-          <el-input v-model="form.channel" class="w-480" placeholder="https://mirrors.zap.cn/zap/releases" />
-          <span class="form-hint">发行包与 latest.txt 所在目录（需以 http(s):// 开头）</span>
+        <el-form-item :label="t('sysUpdate.channel')">
+          <el-input
+            v-model="form.channel"
+            class="w-480"
+            placeholder="https://mirrors.zap.cn/zap/releases"
+          />
+          <span class="form-hint">{{ t('sysUpdate.channelHint') }}</span>
         </el-form-item>
-        <el-form-item label="最近检查">
+        <el-form-item :label="t('sysUpdate.lastCheck')">
           <span class="muted">
             <template v-if="status.config.last_check_at">
               {{ fmtTime(status.config.last_check_at) }} ·
-              {{ status.config.last_check_has_update ? `发现新版本 v${status.config.last_check_version}` : (status.config.last_check_version ? '已是最新版本' : '检查失败') }}
+              {{
+                status.config.last_check_has_update
+                  ? t('sysUpdate.foundNewVersion', { version: status.config.last_check_version })
+                  : status.config.last_check_version
+                    ? t('sysUpdate.upToDate')
+                    : t('sysUpdate.checkFailed')
+              }}
             </template>
-            <template v-else>尚未检查过</template>
-            <span v-if="status.config.last_error" class="err-text">（{{ status.config.last_error }}）</span>
+            <template v-else>{{ t('sysUpdate.neverChecked') }}</template>
+            <span v-if="status.config.last_error" class="err-text">
+              ({{ status.config.last_error }})
+            </span>
           </span>
         </el-form-item>
       </el-form>
@@ -86,8 +101,8 @@
     <el-card v-if="liveLog" shadow="never" class="mb">
       <template #header>
         <div class="card-header">
-          <span>升级日志（{{ liveRunId }}）</span>
-          <el-button size="small" @click="closeLiveLog">关闭</el-button>
+          <span>{{ t('sysUpdate.liveLogTitle', { id: liveRunId }) }}</span>
+          <el-button size="small" @click="closeLiveLog">{{ t('sysUpdate.close') }}</el-button>
         </div>
       </template>
       <pre class="log-box">{{ liveLog }}</pre>
@@ -96,25 +111,33 @@
     <!-- 升级历史 -->
     <el-card shadow="never">
       <template #header>
-        <span>升级历史</span>
+        <span>{{ t('sysUpdate.historyTitle') }}</span>
       </template>
-      <el-table :data="status.recent_runs" size="small" empty-text="暂无升级记录">
-        <el-table-column label="版本" width="140">
+      <el-table :data="status.recent_runs" size="small" :empty-text="t('sysUpdate.emptyHistory')">
+        <el-table-column :label="t('sysUpdate.colVersion')" width="140">
           <template #default="{ row }">v{{ row.pkg }}</template>
         </el-table-column>
-        <el-table-column label="结果" width="110">
+        <el-table-column :label="t('sysUpdate.colResult')" width="110">
           <template #default="{ row }">
             <el-tag :type="tagType(row.status)" size="small">
-              {{ row.status === 'running' ? '进行中' : row.status === 'success' ? '成功' : '失败' }}
+              {{
+                row.status === 'running'
+                  ? t('sysUpdate.statusRunning')
+                  : row.status === 'success'
+                    ? t('sysUpdate.statusSuccess')
+                    : t('sysUpdate.statusFailed')
+              }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="开始时间">
+        <el-table-column :label="t('sysUpdate.colStartedAt')">
           <template #default="{ row }">{{ fmtTime(row.started_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="120" align="right">
+        <el-table-column :label="t('common.operation')" width="120" align="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openHistoryLog(row)">查看日志</el-button>
+            <el-button link type="primary" @click="openHistoryLog(row)">
+              {{ t('sysUpdate.viewLog') }}
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -123,18 +146,19 @@
     <!-- 历史日志对话框 -->
     <el-dialog
       v-model="historyVisible"
-      title="升级日志"
+      :title="t('sysUpdate.historyLogTitle')"
       width="720px"
       append-to-body
       destroy-on-close
     >
-      <pre class="log-box">{{ historyLog || '（无日志内容）' }}</pre>
+      <pre class="log-box">{{ historyLog || t('sysUpdate.noLogContent') }}</pre>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Warning } from '@/icons'
 import {
@@ -148,6 +172,8 @@ import {
 } from '@/api/systemUpdate'
 
 const WEB_VERSION = import.meta.env.VITE_WEB_VERSION || ''
+
+const { t } = useI18n()
 
 const status = reactive<UpdateStatusData>({
   zapd_version: '',
@@ -224,16 +250,19 @@ async function onCheck() {
     if (d.has_update) {
       checkMsg.value = {
         type: 'warning',
-        text: `发现新版本：当前 v${d.current} → 最新 v${d.latest}，可点击右上角「立即升级」`,
+        text: t('sysUpdate.newVersionMsg', { current: d.current, latest: d.latest }),
       }
     } else {
-      checkMsg.value = { type: 'success', text: `已是最新版本 v${d.current}` }
+      checkMsg.value = { type: 'success', text: t('sysUpdate.latestMsg', { version: d.current }) }
     }
     // 同步 last_check
     const st = await getUpdateStatus()
     Object.assign(status.config, st.data.config)
   } catch (e: any) {
-    checkMsg.value = { type: 'error', text: `检查更新失败：${e?.message || e}` }
+    checkMsg.value = {
+      type: 'error',
+      text: t('sysUpdate.checkError', { msg: String(e?.message || e) }),
+    }
   } finally {
     checking.value = false
   }
@@ -247,17 +276,21 @@ function validateCron(expr: string): boolean {
 
 async function onSaveConfig() {
   if (!validateCron(form.cron)) {
-    ElMessage.warning('cron 表达式需为 5 段（分 时 日 月 周），且仅含数字与 * / - ,')
+    ElMessage.warning(t('sysUpdate.invalidCron'))
     return
   }
   if (!/^https?:\/\//.test(form.channel)) {
-    ElMessage.warning('更新渠道需以 http:// 或 https:// 开头')
+    ElMessage.warning(t('sysUpdate.invalidChannel'))
     return
   }
   saving.value = true
   try {
-    await saveUpdateConfig({ auto: form.auto, cron: form.cron.trim(), channel: form.channel.trim().replace(/\/+$/, '') })
-    ElMessage.success('自动更新配置已保存')
+    await saveUpdateConfig({
+      auto: form.auto,
+      cron: form.cron.trim(),
+      channel: form.channel.trim().replace(/\/+$/, ''),
+    })
+    ElMessage.success(t('sysUpdate.configSaved'))
     Object.assign(status.config, {
       auto: form.auto,
       cron: form.cron.trim(),
@@ -272,21 +305,24 @@ async function onSaveConfig() {
 
 async function onApply() {
   try {
-    await ElMessageBox.confirm(
-      '升级将依次替换并重启 zapd 与 zapexec，期间面板会短暂不可用（自动更新时请勿重复触发）。是否继续？',
-      '确认升级',
-      { type: 'warning', confirmButtonText: '立即升级', cancelButtonText: '取消' },
-    )
+    await ElMessageBox.confirm(t('sysUpdate.applyConfirm'), t('sysUpdate.applyConfirmTitle'), {
+      type: 'warning',
+      confirmButtonText: t('sysUpdate.applyNow'),
+      cancelButtonText: t('common.cancel'),
+    })
   } catch {
     return
   }
   try {
     const res = await applyUpdate()
     status.upgrading = true
-    ElMessage.success(`升级已启动（目标版本 v${res.data.latest}）`)
+    ElMessage.success(t('sysUpdate.applyStarted', { version: res.data.latest }))
     startPoll(res.data.run_id, res.data.log_path)
   } catch (e: any) {
-    checkMsg.value = { type: 'error', text: `升级启动失败：${e?.message || e}` }
+    checkMsg.value = {
+      type: 'error',
+      text: t('sysUpdate.applyError', { msg: String(e?.message || e) }),
+    }
   }
 }
 
@@ -294,7 +330,7 @@ function startPoll(runId: string, logPath: string) {
   stopPoll()
   liveRunId.value = runId
   liveOffset.value = 0
-  liveLog.value = `等待升级器启动…\n`
+  liveLog.value = `${t('sysUpdate.waitingUpgrader')}\n`
   pollTimer = setInterval(pollLog, 1500)
   pollLog()
 }
@@ -313,7 +349,7 @@ async function pollLog() {
       const ok = d.exit_code === 0
       ElMessage({
         type: ok ? 'success' : 'error',
-        message: ok ? '升级成功，面板即将以新版本重启，请稍后刷新页面查看' : '升级未完全成功，请查看日志',
+        message: ok ? t('sysUpdate.upgradeOk') : t('sysUpdate.upgradeFailed'),
         duration: 6000,
       })
       // 稍等面板重启后刷新状态
@@ -326,7 +362,7 @@ async function pollLog() {
   } catch {
     // zapd 正在重启导致请求中断 → 提示用户刷新查看
     stopPoll()
-    ElMessage.warning('连接中断（面板可能在重启中），请稍后刷新页面查看升级结果')
+    ElMessage.warning(t('sysUpdate.connInterrupted'))
   }
 }
 
@@ -348,9 +384,9 @@ async function openHistoryLog(row: UpdateRunInfo) {
   historyLog.value = ''
   try {
     const res = await getUpdateLog(row.run_id, 0)
-    historyLog.value = res.data.log || '（日志已清理或为空）'
+    historyLog.value = res.data.log || t('sysUpdate.logCleared')
   } catch {
-    historyLog.value = '读取日志失败'
+    historyLog.value = t('sysUpdate.logReadFailed')
   }
 }
 

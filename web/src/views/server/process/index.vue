@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { http } from '@/utils/request'
 import { Search } from '@/icons'
 
@@ -14,6 +15,8 @@ interface ProcessItem {
   cmd: string
 }
 
+const { t } = useI18n()
+
 const processes = ref<ProcessItem[]>([])
 const loading = ref(false)
 const actingPid = ref<number | null>(null)
@@ -24,7 +27,7 @@ const filteredProcesses = computed(() => {
   if (!filter.value) return processes.value
   const f = filter.value.toLowerCase()
   return processes.value.filter(
-    p =>
+    (p) =>
       p.pid.toString().includes(f) ||
       p.user.toLowerCase().includes(f) ||
       p.cmd.toLowerCase().includes(f),
@@ -38,7 +41,9 @@ async function loadProcesses() {
       '/system/config/processes',
     )
     processes.value = res.data?.processes ?? []
-  } catch { /* handled */ } finally {
+  } catch {
+    /* handled */
+  } finally {
     loading.value = false
   }
 }
@@ -53,23 +58,33 @@ function statType(stat: string): 'success' | 'danger' | 'warning' | 'info' {
 }
 
 async function killProcess(row: ProcessItem, signal: 'TERM' | 'KILL') {
-  const label = signal === 'KILL' ? '强制终止' : '终止'
+  const label = signal === 'KILL' ? t('serverProcess.forceKill') : t('serverProcess.terminate')
   const tip =
     signal === 'KILL'
-      ? `确认强制终止进程 ${row.pid}（${row.cmd}）？该操作不可恢复。`
-      : `确认终止进程 ${row.pid}（${row.cmd}）？`
+      ? t('serverProcess.killConfirm', { pid: row.pid, cmd: row.cmd })
+      : t('serverProcess.termConfirm', { pid: row.pid, cmd: row.cmd })
   try {
-    await ElMessageBox.confirm(tip, '提示', { type: 'warning', confirmButtonText: label })
-  } catch { return }
+    await ElMessageBox.confirm(tip, t('common.tip'), {
+      type: 'warning',
+      confirmButtonText: label,
+    })
+  } catch {
+    return
+  }
   actingPid.value = row.pid
   try {
-    const res = await http.post<{ code: number; message: string }>('/system/config/processes/kill', {
-      pid: row.pid,
-      signal: signal === 'KILL' ? '9' : undefined,
-    })
-    ElMessage.success(res.message ?? `${label}成功`)
+    const res = await http.post<{ code: number; message: string }>(
+      '/system/config/processes/kill',
+      {
+        pid: row.pid,
+        signal: signal === 'KILL' ? '9' : undefined,
+      },
+    )
+    ElMessage.success(res.message ?? t('serverProcess.actionSuccess', { label }))
     await loadProcesses()
-  } catch { /* handled */ } finally {
+  } catch {
+    /* handled */
+  } finally {
     actingPid.value = null
   }
 }
@@ -92,14 +107,21 @@ onBeforeUnmount(() => {
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>进程管理</span>
+          <span>{{ t('serverProcess.title') }}</span>
           <div class="header-actions">
-            <el-input v-model="filter" placeholder="搜索 PID / 用户 / 命令..." clearable style="width: 240px">
+            <el-input
+              v-model="filter"
+              :placeholder="t('serverProcess.searchPlaceholder')"
+              clearable
+              style="width: 240px"
+            >
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
-            <el-button type="primary" :loading="loading" @click="loadProcesses">刷新</el-button>
+            <el-button type="primary" :loading="loading" @click="loadProcesses">
+              {{ t('common.refresh') }}
+            </el-button>
           </div>
         </div>
       </template>
@@ -109,29 +131,49 @@ onBeforeUnmount(() => {
         v-loading="loading"
         stripe
         style="width: 100%"
-        empty-text="暂无进程"
+        :empty-text="t('serverProcess.empty')"
         size="default"
       >
         <el-table-column prop="pid" label="PID" width="90" align="center" />
-        <el-table-column prop="user" label="用户" width="100" show-overflow-tooltip />
+        <el-table-column
+          prop="user"
+          :label="t('serverProcess.user')"
+          width="100"
+          show-overflow-tooltip
+        />
         <el-table-column prop="pcpu" label="CPU%" width="90" align="center">
           <template #default="{ row }">
             <span :class="{ 'high-usage': Number(row.pcpu) > 50 }">{{ row.pcpu }}%</span>
           </template>
         </el-table-column>
-        <el-table-column prop="pmem" label="内存%" width="90" align="center">
+        <el-table-column
+          prop="pmem"
+          :label="t('serverProcess.memPercent')"
+          width="90"
+          align="center"
+        >
           <template #default="{ row }">
             <span>{{ row.pmem }}%</span>
           </template>
         </el-table-column>
-        <el-table-column prop="stat" label="状态" width="100" align="center">
+        <el-table-column prop="stat" :label="t('common.status')" width="100" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="statType(row.stat)">{{ row.stat }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="etime" label="运行时长" width="110" align="center" />
-        <el-table-column prop="cmd" label="命令" min-width="320" show-overflow-tooltip />
-        <el-table-column label="操作" width="190" align="center" fixed="right">
+        <el-table-column
+          prop="etime"
+          :label="t('serverProcess.uptime')"
+          width="110"
+          align="center"
+        />
+        <el-table-column
+          prop="cmd"
+          :label="t('serverProcess.command')"
+          min-width="320"
+          show-overflow-tooltip
+        />
+        <el-table-column :label="t('common.operation')" width="190" align="center" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
@@ -141,7 +183,7 @@ onBeforeUnmount(() => {
               :disabled="isProtected(row.pid) || actingPid !== null"
               @click="killProcess(row, 'TERM')"
             >
-              终止
+              {{ t('serverProcess.terminate') }}
             </el-button>
             <el-button
               size="small"
@@ -150,7 +192,7 @@ onBeforeUnmount(() => {
               :disabled="isProtected(row.pid) || actingPid !== null"
               @click="killProcess(row, 'KILL')"
             >
-              强制终止
+              {{ t('serverProcess.forceKill') }}
             </el-button>
           </template>
         </el-table-column>
@@ -160,8 +202,21 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.process-container { padding: 20px; }
-.card-header { display: flex; align-items: center; justify-content: space-between; }
-.header-actions { display: flex; align-items: center; gap: 12px; }
-.high-usage { color: #f56c6c; font-weight: 600; }
+.process-container {
+  padding: 20px;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.high-usage {
+  color: #f56c6c;
+  font-weight: 600;
+}
 </style>

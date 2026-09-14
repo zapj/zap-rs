@@ -1,11 +1,14 @@
 <template>
-  <el-config-provider :locale="zhCn">
+  <!-- Element Plus 组件库文案（分页器 / 日期选择器 / 表格空态…）跟随应用语言 -->
+  <el-config-provider :locale="elementLocale">
     <router-view />
   </el-config-provider>
 </template>
 
 <script setup lang="ts">
-import zhCn from 'element-plus/dist/locale/zh-cn.mjs';
+import { useLocale } from '@/composables/useLocale'
+
+const { elementLocale } = useLocale()
 </script>
 
 <style>

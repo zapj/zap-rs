@@ -1,28 +1,30 @@
 /**
- * 角色名称映射（与后端 roles 表 role_key 对应）
+ * 角色名称映射（与后端 roles 表 role_key 对应）。
+ *
+ * 显示名来自语言包的 `role` 命名空间；管理员自建的角色（role_key 不在语言包里）
+ * 原样返回标识符，避免界面出现空白。
+ *
+ * 这里用 `@/i18n` 的全局 `t` 而不是组件内的 `useI18n()`——`t` 在渲染期被调用时会读到
+ * 当前 locale，因此模板里依然响应语言切换（原理见 i18n/index.ts 的注释）。
  */
-export const ROLE_LABELS: Record<string, string> = {
-  admin: '管理员',
-  reseller: '经销商',
-  user: '普通用户',
-  demo: '演示',
-}
+import { t, te } from '@/i18n'
 
-/** 根据角色标识返回中文名称，未知角色原样返回 */
+/** 全部内置角色（下拉框用），顺序即展示顺序 */
+export const ROLE_KEYS = ['admin', 'reseller', 'user', 'demo'] as const
+
+/** 根据角色标识返回当前语言下的名称，未知角色原样返回 */
 export function roleLabel(role: string): string {
-  return ROLE_LABELS[role] ?? role
+  const key = `role.${role}`
+  return te(key) ? t(key) : role
 }
 
-/** 全部可选角色（用于下拉框） */
-export const ROLE_OPTIONS = [
-  { label: '管理员', value: 'admin' },
-  { label: '经销商', value: 'reseller' },
-  { label: '普通用户', value: 'user' },
-  { label: '演示', value: 'demo' },
-]
+/** 角色下拉选项（值 + 当前语言下的标签） */
+export function roleOptions(): { label: string; value: string }[] {
+  return ROLE_KEYS.map((value) => ({ label: roleLabel(value), value }))
+}
 
 /** 系统内置角色标识（不可删除、不可禁用、不可修改标识） */
-export const BUILTIN_ROLE_KEYS = ['admin', 'reseller', 'user', 'demo']
+export const BUILTIN_ROLE_KEYS: string[] = [...ROLE_KEYS]
 
 export function isBuiltinRole(roleKey: string): boolean {
   return BUILTIN_ROLE_KEYS.includes(roleKey)

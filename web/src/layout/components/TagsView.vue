@@ -9,7 +9,7 @@
         @click="goToPage(tag)"
         @contextmenu.prevent="openMenu(tag, $event)"
       >
-        <span>{{ tag.title }}</span>
+        <span>{{ translateTitle(tag.title) }}</span>
         <el-icon class="close-icon" @click.stop="closeSelectedTag(tag)" v-if="!isAffix(tag)">
           <Close />
         </el-icon>
@@ -18,10 +18,12 @@
 
     <!-- 右键菜单 -->
     <ul v-show="visible" :style="{ left: left + 'px', top: top + 'px' }" class="contextmenu">
-      <li @click="refreshSelectedTag(selectedTag)">刷新页面</li>
-      <li v-if="!isAffix(selectedTag)" @click="closeSelectedTag(selectedTag)">关闭当前</li>
-      <li @click="closeOthersTags(selectedTag)">关闭其他</li>
-      <li @click="closeAllTags(selectedTag)">关闭所有</li>
+      <li @click="refreshSelectedTag(selectedTag)">{{ t('layout.tagsRefresh') }}</li>
+      <li v-if="!isAffix(selectedTag)" @click="closeSelectedTag(selectedTag)">
+        {{ t('layout.tagsCloseCurrent') }}
+      </li>
+      <li @click="closeOthersTags(selectedTag)">{{ t('layout.tagsCloseOthers') }}</li>
+      <li @click="closeAllTags(selectedTag)">{{ t('layout.tagsCloseAll') }}</li>
     </ul>
   </div>
 </template>
@@ -29,10 +31,13 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter, type RouteLocationNormalized } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Close } from '@/icons'
+import { translateTitle } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 
 // 访问过的视图
 interface TagView extends Partial<RouteLocationNormalized> {
@@ -66,7 +71,7 @@ const initTags = () => {
 // 添加访问标签
 const addVisitedView = (view: TagView) => {
   if (visitedViews.value.some((v) => v.path === view.path)) return
-  if(view.path?.startsWith("/redirect")){
+  if (view.path?.startsWith('/redirect')) {
     return
   }
   visitedViews.value.push(

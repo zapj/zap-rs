@@ -5,7 +5,7 @@
         <el-card shadow="hover">
           <div class="stat-card">
             <el-progress type="dashboard" :percentage="memoryPct" :color="memoryColor" />
-            <div class="stat-title">内存使用率</div>
+            <div class="stat-title">{{ t('statusMemory.usage') }}</div>
             <div class="stat-sub">{{ formatBytes(usedMem) }} / {{ formatBytes(totalMem) }}</div>
           </div>
         </el-card>
@@ -13,15 +13,29 @@
       <el-col :sm="16">
         <el-card shadow="hover">
           <template #header>
-            <div class="card-header"><span>内存详情</span></div>
+            <div class="card-header">
+              <span>{{ t('statusMemory.detailTitle') }}</span>
+            </div>
           </template>
           <el-descriptions :column="3" border>
-            <el-descriptions-item label="总内存">{{ formatBytes(totalMem) }}</el-descriptions-item>
-            <el-descriptions-item label="已使用">{{ formatBytes(usedMem) }}</el-descriptions-item>
-            <el-descriptions-item label="可用">{{ formatBytes(availMem) }}</el-descriptions-item>
-            <el-descriptions-item label="Swap 总量">{{ formatBytes(swapTotal) }}</el-descriptions-item>
-            <el-descriptions-item label="Swap 已用">{{ formatBytes(swapUsed) }}</el-descriptions-item>
-            <el-descriptions-item label="Swap 可用">{{ formatBytes(swapTotal - swapUsed) }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusMemory.total')">{{
+              formatBytes(totalMem)
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusMemory.used')">{{
+              formatBytes(usedMem)
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusMemory.available')">{{
+              formatBytes(availMem)
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusMemory.swapTotal')">{{
+              formatBytes(swapTotal)
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusMemory.swapUsed')">{{
+              formatBytes(swapUsed)
+            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('statusMemory.swapFree')">{{
+              formatBytes(swapTotal - swapUsed)
+            }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -30,7 +44,7 @@
     <el-card shadow="hover" class="mt-4">
       <template #header>
         <div class="card-header">
-          <span>内存使用率趋势（最近 5 分钟）</span>
+          <span>{{ t('statusMemory.trend') }}</span>
         </div>
       </template>
       <canvas id="memory_chart" style="width: 100%; height: 320px"></canvas>
@@ -42,8 +56,11 @@
 import Chart from 'chart.js/auto'
 import { applyChartTheme, watchChartTheme } from '@/utils/chart-theme'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getRTStatus, getSystemInfo } from '@/api/dashboard.ts'
 import { formatBytes } from '@/utils/fmt'
+
+const { t } = useI18n()
 
 const totalMem = ref(0)
 const availMem = ref(0)
@@ -73,7 +90,7 @@ onMounted(async () => {
       labels: [],
       datasets: [
         {
-          label: '内存使用率',
+          label: t('statusMemory.usage'),
           data: [],
           fill: false,
           borderColor: 'rgba(64, 158, 255, 1)',

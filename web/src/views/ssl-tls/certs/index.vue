@@ -4,82 +4,104 @@
       <template #header>
         <div class="card-header">
           <div class="header-left">
-            <span class="title">SSL 证书管理</span>
+            <span class="title">{{ t('sslCerts.cardTitle') }}</span>
             <el-tag type="warning" size="small" style="margin-left: 8px">SSL/TLS</el-tag>
           </div>
           <div class="header-actions">
-            <el-button type="primary" :icon="Plus" @click="openAdd">添加证书</el-button>
-            <el-button :icon="Key" @click="openSelfSign">生成自签名</el-button>
-            <el-button type="success" :icon="MagicStick" @click="openLetsEncrypt">申请 Let's Encrypt</el-button>
+            <el-button type="primary" :icon="Plus" @click="openAdd">{{
+              t('sslCerts.addCert')
+            }}</el-button>
+            <el-button :icon="Key" @click="openSelfSign">{{ t('sslCerts.selfSignBtn') }}</el-button>
+            <el-button type="success" :icon="MagicStick" @click="openLetsEncrypt">{{
+              t('sslCerts.letsEncryptBtn')
+            }}</el-button>
           </div>
         </div>
       </template>
 
       <el-alert type="info" :closable="false" class="tip">
         <p style="margin: 0 0 4px">
-          支持三种来源：手动导入（粘贴 / 从文件读取 PEM）、rcgen 生成<strong>自签名</strong>证书、通过 ACME
-          HTTP-01 向 <strong>Let's Encrypt</strong> 自动申请。每份证书保存四段材料：
-          <code>crt</code>（证书）、<code>key</code>（私钥）、<code>ca-bundle</code>（中间链）、<code>csr</code>（签名请求）。
-          手动添加时只需粘贴证书，<strong>域名与有效期会自动解析</strong>；<code>ca-bundle</code> 与 <code>csr</code>
-          为选填项，默认折叠，点标题即可展开填写。
+          {{ t('sslCerts.tip1a') }}<strong>{{ t('sslCerts.tipSelfSigned') }}</strong
+          >{{ t('sslCerts.tip1b') }}<strong>{{ t('sslCerts.tipLetsEncrypt') }}</strong
+          >{{ t('sslCerts.tip1c') }}<code>crt</code>{{ t('sslCerts.tipCertName') }}<code>key</code
+          >{{ t('sslCerts.tipPrivateKeyName') }}<code>ca-bundle</code>{{ t('sslCerts.tipChainName')
+          }}<code>csr</code>{{ t('sslCerts.tipCsrName')
+          }}<strong>{{ t('sslCerts.tipAutoParse') }}</strong
+          >{{ t('sslCerts.tip1d') }}<code>ca-bundle</code>{{ t('sslCerts.tipAnd') }}<code>csr</code
+          >{{ t('sslCerts.tip1e') }}
         </p>
         <p style="margin: 0 0 4px">
-          证书按<strong>归属用户</strong>隔离：页面默认只展示当前账号自己的证书；管理员 / 经销商可为客户代建
-          （把归属选为该客户后，该客户站点的「SSL/TLS」即可选择此证书绑定）。
+          {{ t('sslCerts.tip2a') }}<strong>{{ t('sslCerts.tipOwner') }}</strong
+          >{{ t('sslCerts.tip2b') }}
         </p>
         <p style="margin: 0">
-          安全提示：私钥属敏感信息，仅存储在服务器数据库中；请勿将本页面内容分享给无关人员。
+          {{ t('sslCerts.tipSecurity') }}
         </p>
       </el-alert>
 
       <el-table :data="tableData" v-loading="loading" stripe style="margin-top: 14px">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column v-if="canManageAll" label="归属" width="160">
+        <el-table-column v-if="canManageAll" :label="t('sslCerts.colOwner')" width="160">
           <template #default="{ row }">
-            <el-tag v-if="!row.user_id" size="small" effect="plain" type="info">系统</el-tag>
+            <el-tag v-if="!row.user_id" size="small" effect="plain" type="info">{{
+              t('sslCerts.tagSystem')
+            }}</el-tag>
             <span v-else>{{ certOwnerText(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
-        <el-table-column label="域名" min-width="170" show-overflow-tooltip>
+        <el-table-column
+          prop="name"
+          :label="t('sslCerts.colName')"
+          min-width="130"
+          show-overflow-tooltip
+        />
+        <el-table-column :label="t('sslCerts.colDomains')" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.domains">{{ row.domains }}</span>
             <span v-else class="never">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="150">
+        <el-table-column :label="t('sslCerts.colType')" width="150">
           <template #default="{ row }">
-            <el-tag :type="certTypeTag(row.cert_type)" size="small">{{ certTypeLabel(row.cert_type) }}</el-tag>
+            <el-tag :type="certTypeTag(row.cert_type)" size="small">{{
+              certTypeLabel(row.cert_type)
+            }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column :label="t('sslCerts.colStatus')" width="90">
           <template #default="{ row }">
             <el-switch
               :model-value="row.status === 1"
               inline-prompt
-              active-text="启用"
-              inactive-text="停用"
+              :active-text="t('sslCerts.enable')"
+              :inactive-text="t('sslCerts.disable')"
               @change="(v: boolean) => toggleStatus(row, v)"
             />
           </template>
         </el-table-column>
-        <el-table-column label="有效期至" width="170">
+        <el-table-column :label="t('sslCerts.colNotAfter')" width="170">
           <template #default="{ row }">
-            <el-tag v-if="row.not_after > 0 && row.not_after < nowTs" type="danger" size="small">已过期</el-tag>
+            <el-tag v-if="row.not_after > 0 && row.not_after < nowTs" type="danger" size="small">{{
+              t('sslCerts.expired')
+            }}</el-tag>
             <span v-else>{{ row.not_after ? fmtTime(row.not_after) : '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="备注" min-width="140" show-overflow-tooltip>
+        <el-table-column :label="t('sslCerts.colRemark')" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">{{ row.remark || '-' }}</template>
         </el-table-column>
-        <el-table-column label="更新时间" width="160">
+        <el-table-column :label="t('sslCerts.colUpdatedAt')" width="160">
           <template #default="{ row }">{{ fmtTime(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column :label="t('common.operation')" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link @click="openDetail(row)">详情</el-button>
-            <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
-            <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link @click="openDetail(row)">{{
+              t('sslCerts.detail')
+            }}</el-button>
+            <el-button type="primary" link @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+            <el-button type="danger" link @click="handleDelete(row)">{{
+              t('common.delete')
+            }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -88,19 +110,19 @@
     <!-- 添加 / 编辑 -->
     <el-dialog
       v-model="editVisible"
-      :title="editForm.id ? '编辑证书' : '添加证书'"
+      :title="editForm.id ? t('sslCerts.editTitle') : t('sslCerts.addTitle')"
       width="920px"
       top="4vh"
       @closed="resetEdit"
     >
       <el-form :model="editForm" label-width="86px" @submit.prevent>
-        <el-form-item v-if="canManageAll" label="归属用户">
+        <el-form-item v-if="canManageAll" :label="t('sslCerts.ownerLabel')">
           <el-select
             v-model="editForm.user_id"
             filterable
             clearable
             :loading="ownersLoading"
-            placeholder="归属的用户（可在其站点的 SSL/TLS 中绑定）"
+            :placeholder="t('sslCerts.ownerPlaceholder')"
             style="width: 360px"
           >
             <el-option
@@ -110,30 +132,30 @@
               :value="o.id"
             />
           </el-select>
-          <span class="form-hint">留空 = 当前登录账号自己</span>
+          <span class="form-hint">{{ t('sslCerts.ownerHint') }}</span>
         </el-form-item>
         <el-row :gutter="14">
           <el-col :span="12">
-            <el-form-item label="证书名称">
+            <el-form-item :label="t('sslCerts.certName')">
               <el-input
                 v-model="editForm.name"
-                placeholder="留空则自动取证书 CN / 主域名"
+                :placeholder="t('sslCerts.certNamePlaceholder')"
                 maxlength="80"
                 @input="nameManual = true"
               />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="域名">
+            <el-form-item :label="t('sslCerts.domains')">
               <el-input
                 v-model="editForm.domains"
-                placeholder="留空，粘贴证书后自动解析"
+                :placeholder="t('sslCerts.domainsPlaceholder')"
                 @input="domainsManual = true"
               />
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="备注">
+        <el-form-item :label="t('sslCerts.colRemark')">
           <el-input v-model="editForm.remark" maxlength="200" />
         </el-form-item>
       </el-form>
@@ -141,15 +163,29 @@
       <div v-for="g in pemGroups" :key="g.key" class="pem-group">
         <div class="pem-header">
           <div class="pem-title-wrap" @click="togglePem(g)">
-            <el-icon class="arrow" :class="{ 'is-open': !collapsed[g.key] }"><ArrowRight /></el-icon>
+            <el-icon class="arrow" :class="{ 'is-open': !collapsed[g.key] }"
+              ><ArrowRight
+            /></el-icon>
             <span class="pem-title">{{ g.title }}</span>
-            <el-tag v-if="g.optional" size="small" effect="plain" type="info">选填</el-tag>
-            <el-tag v-if="editForm[g.key]" size="small" effect="plain" type="success">已填写</el-tag>
+            <el-tag v-if="g.optional" size="small" effect="plain" type="info">{{
+              t('sslCerts.optional')
+            }}</el-tag>
+            <el-tag v-if="editForm[g.key]" size="small" effect="plain" type="success">{{
+              t('sslCerts.filled')
+            }}</el-tag>
           </div>
           <div class="pem-actions">
-            <el-button size="small" @click="pickFile(g.key)">从文件导入</el-button>
-            <el-button v-if="editForm[g.key]" size="small" type="danger" link @click="editForm[g.key] = ''">
-              清空
+            <el-button size="small" @click="pickFile(g.key)">{{
+              t('sslCerts.importFile')
+            }}</el-button>
+            <el-button
+              v-if="editForm[g.key]"
+              size="small"
+              type="danger"
+              link
+              @click="editForm[g.key] = ''"
+            >
+              {{ t('sslCerts.clear') }}
             </el-button>
           </div>
         </div>
@@ -167,37 +203,60 @@
             <!-- 证书解析结果（自动读取域名，无需手工填写） -->
             <div v-if="g.key === 'cert_content'" class="parse-box">
               <span v-if="parseState.loading" class="parse-tip">
-                <el-icon class="is-loading"><Loading /></el-icon> 正在解析证书…
+                <el-icon class="is-loading"><Loading /></el-icon> {{ t('sslCerts.parsing') }}
               </span>
               <div v-else-if="parseState.info" class="parse-info">
-                <el-tag size="small" type="success" effect="dark">已自动解析</el-tag>
-                <span>域名 {{ parseState.info.domains.length }} 个</span>
+                <el-tag size="small" type="success" effect="dark">{{
+                  t('sslCerts.parsed')
+                }}</el-tag>
+                <span>{{ t('sslCerts.domainsCount', { n: parseState.info.domains.length }) }}</span>
                 <span v-if="parseState.info.not_after">
-                  有效期至 {{ fmtTime(parseState.info.not_after) }}（剩余 {{ daysLeft(parseState.info.not_after) }} 天）
+                  {{
+                    t('sslCerts.validUntilLeft', {
+                      time: fmtTime(parseState.info.not_after),
+                      days: daysLeft(parseState.info.not_after),
+                    })
+                  }}
                 </span>
-                <span v-if="parseState.info.issuer">签发者 {{ parseState.info.issuer }}</span>
+                <span v-if="parseState.info.issuer">{{
+                  t('sslCerts.issuer', { issuer: parseState.info.issuer })
+                }}</span>
                 <span v-if="parseState.info.key_type">
-                  {{ parseState.info.key_type }} {{ parseState.info.key_bits }} 位
+                  {{
+                    t('sslCerts.keyBits', {
+                      type: parseState.info.key_type,
+                      bits: parseState.info.key_bits,
+                    })
+                  }}
                 </span>
-                <span v-if="parseState.info.fingerprint" class="fp">SHA256 {{ parseState.info.fingerprint }}</span>
+                <span v-if="parseState.info.fingerprint" class="fp"
+                  >SHA256 {{ parseState.info.fingerprint }}</span
+                >
               </div>
-              <span v-else-if="parseState.error" class="parse-tip is-error">{{ parseState.error }}</span>
+              <span v-else-if="parseState.error" class="parse-tip is-error">{{
+                parseState.error
+              }}</span>
 
               <!-- 证书与私钥配对校验 -->
               <div v-if="parseState.info?.key_match === true" class="parse-pair is-ok">
-                <el-icon><CircleCheckFilled /></el-icon> 证书与私钥匹配
+                <el-icon><CircleCheckFilled /></el-icon> {{ t('sslCerts.keyPairOk') }}
               </div>
               <div v-else-if="parseState.info?.key_match === false" class="parse-pair is-bad">
                 <el-icon><CircleCloseFilled /></el-icon>
-                证书与私钥不匹配：该私钥不属于这张证书，保存后无法部署
+                {{ t('sslCerts.keyPairBad') }}
               </div>
               <div v-else-if="parseState.info?.key_error" class="parse-pair is-bad">
                 <el-icon><WarningFilled /></el-icon> {{ parseState.info.key_error }}
               </div>
 
-              <div v-if="parseState.info?.cert_count && parseState.info.cert_count > 1" class="parse-chain">
-                检测到 {{ parseState.info.cert_count }} 张证书（含中间链）
-                <el-button size="small" text type="primary" @click="splitChain">拆到 CA 中间链</el-button>
+              <div
+                v-if="parseState.info?.cert_count && parseState.info.cert_count > 1"
+                class="parse-chain"
+              >
+                {{ t('sslCerts.chainDetected', { n: parseState.info.cert_count }) }}
+                <el-button size="small" text type="primary" @click="splitChain">{{
+                  t('sslCerts.splitChain')
+                }}</el-button>
               </div>
             </div>
           </div>
@@ -205,60 +264,87 @@
       </div>
 
       <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitSave">保存</el-button>
+        <el-button @click="editVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="submitSave">{{
+          t('common.save')
+        }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 详情 -->
-    <el-dialog v-model="detailVisible" title="证书详情" width="860px" top="4vh">
+    <el-dialog v-model="detailVisible" :title="t('sslCerts.detailTitle')" width="860px" top="4vh">
       <el-descriptions :column="2" border size="small" style="margin-bottom: 12px">
-        <el-descriptions-item label="名称">{{ detail?.name }}</el-descriptions-item>
-        <el-descriptions-item label="类型">{{ detail ? certTypeLabel(detail.cert_type) : '' }}</el-descriptions-item>
-        <el-descriptions-item v-if="canManageAll" label="归属">
+        <el-descriptions-item :label="t('sslCerts.colName')">{{
+          detail?.name
+        }}</el-descriptions-item>
+        <el-descriptions-item :label="t('sslCerts.colType')">{{
+          detail ? certTypeLabel(detail.cert_type) : ''
+        }}</el-descriptions-item>
+        <el-descriptions-item v-if="canManageAll" :label="t('sslCerts.colOwner')">
           {{ detail ? certOwnerText(detail) : '' }}
         </el-descriptions-item>
-        <el-descriptions-item label="域名" :span="2">{{ detail?.domains || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="有效期">
+        <el-descriptions-item :label="t('sslCerts.colDomains')" :span="2">{{
+          detail?.domains || '-'
+        }}</el-descriptions-item>
+        <el-descriptions-item :label="t('sslCerts.colNotAfter')">
           {{ detail && detail.not_after ? fmtTime(detail.not_after) : '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="备注">{{ detail?.remark || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('sslCerts.colRemark')">{{
+          detail?.remark || '-'
+        }}</el-descriptions-item>
       </el-descriptions>
 
       <el-tabs v-if="detail" type="border-card">
         <el-tab-pane v-for="g in pemGroups" :key="g.key" :label="g.title">
           <div class="detail-toolbar">
-            <el-button size="small" @click="copyText(detail[g.key] || '', g.title)">复制</el-button>
-            <el-button size="small" @click="downloadText(detail[g.key] || '', g.filename(detail))">下载</el-button>
+            <el-button size="small" @click="copyText(detail[g.key] || '', g.title)">{{
+              t('sslCerts.copy')
+            }}</el-button>
+            <el-button
+              size="small"
+              @click="downloadText(detail[g.key] || '', g.filename(detail))"
+              >{{ t('sslCerts.download') }}</el-button
+            >
           </div>
-          <pre class="pem-view mono">{{ detail[g.key] || '(空)' }}</pre>
+          <pre class="pem-view mono">{{ detail[g.key] || t('sslCerts.empty') }}</pre>
         </el-tab-pane>
       </el-tabs>
 
       <template #footer>
-        <el-button @click="detailVisible = false">关闭</el-button>
-        <el-button type="primary" @click="openEdit(detail)">编辑此证书</el-button>
+        <el-button @click="detailVisible = false">{{ t('sslCerts.close') }}</el-button>
+        <el-button type="primary" @click="openEdit(detail)">{{ t('sslCerts.editThis') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 自签名 -->
-    <el-dialog v-model="selfSignVisible" title="生成自签名证书" width="560px">
-      <el-alert type="warning" :closable="false" show-icon
-        description="自签名证书不会被浏览器信任，适合测试 / 内网使用；证书与私钥、CSR 将由服务端即时生成并保存。" />
+    <el-dialog v-model="selfSignVisible" :title="t('sslCerts.selfSignTitle')" width="560px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        :description="t('sslCerts.selfSignAlert')"
+      />
       <el-form label-width="90px" style="margin-top: 12px" @submit.prevent>
-        <el-form-item label="证书名称">
-          <el-input v-model="selfSignForm.name" placeholder="如 dev-server" maxlength="80" />
+        <el-form-item :label="t('sslCerts.certName')">
+          <el-input
+            v-model="selfSignForm.name"
+            :placeholder="t('sslCerts.selfSignNamePlaceholder')"
+            maxlength="80"
+          />
         </el-form-item>
-        <el-form-item label="域名 / IP">
-          <el-input v-model="selfSignForm.domains" placeholder="localhost, 127.0.0.1, my.example.com" />
-          <span class="form-hint">多个用逗号分隔，支持 IP</span>
+        <el-form-item :label="t('sslCerts.domainsIp')">
+          <el-input
+            v-model="selfSignForm.domains"
+            placeholder="localhost, 127.0.0.1, my.example.com"
+          />
+          <span class="form-hint">{{ t('sslCerts.domainsIpHint') }}</span>
         </el-form-item>
-        <el-form-item v-if="canManageAll" label="归属用户">
+        <el-form-item v-if="canManageAll" :label="t('sslCerts.ownerLabel')">
           <el-select
             v-model="selfSignForm.user_id"
             filterable
             :loading="ownersLoading"
-            placeholder="归属的用户"
+            :placeholder="t('sslCerts.ownerLabel')"
             style="width: 100%"
           >
             <el-option
@@ -269,40 +355,45 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="有效天数">
+        <el-form-item :label="t('sslCerts.days')">
           <el-input-number v-model="selfSignForm.days" :min="1" :max="3650" />
-          <span class="form-hint">默认 365 天</span>
+          <span class="form-hint">{{ t('sslCerts.daysHint') }}</span>
         </el-form-item>
-        <el-form-item label="备注">
+        <el-form-item :label="t('sslCerts.colRemark')">
           <el-input v-model="selfSignForm.remark" maxlength="200" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="selfSignVisible = false">取消</el-button>
-        <el-button type="primary" :loading="selfSigning" @click="submitSelfSign">生成并保存</el-button>
+        <el-button @click="selfSignVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="selfSigning" @click="submitSelfSign">{{
+          t('sslCerts.generateSave')
+        }}</el-button>
       </template>
     </el-dialog>
 
     <!-- Let's Encrypt -->
-    <el-dialog v-model="leVisible" title="申请 Let's Encrypt 证书" width="620px">
-      <el-alert type="info" :closable="false" show-icon
-        description="通过 ACME HTTP-01 验证域名所有权：申请期间本服务将在 80 端口临时响应验证请求，请确保域名已解析到本机且 80 端口对外可达、未被占用。" />
+    <el-dialog v-model="leVisible" :title="t('sslCerts.leTitle')" width="620px">
+      <el-alert type="info" :closable="false" show-icon :description="t('sslCerts.leAlert')" />
       <el-form label-width="90px" style="margin-top: 12px" @submit.prevent>
-        <el-form-item label="域名">
-          <el-input v-model="leForm.domains" placeholder="example.com, www.example.com（首域名将作为证书名称）" />
+        <el-form-item :label="t('sslCerts.domains')">
+          <el-input v-model="leForm.domains" :placeholder="t('sslCerts.leDomainsPlaceholder')" />
         </el-form-item>
-        <el-form-item label="邮箱">
-          <el-input v-model="leForm.email" placeholder="用于 ACME 账户（Let's Encrypt 通知用）" />
+        <el-form-item :label="t('sslCerts.leEmail')">
+          <el-input v-model="leForm.email" :placeholder="t('sslCerts.leEmailPlaceholder')" />
         </el-form-item>
-        <el-form-item label="证书名称">
-          <el-input v-model="leForm.name" placeholder="可留空，默认使用主域名" maxlength="80" />
+        <el-form-item :label="t('sslCerts.certName')">
+          <el-input
+            v-model="leForm.name"
+            :placeholder="t('sslCerts.leNamePlaceholder')"
+            maxlength="80"
+          />
         </el-form-item>
-        <el-form-item v-if="canManageAll" label="归属用户">
+        <el-form-item v-if="canManageAll" :label="t('sslCerts.ownerLabel')">
           <el-select
             v-model="leForm.user_id"
             filterable
             :loading="ownersLoading"
-            placeholder="归属的用户"
+            :placeholder="t('sslCerts.ownerLabel')"
             style="width: 100%"
           >
             <el-option
@@ -313,17 +404,19 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="测试环境">
+        <el-form-item :label="t('sslCerts.leStaging')">
           <el-switch v-model="leForm.staging" />
-          <span class="form-hint">测试环境证书不受信任，用于验证流程</span>
+          <span class="form-hint">{{ t('sslCerts.leStagingHint') }}</span>
         </el-form-item>
-        <el-form-item label="备注">
+        <el-form-item :label="t('sslCerts.colRemark')">
           <el-input v-model="leForm.remark" maxlength="200" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="leVisible = false">取消</el-button>
-        <el-button type="success" :loading="leBusy" @click="submitLetsEncrypt">开始申请</el-button>
+        <el-button @click="leVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="success" :loading="leBusy" @click="submitLetsEncrypt">{{
+          t('sslCerts.startApply')
+        }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -342,6 +435,7 @@ import {
   WarningFilled,
 } from '@/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import {
@@ -359,6 +453,8 @@ import {
   type OwnerOption,
 } from '@/api/ssl'
 
+const { t } = useI18n()
+
 const nowTs = ref(Math.floor(Date.now() / 1000))
 const loading = ref(false)
 const tableData = ref<SslCertItem[]>([])
@@ -366,7 +462,7 @@ const tableData = ref<SslCertItem[]>([])
 const userStore = useUserStore()
 // admin / reseller 可管理他人（能看到全部或名下证书并可指定归属）；普通用户只能看到自己的
 const canManageAll = computed(
-  () => userStore.roles.includes('admin') || userStore.roles.includes('reseller')
+  () => userStore.roles.includes('admin') || userStore.roles.includes('reseller'),
 )
 const myUserId = computed(() => userStore.userInfo.id)
 
@@ -391,7 +487,7 @@ const ownerLabel = (id?: number) => {
 }
 /** 列表/详情展示证书归属：0 = 历史系统证书 */
 const certOwnerText = (row: { user_id?: number; owner_name?: string }) => {
-  if (!row.user_id) return '系统'
+  if (!row.user_id) return t('sslCerts.tagSystem')
   return row.owner_name || ownerLabel(row.user_id) || `#${row.user_id}`
 }
 
@@ -400,22 +496,27 @@ async function loadList() {
   try {
     const res = await getCertList()
     tableData.value = res.data ?? []
-  } catch { /* handled by interceptor */ }
-  finally { loading.value = false }
+  } catch {
+    /* handled by interceptor */
+  } finally {
+    loading.value = false
+  }
 }
 
-const TYPE_META: Record<string, { label: string; tag: 'info' | 'success' | 'warning' | 'primary' | 'danger' }> = {
-  upload: { label: '手动导入', tag: 'info' },
-  'self-signed': { label: '自签名', tag: 'warning' },
-  letsencrypt: { label: "Let's Encrypt", tag: 'success' },
-  'letsencrypt-staging': { label: "Let's Encrypt(测试)", tag: 'danger' },
-}
+type CertTag = 'info' | 'success' | 'warning' | 'primary' | 'danger'
 
-function certTypeLabel(t: string) {
-  return TYPE_META[t]?.label ?? t
+const typeMeta = computed<Record<string, { label: string; tag: CertTag }>>(() => ({
+  upload: { label: t('sslCerts.typeUpload'), tag: 'info' },
+  'self-signed': { label: t('sslCerts.typeSelfSigned'), tag: 'warning' },
+  letsencrypt: { label: t('sslCerts.typeLetsEncrypt'), tag: 'success' },
+  'letsencrypt-staging': { label: t('sslCerts.typeLetsEncryptStaging'), tag: 'danger' },
+}))
+
+function certTypeLabel(type: string) {
+  return typeMeta.value[type]?.label ?? type
 }
-function certTypeTag(t: string) {
-  return TYPE_META[t]?.tag ?? 'info'
+function certTypeTag(type: string): CertTag {
+  return typeMeta.value[type]?.tag ?? 'info'
 }
 
 type PemKey = 'cert_content' | 'key_content' | 'ca_bundle' | 'csr'
@@ -430,31 +531,37 @@ interface PemField {
   filename: (d: SslCertDetail) => string
 }
 
-const pemGroups: PemField[] = [
+const pemGroups = computed<PemField[]>(() => [
   {
-    key: 'cert_content', title: '证书（crt）',
-    placeholder: '-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----\n粘贴后自动解析域名与有效期',
+    key: 'cert_content',
+    title: t('sslCerts.pemCert'),
+    placeholder: t('sslCerts.pemCertPlaceholder'),
     rows: 6,
     filename: (d) => `${d.name}.crt`,
   },
   {
-    key: 'key_content', title: '私钥（key）',
-    placeholder: '-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----',
+    key: 'key_content',
+    title: t('sslCerts.pemKey'),
+    placeholder: t('sslCerts.pemKeyPlaceholder'),
     filename: (d) => `${d.name}.key`,
   },
   {
-    key: 'ca_bundle', title: 'CA 中间链（ca-bundle）',
-    placeholder: '（选填）中间证书链，多个证书依次粘贴',
-    optional: true, rows: 4,
+    key: 'ca_bundle',
+    title: t('sslCerts.pemCaBundle'),
+    placeholder: t('sslCerts.pemCaBundlePlaceholder'),
+    optional: true,
+    rows: 4,
     filename: (d) => `${d.name}-ca-bundle.crt`,
   },
   {
-    key: 'csr', title: '证书签名请求（csr）',
-    placeholder: '（选填）-----BEGIN CERTIFICATE REQUEST-----\n…\n-----END CERTIFICATE REQUEST-----',
-    optional: true, rows: 4,
+    key: 'csr',
+    title: t('sslCerts.pemCsr'),
+    placeholder: t('sslCerts.pemCsrPlaceholder'),
+    optional: true,
+    rows: 4,
     filename: (d) => `${d.name}.csr`,
   },
-]
+])
 
 /** CA 中间链与 CSR 默认折叠，需要时点标题展开 */
 const collapsed = reactive<Record<PemKey, boolean>>({
@@ -465,7 +572,7 @@ const collapsed = reactive<Record<PemKey, boolean>>({
 })
 
 function resetCollapse() {
-  for (const g of pemGroups) collapsed[g.key] = !!g.optional
+  for (const g of pemGroups.value) collapsed[g.key] = !!g.optional
 }
 function togglePem(g: PemField) {
   collapsed[g.key] = !collapsed[g.key]
@@ -534,8 +641,7 @@ async function runParse() {
     parseTimer = undefined
   }
   if (!editVisible.value) return
-  const pem =
-    String(editForm.cert_content || '').trim() || String(editForm.csr || '').trim()
+  const pem = String(editForm.cert_content || '').trim() || String(editForm.csr || '').trim()
   if (!pem) {
     parseState.info = undefined
     parseState.error = ''
@@ -555,16 +661,15 @@ async function runParse() {
     }
   } catch (e: any) {
     parseState.info = undefined
-    parseState.error = `证书解析失败：${e?.response?.data?.message || e?.message || '请检查 PEM 是否完整'}`
+    parseState.error = t('sslCerts.parseFailed', {
+      msg: e?.response?.data?.message || e?.message || t('sslCerts.parseFailedFallback'),
+    })
   } finally {
     parseState.loading = false
   }
 }
 
-watch(
-  [() => editForm.cert_content, () => editForm.csr, () => editForm.key_content],
-  scheduleParse,
-)
+watch([() => editForm.cert_content, () => editForm.csr, () => editForm.key_content], scheduleParse)
 
 /** 粘贴的是 fullchain 时，把叶子证书之外的证书挪到 CA 中间链 */
 function splitChain() {
@@ -574,7 +679,7 @@ function splitChain() {
   editForm.cert_content = blocks[0]
   editForm.ca_bundle = blocks.slice(1).join('\n')
   collapsed.ca_bundle = true
-  ElMessage.success(`已拆出 ${blocks.length - 1} 张中间证书到 CA 中间链`)
+  ElMessage.success(t('sslCerts.splitDone', { n: blocks.length - 1 }))
 }
 
 function daysLeft(ts: number) {
@@ -587,7 +692,9 @@ async function openEdit(row: SslCertItem | SslCertDetail | undefined) {
   try {
     const res = await getCertDetail(row.id)
     detail = res.data
-  } catch { return }
+  } catch {
+    return
+  }
   if (!detail) return
   editForm.id = detail.id
   editForm.name = detail.name
@@ -603,7 +710,7 @@ async function openEdit(row: SslCertItem | SslCertDetail | undefined) {
       ? detail.user_id
       : undefined
   // 有内容的分组默认展开展示；选填项为空则保持折叠
-  for (const g of pemGroups) {
+  for (const g of pemGroups.value) {
     collapsed[g.key] = g.optional ? !String(editForm[g.key] ?? '').trim() : false
   }
   nameManual.value = !!detail.name
@@ -622,9 +729,9 @@ function pickFile(key: string) {
     try {
       const text = await f.text()
       ;(editForm as Record<string, string>)[key] = text
-      ElMessage.success(`已从 ${f.name} 导入`)
+      ElMessage.success(t('sslCerts.imported', { name: f.name }))
     } catch {
-      ElMessage.error('文件读取失败')
+      ElMessage.error(t('sslCerts.fileReadFailed'))
     }
   }
   input.click()
@@ -633,7 +740,7 @@ function pickFile(key: string) {
 async function submitSave() {
   const name = String(editForm.name || '').trim()
   if (!name) {
-    ElMessage.warning('请填写证书名称')
+    ElMessage.warning(t('sslCerts.nameRequired'))
     return
   }
   const hasMaterial =
@@ -641,7 +748,7 @@ async function submitSave() {
     String(editForm.key_content || '').trim() ||
     String(editForm.csr || '').trim()
   if (!hasMaterial) {
-    ElMessage.warning('请至少填写 证书 / 私钥 / CSR 之一')
+    ElMessage.warning(t('sslCerts.materialRequired'))
     return
   }
 
@@ -650,7 +757,7 @@ async function submitSave() {
   if (hasKey && (String(editForm.cert_content || '').trim() || String(editForm.csr || '').trim())) {
     if (!parseState.info) await runParse()
     if (parseState.info?.key_match === false) {
-      ElMessage.error('证书与私钥不匹配：该私钥不属于这张证书，无法保存')
+      ElMessage.error(t('sslCerts.keyMismatch'))
       return
     }
     if (parseState.info?.key_error) {
@@ -673,15 +780,18 @@ async function submitSave() {
     }
     if (editForm.id) {
       await updateCert({ id: editForm.id, ...data })
-      ElMessage.success('已保存')
+      ElMessage.success(t('sslCerts.saved'))
     } else {
       await addCert(data)
-      ElMessage.success('证书已添加')
+      ElMessage.success(t('sslCerts.added'))
     }
     editVisible.value = false
     loadList()
-  } catch { /* handled */ }
-  finally { saving.value = false }
+  } catch {
+    /* handled */
+  } finally {
+    saving.value = false
+  }
 }
 
 // ── 详情 ────────────────────────────────────────────────────
@@ -693,15 +803,17 @@ async function openDetail(row: SslCertItem) {
     const res = await getCertDetail(row.id)
     detail.value = res.data
     detailVisible.value = true
-  } catch { /* handled */ }
+  } catch {
+    /* handled */
+  }
 }
 
 async function copyText(text: string, label: string) {
   try {
     await navigator.clipboard.writeText(text || '')
-    ElMessage.success(`${label} 已复制`)
+    ElMessage.success(t('sslCerts.copied', { label }))
   } catch {
-    ElMessage.info('请手动复制内容')
+    ElMessage.info(t('sslCerts.copyManual'))
   }
 }
 
@@ -726,23 +838,29 @@ async function toggleStatus(row: SslCertItem, enabled: boolean) {
       status: enabled ? 1 : 0,
     })
     row.status = enabled ? 1 : 0
-    ElMessage.success(enabled ? '已启用' : '已停用')
-  } catch { /* handled */ }
+    ElMessage.success(enabled ? t('sslCerts.enabled') : t('sslCerts.disabled'))
+  } catch {
+    /* handled */
+  }
 }
 
 async function handleDelete(row: SslCertItem) {
   try {
     await ElMessageBox.confirm(
-      `确认删除证书「${row.name}」？删除后不可恢复。`,
-      '删除证书',
-      { type: 'warning', confirmButtonText: '确认删除' },
+      t('sslCerts.deleteConfirm', { name: row.name }),
+      t('sslCerts.deleteTitle'),
+      { type: 'warning', confirmButtonText: t('sslCerts.confirmDelete') },
     )
-  } catch { return }
+  } catch {
+    return
+  }
   try {
     await deleteCert(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('sslCerts.deleteOk'))
     loadList()
-  } catch { /* handled */ }
+  } catch {
+    /* handled */
+  }
 }
 
 // ── 自签名 ──────────────────────────────────────────────────
@@ -767,11 +885,11 @@ function openSelfSign() {
 
 async function submitSelfSign() {
   if (!selfSignForm.name.trim()) {
-    ElMessage.warning('请填写证书名称')
+    ElMessage.warning(t('sslCerts.nameRequired'))
     return
   }
   if (!selfSignForm.domains.trim()) {
-    ElMessage.warning('请填写至少一个域名或 IP')
+    ElMessage.warning(t('sslCerts.selfSignDomainsRequired'))
     return
   }
   selfSigning.value = true
@@ -783,11 +901,14 @@ async function submitSelfSign() {
       remark: selfSignForm.remark.trim(),
       ...(canManageAll.value ? { user_id: selfSignForm.user_id || undefined } : {}),
     })
-    ElMessage.success('自签名证书已生成并保存')
+    ElMessage.success(t('sslCerts.selfSignOk'))
     selfSignVisible.value = false
     loadList()
-  } catch { /* handled */ }
-  finally { selfSigning.value = false }
+  } catch {
+    /* handled */
+  } finally {
+    selfSigning.value = false
+  }
 }
 
 // ── Let's Encrypt ───────────────────────────────────────────
@@ -814,11 +935,11 @@ function openLetsEncrypt() {
 
 async function submitLetsEncrypt() {
   if (!leForm.domains.trim()) {
-    ElMessage.warning('请填写域名')
+    ElMessage.warning(t('sslCerts.leDomainsRequired'))
     return
   }
   if (!leForm.email.trim()) {
-    ElMessage.warning('请填写 ACME 账户邮箱')
+    ElMessage.warning(t('sslCerts.leEmailRequired'))
     return
   }
   leBusy.value = true
@@ -831,21 +952,26 @@ async function submitLetsEncrypt() {
       remark: leForm.remark.trim() || undefined,
       ...(canManageAll.value ? { user_id: leForm.user_id || undefined } : {}),
     })
-    ElMessage.success('证书申请成功并已保存')
+    ElMessage.success(t('sslCerts.leOk'))
     leVisible.value = false
     loadList()
-  } catch { /* handled */ }
-  finally { leBusy.value = false }
+  } catch {
+    /* handled */
+  } finally {
+    leBusy.value = false
+  }
 }
 
 function fmtTime(ts: number) {
-  return ts ? new Date(ts * 1000).toLocaleString('zh-CN') : '-'
+  return ts ? new Date(ts * 1000).toLocaleString() : '-'
 }
 
 onMounted(() => {
   loadList()
   loadOwners()
-  setInterval(() => { nowTs.value = Math.floor(Date.now() / 1000) }, 30000)
+  setInterval(() => {
+    nowTs.value = Math.floor(Date.now() / 1000)
+  }, 30000)
 })
 
 onBeforeUnmount(() => {
@@ -854,59 +980,141 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.ssl-container { padding: 20px; }
-.card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-.header-left { display: flex; align-items: center; }
-.title { font-size: 16px; font-weight: 600; }
-.tip code, .mono {
+.ssl-container {
+  padding: 20px;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+}
+.title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.tip code,
+.mono {
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 .tip code {
-  background: var(--el-fill-color); border-radius: 3px; padding: 1px 5px;
+  background: var(--el-fill-color);
+  border-radius: 3px;
+  padding: 1px 5px;
 }
-.form-hint { margin-left: 10px; color: var(--el-text-color-secondary); font-size: 12px; }
-.never { color: var(--el-text-color-placeholder); }
-.pem-group { margin-top: 14px; }
+.form-hint {
+  margin-left: 10px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.never {
+  color: var(--el-text-color-placeholder);
+}
+.pem-group {
+  margin-top: 14px;
+}
 .pem-header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 6px;
 }
 .pem-title-wrap {
-  display: flex; align-items: center; gap: 6px;
-  cursor: pointer; user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
 }
-.pem-title-wrap:hover .pem-title { color: var(--el-color-primary); }
-.pem-actions { display: flex; align-items: center; gap: 4px; }
+.pem-title-wrap:hover .pem-title {
+  color: var(--el-color-primary);
+}
+.pem-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .arrow {
-  font-size: 12px; color: var(--el-text-color-secondary);
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
   transition: transform 0.2s ease-in-out;
 }
-.arrow.is-open { transform: rotate(90deg); }
-.pem-title { font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); }
-.parse-box { margin-top: 6px; font-size: 12px; color: var(--el-text-color-regular); }
+.arrow.is-open {
+  transform: rotate(90deg);
+}
+.pem-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.parse-box {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
 .parse-info {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
-  padding: 7px 10px; border-radius: 4px;
-  background: var(--el-color-success-light-9); border: 1px solid var(--el-color-success-light-7);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: var(--el-color-success-light-9);
+  border: 1px solid var(--el-color-success-light-7);
 }
 .parse-info .fp {
   font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 11px; color: var(--el-text-color-secondary); word-break: break-all;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  word-break: break-all;
 }
-.parse-tip { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-secondary); }
-.parse-tip.is-error { color: var(--el-color-danger); }
+.parse-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--el-text-color-secondary);
+}
+.parse-tip.is-error {
+  color: var(--el-color-danger);
+}
 .parse-chain {
-  margin-top: 6px; display: flex; align-items: center; gap: 4px; color: #e6a23c;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #e6a23c;
 }
 .parse-pair {
-  margin-top: 6px; display: flex; align-items: center; gap: 5px;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
-.parse-pair.is-ok { color: #67c23a; }
-.parse-pair.is-bad { color: var(--el-color-danger); }
-.detail-toolbar { margin-bottom: 8px; }
+.parse-pair.is-ok {
+  color: #67c23a;
+}
+.parse-pair.is-bad {
+  color: var(--el-color-danger);
+}
+.detail-toolbar {
+  margin-bottom: 8px;
+}
 .pem-view {
-  max-height: 300px; overflow: auto; margin: 0; padding: 10px 12px;
-  background: var(--el-fill-color-light); border: 1px solid var(--el-border-color-lighter); border-radius: 4px;
-  font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+  max-height: 300px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

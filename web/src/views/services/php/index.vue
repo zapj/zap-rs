@@ -3,17 +3,18 @@
     <el-card shadow="never" class="top-card">
       <div class="top-row">
         <div class="title">
-          <span class="t-name">PHP 配置</span>
+          <span class="t-name">{{ t('servicesPhp.title') }}</span>
           <el-tag v-if="instances.length" size="small" type="info">
-            {{ instances.length }} 个版本实例
+            {{ t('servicesPhp.versionsCount', { n: instances.length }) }}
           </el-tag>
         </div>
         <div class="actions">
           <span class="hint">
-            多个 PHP 版本可共存：每个版本独立配置 php.ini / php-fpm，并可开启「全局默认访问」注册到
-            /usr/local/bin。
+            {{ t('servicesPhp.hint') }}
           </span>
-          <el-button size="small" :loading="loading" @click="load">刷新</el-button>
+          <el-button size="small" :loading="loading" @click="load">{{
+            t('servicesPhp.refresh')
+          }}</el-button>
         </div>
       </div>
     </el-card>
@@ -25,13 +26,11 @@
     </template>
 
     <el-card v-else-if="!instances.length" shadow="never" class="mt-3">
-      <el-result
-        icon="warning"
-        title="未安装任何 PHP 版本"
-        :sub-title="emptyHint"
-      >
+      <el-result icon="warning" :title="t('servicesPhp.noPhpTitle')" :sub-title="emptyHint">
         <template #extra>
-          <el-button type="primary" @click="router.push('/appstore')">前往应用商店</el-button>
+          <el-button type="primary" @click="router.push('/appstore')">{{
+            t('servicesPhp.goAppstore')
+          }}</el-button>
         </template>
       </el-result>
     </el-card>
@@ -42,10 +41,10 @@
           <span class="tab-label">
             {{ inst.svc }}
             <el-tag size="small" :type="inst.running ? 'success' : 'danger'" class="tab-tag">
-              {{ inst.running ? '运行中' : '已停止' }}
+              {{ inst.running ? t('servicesPhp.running') : t('servicesPhp.stopped') }}
             </el-tag>
             <el-tag v-if="inst.is_default" size="small" type="warning" class="tab-tag">
-              默认
+              {{ t('servicesPhp.defaultTag') }}
             </el-tag>
           </span>
         </template>
@@ -57,10 +56,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import InstancePanel from './InstancePanel.vue'
 import { getServiceConfInstances, type ServiceConfInstance } from '@/api/servicesConf.ts'
 
+const { t } = useI18n()
 const router = useRouter()
 const instances = ref<ServiceConfInstance[]>([])
 const active = ref('')
@@ -69,11 +70,8 @@ const loading = ref(false)
 const appsDir = ref('')
 
 const emptyHint = computed(() => {
-  const base =
-    '通过应用商店安装 PHP 应用后，本页将按版本标签（php74 / php81 …）逐个实例展示状态、配置 php.ini 与「全局默认访问」开关。'
-  return appsDir.value
-    ? `${base}\n实例扫描目录：${appsDir.value}（若 PHP 装在别处，请用 ZAP_APPS_DIR 指向该目录后重启 zapexec）`
-    : base
+  const base = t('servicesPhp.emptyHint')
+  return appsDir.value ? t('servicesPhp.emptyHintDir', { base, dir: appsDir.value }) : base
 })
 
 async function load() {

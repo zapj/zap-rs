@@ -3,9 +3,11 @@
     <transition-group name="breadcrumb">
       <el-breadcrumb-item v-for="(item, index) in breadcrumbs" :key="item.path">
         <span v-if="index === breadcrumbs.length - 1" class="no-redirect">{{
-          item.meta.title
+          translateTitle(item.meta.title as string)
         }}</span>
-        <a v-else @click.prevent="handleLink(item)">{{ item.meta.title }}</a>
+        <a v-else @click.prevent="handleLink(item)">{{
+          translateTitle(item.meta.title as string)
+        }}</a>
       </el-breadcrumb-item>
     </transition-group>
   </el-breadcrumb>
@@ -14,6 +16,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRoute, useRouter, type RouteLocationMatched } from 'vue-router'
+import { translateTitle } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,9 +31,10 @@ const getBreadcrumb = () => {
   if (first && first.path !== '/dashboard') {
     matched = [
       {
+        // 用 i18n key：translateTitle 命中语言包后按当前语言渲染
         path: '/dashboard',
-        meta: { title: '首页' },
-      }  as unknown as RouteLocationMatched,
+        meta: { title: 'menu.dashboard' },
+      } as unknown as RouteLocationMatched,
     ].concat(matched)
   }
   breadcrumbs.value = matched

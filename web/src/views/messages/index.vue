@@ -3,7 +3,7 @@
     <el-card shadow="never">
       <template #header>
         <div class="messages-head">
-          <span class="messages-head__title">消息中心</span>
+          <span class="messages-head__title">{{ t('messages.title') }}</span>
           <el-button
             v-if="unreadCount > 0"
             type="primary"
@@ -12,13 +12,13 @@
             :loading="readAllLoading"
             @click="onReadAll"
           >
-            全部已读
+            {{ t('messages.readAll') }}
           </el-button>
         </div>
       </template>
 
       <div v-loading="loading">
-        <el-empty v-if="!loading && list.length === 0" description="暂无消息" />
+        <el-empty v-if="!loading && list.length === 0" :description="t('messages.empty')" />
 
         <div
           v-for="m in list"
@@ -36,17 +36,11 @@
             <div class="msg-item__body">{{ m.body }}</div>
           </div>
           <div class="msg-item__ops" @click.stop>
-            <el-button
-              v-if="!m.is_read"
-              link
-              type="primary"
-              size="small"
-              @click="onRead(m)"
-            >
-              标记已读
+            <el-button v-if="!m.is_read" link type="primary" size="small" @click="onRead(m)">
+              {{ t('messages.markRead') }}
             </el-button>
             <el-button link type="danger" size="small" @click="onDelete(m.id)">
-              删除
+              {{ t('common.delete') }}
             </el-button>
           </div>
         </div>
@@ -59,14 +53,20 @@
           :total="total"
           :page-size="pageSize"
           :current-page="page"
-          @current-change="load(page = $event)"
+          @current-change="load((page = $event))"
         />
       </div>
     </el-card>
 
-    <el-dialog v-model="detailVisible" :title="active?.title ?? '消息详情'" width="560px">
+    <el-dialog
+      v-model="detailVisible"
+      :title="active?.title ?? t('messages.detailTitle')"
+      width="560px"
+    >
       <div class="msg-detail">
-        <div class="msg-detail__meta">发送时间：{{ active ? fmtTime(active.created_at) : '' }}</div>
+        <div class="msg-detail__meta">
+          {{ t('messages.sentAt', { time: active ? fmtTime(active.created_at) : '' }) }}
+        </div>
         <div class="msg-detail__body">{{ active?.body }}</div>
       </div>
     </el-dialog>
@@ -75,10 +75,13 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { deleteNotices, getNotices, readAllNotices, readNotice } from '@/api/notice'
 import type { NoticeMessage } from '@/api/notice'
+
+const { t } = useI18n()
 
 const loading = ref(false)
 const readAllLoading = ref(false)
@@ -125,7 +128,7 @@ async function onRead(m: NoticeMessage, silent = false) {
     await readNotice(m.id)
     m.is_read = 1
     unreadCount.value = Math.max(0, unreadCount.value - 1)
-    if (!silent) ElMessage.success('已标记为已读')
+    if (!silent) ElMessage.success(t('messages.readOk'))
   } catch {
     // 拦截器已弹窗
   }
@@ -137,7 +140,7 @@ async function onReadAll() {
     await readAllNotices()
     list.value.forEach((m) => (m.is_read = 1))
     unreadCount.value = 0
-    ElMessage.success('已全部标记为已读')
+    ElMessage.success(t('messages.readAllOk'))
   } catch {
     // 拦截器已弹窗
   } finally {
@@ -147,9 +150,9 @@ async function onReadAll() {
 
 async function onDelete(id: number) {
   try {
-    await ElMessageBox.confirm('确定删除这条消息吗？删除后不可恢复。', '删除消息', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('messages.deleteConfirm'), t('messages.deleteTitle'), {
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
     })
   } catch {
@@ -157,7 +160,7 @@ async function onDelete(id: number) {
   }
   try {
     await deleteNotices([id])
-    ElMessage.success('删除成功')
+    ElMessage.success(t('messages.deleteOk'))
     await load(page.value)
   } catch {
     // 拦截器已弹窗
