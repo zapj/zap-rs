@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::zap::{
-    ZapError, ZapJsonResult, audit,
+    ZapError, ZapJsonResult, appstore as ast, audit,
     jwt::{ValidatedClaims, is_admin},
     user_cron,
 };
@@ -268,5 +268,71 @@ pub async fn cron_log(
     Ok(Json(json!({
         "code": 0,
         "data": { "log": content, "done": done.is_some(), "exit_code": done }
+    })))
+}
+
+/// GET /terminal/crontab/runs[?id=&username=] —— 某任务最近的运行历史
+pub async fn cron_runs(
+    claims: ValidatedClaims,
+    Query(q): Query<HashMap<String, String>>,
+) -> ZapJsonResult {
+    let username = target_username(&claims, q.get("username"))?;
+    let id = q.get("id").cloned().unwrap_or_default();
+    if id.trim().is_empty() {
+        return Err(ZapError::New(-1, "缺少任务 id".to_string()));
+    }
+    let runs = user_cron::list_runs(&username, id.trim()).await?;
+    Ok(Json(json!({
+        "code": 0,
+        "data": { "runs": runs, "keep": ast::MAX_RUNS_PER_JOB }
+    })))
+}
+
+/// POST /terminal/crontab/runs_clear —— 清空某任务的运行历史
+pub async fn cron_runs_clear(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<CronIdPayload>,
+) -> ZapJsonResult {
+    let username = claims.sub.clone();
+    let id = payload.id.trim();
+    let job = user_cron::get(&username, id)
+        .await?
+        .ok_or_else(|| ZapError::New(-1, "计划任务不存在".to_string()))?;
+    let n = user_cron::clear_runs(&username, id).await?;
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "crontab_runs_clear",
+        &job.name,
+        &n.to_string(),
+    )
+    .await;
+    Ok(Json(json!({
+        "code": 0,
+        "message": "已清空运行历史",
+        "data": { "deleted": n }
+    })))
+}
+
+/// POST /terminal/crontab/logs_purge —— 清理无归属的历史遗留日志
+pub async fn cron_logs_purge(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+) -> ZapJsonResult {
+    let username = claims.sub.clone();
+    let n = user_cron::purge_orphan_logs(&username).await?;
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "crontab_logs_purge",
+        &username,
+        &n.to_string(),
+    )
+    .await;
+    Ok(Json(json!({
+        "code": 0,
+        "message": "已清理历史遗留日志",
+        "data": { "deleted": n }
     })))
 }

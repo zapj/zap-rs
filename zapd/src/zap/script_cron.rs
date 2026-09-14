@@ -316,14 +316,17 @@ pub async fn refresh_next_run(job: &mut CronJob) {
 
 /// 执行一次脚本运行（与「自定义脚本 → 运行」同一链路）。
 /// `action` 用于运行记录区分（cron / manual）。
+/// `job_id > 0` 时该次运行计入对应任务的历史，并按任务保留上限裁剪。
 pub async fn launch_script_run(
     path: &str,
     action: &str,
     username: &str,
+    job_id: i64,
 ) -> Result<String, ZapError> {
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
-    ast::register_run(&run_id, action, path, username, &log_path).await?;
+    let key = format!("cron:{job_id}");
+    ast::register_run_with_key(&run_id, action, path, username, &log_path, &key).await?;
     let resp = zapexec::call(Request::AppstoreScriptRun {
         path: path.to_string(),
         run_id: run_id.clone(),
@@ -392,7 +395,7 @@ async fn tick_once(now: &chrono::DateTime<chrono::Local>) {
             mark_last_run(job_id, &run_id).await;
             tokio::spawn(async move {
                 // 计划任务表是全局的（无用户列），而脚本按用户隔离 → 一律归属 admin
-                match launch_script_run(&path, "cron", "admin").await {
+                match launch_script_run(&path, "cron", "admin", job_id).await {
                     Ok(rid) => info!("计划任务 #{job_id} 已触发: {path} ({rid})"),
                     Err(e) => warn!("计划任务 #{job_id} 触发失败: {path}: {e}"),
                 }

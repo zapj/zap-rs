@@ -759,10 +759,14 @@ async fn init_appstore_runs_table() {
         status TEXT NOT NULL DEFAULT 'running',
         exit_code INTEGER NOT NULL DEFAULT -1,
         log_path TEXT NOT NULL DEFAULT '',
+        -- 任务归属键："cron:<id>"（计划任务）| "crontab:<username>:<id>"（用户计划任务）；
+        -- 空串表示非任务触发（如手动安装）。改表结构直接改这里，不做旧库补列兼容。
+        job_key TEXT NOT NULL DEFAULT '',
         started_at INTEGER NOT NULL DEFAULT 0,
         finished_at INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX idx_appstore_runs_started ON appstore_runs(started_at);
+    CREATE INDEX idx_appstore_runs_job ON appstore_runs(job_key, started_at);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -991,4 +995,24 @@ async fn table_exists(table_name: &str) -> bool {
             .fetch_one(pool)
             .await;
     result.is_ok()
+}
+
+async fn ensure_column(table: &str, column: &str, decl: &str) {
+    if column_exists(table, column).await {
+        return;
+    }
+    let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {decl}");
+    let _ = get_db_pool().await.execute(sql.as_str()).await;
+}
+
+async fn column_exists(table: &str, column: &str) -> bool {
+    let pool = get_db_pool().await;
+    let rows: Result<Vec<(String,)>, sqlx::Error> =
+        sqlx::query_as(&format!("PRAGMA table_info({table})"))
+            .fetch_all(pool)
+            .await;
+    match rows {
+        Ok(rs) => rs.iter().any(|(name,)| name == column),
+        Err(_) => false,
+    }
 }

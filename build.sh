@@ -115,10 +115,9 @@ cp -Rf "$CUR_DIR/scripts" "$DIST_ZAP/"
 # 不打包：zap.db、run/、tmp/、apps/library、appstore 的 cache/logs/runs/tmp/custom/scripts
 DIST_DATA="$DIST_ZAP/data"
 mkdir -p "$DIST_DATA/apps"
-mkdir -p "$DIST_DATA/appstore/repos" "$DIST_DATA/appstore/custom"
+mkdir -p "$DIST_DATA/appstore/repos"
 cp -Rf "$CUR_DIR/data/appstore/repos/zap-appstore" "$DIST_DATA/appstore/repos/" 2>/dev/null || true
 cp -f "$CUR_DIR/data/appstore/repos.yaml" "$DIST_DATA/appstore/" 2>/dev/null || true
-cp -f "$CUR_DIR/data/appstore/custom/README.md" "$DIST_DATA/appstore/custom/" 2>/dev/null || true
 cp -f "$CUR_DIR/data/apps/README.md" "$DIST_DATA/apps/" 2>/dev/null || true
 # www/：站点骨架模板 skel/index.html 与 IP 默认页 / 维护页 _zap/*.html（运维可直接编辑）
 cp -Rf "$CUR_DIR/data/www" "$DIST_DATA/" 2>/dev/null || true

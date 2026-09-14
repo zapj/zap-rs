@@ -14,6 +14,7 @@ declare module 'vue' {
     AppStoreLogDrawer: typeof import('./src/components/AppStoreLogDrawer.vue')['default']
     Breadcrumb: typeof import('./src/components/Breadcrumb/index.vue')['default']
     CodeEditor: typeof import('./src/components/CodeEditor.vue')['default']
+    CronRunHistory: typeof import('./src/components/CronRunHistory.vue')['default']
     DirPicker: typeof import('./src/components/DirPicker.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElBadge: typeof import('element-plus/es')['ElBadge']

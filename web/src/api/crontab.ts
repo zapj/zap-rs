@@ -75,6 +75,45 @@ export function readCrontabLog(run_id: string, username?: string) {
   }>('/terminal/crontab/log', { params: { run_id, ...(username ? { username } : {}) } })
 }
 
+/** 一次运行的记录（对应后端 appstore_runs 表） */
+export interface CrontabRunItem {
+  id: number
+  run_id: string
+  action: string
+  pkg: string
+  username: string
+  status: string
+  exit_code: number
+  log_path: string
+  job_key: string
+  started_at: number
+  finished_at: number
+}
+
+/** 某任务最近的运行历史（后端只保留最近 N 条，无需分页） */
+export function listCrontabRuns(jobId: string) {
+  return http.get<{
+    code: number
+    message: string
+    data: { runs: CrontabRunItem[]; keep: number }
+  }>('/terminal/crontab/runs', { params: { id: jobId } })
+}
+
+/** 清空某任务的运行历史（含日志文件） */
+export function clearCrontabRuns(jobId: string) {
+  return http.post<{ code: number; message: string; data: { deleted: number } }>(
+    '/terminal/crontab/runs_clear',
+    { id: jobId },
+  )
+}
+
+/** 清理无归属的历史遗留日志（开始登记运行记录之前留下的 run-*.log） */
+export function purgeCrontabLogs() {
+  return http.post<{ code: number; message: string; data: { deleted: number } }>(
+    '/terminal/crontab/logs_purge',
+  )
+}
+
 /** 可供 admin 选择的执行用户列表（仅 admin 可调用） */
 export function listCrontabExecUsers() {
   return http.get<{ code: number; message: string; data: { users: string[] } }>(

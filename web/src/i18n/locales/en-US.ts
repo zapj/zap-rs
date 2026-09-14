@@ -2087,6 +2087,35 @@ const enUS: Messages = {
   },
 
   /** Automation - custom scripts */
+  cronHistory: {
+    title: 'Run history · {name}',
+    history: 'History',
+    keepTip:
+      'Only the latest {n} run records are kept; older ones are pruned automatically (including log files and snapshots)',
+    refresh: 'Refresh',
+    clear: 'Clear history',
+    clearTitle: 'Confirm clearing',
+    clearConfirm:
+      'Clear all run history for this job? Logs and snapshots will be deleted and cannot be recovered.',
+    cleared: 'Cleared {n} run records',
+    clearFailed: 'Clear failed',
+    loadFailed: 'Failed to load run history',
+    empty: 'No run records yet',
+    colTime: 'Started at',
+    colStatus: 'Status',
+    colExitCode: 'Exit code',
+    colDuration: 'Duration',
+    colTrigger: 'Trigger',
+    viewLog: 'View log',
+    statusSuccess: 'Success',
+    statusFailed: 'Failed',
+    statusRunning: 'Running',
+    triggerManual: 'Manual',
+    triggerCron: 'Scheduled',
+    seconds: '{n}s',
+    minutes: '{n}m {s}s',
+  },
+
   automationScripts: {
     title: 'Custom Scripts',
     newScript: 'New',
@@ -2196,6 +2225,13 @@ const enUS: Messages = {
   crontab: {
     title: 'Scheduled Tasks',
     newJob: 'New Task',
+    history: 'History',
+    purgeOldLogs: 'Clean up old logs',
+    purgeTitle: 'Confirm cleanup',
+    purgeConfirm:
+      'This deletes old log files under your account that cannot be attributed to any task (earlier versions only wrote log files without recording runs). Logs already listed in run history are not affected. Continue?',
+    purged: 'Cleaned up {n} old log files',
+    purgeFailed: 'Cleanup failed',
     alertPrefix: 'Tasks run as the Linux account ',
     alertChosen: 'you choose',
     alertSelf: 'that owns your account',

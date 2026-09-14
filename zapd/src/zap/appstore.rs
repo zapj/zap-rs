@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
+use tracing::{info, warn};
+
 use crate::{
     config, db,
     zap::{ZapError, jwt},
@@ -11,6 +13,15 @@ use crate::{
 
 /// 日志结束标记：`__ZAP_DONE__ <exit_code>`（zapexec 写入）
 pub const DONE_MARKER: &str = "__ZAP_DONE__";
+
+/// 单个计划任务保留的运行记录条数上限（超出后自动清理最旧的）。
+///
+/// 一分钟一次的任务一天就是 1440 条；不设上限的话 `appstore_runs` 表与
+/// `appstore/logs/` 目录会一起无限增长。
+pub const MAX_RUNS_PER_JOB: i64 = 50;
+
+/// 全表运行记录兜底上限（涵盖手动运行脚本、安装/更新等所有来源）。
+pub const MAX_RUNS_TOTAL: i64 = 1000;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct AppstoreRun {
@@ -22,6 +33,8 @@ pub struct AppstoreRun {
     pub status: String,
     pub exit_code: i64,
     pub log_path: String,
+    /// 任务归属键：`cron:<id>`（计划任务）| `crontab:<username>:<id>`（用户计划任务）
+    pub job_key: String,
     pub started_at: i64,
     pub finished_at: i64,
 }
@@ -67,6 +80,42 @@ pub fn generate_run_id() -> String {
 }
 
 /// 登记一条运行记录（status=running）。
+///
+/// `job_key` 非空表示由定时任务触发，既是历史列表的查询条件，也是按任务
+/// 保留数量的依据：`cron:<id>`（计划任务）或 `crontab:<username>:<id>`（用户
+/// 计划任务）；非任务触发传空串。登记后会异步裁剪历史，避免无限增长。
+pub async fn register_run_with_key(
+    run_id: &str,
+    action: &str,
+    pkg: &str,
+    username: &str,
+    log_path: &str,
+    job_key: &str,
+) -> Result<(), ZapError> {
+    let now = chrono::Utc::now().timestamp();
+    let pool = db::get_db_pool().await;
+    sqlx::query(
+        "INSERT INTO appstore_runs (run_id, action, pkg, username, status, exit_code, log_path, job_key, started_at, finished_at) \
+         VALUES (?, ?, ?, ?, 'running', -1, ?, ?, ?, 0)",
+    )
+    .bind(run_id)
+    .bind(action)
+    .bind(pkg)
+    .bind(username)
+    .bind(log_path)
+    .bind(job_key)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    // 裁剪在后台跑，不拖慢本次触发；无归属的运行只受全表上限约束
+    if !job_key.is_empty() {
+        let key = job_key.to_string();
+        tokio::spawn(async move { prune_runs(&key).await });
+    }
+    Ok(())
+}
+
+/// 登记一条与定时任务无关的运行记录（`job_key` 为空）。
 pub async fn register_run(
     run_id: &str,
     action: &str,
@@ -74,21 +123,134 @@ pub async fn register_run(
     username: &str,
     log_path: &str,
 ) -> Result<(), ZapError> {
-    let now = chrono::Utc::now().timestamp();
+    register_run_with_key(run_id, action, pkg, username, log_path, "").await
+}
+
+/// 列出某个定时任务最近的运行记录（新的在前）。
+pub async fn list_runs_by_key(job_key: &str, limit: i64) -> Result<Vec<AppstoreRun>, sqlx::Error> {
     let pool = db::get_db_pool().await;
-    sqlx::query(
-        "INSERT INTO appstore_runs (run_id, action, pkg, username, status, exit_code, log_path, started_at, finished_at) \
-         VALUES (?, ?, ?, ?, 'running', -1, ?, ?, 0)",
+    let limit = limit.clamp(1, 200);
+    sqlx::query_as::<_, AppstoreRun>(
+        "SELECT * FROM appstore_runs WHERE job_key = ? ORDER BY started_at DESC, id DESC LIMIT ?",
     )
-    .bind(run_id)
-    .bind(action)
-    .bind(pkg)
-    .bind(username)
-    .bind(log_path)
-    .bind(now)
-    .execute(pool)
+    .bind(job_key)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+/// 清空某个定时任务的全部运行历史（记录 + 日志 + 快照），返回删除条数。
+pub async fn delete_runs_by_key(job_key: &str) -> Result<i64, sqlx::Error> {
+    let pool = db::get_db_pool().await;
+    let rows = sqlx::query_as::<_, (i64, String, String)>(
+        "SELECT id, run_id, log_path FROM appstore_runs WHERE job_key = ?",
+    )
+    .bind(job_key)
+    .fetch_all(pool)
     .await?;
-    Ok(())
+    let n = rows.len() as i64;
+    for (_, run_id, log_path) in &rows {
+        remove_run_artifacts(run_id, log_path);
+    }
+    sqlx::query("DELETE FROM appstore_runs WHERE job_key = ?")
+        .bind(job_key)
+        .execute(pool)
+        .await?;
+    Ok(n)
+}
+
+/// 裁剪运行记录：按任务保留最近 `MAX_RUNS_PER_JOB` 条，全表兜底保留最近
+/// `MAX_RUNS_TOTAL` 条；被裁掉的记录连同日志文件、运行快照一起删除。
+///
+/// 只删"超出保留范围的旧记录"，正在运行的一定是最新的一条，不会被误删。
+pub async fn prune_runs(job_key: &str) {
+    prune_keep_recent(Some(job_key), MAX_RUNS_PER_JOB).await;
+    prune_keep_recent(None, MAX_RUNS_TOTAL).await;
+}
+
+/// 删除超出 `keep` 条的旧记录；`scope` 为 None 时按全表裁剪。
+async fn prune_keep_recent(scope: Option<&str>, keep: i64) {
+    let pool = db::get_db_pool().await;
+    let rows = match scope {
+        Some(key) => {
+            sqlx::query_as::<_, (i64, String, String)>(
+                "SELECT id, run_id, log_path FROM appstore_runs \
+                 WHERE job_key = ? ORDER BY started_at DESC, id DESC LIMIT -1 OFFSET ?",
+            )
+            .bind(key)
+            .bind(keep)
+            .fetch_all(pool)
+            .await
+        }
+        None => {
+            sqlx::query_as::<_, (i64, String, String)>(
+                "SELECT id, run_id, log_path FROM appstore_runs \
+                 ORDER BY started_at DESC, id DESC LIMIT -1 OFFSET ?",
+            )
+            .bind(keep)
+            .fetch_all(pool)
+            .await
+        }
+    };
+    let stale = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("查询待清理的运行记录失败: {e}");
+            return;
+        }
+    };
+    if stale.is_empty() {
+        return;
+    }
+    // 先按 log_path 删磁盘产物，再一条 SQL 批量删记录：
+    // 存量可能很大（长年未清理），逐条 DELETE 会明显拖慢后台任务
+    for (_, run_id, log_path) in &stale {
+        remove_run_artifacts(run_id, log_path);
+    }
+    let deleted = match scope {
+        Some(key) => {
+            sqlx::query(
+                "DELETE FROM appstore_runs WHERE id IN (\
+                 SELECT id FROM appstore_runs WHERE job_key = ? \
+                 ORDER BY started_at DESC, id DESC LIMIT -1 OFFSET ?)",
+            )
+            .bind(key)
+            .bind(keep)
+            .execute(pool)
+            .await
+        }
+        None => {
+            sqlx::query(
+                "DELETE FROM appstore_runs WHERE id IN (\
+                 SELECT id FROM appstore_runs \
+                 ORDER BY started_at DESC, id DESC LIMIT -1 OFFSET ?)",
+            )
+            .bind(keep)
+            .execute(pool)
+            .await
+        }
+    };
+    if let Err(e) = deleted {
+        warn!("清理运行记录失败: {e}");
+        return;
+    }
+    info!(
+        "已清理 {} 条历史运行记录（保留最近 {keep} 条）",
+        stale.len()
+    );
+}
+
+/// 删除一次运行留下的磁盘产物：日志文件 + 运行快照目录。
+///
+/// 日志路径直接取自 DB 的 `log_path`；快照目录按 run_id 拼出，run_id 是
+/// 十六进制串不含路径分隔符，拼接安全。删除失败（已被清理/不在本机）忽略。
+fn remove_run_artifacts(run_id: &str, log_path: &str) {
+    if !log_path.is_empty() {
+        let _ = std::fs::remove_file(log_path);
+    }
+    if !run_id.is_empty() {
+        let _ = std::fs::remove_dir_all(appstore_dir().join("runs").join(run_id));
+    }
 }
 
 pub async fn finish_run(run_id: &str, status: &str, exit_code: i64) {

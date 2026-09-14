@@ -161,6 +161,14 @@ pub fn log_path(username: &str, run_id: &str) -> String {
         .into_owned()
 }
 
+/// 运行记录在 `appstore_runs` 表中的任务归属键。
+///
+/// 带上用户名是因为 crontab 按用户隔离（`crontab.yaml` 各存一份），
+/// 不同用户的任务 id 不保证全局唯一。
+pub fn job_key(username: &str, job_id: &str) -> String {
+    format!("crontab:{username}:{job_id}")
+}
+
 // ── 读写 ────────────────────────────────────────────────────
 
 pub fn load_sync(username: &str) -> Result<Crontab, ZapError> {
@@ -477,8 +485,21 @@ async fn mark_running(username: &str, id: &str, run_id: &str) -> Result<(), ZapE
 }
 
 /// 调用 zapexec 以 `job.exec_user` 身份运行任务。
-async fn launch_exec(username: &str, job: &CronJob, run_id: &str) -> Result<(), ZapError> {
+async fn launch_exec(
+    username: &str,
+    job: &CronJob,
+    run_id: &str,
+    action: &str,
+) -> Result<(), ZapError> {
     let log = log_path(username, run_id);
+    // 登记运行记录（顺带按保留上限裁剪历史 + 删掉超出的日志文件）；
+    // 登记失败只记日志，不阻断任务执行
+    let key = job_key(username, &job.id);
+    if let Err(e) =
+        ast::register_run_with_key(run_id, action, &job.name, username, &log, &key).await
+    {
+        warn!("登记计划任务运行记录失败: {e}");
+    }
     let home = home_dir_of(&job.exec_user).await;
     let resp = zapexec::call(Request::CronRun {
         run_id: run_id.to_string(),
@@ -492,7 +513,12 @@ async fn launch_exec(username: &str, job: &CronJob, run_id: &str) -> Result<(), 
     if resp.code != 0 {
         return Err(ZapError::New(resp.code, resp.message));
     }
-    watch_run(username.to_string(), job.id.clone(), log);
+    watch_run(
+        username.to_string(),
+        job.id.clone(),
+        run_id.to_string(),
+        log,
+    );
     Ok(())
 }
 
@@ -508,7 +534,7 @@ async fn update_status(username: &str, job_id: &str, status: &str) {
 }
 
 /// 后台轮询日志末尾的完成标记，回写任务状态。
-fn watch_run(username: String, job_id: String, log: String) {
+fn watch_run(username: String, job_id: String, run_id: String, log: String) {
     tokio::spawn(async move {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(24 * 3600);
         loop {
@@ -516,11 +542,13 @@ fn watch_run(username: String, job_id: String, log: String) {
                 Some(code) => {
                     let status = if code == 0 { "success" } else { "failed" };
                     update_status(&username, &job_id, status).await;
+                    ast::finish_run(&run_id, status, code).await;
                     break;
                 }
                 None => {
                     if std::time::Instant::now() > deadline {
                         update_status(&username, &job_id, "failed").await;
+                        ast::finish_run(&run_id, "failed", -1).await;
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
@@ -540,12 +568,13 @@ pub async fn run_now(username: &str, id: &str) -> Result<String, ZapError> {
     }
     let run_id = ast::generate_run_id();
     mark_running(username, id, &run_id).await?;
-    if let Err(e) = launch_exec(username, &job, &run_id).await {
+    if let Err(e) = launch_exec(username, &job, &run_id, "manual").await {
         let mut ct = load(username).await?;
         if let Some(j) = ct.jobs.iter_mut().find(|j| j.id == id) {
             j.last_status = "failed".to_string();
         }
         let _ = save(username, &ct).await;
+        ast::finish_run(&run_id, "failed", -1).await;
         return Err(e);
     }
     Ok(run_id)
@@ -656,7 +685,7 @@ async fn tick_once(now: &chrono::DateTime<chrono::Local>) {
                 let username = username.clone();
                 let job = job.clone();
                 tokio::spawn(async move {
-                    match launch_exec(&username, &job, &run_id).await {
+                    match launch_exec(&username, &job, &run_id, "cron").await {
                         Ok(()) => info!("用户 {username} 计划任务 {} 已触发", job.id),
                         Err(e) => warn!("用户 {username} 计划任务 {} 触发失败: {e}", job.id),
                     }
@@ -667,4 +696,67 @@ async fn tick_once(now: &chrono::DateTime<chrono::Local>) {
             warn!("回写用户 {username} 的 crontab 失败: {e}");
         }
     }
+}
+
+// ── 运行历史 ────────────────────────────────────────────────
+
+/// 列出某任务最近的运行历史（新的在前）。
+pub async fn list_runs(username: &str, job_id: &str) -> Result<Vec<ast::AppstoreRun>, sqlx::Error> {
+    ast::list_runs_by_key(&job_key(username, job_id), ast::MAX_RUNS_PER_JOB).await
+}
+
+/// 清空某任务的运行历史（DB 记录 + 日志文件），并断开 crontab.yaml 里的
+/// last_run_id 引用 —— 否则「上次运行」会指向已被删除的日志。
+pub async fn clear_runs(username: &str, job_id: &str) -> Result<i64, ZapError> {
+    let n = ast::delete_runs_by_key(&job_key(username, job_id)).await?;
+    if let Ok(mut ct) = load(username).await
+        && let Some(job) = ct.jobs.iter_mut().find(|j| j.id == job_id)
+    {
+        job.last_run_id = String::new();
+        job.last_run_at = 0;
+        job.last_status = String::new();
+        let _ = save(username, &ct).await;
+    }
+    Ok(n)
+}
+
+/// 清理历史遗留的孤儿日志：目录下 `run-<id>.log` 里 DB 查不到对应记录的那些。
+///
+/// 本模块此前只写日志文件、不登记记录，那个时期留下的日志无法归属到任务，
+/// 只能按"有没有记录"判断；查库出错时保守处理（当作有记录，不删）。
+pub async fn purge_orphan_logs(username: &str) -> Result<i64, ZapError> {
+    safe_username(username)?;
+    let dir = logs_dir(username);
+    let pool = crate::db::get_db_pool().await;
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(it) => it,
+        // 目录不存在 = 该用户还没跑过任务
+        Err(_) => return Ok(0),
+    };
+    let mut removed = 0i64;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(run_id) = name
+            .strip_prefix("run-")
+            .and_then(|r| r.strip_suffix(".log"))
+        else {
+            continue;
+        };
+        let known: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM appstore_runs WHERE run_id = ?)")
+                .bind(run_id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(true);
+        if !known && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }

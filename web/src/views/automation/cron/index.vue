@@ -59,7 +59,7 @@
             {{ row.enabled === 1 && row.next_run_at > 0 ? fmt(row.next_run_at) : '—' }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.operation')" width="190" fixed="right">
+        <el-table-column :label="t('common.operation')" width="240" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -68,6 +68,9 @@
               @click="handleRunNow(row)"
             >
               {{ runningId === row.id ? t('automationCron.running') : t('automationCron.runNow') }}
+            </el-button>
+            <el-button link type="primary" @click="openHistory(row)">
+              {{ t('cronHistory.history') }}
             </el-button>
             <el-button link type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
             <el-button link type="danger" @click="handleDelete(row)">{{
@@ -142,6 +145,7 @@
     </el-dialog>
 
     <AppStoreLogDrawer ref="logDrawerRef" />
+    <CronRunHistory ref="historyRef" variant="system" @view="handleViewRun" @cleared="load" />
   </div>
 </template>
 
@@ -161,8 +165,10 @@ import {
   toggleCronJob,
   runCronJobNow,
   type CronJob,
+  type CronRunItem,
 } from '@/api/cron'
 import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
+import CronRunHistory from '@/components/CronRunHistory.vue'
 
 const { t } = useI18n()
 
@@ -370,6 +376,21 @@ function openLog(row: CronJob) {
 }
 
 const logDrawerRef = ref<InstanceType<typeof AppStoreLogDrawer> | null>(null)
+const historyRef = ref<InstanceType<typeof CronRunHistory> | null>(null)
+/** 当前历史抽屉所属任务名，仅用于给日志抽屉凑标题 */
+const historyJobName = ref('')
+
+function openHistory(row: CronJob) {
+  historyJobName.value = row.name
+  historyRef.value?.open({ id: String(row.id), name: row.name })
+}
+
+function handleViewRun(row: CronRunItem) {
+  logDrawerRef.value?.openDrawer(
+    row.run_id,
+    t('automationCron.runLogTitle', { name: historyJobName.value }),
+  )
+}
 
 // ── 脚本候选（扁平化 tree） ─────────────────────────────────
 const scriptFiles = ref<string[]>([])

@@ -4,9 +4,14 @@
       <template #header>
         <div class="card-header">
           <span>{{ t('crontab.title') }}</span>
-          <el-button type="primary" :icon="Plus" @click="openCreate">{{
-            t('crontab.newJob')
-          }}</el-button>
+          <div class="header-actions">
+            <el-button :icon="Delete" :disabled="readonly" @click="handlePurge">
+              {{ t('crontab.purgeOldLogs') }}
+            </el-button>
+            <el-button type="primary" :icon="Plus" @click="openCreate">{{
+              t('crontab.newJob')
+            }}</el-button>
+          </div>
         </div>
       </template>
 
@@ -75,7 +80,7 @@
             {{ row.enabled && row.next_run_at > 0 ? fmt(row.next_run_at) : '—' }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.operation')" width="190" fixed="right">
+        <el-table-column :label="t('common.operation')" width="250" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -84,6 +89,9 @@
               @click="handleRunNow(row)"
             >
               {{ runningId === row.id ? t('crontab.running') : t('crontab.runNow') }}
+            </el-button>
+            <el-button link type="primary" @click="openHistory(row)">
+              {{ t('cronHistory.history') }}
             </el-button>
             <el-button link type="primary" :disabled="readonly" @click="openEdit(row)">{{
               t('common.edit')
@@ -210,6 +218,8 @@
         <el-button @click="logVisible = false">{{ t('crontab.close') }}</el-button>
       </template>
     </el-dialog>
+
+    <CronRunHistory ref="historyRef" variant="crontab" @view="handleViewRun" @cleared="load" />
   </div>
 </template>
 
@@ -217,7 +227,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@/icons'
+import { Plus, Delete } from '@/icons'
 import dayjs from 'dayjs'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
@@ -229,9 +239,12 @@ import {
   runCrontabNow,
   readCrontabLog,
   listCrontabExecUsers,
+  purgeCrontabLogs,
   type CronJob,
+  type CrontabRunItem,
 } from '@/api/crontab'
 import { useUserStore } from '@/stores/user'
+import CronRunHistory from '@/components/CronRunHistory.vue'
 
 const { t } = useI18n()
 const userStore = useUserStore()
@@ -455,9 +468,12 @@ async function handleDelete(row: CronJob) {
   }
 }
 
-// ── 日志 ────────────────────────────────────────────────────
+// ── 日志 / 运行历史 ─────────────────────────────────────────
 const logVisible = ref(false)
 const logTitle = ref(t('crontab.logTitle'))
+const historyRef = ref<InstanceType<typeof CronRunHistory> | null>(null)
+/** 当前历史抽屉所属任务名，用于日志弹窗标题 */
+const historyJobName = ref('')
 const logText = ref('')
 const logDone = ref(false)
 let logTimer: number | undefined
@@ -480,15 +496,47 @@ async function fetchLog(runId: string) {
   }
 }
 
-function openLog(row: CronJob) {
-  if (!row.last_run_id) return
+/** 按 run_id 打开日志弹窗（历史列表点「查看日志」也走这里） */
+function openLogByRunId(runId: string) {
+  if (!runId) return
   stopPoll()
   logText.value = ''
   logDone.value = false
-  logTitle.value = t('crontab.logTitleWithName', { name: row.name })
+  logTitle.value = t('crontab.logTitleWithName', { name: historyJobName.value })
   logVisible.value = true
-  fetchLog(row.last_run_id)
-  logTimer = window.setInterval(() => fetchLog(row.last_run_id), 1000)
+  fetchLog(runId)
+  logTimer = window.setInterval(() => fetchLog(runId), 1000)
+}
+
+function openLog(row: CronJob) {
+  historyJobName.value = row.name
+  openLogByRunId(row.last_run_id)
+}
+
+function openHistory(row: CronJob) {
+  historyJobName.value = row.name
+  historyRef.value?.open({ id: row.id, name: row.name })
+}
+
+function handleViewRun(row: CrontabRunItem) {
+  openLogByRunId(row.run_id)
+}
+
+/** 清理「开始登记运行记录之前」遗留的、无法归属到任务的日志 */
+async function handlePurge() {
+  try {
+    await ElMessageBox.confirm(t('crontab.purgeConfirm'), t('crontab.purgeTitle'), {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    const resp = await purgeCrontabLogs()
+    ElMessage.success(t('crontab.purged', { n: resp.data?.deleted ?? 0 }))
+  } catch (e: any) {
+    ElMessage.error(e.message || t('crontab.purgeFailed'))
+  }
 }
 
 // ── 数据加载 ────────────────────────────────────────────────
@@ -529,6 +577,11 @@ onBeforeUnmount(stopPoll)
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .cron-alert {

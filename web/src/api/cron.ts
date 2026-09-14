@@ -44,3 +44,35 @@ export function toggleCronJob(id: number, enabled: boolean) {
 export function runCronJobNow(id: number) {
   return http.post<{ code: number; message: string; data: { run_id: string } }>('/system/cron/run_now', { id })
 }
+
+/** 一次运行的记录（对应后端 appstore_runs 表） */
+export interface CronRunItem {
+  id: number
+  run_id: string
+  action: string
+  pkg: string
+  username: string
+  status: string
+  exit_code: number
+  log_path: string
+  job_key: string
+  started_at: number
+  finished_at: number
+}
+
+/** 某任务最近的运行历史（后端只保留最近 N 条，无需分页） */
+export function listCronRuns(jobId: number) {
+  return http.get<{
+    code: number
+    message: string
+    data: { runs: CronRunItem[]; keep: number }
+  }>('/system/cron/runs', { params: { job_id: jobId } })
+}
+
+/** 清空某任务的运行历史（含日志文件与运行快照） */
+export function clearCronRuns(jobId: number) {
+  return http.post<{ code: number; message: string; data: { deleted: number } }>(
+    '/system/cron/runs_clear',
+    { id: jobId },
+  )
+}

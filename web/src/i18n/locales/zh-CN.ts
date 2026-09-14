@@ -2077,6 +2077,33 @@ export default {
   },
 
   /** 脚本/自动化 - 自定义脚本 */
+  cronHistory: {
+    title: '运行历史 · {name}',
+    history: '历史',
+    keepTip: '仅保留最近 {n} 条运行记录，超出的自动清理（含日志文件与快照）',
+    refresh: '刷新',
+    clear: '清空历史',
+    clearTitle: '清空确认',
+    clearConfirm: '确定清空该任务的全部运行历史？日志与快照会一并删除，不可恢复。',
+    cleared: '已清空 {n} 条运行历史',
+    clearFailed: '清空失败',
+    loadFailed: '加载运行历史失败',
+    empty: '暂无运行记录',
+    colTime: '开始时间',
+    colStatus: '状态',
+    colExitCode: '退出码',
+    colDuration: '耗时',
+    colTrigger: '触发方式',
+    viewLog: '查看日志',
+    statusSuccess: '成功',
+    statusFailed: '失败',
+    statusRunning: '运行中',
+    triggerManual: '手动',
+    triggerCron: '定时',
+    seconds: '{n} 秒',
+    minutes: '{n} 分 {s} 秒',
+  },
+
   automationScripts: {
     title: '自定义脚本',
     newScript: '新建',
@@ -2181,6 +2208,13 @@ export default {
   crontab: {
     title: '定时任务',
     newJob: '新建任务',
+    history: '历史',
+    purgeOldLogs: '清理旧日志',
+    purgeTitle: '清理确认',
+    purgeConfirm:
+      '将删除本账号下无法归属到任务的旧日志文件（早期版本只写日志、不登记运行记录，那些日志无法归入历史列表）。已在历史列表中的日志不受影响。确定清理？',
+    purged: '已清理 {n} 个旧日志文件',
+    purgeFailed: '清理失败',
     alertPrefix: '任务以',
     alertChosen: '所选',
     alertSelf: '你自身',

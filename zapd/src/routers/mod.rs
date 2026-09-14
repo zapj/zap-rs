@@ -459,6 +459,11 @@ fn api_routers() -> Router {
         .route("/system/cron/delete", post(system_cron::cron_delete))
         .route("/system/cron/toggle", post(system_cron::cron_toggle))
         .route("/system/cron/run_now", post(system_cron::cron_run_now))
+        .route("/system/cron/runs", get(system_cron::cron_runs))
+        .route(
+            "/system/cron/runs_clear",
+            post(system_cron::cron_runs_clear),
+        )
         // PHP-FPM 规格模板库（admin 维护；reseller 可读自己名下 + 全局模板）
         .route("/system/fpm-specs/list", get(fpm_spec::spec_list))
         .route("/system/fpm-specs/add", post(fpm_spec::spec_add))
@@ -535,6 +540,15 @@ fn api_routers() -> Router {
         .route("/terminal/crontab/toggle", post(user_cron::cron_toggle))
         .route("/terminal/crontab/run_now", post(user_cron::cron_run_now))
         .route("/terminal/crontab/log", get(user_cron::cron_log))
+        .route("/terminal/crontab/runs", get(user_cron::cron_runs))
+        .route(
+            "/terminal/crontab/runs_clear",
+            post(user_cron::cron_runs_clear),
+        )
+        .route(
+            "/terminal/crontab/logs_purge",
+            post(user_cron::cron_logs_purge),
+        )
         // System
         .route("/system/info", get(system_info::system_info))
         .route("/system/status", get(system_info::system_status))

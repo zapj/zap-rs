@@ -2,12 +2,15 @@
 
 use std::net::SocketAddr;
 
-use axum::{Json, extract::Extension};
+use axum::{
+    Json,
+    extract::{Extension, Query},
+};
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::zap::{
-    ZapError, ZapJsonResult, audit,
+    ZapError, ZapJsonResult, appstore as ast, audit,
     jwt::{ValidatedClaims, is_admin},
     script_cron::{self, Cron},
 };
@@ -202,7 +205,8 @@ pub async fn cron_run_now(
     let job = script_cron::get_job(payload.id)
         .await?
         .ok_or_else(|| ZapError::New(-1, "计划任务不存在".to_string()))?;
-    let run_id = script_cron::launch_script_run(&job.script_path, "manual", &claims.sub).await?;
+    let run_id =
+        script_cron::launch_script_run(&job.script_path, "manual", &claims.sub, job.id).await?;
     // 立即运行同样刷新最近运行记录
     let now = chrono::Local::now().timestamp();
     let _ = sqlx::query(
@@ -225,5 +229,57 @@ pub async fn cron_run_now(
         "code": 0,
         "message": "已触发运行",
         "data": { "run_id": run_id }
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CronRunsQuery {
+    pub job_id: i64,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// GET /system/cron/runs —— 某个任务最近的运行历史（新的在前）。
+///
+/// 只保留最近 `MAX_RUNS_PER_JOB` 条，超出的在登记新运行时已自动清理，
+/// 所以这里不需要分页。
+pub async fn cron_runs(claims: ValidatedClaims, Query(q): Query<CronRunsQuery>) -> ZapJsonResult {
+    ensure_admin(&claims)?;
+    let limit = q.limit.unwrap_or(ast::MAX_RUNS_PER_JOB);
+    let runs = ast::list_runs_by_key(&format!("cron:{}", q.job_id), limit).await?;
+    Ok(Json(json!({
+        "code": 0,
+        "data": { "runs": runs, "keep": ast::MAX_RUNS_PER_JOB }
+    })))
+}
+
+/// POST /system/cron/runs_clear —— 清空某个任务的运行历史（含日志文件与快照）。
+pub async fn cron_runs_clear(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<CronIdPayload>,
+) -> ZapJsonResult {
+    ensure_admin(&claims)?;
+    let job = script_cron::get_job(payload.id)
+        .await?
+        .ok_or_else(|| ZapError::New(-1, "计划任务不存在".to_string()))?;
+    let n = ast::delete_runs_by_key(&format!("cron:{}", payload.id)).await?;
+    // 历史已清空：断开 last_run_id 引用，避免「上次运行」指向已删记录
+    let _ = sqlx::query("UPDATE cron_jobs SET last_run_id = '', last_run_at = 0 WHERE id = ?")
+        .bind(payload.id)
+        .execute(crate::db::get_db_pool().await)
+        .await;
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "cron_runs_clear",
+        &job.name,
+        &n.to_string(),
+    )
+    .await;
+    Ok(Json(json!({
+        "code": 0,
+        "message": "已清空运行历史",
+        "data": { "deleted": n }
     })))
 }
