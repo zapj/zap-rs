@@ -219,7 +219,10 @@ fn ensure_owner(actor: Option<Actor>, path: &Path) -> Result<(), String> {
     }
 }
 
-/// 把新建/写入的内容归到操作者名下（避免留下 root 拥有的文件）。
+/// 把**新建**的内容归到操作者名下（避免留下 root 拥有的文件）。
+///
+/// 只用于「新建」场景；修改已有文件时不调用，以保持其原有属主 ——
+/// 编辑 /etc 下的系统配置若把属主改成操作者本人，服务可能就读不到了。
 fn apply_owner(actor: Option<Actor>, path: &Path) -> Result<(), String> {
     let Some(actor) = actor else { return Ok(()) };
     std::os::unix::fs::chown(path, Some(actor.uid), Some(actor.gid))
@@ -395,7 +398,8 @@ pub async fn write(
             return Response::err(-1, "不能覆盖目录");
         }
         // 覆盖已有文件仅限本人文件（root 建的文件普通用户改不了）
-        if resolved.exists()
+        let existed = resolved.exists();
+        if existed
             && let Err(e) = ensure_owner(actor, &resolved)
         {
             return Response::err(-1, e);
@@ -406,13 +410,23 @@ pub async fn write(
             return Response::err(-1, e);
         }
         match std::fs::write(&resolved, &content) {
-            Ok(_) => match apply_owner(actor, &resolved) {
-                Ok(_) => Response::ok(
-                    "保存成功",
-                    Some(json!({ "path": resolved.to_string_lossy() })),
-                ),
-                Err(e) => Response::err(-1, e),
-            },
+            Ok(_) => {
+                // 仅新建的内容归操作者；修改已有文件时保持其原有属主，
+                // 否则编辑 /etc 下的系统配置会把属主改成操作者本人，
+                // 依赖 root 属主读取配置的服务就会起不来。
+                let owner = if existed {
+                    Ok(())
+                } else {
+                    apply_owner(actor, &resolved)
+                };
+                match owner {
+                    Ok(_) => Response::ok(
+                        "保存成功",
+                        Some(json!({ "path": resolved.to_string_lossy() })),
+                    ),
+                    Err(e) => Response::err(-1, e),
+                }
+            }
             Err(e) => Response::err(-1, format!("写入失败: {e}")),
         }
     })
@@ -585,16 +599,27 @@ pub async fn upload(
             return Response::err(-1, e);
         }
         // 覆盖同名文件仅限本人文件；新上传的文件归操作者所有
-        if dest.exists()
+        let existed = dest.exists();
+        if existed
             && let Err(e) = ensure_owner(actor, &dest)
         {
             return Response::err(-1, e);
         }
         match std::fs::write(&dest, &bytes) {
-            Ok(_) => match apply_owner(actor, &dest) {
-                Ok(_) => Response::ok("上传成功", Some(json!({ "name": rel.to_string_lossy() }))),
-                Err(e) => Response::err(-1, e),
-            },
+            Ok(_) => {
+                // 与 write 同一规则：只有新建的才归操作者，覆盖已有文件时保持原属主
+                let owner = if existed {
+                    Ok(())
+                } else {
+                    apply_owner(actor, &dest)
+                };
+                match owner {
+                    Ok(_) => {
+                        Response::ok("上传成功", Some(json!({ "name": rel.to_string_lossy() })))
+                    }
+                    Err(e) => Response::err(-1, e),
+                }
+            }
             Err(e) => Response::err(-1, format!("上传失败: {e}")),
         }
     })
@@ -767,13 +792,19 @@ pub async fn chown(
 }
 
 /// 递归复制文件或目录。
+///
+/// 副本**原样继承源的权限与属主/属组**（等价 `cp -a`）：复制只是多出一份内容，
+/// 不该改变它"是谁的"。唯一例外是过程中新建出来的中间目录 —— 源里没有对应物，
+/// 归操作者所有。
 fn copy_recursive(src: &Path, dst: &Path, actor: Option<Actor>) -> Result<(), String> {
     let md = std::fs::metadata(src).map_err(|e| format!("读取源失败 {}: {e}", src.display()))?;
     if md.is_dir() {
         std::fs::create_dir_all(dst).map_err(|e| format!("创建目录失败 {}: {e}", dst.display()))?;
+        // 先定属主再定权限：让 set_permissions 收口，保证最终权限与源一致
+        std::os::unix::fs::chown(dst, Some(md.uid()), Some(md.gid()))
+            .map_err(|e| format!("设置属主失败 {}: {e}", dst.display()))?;
         std::fs::set_permissions(dst, md.permissions())
             .map_err(|e| format!("设置权限失败 {}: {e}", dst.display()))?;
-        apply_owner(actor, dst)?;
         for entry in std::fs::read_dir(src)
             .map_err(|e| format!("读取目录失败 {}: {e}", src.display()))?
             .flatten()
@@ -782,13 +813,14 @@ fn copy_recursive(src: &Path, dst: &Path, actor: Option<Actor>) -> Result<(), St
             copy_recursive(&entry.path(), &dst.join(name), actor)?;
         }
     } else {
-        // 父目录不存在时逐级创建（中间层同样归操作者所有）
+        // 父目录不存在时逐级创建：中间层是新建的，归操作者所有
         if let Some(parent) = dst.parent() {
             create_dirs_owned(actor, parent)?;
         }
         std::fs::copy(src, dst).map_err(|e| format!("复制文件失败 {}: {e}", dst.display()))?;
-        // std::fs::copy 会保留权限模式；再归到操作者名下
-        apply_owner(actor, dst)?;
+        // std::fs::copy 已保留权限模式，这里再把属主/属组也原样带过来
+        std::os::unix::fs::chown(dst, Some(md.uid()), Some(md.gid()))
+            .map_err(|e| format!("设置属主失败 {}: {e}", dst.display()))?;
     }
     Ok(())
 }

@@ -145,9 +145,13 @@ pub(crate) async fn user_private_prefixes(claims: &Claims) -> (String, String) {
 }
 
 /// 文件操作的执行身份 `(linux 账号, 是否跳过属主校验)`：
-/// - 管理员：新建内容归自己的账号（不再一律是 root），但跳过属主校验，
-///   仍可管理服务器上 root 拥有的文件；
-/// - 普通用户：内容归自己，且只能删改本人文件。
+/// - 管理员：以自己的 Linux 账号执行，跳过属主校验（可管理 root 拥有的文件）；
+/// - 普通用户：以自己的 Linux 账号执行，且只能删改本人文件。
+///
+/// 这里只决定「以谁的名义执行」与「允许操作哪些文件」，**不决定文件属主**。
+/// 属主规则统一放在 zapexec 侧：新建的内容归操作者，修改已有文件时保持原属主。
+/// 后者尤其关键 —— 编辑 /etc 下的系统配置若把属主改成操作者本人，
+/// 依赖 root 属主读取配置的服务就会起不来。
 async fn actor_identity(claims: &Claims) -> Result<(Option<String>, bool), ZapError> {
     let pool = db::get_db_pool().await;
     let lu: Option<String> = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
@@ -165,6 +169,19 @@ async fn actor_identity(claims: &Claims) -> Result<(Option<String>, bool), ZapEr
             "当前账号未绑定系统用户，无法执行文件操作".to_string(),
         )),
     }
+}
+
+/// `path` 是否位于 `prefix` 之内（`prefix` 自身也算在内）。
+///
+/// 用于 home / 私有 tmp 这类「目录前缀」判断。必须比对到 `/` 边界，
+/// 否则 `/home/admin` 会把 `/home/admin-tools` 也一并算进去。
+fn path_within(path: &Path, prefix: &str) -> bool {
+    let prefix = prefix.trim_end_matches('/');
+    if prefix.is_empty() {
+        return false;
+    }
+    let p = path.to_string_lossy();
+    p == prefix || p.starts_with(&format!("{prefix}/"))
 }
 
 /// Check if user has read access to a path.
@@ -185,12 +202,7 @@ pub(crate) fn check_access(
     if is_admin(claims) {
         return Ok(());
     }
-    let path_str = path.to_string_lossy().to_string();
-    if path_str == home
-        || path_str.starts_with(&format!("{home}/"))
-        || path_str == tmp
-        || path_str.starts_with(&format!("{tmp}/"))
-    {
+    if path_within(path, home) || path_within(path, tmp) {
         return Ok(());
     }
     Err(ZapError::New(-1, "没有访问该路径的权限".to_string()))
@@ -243,7 +255,8 @@ pub(crate) async fn list_local_dir(
 
     // 首次访问自己的 home 时自动创建（以该用户名义创建，属主即本人）
     if !is_admin(claims) && resolved.as_path() == Path::new(&home) && !resolved.exists() {
-        let (as_user, skip_owner_check) = actor_identity(claims).await?;
+        let (as_user, skip_owner_check) =
+            actor_identity(claims).await?;
         let _ = crate::zapexec::call(Request::FileMkdir {
             path: home.clone(),
             as_user,
@@ -849,6 +862,27 @@ mod tests {
         let home = format!("/home/{}", c.sub);
         let tmp = format!("/tmp/zap-{}", c.sub);
         check_write_access(c, Path::new(p), &home, &tmp)
+    }
+
+    #[test]
+    fn home_prefix_matches_only_full_segments() {
+        // 目录自身与其下任意层级的子项都算命中
+        assert!(path_within(Path::new("/home/admin"), "/home/admin"));
+        assert!(path_within(Path::new("/home/admin/a.txt"), "/home/admin"));
+        assert!(path_within(Path::new("/home/admin/sub/deep"), "/home/admin"));
+
+        // 字符串前缀相同但不是同一个目录：不能算命中，
+        // 否则 /home/admin-tools 会被当成 admin 的 home（越权）
+        assert!(!path_within(Path::new("/home/admin-tools"), "/home/admin"));
+        assert!(!path_within(Path::new("/home/adminx/f"), "/home/admin"));
+
+        // 完全无关的路径
+        assert!(!path_within(Path::new("/etc/nginx"), "/home/admin"));
+        assert!(!path_within(Path::new("/home/alice"), "/home/admin"));
+
+        // 结尾斜杠宽容处理；空前缀一律不命中（否则会命中所有路径）
+        assert!(path_within(Path::new("/home/admin/x"), "/home/admin/"));
+        assert!(!path_within(Path::new("/anything"), ""));
     }
 
     #[test]
