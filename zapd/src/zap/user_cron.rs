@@ -499,6 +499,8 @@ async fn launch_exec(
         ast::register_run_with_key(run_id, action, &job.name, username, &log, &key).await
     {
         warn!("登记计划任务运行记录失败: {e}");
+        // 记录没入库 → 撤回 last_run_id，否则「查看日志」会指向不存在的运行记录
+        clear_last_run(username, &job.id, run_id).await;
     }
     let home = home_dir_of(&job.exec_user).await;
     let resp = zapexec::call(Request::CronRun {
@@ -520,6 +522,22 @@ async fn launch_exec(
         log,
     );
     Ok(())
+}
+
+/// 仅当 `last_run_id` 仍是本次（登记失败）运行的 `run_id` 时清空它。
+async fn clear_last_run(username: &str, job_id: &str, run_id: &str) {
+    if let Ok(mut ct) = load(username).await {
+        let mut changed = false;
+        if let Some(job) = ct.jobs.iter_mut().find(|j| j.id == job_id) {
+            if job.last_run_id == run_id {
+                job.last_run_id = String::new();
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = save(username, &ct).await;
+        }
+    }
 }
 
 /// 回写某个任务的状态（运行中 -> success / failed）。

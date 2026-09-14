@@ -238,6 +238,22 @@ async fn prune_keep_recent(scope: Option<&str>, keep: i64) {
         "已清理 {} 条历史运行记录（保留最近 {keep} 条）",
         stale.len()
     );
+    // 被裁掉的可能是某任务的「上次运行」：断开引用，避免查看日志时指向空记录
+    clear_dangling_last_run_ids().await;
+}
+
+/// 清掉 `cron_jobs` 里指向已删除运行记录的 `last_run_id`。
+///
+/// 用户计划任务的引用存在 crontab.yaml 里，由登记失败时的回滚兜底，这里只处理
+/// 落在 DB 中的计划任务表。
+pub async fn clear_dangling_last_run_ids() {
+    let pool = db::get_db_pool().await;
+    let _ = sqlx::query(
+        "UPDATE cron_jobs SET last_run_id = '' \
+         WHERE last_run_id <> '' AND last_run_id NOT IN (SELECT run_id FROM appstore_runs)",
+    )
+    .execute(pool)
+    .await;
 }
 
 /// 删除一次运行留下的磁盘产物：日志文件 + 运行快照目录。

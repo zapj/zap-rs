@@ -1000,14 +1000,23 @@ pub async fn ws_log(
         Ok(data) => data.claims,
         Err(_) => return unauthorized("Invalid token"),
     };
-    // 归属校验：实时日志同样按归属用户隔离，不能凭 run_id 串看他人安装输出
-    if let Err(e) = ast::ensure_run_access(&claims, &run_id).await {
-        return axum::response::Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body(axum::body::Body::from(e.to_string()))
-            .unwrap();
-    }
-    ws.on_upgrade(move |socket| handle_ws_log(socket, run_id))
+    // 归属校验：实时日志同样按归属用户隔离，不能凭 run_id 串看他人安装输出。
+    // 校验失败也照常升级，再回一条可读的 error 帧：直接回 403 时浏览器只会触发
+    // onerror，前端拿不到任何原因，只能显示含糊的「连接错误」。
+    let access = ast::ensure_run_access(&claims, &run_id).await;
+    ws.on_upgrade(move |mut socket| async move {
+        match access {
+            Ok(_) => handle_ws_log(socket, run_id).await,
+            Err(e) => {
+                let _ = socket
+                    .send(Message::Text(Utf8Bytes::from(
+                        json!({ "type": "error", "message": e.to_string() }).to_string(),
+                    )))
+                    .await;
+                let _ = socket.close().await;
+            }
+        }
+    })
 }
 
 /// WebSocket 握手失败的统一响应（升级前返回，前端表现为连接失败）。

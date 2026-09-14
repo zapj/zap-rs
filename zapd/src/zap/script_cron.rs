@@ -281,6 +281,17 @@ async fn mark_last_run(id: i64, run_id: &str) {
     .await;
 }
 
+/// 仅当 `last_run_id` 仍是本次（失败）运行的 `run_id` 时清空它，
+/// 避免误删之后已经成功登记的新运行引用。
+async fn clear_last_run(id: i64, run_id: &str) {
+    let pool = crate::db::get_db_pool().await;
+    let _ = sqlx::query("UPDATE cron_jobs SET last_run_id = '' WHERE id = ? AND last_run_id = ?")
+        .bind(id)
+        .bind(run_id)
+        .execute(pool)
+        .await;
+}
+
 async fn mark_next_run(id: i64, next: i64) {
     let pool = crate::db::get_db_pool().await;
     let _ = sqlx::query(
@@ -324,27 +335,44 @@ pub async fn launch_script_run(
     job_id: i64,
 ) -> Result<String, ZapError> {
     let run_id = ast::generate_run_id();
-    let log_path = ast::log_path_for(&run_id);
+    launch_script_run_with_id(path, action, username, job_id, &run_id).await
+}
+
+/// 用指定的 `run_id` 执行一次脚本运行。
+///
+/// 调度器需要先回写 `last_run_at` 做防重（同步进行，避免同一分钟重复触发），
+/// 因此必须复用同一个 `run_id`：否则 `last_run_id` 会指向一条从未登记的运行
+/// 记录，前端点「查看日志」时 WebSocket 握手会被拒，表现为「连接错误」。
+pub async fn launch_script_run_with_id(
+    path: &str,
+    action: &str,
+    username: &str,
+    job_id: i64,
+    run_id: &str,
+) -> Result<String, ZapError> {
+    let log_path = ast::log_path_for(run_id);
     let key = format!("cron:{job_id}");
-    ast::register_run_with_key(&run_id, action, path, username, &log_path, &key).await?;
+    ast::register_run_with_key(run_id, action, path, username, &log_path, &key).await?;
     let resp = zapexec::call(Request::AppstoreScriptRun {
         path: path.to_string(),
-        run_id: run_id.clone(),
+        run_id: run_id.to_string(),
         username: username.to_string(),
     })
     .await?;
     if resp.code != 0 {
-        ast::finish_run(&run_id, "failed", resp.code as i64).await;
+        ast::finish_run(run_id, "failed", resp.code as i64).await;
         return Err(ZapError::New(resp.code, resp.message));
     }
-    ast::watch_log(run_id.clone(), log_path);
-    Ok(run_id)
+    ast::watch_log(run_id.to_string(), log_path);
+    Ok(run_id.to_string())
 }
 
 /// 启动计划任务调度器（后台每分钟评估一次）。
 pub fn start() {
     tokio::spawn(async move {
         info!("脚本计划任务调度器已启动");
+        // 历史遗留：清掉指向已删除运行记录的 last_run_id，否则「查看日志」连不上
+        ast::clear_dangling_last_run_ids().await;
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         let mut last_minute: i64 = -1;
         loop {
@@ -391,13 +419,22 @@ async fn tick_once(now: &chrono::DateTime<chrono::Local>) {
         if expr.matches(now) && job.last_run_at < ts - 50 {
             let job_id = job.id;
             let path = job.script_path.clone();
+            // 先同步回写 last_run_at 做防重；run_id 必须贯穿到实际执行，
+            // 否则 last_run_id 会指向一条未登记的运行记录（查看日志 → 连接错误）
             let run_id = ast::generate_run_id();
             mark_last_run(job_id, &run_id).await;
             tokio::spawn(async move {
                 // 计划任务表是全局的（无用户列），而脚本按用户隔离 → 一律归属 admin
-                match launch_script_run(&path, "cron", "admin", job_id).await {
-                    Ok(rid) => info!("计划任务 #{job_id} 已触发: {path} ({rid})"),
-                    Err(e) => warn!("计划任务 #{job_id} 触发失败: {path}: {e}"),
+                match launch_script_run_with_id(&path, "cron", "admin", job_id, &run_id).await {
+                    Ok(rid) => {
+                        mark_last_run(job_id, &rid).await;
+                        info!("计划任务 #{job_id} 已触发: {path} ({rid})");
+                    }
+                    Err(e) => {
+                        // 运行登记/启动失败：撤掉悬空的 last_run_id
+                        clear_last_run(job_id, &run_id).await;
+                        warn!("计划任务 #{job_id} 触发失败: {path}: {e}");
+                    }
                 }
             });
         }

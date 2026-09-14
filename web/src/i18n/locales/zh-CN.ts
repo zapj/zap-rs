@@ -2584,6 +2584,7 @@ export default {
     statusFailed: '执行失败',
     statusError: '错误',
     statusConnError: '连接错误',
+    noRunId: '该运行记录不存在，可能已被自动清理',
     statusDisconnected: '连接已断开',
     statusStopped: '已停止',
     stopSent: '已发送停止信号',

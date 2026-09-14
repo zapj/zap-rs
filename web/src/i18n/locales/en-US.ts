@@ -2618,6 +2618,7 @@ const enUS: Messages = {
     statusFailed: 'Failed',
     statusError: 'Error',
     statusConnError: 'Connection error',
+    noRunId: 'Run record not found, it may have been purged automatically',
     statusDisconnected: 'Connection closed',
     statusStopped: 'Stopped',
     stopSent: 'Stop signal sent',

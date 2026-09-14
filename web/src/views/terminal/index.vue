@@ -1227,6 +1227,7 @@ function connectTab(tab: TerminalTab, conn: SshConnection, authPassword?: string
     if (authPassword) {
       // 后端凭据里无密码：把本次输入的临时密码下发给后端完成 SSH 认证
       term.writeln('\x1b[36m' + t('terminal.authenticating') + '\x1b[0m')
+      ;(tab as any).authSent = true
       ws.send(JSON.stringify({ type: 'auth', password: authPassword }))
     } else {
       term.writeln(
@@ -1245,6 +1246,34 @@ function connectTab(tab: TerminalTab, conn: SshConnection, authPassword?: string
     if (event.data instanceof ArrayBuffer) {
       term.write(new Uint8Array(event.data))
     } else if (typeof event.data === 'string') {
+      // 后端控制消息（如索要临时密码）不回显到终端
+      let ctrl: any = null
+      try {
+        ctrl = JSON.parse(event.data)
+      } catch {
+        ctrl = null
+      }
+      if (ctrl?.type === 'ask_password') {
+        // 连接时已下发过临时密码 → 这条是竞态产物，忽略
+        if ((tab as any).authSent) return
+        void ElMessageBox.prompt(
+          t('terminal.pwdPrompt', { user: conn.username, host: conn.host }),
+          t('terminal.connectTitle', { name: conn.name }),
+          {
+            inputType: 'password',
+            confirmButtonText: t('terminal.connect'),
+            cancelButtonText: t('common.cancel'),
+            inputValidator: (v: string) => (v.trim() ? true : t('terminal.pwdNotEmpty')),
+          },
+        )
+          .then(({ value }) => {
+            if (tab.ws !== ws || ws.readyState !== WebSocket.OPEN) return
+            ;(tab as any).authSent = true
+            ws.send(JSON.stringify({ type: 'auth', password: value ?? '' }))
+          })
+          .catch(() => ws.close())
+        return
+      }
       term.write(event.data)
     }
   }

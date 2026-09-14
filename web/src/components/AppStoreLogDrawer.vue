@@ -166,9 +166,16 @@ let fitAddon: FitAddon | null = null
 let ws: WebSocket | null = null
 
 function openDrawer(id: string, title?: string) {
+  if (!id) {
+    ElMessage.warning(t('runLogDrawer.noRunId'))
+    return
+  }
+  const reopen = visible.value
   runId.value = id
   if (title) drawerTitle.value = title
   visible.value = true
+  // 抽屉已处于打开状态时 watch(visible) 不会再触发，需手动重连到新的 run
+  if (reopen) connect()
 }
 
 defineExpose({ openDrawer })

@@ -600,6 +600,14 @@ async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) 
                 "\x1b[33m需要 SSH 密码，请在弹窗中输入（仅本次会话使用，不会保存）\x1b[0m\r\n",
             )))
             .await;
+        // 结构化控制消息：前端据此弹出密码输入框并回发 {"type":"auth","password":...}。
+        // 兜底场景：库里存了密文但解密后为空（如加密密钥轮换、历史数据），
+        // 此时前端列表的 has_password 仍为 true、不会提前弹窗，只有这条消息能救场。
+        let _ = tx
+            .send(Message::Text(axum::extract::ws::Utf8Bytes::from(
+                r#"{"type":"ask_password"}"#,
+            )))
+            .await;
         let pwd = tokio::time::timeout(std::time::Duration::from_secs(30), async {
             loop {
                 match rx.next().await {
