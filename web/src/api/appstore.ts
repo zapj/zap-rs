@@ -166,6 +166,10 @@ export const readScript = (path: string) =>
 export const writeScript = (data: { path: string; content: string }) =>
   http.post<any>('/appstore/script/write', data)
 
+/** 删除自定义脚本或目录（仅限 scripts/ 下，脚本根目录不可删） */
+export const deleteScript = (data: { path: string }) =>
+  http.post<any>('/appstore/script/delete', data)
+
 export const runScript = (data: { path: string }) => http.post<any>('/appstore/script/run', data)
 
 export const stopScript = (data: { run_id: string }) => http.post<any>('/appstore/script/stop', data)

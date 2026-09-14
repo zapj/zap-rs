@@ -1464,10 +1464,44 @@ pub async fn run_retry(run_id: String, new_run_id: String) -> Response {
     .unwrap_or_else(|e| Response::err(-1, e))
 }
 
-pub async fn script_run(path: String, run_id: String) -> Response {
+/// 面板用户名安全校验：仅允许 `[A-Za-z0-9._-]`，禁止 `..` 与路径分隔符。
+///
+/// 用户名会被拼进 `data/users/<user>/`，必须拦住 `/` 与 `..`，
+/// 否则能把落盘路径带出用户目录。
+fn safe_username(u: &str) -> Result<(), String> {
+    let u = u.trim();
+    if u.is_empty() || u.len() > 64 {
+        return Err("用户名不合法".into());
+    }
+    if u.starts_with('.')
+        || u.contains("..")
+        || u.contains('/')
+        || u.contains('\\')
+        || !u
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err("用户名不合法".into());
+    }
+    Ok(())
+}
+
+/// 自定义脚本根目录：`{ZAP_PATH}/data/users/<username>/`。
+///
+/// 与 `crontab.yaml`、`cloud/` 同级 —— 用户的「个人数据」统一收在
+/// `users/<user>/` 下，备份迁移时整目录打包即可。
+///
+/// 返回的是**用户目录**而不是 scripts 本身：`path` 参数自带 `scripts/`
+/// 前缀（如 `scripts/backup.sh`），与前端树节点契约一致。
+fn user_scripts_root(username: &str) -> Result<PathBuf, String> {
+    safe_username(username)?;
+    Ok(zap_path().join("data").join("users").join(username))
+}
+
+pub async fn script_run(path: String, run_id: String, username: String) -> Response {
     tokio::task::spawn_blocking(move || -> Result<Response, String> {
-        let custom = appstore_dir().join("custom");
-        let resolved = safe_join(&custom, &path)?;
+        let root = user_scripts_root(&username)?;
+        let resolved = safe_join(&root, &path)?;
         if !resolved.is_file() {
             return Err("脚本不存在".into());
         }
@@ -1517,11 +1551,11 @@ pub async fn script_stop(run_id: String) -> Response {
     .unwrap_or_else(|e| Response::err(-1, e))
 }
 
-pub async fn script_read(path: String) -> Response {
+pub async fn script_read(path: String, username: String) -> Response {
     tokio::task::spawn_blocking(move || {
-        // 与 script_write / script_run 一致：path 相对 custom/（树节点亦以此生成）
-        let custom = appstore_dir().join("custom");
-        let resolved = safe_join(&custom, &path)?;
+        // 与 script_write / script_run 一致：path 相对用户目录（树节点亦以此生成）
+        let root = user_scripts_root(&username)?;
+        let resolved = safe_join(&root, &path)?;
         let md = std::fs::metadata(&resolved).map_err(|e| format!("路径不存在: {e}"))?;
         if !md.is_file() {
             return Err("不是文件".to_string());
@@ -1537,11 +1571,11 @@ pub async fn script_read(path: String) -> Response {
     .unwrap_or_else(|e| Response::err(-1, e))
 }
 
-pub async fn script_write(path: String, content: String) -> Response {
+pub async fn script_write(path: String, content: String, username: String) -> Response {
     tokio::task::spawn_blocking(move || {
         use std::os::unix::fs::PermissionsExt;
-        let custom = appstore_dir().join("custom");
-        let resolved = safe_join(&custom, &path)?;
+        let root = user_scripts_root(&username)?;
+        let resolved = safe_join(&root, &path)?;
         if let Ok(md) = std::fs::metadata(&resolved)
             && md.is_dir()
         {
@@ -1555,6 +1589,36 @@ pub async fn script_write(path: String, content: String) -> Response {
         let _ = std::fs::set_permissions(&resolved, std::fs::Permissions::from_mode(0o755));
         Ok::<_, String>(Response::ok(
             "保存成功",
+            Some(json!({ "path": resolved.to_string_lossy() })),
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+/// 删除自定义脚本或目录（仅限 `{ZAP_PATH}/data/users/<username>/scripts/` 下）。
+pub async fn script_delete(path: String, username: String) -> Response {
+    tokio::task::spawn_blocking(move || {
+        let root = user_scripts_root(&username)?;
+        let scripts = root.join("scripts");
+        let resolved = safe_join(&root, &path)?;
+        // 双重保险：safe_join 已挡住跳出用户目录，这里再挡住删向 scripts/ 之外
+        //（同级的 crontab.yaml、cloud/ 不能被顺手删掉）
+        if resolved != scripts && !resolved.starts_with(&scripts) {
+            return Err("只允许删除 scripts/ 下的内容".to_string());
+        }
+        if resolved == scripts {
+            return Err("不能删除脚本根目录".to_string());
+        }
+        let md = std::fs::metadata(&resolved).map_err(|e| format!("路径不存在: {e}"))?;
+        if md.is_dir() {
+            std::fs::remove_dir_all(&resolved).map_err(|e| format!("删除失败: {e}"))?;
+        } else {
+            std::fs::remove_file(&resolved).map_err(|e| format!("删除失败: {e}"))?;
+        }
+        Ok::<_, String>(Response::ok(
+            "删除成功",
             Some(json!({ "path": resolved.to_string_lossy() })),
         ))
     })
@@ -1792,6 +1856,28 @@ mod tests {
         assert!(safe_join(&base, "../x").is_err());
         let ok = safe_join(&base, "sub/x.sh").unwrap();
         assert_eq!(ok, base.join("sub/x.sh"));
+    }
+
+    #[test]
+    fn user_scripts_root_rejects_unsafe_username() {
+        let (_guard, root) = with_zap_root();
+        assert_eq!(
+            user_scripts_root("admin").unwrap(),
+            root.join("data/users/admin")
+        );
+        assert!(user_scripts_root("a.b-c_1").is_ok());
+        let long = "x".repeat(65);
+        for bad in [
+            "",
+            "..",
+            "../admin",
+            "a/b",
+            "a\\b",
+            ".hidden",
+            long.as_str(),
+        ] {
+            assert!(user_scripts_root(bad).is_err(), "应拒绝用户名: {bad}");
+        }
     }
 
     #[test]

@@ -415,6 +415,11 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
         Some(Perm::action("appstore.script", "run")),
     ),
     (
+        "/appstore/script/delete",
+        Required::Admin,
+        Some(Perm::action("appstore.script", "write")),
+    ),
+    (
         "/appstore/packages",
         Required::User,
         Some(Perm::action("appstore", "view")),

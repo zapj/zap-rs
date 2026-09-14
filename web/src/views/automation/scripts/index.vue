@@ -17,6 +17,7 @@
           default-expand-all
           highlight-current
           @node-click="handleNodeClick"
+          @node-contextmenu="handleContextMenu"
         >
           <template #default="{ data }">
             <span class="tree-node">
@@ -69,6 +70,19 @@
       />
     </div>
 
+    <!-- 树右键菜单 -->
+    <div
+      v-show="ctxMenu.visible"
+      class="ctx-menu"
+      :style="{ top: `${ctxMenu.y}px`, left: `${ctxMenu.x}px` }"
+      @contextmenu.prevent
+    >
+      <div class="ctx-item ctx-item-danger" @click.stop="handleCtxDelete">
+        <el-icon><Delete /></el-icon>
+        <span>{{ t('automationScripts.delete') }}</span>
+      </div>
+    </div>
+
     <!-- 日志抽屉 -->
     <AppStoreLogDrawer ref="logDrawerRef" />
   </div>
@@ -78,15 +92,13 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Folder, Document, InfoFilled } from '@/icons'
-import { useUserStore } from '@/stores/user'
-import { getScriptsTree, readScript, writeScript, runScript } from '@/api/appstore'
+import { Plus, Folder, Document, InfoFilled, Delete } from '@/icons'
+import { getScriptsTree, readScript, writeScript, runScript, deleteScript } from '@/api/appstore'
 import AppStoreLogDrawer from '@/components/AppStoreLogDrawer.vue'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { langFromPath } from '@/utils/editorLang'
 
 const { t } = useI18n()
-const userStore = useUserStore()
 
 interface TreeNode {
   type: 'dir' | 'file'
@@ -149,8 +161,7 @@ async function openScript(path: string) {
 }
 
 async function handleNewScript() {
-  const username = userStore.name || 'admin'
-  const defaultPath = `scripts/${username}/new-script.sh`
+  const defaultPath = 'scripts/new-script.sh'
   try {
     const { value } = await ElMessageBox.prompt(
       t('automationScripts.pathPrompt'),
@@ -215,6 +226,54 @@ async function handleRun() {
   }
 }
 
+// ── 树右键菜单 ────────────────────────────────────────────
+const ctxMenu = ref<{ visible: boolean; x: number; y: number; node: TreeNode | null }>({
+  visible: false,
+  x: 0,
+  y: 0,
+  node: null,
+})
+
+function handleContextMenu(e: MouseEvent, data: TreeNode) {
+  e.preventDefault()
+  ctxMenu.value = { visible: true, x: e.clientX, y: e.clientY, node: data }
+}
+
+function closeCtxMenu() {
+  ctxMenu.value.visible = false
+}
+
+async function handleCtxDelete() {
+  const node = ctxMenu.value.node
+  closeCtxMenu()
+  if (!node) return
+  const isDir = node.type === 'dir'
+  try {
+    await ElMessageBox.confirm(
+      t(isDir ? 'automationScripts.deleteDirConfirm' : 'automationScripts.deleteFileConfirm', {
+        name: node.name,
+      }),
+      t('automationScripts.deleteTitle'),
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteScript({ path: node.path })
+    ElMessage.success(t('automationScripts.deleted'))
+    // 删掉的正好是当前打开的脚本（或其所在目录）时，清空编辑器避免误存回已删文件
+    if (currentPath.value === node.path || currentPath.value.startsWith(`${node.path}/`)) {
+      currentPath.value = ''
+      content.value = ''
+      originalContent.value = ''
+    }
+    await loadTree()
+  } catch (e: any) {
+    ElMessage.error(e.message || t('automationScripts.deleteFailed'))
+  }
+}
+
 const logDrawerRef = ref<InstanceType<typeof AppStoreLogDrawer> | null>(null)
 
 // Ctrl/Cmd + S 保存当前脚本
@@ -229,10 +288,15 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => {
   loadTree()
   window.addEventListener('keydown', onKeydown)
+  // 点击别处或窗口尺寸变化时收起右键菜单
+  window.addEventListener('click', closeCtxMenu)
+  window.addEventListener('resize', closeCtxMenu)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('click', closeCtxMenu)
+  window.removeEventListener('resize', closeCtxMenu)
 })
 </script>
 
@@ -343,5 +407,39 @@ onBeforeUnmount(() => {
 
 .editor-area.is-readonly {
   background: var(--el-fill-color-light);
+}
+
+/* 树右键菜单 */
+.ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 130px;
+  padding: 4px 0;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 4px;
+  box-shadow: var(--el-box-shadow-light);
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+}
+
+.ctx-item:hover {
+  background: var(--el-fill-color-light);
+}
+
+.ctx-item-danger {
+  color: var(--el-color-danger);
+}
+
+.ctx-item-danger:hover {
+  background: var(--el-color-danger-light-9);
 }
 </style>

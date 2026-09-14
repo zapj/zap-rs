@@ -202,7 +202,7 @@ pub async fn cron_run_now(
     let job = script_cron::get_job(payload.id)
         .await?
         .ok_or_else(|| ZapError::New(-1, "计划任务不存在".to_string()))?;
-    let run_id = script_cron::launch_script_run(&job.script_path, "manual").await?;
+    let run_id = script_cron::launch_script_run(&job.script_path, "manual", &claims.sub).await?;
     // 立即运行同样刷新最近运行记录
     let now = chrono::Local::now().timestamp();
     let _ = sqlx::query(

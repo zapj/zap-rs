@@ -424,18 +424,29 @@ pub enum Request {
         run_mode: Option<String>,
         run_id: String,
     },
-    /// 运行自定义脚本（仅限 appstore/custom/ 内）
+    /// 运行自定义脚本（仅限 `{data}/users/<username>/scripts/` 内）
     #[serde(rename = "appstore.script_run")]
-    AppstoreScriptRun { path: String, run_id: String },
+    AppstoreScriptRun {
+        path: String,
+        run_id: String,
+        username: String,
+    },
     /// 停止运行中的任务（按 run_id 杀进程组）
     #[serde(rename = "appstore.script_stop")]
     AppstoreScriptStop { run_id: String },
-    /// 读取 appstore 内脚本内容（编辑前读取）
+    /// 读取自定义脚本内容（编辑前读取）
     #[serde(rename = "appstore.script_read")]
-    AppstoreScriptRead { path: String },
-    /// 写自定义脚本（仅限 appstore/custom/ 内）
+    AppstoreScriptRead { path: String, username: String },
+    /// 写自定义脚本（仅限 `{data}/users/<username>/scripts/` 内）
     #[serde(rename = "appstore.script_write")]
-    AppstoreScriptWrite { path: String, content: String },
+    AppstoreScriptWrite {
+        path: String,
+        content: String,
+        username: String,
+    },
+    /// 删除自定义脚本或目录（仅限 `{data}/users/<username>/scripts/` 内）
+    #[serde(rename = "appstore.script_delete")]
+    AppstoreScriptDelete { path: String, username: String },
     /// 列出一次运行的可编辑脚本快照（runs/<run_id>/pkg/ 递归文件树）
     #[serde(rename = "appstore.run_files")]
     AppstoreRunFiles { run_id: String },
@@ -1140,6 +1151,7 @@ mod tests {
         let req = Request::AppstoreScriptWrite {
             path: "scripts/admin/backup.sh".into(),
             content: "#!/bin/bash\necho hi".into(),
+            username: "admin".into(),
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: Request = serde_json::from_str(&json).unwrap();

@@ -2091,7 +2091,7 @@ const enUS: Messages = {
     title: 'Custom Scripts',
     newScript: 'New',
     sidebarTip:
-      'Scripts live in custom/scripts/ (visible to admins only), survive Git source updates, and can be scheduled from "Scheduled Tasks"',
+      'Scripts are stored per user in data/users/<username>/scripts/ (visible to admins only), survive Git source updates, and can be scheduled from "Scheduled Tasks"',
     selectOrNew: 'Select or create a script',
     save: 'Save',
     run: 'Run',
@@ -2101,8 +2101,8 @@ const enUS: Messages = {
     unsavedSwitch: 'The current script has unsaved changes. Discard them?',
     readFailed: 'Failed to read the script',
     newTitle: 'New Script',
-    pathPrompt: 'Enter the script path (relative to custom/)',
-    pathPlaceholder: 'e.g. scripts/admin/backup.sh',
+    pathPrompt: 'Enter the script path (relative to the scripts directory)',
+    pathPlaceholder: 'e.g. scripts/backup.sh',
     pathEmpty: 'Path cannot be empty',
     mustBeSh: 'Scripts must end with .sh',
     pathInvalid: 'Invalid path',
@@ -2117,6 +2117,13 @@ const enUS: Messages = {
     runFailed: 'Run failed',
     runLogTitle: 'Run {name}',
     fallbackName: 'script',
+    delete: 'Delete',
+    deleteTitle: 'Confirm deletion',
+    deleteFileConfirm: 'Delete the script "{name}"? This cannot be undone.',
+    deleteDirConfirm:
+      'Delete the directory "{name}" and all scripts inside it? This cannot be undone.',
+    deleted: 'Deleted successfully',
+    deleteFailed: 'Delete failed',
   },
 
   /** Profile */

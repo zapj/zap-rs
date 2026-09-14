@@ -23,6 +23,7 @@ use crate::{
     zap::{
         ZapError, ZapJsonResult, appstore as ast, audit,
         jwt::{self, Claims, ValidatedClaims},
+        user_cron,
     },
     zapexec,
 };
@@ -602,9 +603,15 @@ fn build_script_tree(dir: &std::path::Path, rel_base: &std::path::Path) -> Value
 
 pub async fn scripts_tree(claims: ValidatedClaims) -> ZapJsonResult {
     require_admin(&claims)?;
-    // 路径统一相对 custom/（如 scripts/admin/backup.sh），与 script_read/write 契约一致
-    let base = ast::appstore_dir().join("custom");
+    user_cron::safe_username(&claims.sub)?;
+    // 自定义脚本按用户隔离：{data}/users/<username>/scripts/
+    // 路径统一相对**用户目录**（如 scripts/backup.sh），与 script_read/write 契约一致
+    let base = user_cron::users_dir().join(&claims.sub);
     let root = base.join("scripts");
+    // 首次访问即把该用户的脚本目录建出来（与 crontab.yaml、cloud/ 同级）
+    tokio::fs::create_dir_all(&root)
+        .await
+        .map_err(|e| ZapError::New(-1, format!("创建脚本目录失败: {e}")))?;
     let tree = tokio::task::spawn_blocking(move || {
         if root.is_dir() {
             build_script_tree(&root, &base)
@@ -629,9 +636,11 @@ pub async fn script_read(
     Query(q): Query<ScriptPathQuery>,
 ) -> ZapJsonResult {
     require_admin(&claims)?;
+    user_cron::safe_username(&claims.sub)?;
     validate_script_path(&q.path)?;
     let resp = zapexec::call(Request::AppstoreScriptRead {
         path: q.path.clone(),
+        username: claims.sub.clone(),
     })
     .await?;
     if resp.code != 0 {
@@ -654,10 +663,12 @@ pub async fn script_write(
     Json(payload): Json<ScriptWritePayload>,
 ) -> ZapJsonResult {
     require_admin(&claims)?;
+    user_cron::safe_username(&claims.sub)?;
     validate_script_path(&payload.path)?;
     let resp = zapexec::call(Request::AppstoreScriptWrite {
         path: payload.path.clone(),
         content: payload.content.clone(),
+        username: claims.sub.clone(),
     })
     .await?;
     if resp.code != 0 {
@@ -677,6 +688,41 @@ pub async fn script_write(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ScriptDeletePayload {
+    pub path: String,
+}
+
+/// 删除自定义脚本/目录（仅限 scripts/ 下；脚本根目录本身不可删）。
+pub async fn script_delete(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<ScriptDeletePayload>,
+) -> ZapJsonResult {
+    require_admin(&claims)?;
+    user_cron::safe_username(&claims.sub)?;
+    validate_script_path(&payload.path)?;
+    let resp = zapexec::call(Request::AppstoreScriptDelete {
+        path: payload.path.clone(),
+        username: claims.sub.clone(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "appstore_script_delete",
+        &payload.path,
+        "",
+    )
+    .await;
+    Ok(Json(
+        json!({ "code": 0, "message": "删除成功", "data": resp.data }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ScriptRunPayload {
     pub path: String,
 }
@@ -687,6 +733,7 @@ pub async fn script_run(
     Json(payload): Json<ScriptRunPayload>,
 ) -> ZapJsonResult {
     require_admin(&claims)?;
+    user_cron::safe_username(&claims.sub)?;
     validate_script_path(&payload.path)?;
     let run_id = ast::generate_run_id();
     let log_path = ast::log_path_for(&run_id);
@@ -695,6 +742,7 @@ pub async fn script_run(
     let resp = zapexec::call(Request::AppstoreScriptRun {
         path: payload.path.clone(),
         run_id: run_id.clone(),
+        username: claims.sub.clone(),
     })
     .await?;
     if resp.code != 0 {

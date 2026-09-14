@@ -399,9 +399,7 @@ pub async fn write(
         }
         // 覆盖已有文件仅限本人文件（root 建的文件普通用户改不了）
         let existed = resolved.exists();
-        if existed
-            && let Err(e) = ensure_owner(actor, &resolved)
-        {
+        if existed && let Err(e) = ensure_owner(actor, &resolved) {
             return Response::err(-1, e);
         }
         if let Some(parent) = resolved.parent()
@@ -600,9 +598,7 @@ pub async fn upload(
         }
         // 覆盖同名文件仅限本人文件；新上传的文件归操作者所有
         let existed = dest.exists();
-        if existed
-            && let Err(e) = ensure_owner(actor, &dest)
-        {
+        if existed && let Err(e) = ensure_owner(actor, &dest) {
             return Response::err(-1, e);
         }
         match std::fs::write(&dest, &bytes) {

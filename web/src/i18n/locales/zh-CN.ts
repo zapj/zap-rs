@@ -2081,7 +2081,7 @@ export default {
     title: '自定义脚本',
     newScript: '新建',
     sidebarTip:
-      '脚本位于 custom/scripts/（仅管理员可见），更新 Git 源时不会被覆盖，可被「计划任务」定时执行',
+      '脚本按用户隔离存放于 data/users/<用户名>/scripts/（仅管理员可见），更新 Git 源时不会被覆盖，可被「计划任务」定时执行',
     selectOrNew: '请选择或新建脚本',
     save: '保存',
     run: '运行',
@@ -2091,8 +2091,8 @@ export default {
     unsavedSwitch: '当前脚本有未保存的修改，是否放弃？',
     readFailed: '读取脚本失败',
     newTitle: '新建脚本',
-    pathPrompt: '请输入脚本路径（相对 custom/）',
-    pathPlaceholder: '例如 scripts/admin/backup.sh',
+    pathPrompt: '请输入脚本路径（相对脚本目录）',
+    pathPlaceholder: '例如 scripts/backup.sh',
     pathEmpty: '路径不能为空',
     mustBeSh: '脚本必须以 .sh 结尾',
     pathInvalid: '路径不合法',
@@ -2106,6 +2106,12 @@ export default {
     runFailed: '运行失败',
     runLogTitle: '运行 {name}',
     fallbackName: '脚本',
+    delete: '删除',
+    deleteTitle: '删除确认',
+    deleteFileConfirm: '确定删除脚本「{name}」？该操作不可恢复。',
+    deleteDirConfirm: '确定删除目录「{name}」及其下的全部脚本？该操作不可恢复。',
+    deleted: '删除成功',
+    deleteFailed: '删除失败',
   },
 
   /** 个人中心 */

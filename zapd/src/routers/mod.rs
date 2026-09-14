@@ -596,6 +596,7 @@ fn api_routers() -> Router {
         .route("/appstore/script/read", get(appstore::script_read))
         .route("/appstore/script/write", post(appstore::script_write))
         .route("/appstore/script/run", post(appstore::script_run))
+        .route("/appstore/script/delete", post(appstore::script_delete))
         .route("/appstore/script/stop", post(appstore::script_stop))
         .route("/appstore/run/files", get(appstore::run_files))
         .route("/appstore/run/file/read", get(appstore::run_file_read))

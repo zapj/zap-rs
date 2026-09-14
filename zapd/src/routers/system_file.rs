@@ -255,8 +255,7 @@ pub(crate) async fn list_local_dir(
 
     // 首次访问自己的 home 时自动创建（以该用户名义创建，属主即本人）
     if !is_admin(claims) && resolved.as_path() == Path::new(&home) && !resolved.exists() {
-        let (as_user, skip_owner_check) =
-            actor_identity(claims).await?;
+        let (as_user, skip_owner_check) = actor_identity(claims).await?;
         let _ = crate::zapexec::call(Request::FileMkdir {
             path: home.clone(),
             as_user,
@@ -869,7 +868,10 @@ mod tests {
         // 目录自身与其下任意层级的子项都算命中
         assert!(path_within(Path::new("/home/admin"), "/home/admin"));
         assert!(path_within(Path::new("/home/admin/a.txt"), "/home/admin"));
-        assert!(path_within(Path::new("/home/admin/sub/deep"), "/home/admin"));
+        assert!(path_within(
+            Path::new("/home/admin/sub/deep"),
+            "/home/admin"
+        ));
 
         // 字符串前缀相同但不是同一个目录：不能算命中，
         // 否则 /home/admin-tools 会被当成 admin 的 home（越权）

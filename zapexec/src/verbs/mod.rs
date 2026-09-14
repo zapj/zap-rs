@@ -217,11 +217,22 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             )
             .await
         }
-        Request::AppstoreScriptRun { path, run_id } => appstore::script_run(path, run_id).await,
+        Request::AppstoreScriptRun {
+            path,
+            run_id,
+            username,
+        } => appstore::script_run(path, run_id, username).await,
         Request::AppstoreScriptStop { run_id } => appstore::script_stop(run_id).await,
-        Request::AppstoreScriptRead { path } => appstore::script_read(path).await,
-        Request::AppstoreScriptWrite { path, content } => {
-            appstore::script_write(path, content).await
+        Request::AppstoreScriptRead { path, username } => {
+            appstore::script_read(path, username).await
+        }
+        Request::AppstoreScriptWrite {
+            path,
+            content,
+            username,
+        } => appstore::script_write(path, content, username).await,
+        Request::AppstoreScriptDelete { path, username } => {
+            appstore::script_delete(path, username).await
         }
         Request::AppstoreRunFiles { run_id } => appstore::run_files(run_id).await,
         Request::AppstoreRunFileRead { run_id, path } => {
