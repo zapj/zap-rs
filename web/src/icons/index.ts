@@ -87,6 +87,12 @@ import IconUpload from '~icons/material-symbols/upload'
 import IconViewList from '~icons/material-symbols/view-list'
 import IconVisibility from '~icons/material-symbols/visibility'
 import IconWarning from '~icons/material-symbols/warning'
+import IconHistory from '~icons/material-symbols/history'
+import IconBook from '~icons/material-symbols/book'
+import IconHelp from '~icons/material-symbols/help'
+import IconHelpOutline from '~icons/material-symbols/help-outline'
+import IconUpgrade from '~icons/material-symbols/upgrade'
+import IconArrowBack from '~icons/material-symbols/arrow-back'
 
 /** 路由 / 数据库菜单里图标名的集合前缀 */
 export const ICON_PREFIX = 'material-symbols:'
@@ -167,6 +173,12 @@ export const ICON_MAP: Record<string, Component> = {
   'view-list': IconViewList,
   visibility: IconVisibility,
   warning: IconWarning,
+  history: IconHistory,
+  book: IconBook,
+  help: IconHelp,
+  'help-outline': IconHelpOutline,
+  upgrade: IconUpgrade,
+  'arrow-back': IconArrowBack,
 }
 
 /** 菜单图标可选项（按字母序，供后台菜单管理下拉选择） */
@@ -234,6 +246,13 @@ export const User = IconPerson
 export const UserFilled = IconAccountCircle
 export const Warning = IconWarning
 export const WarningFilled = IconWarning
+// 「文档」菜单新增图标
+export const History = IconHistory
+export const Book = IconBook
+export const Help = IconHelp
+export const HelpOutline = IconHelpOutline
+export const Upgrade = IconUpgrade
+export const ArrowBack = IconArrowBack
 
 /**
  * 解析图标名 → 组件。

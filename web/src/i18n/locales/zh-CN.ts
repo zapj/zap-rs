@@ -129,6 +129,7 @@ export default {
     // 顶部独立 /crontab（src/zap-d/src/db/init_db.rs id=151）叶子用「定时任务」作 title，
     // 与上面 automation 下同样功能的「计划任务」是两套文案，统一映射到同一英文标签。
     'crontab-index': '定时任务',
+    docs: '文档',
     // 二级
     // 备注：这些标题同时被 translateTitle 用作「中文原文 → key」的反查源，
     // 静态路由（router/index.ts）里的中文标题也靠它翻译，改动文案前先确认路由里的写法。
@@ -169,6 +170,10 @@ export default {
     'file-manager': '文件管理',
     'site-manage': '站点',
     'customer-manage': '客户管理',
+    'docs-changelog': '更新日志',
+    'docs-manual': '用户手册',
+    'docs-faq': '常见问题',
+    'docs-upgrade': '升级指南',
   },
 
   /** 登录页 */
@@ -784,6 +789,19 @@ export default {
     empty: '该目录下暂无子目录',
     cancel: '取消',
     loadFailed: '目录读取失败',
+  },
+
+  /** 文档菜单（CHANGELOG / 用户手册 / FAQ / 升级指南） */
+  docs: {
+    intro: '面板使用文档与版本说明。文档源文件位于服务器 data/www/html/ 下，由后端渲染为 HTML 后展示。',
+    changelog: '更新日志',
+    manual: '用户手册',
+    faq: '常见问题',
+    upgrade: '升级指南',
+    back: '返回文档首页',
+    loading: '加载中…',
+    fetchFailed: '文档加载失败：{msg}',
+    notFound: '文档不存在或尚未提供',
   },
 
   /** 文件管理 · 标签页 */

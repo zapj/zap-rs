@@ -407,6 +407,19 @@ async fn init_menus_table() {
     VALUES (15, 0, 'crontab', '/crontab', 'Layout', '/crontab/index', 'dir', '计划任务', 'material-symbols:schedule', 1, 'admin,user,reseller,demo', 4, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (151, 15, 'crontab-index', 'index', 'crontab/index', 'menu', '定时任务', 'material-symbols:alarm', 1, 'admin,user,reseller,demo', 1, 1, strftime('%s','now'), strftime('%s','now'));
+
+    -- 文档（Layout + 子菜单：更新日志 / 用户手册 / FAQ / 升级指南）
+    -- 顺序排在最末：放在 sort_order=14，避免挤掉系统设置/开发等更常用的入口
+    INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (16, 0, 'docs', '/docs', 'Layout', '/docs/index', 'dir', '文档', 'material-symbols:menu-book', 1, 'admin,user,reseller,demo', 14, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (161, 16, 'docs-changelog', 'changelog', 'docs/doc', 'menu', '更新日志', 'material-symbols:history', 0, 'admin,user,reseller,demo', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (162, 16, 'docs-manual', 'manual', 'docs/doc', 'menu', '用户手册', 'material-symbols:book', 0, 'admin,user,reseller,demo', 2, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (163, 16, 'docs-faq', 'faq', 'docs/doc', 'menu', 'FAQ', 'material-symbols:help', 0, 'admin,user,reseller,demo', 3, 1, strftime('%s','now'), strftime('%s','now'));
+    INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
+    VALUES (164, 16, 'docs-upgrade', 'upgrade', 'docs/doc', 'menu', '升级指南', 'material-symbols:upgrade', 0, 'admin,user,reseller,demo', 4, 1, strftime('%s','now'), strftime('%s','now'));
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }
@@ -547,6 +560,27 @@ async fn init_role_menus_table() {
     INSERT INTO role_menus (role_id, menu_id) VALUES (3, 151);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 15);
     INSERT INTO role_menus (role_id, menu_id) VALUES (4, 151);
+    -- 文档（CHANGELOG / 用户手册 / FAQ / 升级指南）：admin / user / reseller / demo 均可见
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 16);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 161);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 162);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 163);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (1, 164);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 16);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 161);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 162);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 163);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (2, 164);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 16);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 161);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 162);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 163);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (3, 164);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 16);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 161);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 162);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 163);
+    INSERT INTO role_menus (role_id, menu_id) VALUES (4, 164);
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }

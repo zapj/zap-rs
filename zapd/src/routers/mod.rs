@@ -45,6 +45,7 @@ pub mod auth;
 pub mod cloud;
 pub mod database;
 pub mod dev;
+pub mod docs;
 pub mod fpm_spec;
 pub mod notice;
 pub mod package;
@@ -631,6 +632,9 @@ fn api_routers() -> Router {
         .route("/dev/api-token/update", post(dev::api_token_update))
         .route("/dev/api-token/delete", post(dev::api_token_delete))
         .route("/dev/api-docs", get(dev::api_docs))
+        // 文档（CHANGELOG / 用户手册 / FAQ / 升级指南）—— 登录即可读
+        .route("/docs/list", get(docs::docs_list))
+        .route("/docs/{name}", get(docs::docs_get))
         // 统一角色门禁（最后添加的 layer 最外层、最先执行）：
         // 路径 → 所需角色见 `access::RULES`，未登记的接口默认要求 admin。
         .layer(middleware::from_fn(demo_readonly_guard))

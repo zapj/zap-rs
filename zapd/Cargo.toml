@@ -71,6 +71,10 @@ tar = "0.4"
 flate2 = "1.0"
 # 国际化域名（中文域名）转 punycode，用于站点域名归一化与判重
 idna = "1.1"
+# 「文档」菜单的 Markdown 渲染（GET /api/docs/:name）
+# 默认 features 已开启 html —— 它负责把 Parser 事件转成 HTML 字符串
+# （依赖 pulldown-cmark-escape），缺它 `pulldown_cmark::html::push_html` 编译失败。
+pulldown-cmark = "0.12"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -123,7 +123,18 @@ cp -f "$CUR_DIR/data/apps/README.md" "$DIST_DATA/apps/" 2>/dev/null || true
 # www/：站点骨架模板 skel/index.html 与 IP 默认页 / 维护页 _zap/*.html（运维可直接编辑）
 cp -Rf "$CUR_DIR/data/www" "$DIST_DATA/" 2>/dev/null || true
 mkdir -p "$DIST_DATA/www/html"
-cp -Rf "$CUR_DIR/CHANGELOG.md" "$DIST_DATA/www/html/" 2>/dev/null || true
+# 「文档」菜单的源 md（位于仓库根，供 build.sh 拷贝到 data/www/html/）。
+# 默认文件名必须与 zapd/src/routers/docs.rs 里的 DOCS 白名单一一对应，
+# 否则前端 GET /api/docs/<id> 会 404。
+# 多语言后缀：<FILE>_<locale>.md（例 USER_MANUAL_zh-CN.md），由后端按 ?lang= 自动回退。
+cp -Rf "$CUR_DIR/CHANGELOG.md"         "$DIST_DATA/www/html/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/USER_MANUAL.md"       "$DIST_DATA/www/html/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/FAQ.md"               "$DIST_DATA/www/html/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/UPGRADE.md"           "$DIST_DATA/www/html/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/CHANGELOG_zh-CN.md"   "$DIST_DATA/www/html/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/USER_MANUAL_zh-CN.md" "$DIST_DATA/www/html/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/FAQ_zh-CN.md"         "$DIST_DATA/www/html/" 2>/dev/null || true
+cp -Rf "$CUR_DIR/UPGRADE_zh-CN.md"     "$DIST_DATA/www/html/" 2>/dev/null || true
 
 ok "资源复制完成"
 

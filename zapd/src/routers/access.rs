@@ -105,6 +105,8 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
     // ── 登录态即可访问的个人接口 ─────────────────────────────
     ("/auth", Required::User, None),
     ("/user", Required::User, None),
+    // ── 文档（CHANGELOG / 用户手册 / FAQ / 升级指南）：所有已登录用户 ──
+    ("/docs", Required::User, None),
     // ── 站点：view / create / update / delete / state / sync ──
     (
         "/site/list",

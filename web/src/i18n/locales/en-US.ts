@@ -114,6 +114,7 @@ const enUS: Messages = {
     database: 'Databases',
     crontab: 'Scheduled Tasks',
     'crontab-index': 'Cron Jobs',
+    docs: 'Docs',
     profile: 'Profile',
     messages: 'Messages',
     'zap-config': 'Zap Settings',
@@ -151,6 +152,10 @@ const enUS: Messages = {
     'file-manager': 'File Manager',
     'site-manage': 'Sites',
     'customer-manage': 'Customers',
+    'docs-changelog': 'Changelog',
+    'docs-manual': 'User Manual',
+    'docs-faq': 'FAQ',
+    'docs-upgrade': 'Upgrade Guide',
   },
 
   login: {
@@ -767,6 +772,19 @@ const enUS: Messages = {
     empty: 'No subdirectory here',
     cancel: 'Cancel',
     loadFailed: 'Failed to read the directory',
+  },
+
+  /** Documents menu (Changelog / User Manual / FAQ / Upgrade Guide) */
+  docs: {
+    intro: 'Documentation and release notes for the panel. Sources live in data/www/html/ on the server and are rendered to HTML by the backend.',
+    changelog: 'Changelog',
+    manual: 'User Manual',
+    faq: 'FAQ',
+    upgrade: 'Upgrade Guide',
+    back: 'Back to docs',
+    loading: 'Loading…',
+    fetchFailed: 'Failed to load doc: {msg}',
+    notFound: 'Document not found or not yet provided',
   },
 
   /** 文件管理 · 标签页 */

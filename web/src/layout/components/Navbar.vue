@@ -109,7 +109,8 @@
       </el-popover>
 
       <el-dropdown class="avatar-container" trigger="click">
-        <div class="avatar-wrapper">
+        <!-- 窄屏会隐藏 .user-name，用 title 兜住「这是谁」 -->
+        <div class="avatar-wrapper" :title="userStore.userInfo.name">
           <img :src="userStore.userInfo.avatar" class="user-avatar" />
           <span class="user-name">{{ userStore.userInfo.name }}</span>
           <el-icon class="el-icon-caret-bottom">
@@ -312,9 +313,9 @@ async function handleLogout() {
   align-items: center;
 
   .hamburger-container {
+    flex-shrink: 0; /* 汉堡按钮不参与压缩 */
     line-height: 46px;
     height: 100%;
-    float: left;
     padding: 0 15px;
     cursor: pointer;
     transition: background 0.3s;
@@ -324,13 +325,24 @@ async function handleLogout() {
     }
   }
 
+  /* 关键：flex 子项默认 `min-width: auto`，面包屑变长时会把顶栏顶宽。
+     加 `flex: 1` + `min-width: 0` 让它可收缩并被父级 overflow 裁掉。 */
   .breadcrumb-container {
-    float: left;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
     margin-left: 16px;
+
+    :deep(.app-breadcrumb.el-breadcrumb) {
+      max-width: 100%;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
   }
 
   .right-menu {
-    float: right;
+    flex-shrink: 0; /* 右侧图标区不参与压缩 */
     margin-left: auto;
     padding-right: 16px;
     display: flex;
@@ -391,6 +403,40 @@ async function handleLogout() {
 
         &:hover {
           background: var(--el-fill-color-light);
+        }
+      }
+    }
+  }
+
+  /* 窄屏收敛：优先保证图标可点，逐级让出空间，避免顶栏被撑开 */
+  @media (max-width: 991px) {
+    .right-menu .avatar-container .user-name {
+      display: none; /* 只留头像 + 箭头 */
+    }
+  }
+
+  @media (max-width: 767px) {
+    .hamburger-container {
+      padding: 0 10px;
+    }
+
+    .breadcrumb-container {
+      display: none; /* 手机屏空间紧张，面包屑让位给操作图标 */
+    }
+
+    .right-menu {
+      gap: 6px;
+      padding-right: 8px;
+
+      .avatar-container .avatar-wrapper {
+        padding: 5px 2px;
+
+        .user-avatar {
+          margin-right: 0;
+        }
+
+        .el-icon-caret-bottom {
+          display: none;
         }
       }
     }

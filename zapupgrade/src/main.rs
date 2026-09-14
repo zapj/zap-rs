@@ -23,7 +23,7 @@ const DONE_MARKER: &str = "__ZAP_DONE__";
 #[derive(Parser, Debug)]
 #[command(
     name = "zapupgrade",
-    about = "ZAP 系统升级器（一次性，root 运行）",
+    about = "zap upgrade tool (used by zapexec to upgrade zapd/zapexec/zapctl/zapupgrade)",
     version
 )]
 struct Cli {

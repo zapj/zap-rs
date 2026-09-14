@@ -10,7 +10,7 @@
 [![Vue](https://img.shields.io/badge/Vue-3.5-brightgreen?logo=vue.js)](https://vuejs.org)
 [![Version](https://img.shields.io/badge/version-1.0.3-blue)](https://github.com/zapj/zap-rs)
 [![Platform](https://img.shields.io/badge/platform-Linux%20amd64%20%7C%20arm64-lightgrey?logo=linux)](https://www.kernel.org)
-[![License](https://img.shields.io/badge/license-LGPL--3.0-blue)](./LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](./LICENSE)
 
 </div>
 
@@ -22,7 +22,7 @@ ZAP 是一套面向 **Linux 服务器与 VPS** 的现代化主机控制面板，
 
 后端以 **Rust** 编写（Axum + Tokio + SQLx），前端采用 **Vue 3 + Element Plus**，编译时通过 `rust-embed` 将前端产物嵌入单一二进制，最终以 **一个可执行文件** 交付，无需 PHP / Python / Node 运行时，内存与 CPU 占用远低于传统面板。
 
-ZAP 以 **[LGPL-3.0](./LICENSE)** 开源许可发布：个人与企业均可免费使用、修改与分发全部功能，商用部署同样无需付费。
+ZAP 以 **[GPL-3.0](./LICENSE)** 开源许可发布：个人与企业均可免费使用、修改与分发全部功能，商用部署同样无需付费。
 
 > 演示与下载：<https://zap.cn> ｜ 文档建设中
 
@@ -307,21 +307,25 @@ cd web && npm run type-check
 
 - 遵循现有代码风格，新增接口请补充审计日志与权限校验
 - 涉及系统变更的能力请通过 `zapexec` 白名单动词实现，不要在业务进程内直接提权
-- 提交 PR 即表示同意你的贡献以本项目许可证（[LGPL-3.0](./LICENSE)）一并授权给社区
+- 提交 PR 即表示同意你的贡献以本项目许可证（[GPL-3.0](./LICENSE)）一并授权给社区
 
 ---
 
 ## 许可证
 
-ZAP 采用 **[GNU Lesser General Public License v3.0](./LICENSE)**（LGPL-3.0）开源许可。
+ZAP 采用 **[GNU General Public License v3.0](./LICENSE)**（GPL-3.0）开源许可。
 
-- 许可正文：[LICENSE](./LICENSE)（LGPL-3.0）
-- LGPL-3.0 以引用方式并入 GPLv3 条款，完整正文另见 [COPYING](./COPYING)（GNU GPL v3.0）
+- 许可正文：[LICENSE](./LICENSE)（GPL-3.0 全文）
 
 据此你可以：
 
 - 免费将 ZAP 用于个人或商业场景，部署到任意数量的服务器；
-- 修改源码并分发（对 ZAP 本体的修改须同样以 LGPL-3.0 开源，并保留版权与许可声明）；
-- 将 ZAP 作为库 / 服务被上层应用链接调用，上层应用可保持自有许可。
+- 修改源码并分发，用于研究、二次开发或商业化定制。
 
-> 本说明仅为概要，不构成法律意见；完整权利义务以 [LICENSE](./LICENSE) 与 [COPYING](./COPYING) 原文为准。
+据此你须：
+
+- 分发（convey）ZAP 本体或其衍生作品时，一并开放完整对应源码；
+- 衍生作品整体以 GPL-3.0 授权，不得附加额外限制；
+- 保留原有版权与许可声明，并注明修改。
+
+> 本说明仅为概要，不构成法律意见；完整权利义务以 [LICENSE](./LICENSE) 原文为准。
