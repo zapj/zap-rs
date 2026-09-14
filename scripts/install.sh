@@ -203,13 +203,12 @@ ok "程序部署完成"
 
 # ── 配置与凭据目录（/etc/zap）───────────────────────────────
 info "准备配置目录 /etc/zap ..."
-mkdir -p /etc/zap /etc/zap/ssh
+mkdir -p /etc/zap
 # zapd 以 zapadm 身份运行（见 zapd.service 的 User=），这里把 /etc/zap 交给 zapadm：
 # 首次启动要在此生成自签证书（zap.crt / zap.key）与面板自身的 secret.key。
-# ssh/ 仍由 zapexec(root) 写入，zapd 以 zapadm 组读取。
+# 面板用户的 SSH 密钥存于各自家目录 ~/.ssh（zap_ 前缀），由 zapexec(root) 读写。
 chown zapadm:zapadm /etc/zap
-chown root:zapadm /etc/zap/ssh
-chmod 0750 /etc/zap /etc/zap/ssh
+chmod 0750 /etc/zap
 
 if [ ! -f /etc/zap/zap.yaml ]; then
     info "生成默认配置 /etc/zap/zap.yaml"

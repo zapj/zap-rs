@@ -219,7 +219,6 @@ zap-rs/
 | 配置文件 | `/etc/zap/zap.yaml` |
 | TLS 证书 | `/etc/zap/zap.crt`、`/etc/zap/zap.key` |
 | HMAC 密钥 | `/etc/zap/exec.key`（首次启动自动生成） |
-| SSH 密钥 | `/etc/zap/ssh/` |
 | 程序目录 | `/usr/local/zap/` |
 | 运行时 | `/run/zap/`（Unix socket） |
 | 软件安装 | `/usr/local/apps/` |

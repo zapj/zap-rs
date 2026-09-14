@@ -524,67 +524,6 @@ const enUS: Messages = {
     contactSaved: 'Contact info saved',
   },
 
-  sshKeys: {
-    generate: 'Generate Key',
-    import: 'Import Key',
-    listTitle: 'SSH Keys',
-    name: 'Name',
-    typeStrength: 'Type / Strength',
-    fingerprint: 'Fingerprint',
-    comment: 'Remark',
-    authorized: 'Authorized',
-    createdAt: 'Created At',
-
-    publicKey: 'Public Key',
-    authorize: 'Authorize',
-    authorizeTip:
-      'Write a marker into the local /etc/zap/ssh/authorized_keys (does not affect remote login)',
-    empty: 'No SSH keys yet',
-
-    authTitle: 'authorized_keys (local)',
-    authNote:
-      'Recorded on the ZAP host only and never pushed to remote hosts. To log in remotely, use "Push Public Key" or copy the key manually.',
-    keyType: 'Type',
-    keyData: 'Key Data',
-    deauthorize: 'Revoke',
-    emptyAuth: 'No authorized keys yet',
-
-    genTitle: 'Generate SSH Key',
-    genNamePlaceholder: 'e.g. id_rsa_zap',
-    genCommentPlaceholder: 'Key comment',
-    recommended: 'recommended',
-    bits: 'Bits',
-    submitGenerate: 'Generate',
-    importTitle: 'Import SSH Key',
-    importNamePlaceholder: 'Key file name (without extension)',
-    privateKey: 'Private Key',
-    privateKeyPlaceholder: 'Paste the private key',
-    publicKeyLabel: 'Public Key',
-    publicKeyPlaceholder: 'Paste the public key (optional, derived from the private key if empty)',
-    submitImport: 'Import',
-
-    pubkeyTitle: 'Public Key: {name}',
-    pubkeyHintPrefix: 'Add this public key to',
-    pubkeyHintMid:
-      'on the remote host to enable passwordless login. You can use "Push Public Key" in the Terminal, or copy it manually and run',
-    pubkeyHintEnd: 'on the target host.',
-    close: 'Close',
-    copy: 'Copy',
-
-    nameRequired: 'Please enter a key name',
-    generated: 'Key generated',
-    importRequired: 'Please fill in the key name and private key',
-    imported: 'Key imported',
-    deleteConfirm: 'Delete key "{name}"?',
-    deleteConfirmTitle: 'Warning',
-    deleteConfirmText: 'Delete',
-    deleted: 'Deleted',
-    copied: 'Copied to clipboard',
-    granted: 'Authorized',
-    deauthConfirm: 'Revoke the authorization of this key?',
-    revoked: 'Authorization revoked',
-  },
-
   zapCfg: {
     title: 'Zap Settings',
     subtitle:
@@ -2834,7 +2773,6 @@ const enUS: Messages = {
     passwordPlaceholder: 'Enter the SSH password (leave empty to prompt on connect; not saved)',
     formKey: 'SSH Key',
     selectKey: 'Select a key',
-    keySystemSuffix: ' (system)',
     keyTipLocal:
       'Local host connection: writes to the local user authorized_keys (requires the admin role)',
     keyTipSaved: 'The key must already be added to the host ~/.ssh/authorized_keys to log in',
@@ -2859,8 +2797,6 @@ const enUS: Messages = {
     keyManagerTitle: 'My SSH Keys',
     keyAlert:
       'Keys are stored in your own home directory ~/.ssh (with the zap_ prefix); the private key is visible only to you and never uploaded to the database.',
-    keyAlertAdmin:
-      'admin additionally sees system-level keys (server /etc/zap/ssh, used for local authorization and historical connections).',
     keyModeDisabled:
       'The current mode is "unified www" (the user has no dedicated Linux account), so personal home-directory keys are unavailable and generate/import is disabled; ask an administrator to switch to "dedicated system user" under Server → Runtime first.',
     genKey: 'Generate Key',
@@ -2871,7 +2807,6 @@ const enUS: Messages = {
     fingerprint: 'Fingerprint',
     copyPub: 'Copy Public Key',
     viewPrivate: 'View Private Key',
-    systemKeyOnly: 'System keys are managed by the server only',
     genKeyTitle: 'Generate SSH Key',
     keyName: 'Key Name',
     keyNamePlaceholder: 'e.g. my-server (letters/digits/-/_, up to 64 characters)',

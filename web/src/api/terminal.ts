@@ -103,8 +103,8 @@ export function pushKeyDirect(data: {
 
 export interface UserSshKey {
   name: string
-  /** user=我的密钥（家目录 ~/.ssh）；system=系统级密钥（仅 admin 可见，/etc/zap/ssh） */
-  scope: 'user' | 'system'
+  /** 恒为 user：密钥保存在本人家目录 ~/.ssh（zap_ 前缀） */
+  scope: 'user'
   comment: string
   fingerprint: string
   created_at: number

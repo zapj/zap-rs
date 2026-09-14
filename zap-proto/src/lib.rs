@@ -15,10 +15,6 @@ pub use types::{
     linux_username, sanitize_site_name,
 };
 
-/// `zapexec` 管理的 SSH 密钥目录（root 写入、`zapadm` 读取）。
-/// 从 `/root/.ssh` 迁出，避免 `zapd` 依赖 root 的 home 目录。
-pub const SSH_KEY_DIR: &str = "/etc/zap/ssh";
-
 /// base64 编码（文件内容传输用）。
 pub fn b64_encode(data: &[u8]) -> String {
     use base64::Engine;

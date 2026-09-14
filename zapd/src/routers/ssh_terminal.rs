@@ -78,30 +78,8 @@ pub async fn init_table() {
     // 新库与老库都幂等补插（已存在 root@127.0.0.1 或 root@localhost 则跳过），
     // 用户后续自行编辑填写密码或改为密钥。
     ensure_default_loopback_connection().await;
-
-    // 面板用户自己的 SSH 密钥索引（密钥文件存于用户家目录 ~/.ssh/，此处只记元数据与公钥）
-    let pool = db::get_db_pool().await;
-    let _ = pool
-        .execute(
-            "CREATE TABLE IF NOT EXISTS user_ssh_keys (
-                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                -- user_id：面板用户 id，连接归属校验同款严格隔离
-                user_id INTEGER NOT NULL,
-                name VARCHAR(128) NOT NULL,
-                -- 公钥内容（公钥无密级，DB 留存便于展示/推送；私钥只在用户家目录，绝不上库）
-                public_key TEXT NOT NULL DEFAULT '',
-                comment TEXT NOT NULL DEFAULT '',
-                fingerprint TEXT NOT NULL DEFAULT '',
-                created_at INTEGER,
-                updated_at INTEGER
-            )",
-        )
-        .await;
-    let _ = pool
-        .execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_ssh_keys_uid_name ON user_ssh_keys(user_id, name)",
-        )
-        .await;
+    // 注：用户 SSH 密钥不建表——密钥只存用户家目录 ~/.ssh/zap_<name>（见
+    // zapexec ssh_user_key），列表由磁盘扫描得出，避免库重建后元数据与文件失联。
 }
 
 /// 幂等补插默认本地连接（127.0.0.1 / root / 22，密码为空），归属 admin。
@@ -592,21 +570,13 @@ pub async fn ws_terminal(
         .and_then(|v| v.parse().ok())
         .unwrap_or(80);
 
-    // 仅 admin 允许系统级密钥回退（历史连接兼容），普通用户一律只用自己名下的密钥
-    let allow_system = crate::zap::jwt::is_admin(&claims);
-    ws.on_upgrade(move |socket| handle_terminal(socket, id, rows, cols, allow_system))
+    ws.on_upgrade(move |socket| handle_terminal(socket, id, rows, cols))
 }
 
-async fn handle_terminal(
-    socket: WebSocket,
-    conn_id: i64,
-    rows: u32,
-    cols: u32,
-    allow_system_fallback: bool,
-) {
+async fn handle_terminal(socket: WebSocket, conn_id: i64, rows: u32, cols: u32) {
     info!("Terminal WebSocket connected for connection {}", conn_id);
 
-    let conn_info = match load_connection_info(conn_id, allow_system_fallback).await {
+    let conn_info = match load_connection_info(conn_id).await {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to load connection {}: {}", conn_id, e);
@@ -880,7 +850,7 @@ fn authenticate(session: &mut Session, info: &ConnectionInfo) -> Result<(), Stri
         }
         "key" => {
             // 私钥/公钥已在 load_connection_info 中按归属解析好（用户家目录密钥由
-            // zapexec root 按需读取；admin 历史连接可回退系统级密钥）
+            // zapexec root 按需读取）
             let key_content = info.ssh_private_key.as_deref().ok_or_else(|| {
                 format!(
                     "SSH 密钥 '{}' 不可用：请在「我的密钥」中创建/导入并重新绑定到连接",
@@ -940,13 +910,8 @@ struct AuthMsg {
     password: String,
 }
 
-/// 加载连接信息并预解析密钥：
-/// `allow_system_fallback` = true（admin）时，密钥名不匹配本人名下用户密钥的，
-/// 回退解析系统级密钥（/etc/zap/ssh），保证历史连接可用。
-async fn load_connection_info(
-    id: i64,
-    allow_system_fallback: bool,
-) -> Result<ConnectionInfo, ZapError> {
+/// 加载连接信息并预解析密钥（家目录 `~/.ssh/zap_<name>`，经 zapexec 读取）。
+async fn load_connection_info(id: i64) -> Result<ConnectionInfo, ZapError> {
     let pool = db::get_db_pool().await;
     let row = sqlx::query(
         "SELECT s.host, s.port, s.username, s.auth_type, s.password, s.ssh_key_name, \
@@ -963,7 +928,6 @@ async fn load_connection_info(
             let stored: String = r.try_get("password").unwrap_or_default();
             let auth_type: String = r.get("auth_type");
             let ssh_key_name: String = r.try_get("ssh_key_name").unwrap_or_default();
-            let owner_id: i64 = r.try_get("owner_id").unwrap_or(0);
             let linux_user: String = r.try_get("linux_user").unwrap_or_default();
             let mut info = ConnectionInfo {
                 host: r.get("host"),
@@ -977,14 +941,7 @@ async fn load_connection_info(
                 ssh_public_key: None,
             };
             if auth_type == "key" && !ssh_key_name.is_empty() {
-                match resolve_key_material(
-                    owner_id,
-                    &linux_user,
-                    &ssh_key_name,
-                    allow_system_fallback,
-                )
-                .await
-                {
+                match resolve_key_material(&linux_user, &ssh_key_name).await {
                     Ok((private_key, public_key)) => {
                         info.ssh_private_key = Some(private_key);
                         info.ssh_public_key = Some(public_key);
@@ -998,135 +955,94 @@ async fn load_connection_info(
     }
 }
 
-/// 按归属解析连接绑定的密钥内容：
-/// 1) 优先连接 owner 名下「我的密钥」（家目录 `~/.ssh/zap_<name>`，root 按需读取私钥）；
-/// 2) admin 的历史连接回退系统级密钥（/etc/zap/ssh）。
+/// 解析连接绑定的密钥内容（私钥 + 公钥）：家目录 `~/.ssh/zap_<name>`
+/// （密钥只存文件，root 按需读取）。
 async fn resolve_key_material(
-    owner_id: i64,
     linux_user: &str,
     key_name: &str,
-    allow_system_fallback: bool,
 ) -> Result<(String, String), ZapError> {
-    let pool = db::get_db_pool().await;
-    let own_pub: Option<String> =
-        sqlx::query_scalar("SELECT public_key FROM user_ssh_keys WHERE user_id = ? AND name = ?")
-            .bind(owner_id)
-            .bind(key_name)
-            .fetch_optional(pool)
-            .await?;
-    if let Some(pub_content) = own_pub {
-        if linux_user.is_empty() {
-            return Err(ZapError::New(
-                -1,
-                format!("密钥 '{key_name}' 的归属账号未绑定系统用户，无法读取私钥"),
-            ));
-        }
+    // 1) 家目录密钥：存在性以磁盘文件为准（库重建不影响），私钥/公钥分别经 zapexec 读取
+    if !linux_user.is_empty() {
         let resp = crate::zapexec::call(Request::SshUserKeyPrivateGet {
             linux_user: linux_user.to_string(),
             name: key_name.to_string(),
         })
         .await?;
-        if resp.code != 0 {
-            return Err(ZapError::New(
-                resp.code,
-                format!("读取密钥 '{key_name}' 失败：{}", resp.message),
-            ));
-        }
-        let private_key = resp
-            .data
-            .as_ref()
-            .and_then(|d| d.get("private_key"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        if private_key.is_empty() {
-            return Err(ZapError::New(
-                -1,
-                format!("密钥 '{key_name}' 私钥为空或文件缺失"),
-            ));
-        }
-        return Ok((private_key, pub_content));
-    }
-    if allow_system_fallback && let Some(key_path) = get_key_path(key_name) {
-        let key_content = std::fs::read_to_string(&key_path)
-            .map_err(|e| ZapError::Error(format!("读取系统密钥失败: {e}")))?;
-        if let Some(pub_content) = get_pub_key_content(key_name) {
-            return Ok((key_content, pub_content));
+        if resp.code == 0 {
+            let private_key = resp
+                .data
+                .as_ref()
+                .and_then(|d| d.get("private_key"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            if !private_key.is_empty() {
+                let pub_resp = crate::zapexec::call(Request::SshUserKeyPublicGet {
+                    linux_user: linux_user.to_string(),
+                    name: key_name.to_string(),
+                })
+                .await?;
+                let public_key = pub_resp
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("public_key"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if public_key.is_empty() {
+                    return Err(ZapError::New(
+                        -1,
+                        format!(
+                            "密钥 '{key_name}' 的公钥不可用（~/.ssh/zap_{key_name}.pub 缺失或为空）"
+                        ),
+                    ));
+                }
+                return Ok((private_key, public_key));
+            }
         }
     }
     Err(ZapError::New(
         -1,
-        format!(
-            "SSH 密钥 '{key_name}' 不存在或不可用：请使用「我的密钥」创建/导入并重新绑定到连接"
-        ),
+        if linux_user.is_empty() {
+            format!("连接的归属账号未绑定系统用户，无法读取密钥 '{key_name}'")
+        } else {
+            format!("SSH 密钥 '{key_name}' 不存在或不可用：请在「我的密钥」中创建/导入并绑定到连接")
+        },
     ))
 }
 
-/// 推送公钥前按归属解析公钥内容：本人名下用户密钥优先；admin 回退系统级密钥。
+/// 推送公钥前解析公钥内容：本人家目录密钥（`~/.ssh/zap_<name>.pub`）。
 async fn resolve_pub_for_push(
     claims: &ValidatedClaims,
     key_name: &str,
 ) -> Result<String, ZapError> {
     let pool = db::get_db_pool().await;
-    let own_pub: Option<String> =
-        sqlx::query_scalar("SELECT public_key FROM user_ssh_keys WHERE user_id = ? AND name = ?")
-            .bind(claims.id as i64)
-            .bind(key_name)
-            .fetch_optional(pool)
-            .await?;
-    if let Some(p) = own_pub {
-        return Ok(p);
-    }
-    if crate::zap::jwt::is_admin(claims)
-        && let Some(p) = get_pub_key_content(key_name)
-    {
-        return Ok(p);
+    let linux_user: String = sqlx::query_scalar("SELECT linux_user FROM user WHERE id = ?")
+        .bind(claims.id as i64)
+        .fetch_optional(pool)
+        .await?
+        .unwrap_or_default();
+    if !linux_user.is_empty() {
+        let resp = crate::zapexec::call(Request::SshUserKeyPublicGet {
+            linux_user,
+            name: key_name.to_string(),
+        })
+        .await?;
+        if resp.code == 0
+            && let Some(p) = resp
+                .data
+                .as_ref()
+                .and_then(|d| d.get("public_key"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        {
+            return Ok(p.to_string());
+        }
     }
     Err(ZapError::New(
         -1,
         format!("公钥 '{key_name}' 不存在（用户密钥请在「我的密钥」中创建）"),
     ))
-}
-
-fn get_key_path(key_name: &str) -> Option<std::path::PathBuf> {
-    // 密钥由 zapexec 写入 /etc/zap/ssh（root:zapadm 0640），zapd 以 zapadm 身份直接读取
-    let ssh_dir = std::path::PathBuf::from(zap_proto::SSH_KEY_DIR);
-
-    let key_path = ssh_dir.join(key_name);
-    if key_path.exists() {
-        return Some(key_path);
-    }
-    None
-}
-
-/// 读取公钥内容（优先读 .pub 文件，缺失时用 ssh-keygen 从私钥推导）
-fn get_pub_key_content(key_name: &str) -> Option<String> {
-    let ssh_dir = std::path::PathBuf::from(zap_proto::SSH_KEY_DIR);
-    let pub_path = ssh_dir.join(format!("{key_name}.pub"));
-    if pub_path.exists()
-        && let Ok(content) = std::fs::read_to_string(&pub_path)
-    {
-        let trimmed = content.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-    // 兜底：从私钥推导公钥
-    let key_path = ssh_dir.join(key_name);
-    if key_path.exists()
-        && let Ok(out) = std::process::Command::new("ssh-keygen")
-            .args(["-y", "-f"])
-            .arg(&key_path)
-            .output()
-        && out.status.success()
-    {
-        let trimmed = String::from_utf8_lossy(&out.stdout);
-        let trimmed = trimmed.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-    None
 }
 
 // ── Test connection ────────────────────────────────────────
@@ -1141,8 +1057,7 @@ pub async fn test_connection(
     Query(params): Query<TestConnectionQuery>,
 ) -> ZapJsonResult {
     connection_in_scope(&claims, params.id).await?;
-    let allow_system = crate::zap::jwt::is_admin(&claims);
-    let conn_info = load_connection_info(params.id, allow_system).await?;
+    let conn_info = load_connection_info(params.id).await?;
     let addr = format!("{}:{}", conn_info.host, conn_info.port);
 
     let tcp = match TcpStream::connect(&addr) {
@@ -1205,8 +1120,7 @@ pub async fn push_key_to_host(
 ) -> ZapJsonResult {
     // 归属校验：仅连接归属范围内可推送公钥
     connection_in_scope(&claims, id).await?;
-    let allow_system = crate::zap::jwt::is_admin(&claims);
-    let conn_info = load_connection_info(id, allow_system).await?;
+    let conn_info = load_connection_info(id).await?;
     if conn_info.auth_type != "key" {
         return Err(ZapError::New(
             -1,

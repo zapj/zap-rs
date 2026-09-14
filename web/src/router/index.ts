@@ -108,12 +108,6 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
         meta: { title: '菜单管理', icon: 'material-symbols:menu' , affix: true},
       },
       {
-        path: 'ssh-keys',
-        name: 'SshKeys',
-        component: () => import('@/views/system/config/ssh-keys.vue'),
-        meta: { title: 'SSH 密钥', icon: 'material-symbols:key', affix: true },
-      },
-      {
         path: 'update',
         name: 'SystemUpdate',
         component: () => import('@/views/system/update/index.vue'),

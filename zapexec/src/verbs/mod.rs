@@ -36,7 +36,7 @@ pub(super) fn install_root() -> PathBuf {
 }
 
 /// 白名单动词分发：这里没有、也不会有任意 shell 执行入口。
-pub async fn dispatch(req: Request, gid: u32) -> Response {
+pub async fn dispatch(req: Request) -> Response {
     match req {
         Request::TimeSync => time::sync().await,
         Request::TimeSetTimezone { timezone } => time::set_timezone(&timezone).await,
@@ -55,26 +55,6 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::ServiceAction { name, action } => service::action(&name, &action).await,
         Request::ProcessList => process::list().await,
         Request::ProcessKill { pid, signal } => process::kill(pid, signal).await,
-        Request::SshKeyList => ssh_key::list(gid).await,
-        Request::SshKeyGet { name } => ssh_key::get(name, gid).await,
-        Request::SshKeyGenerate {
-            name,
-            key_type,
-            bits,
-            comment,
-        } => ssh_key::generate(name, key_type, bits, comment, gid).await,
-        Request::SshKeyImport {
-            name,
-            private_key,
-            public_key,
-        } => ssh_key::import(name, private_key, public_key, gid).await,
-        Request::SshKeyDelete { name } => ssh_key::delete(name).await,
-        Request::SshKeyAuthorizedList => ssh_key::authorized_list().await,
-        Request::SshKeyAuthorize { name } => ssh_key::authorize(name, gid).await,
-        Request::SshKeyDeauthorize { index } => ssh_key::deauthorize(index).await,
-        Request::SshKeyInstallLocal { username, key_name } => {
-            ssh_key::install_local(username, key_name).await
-        }
         Request::SshKeyInstallPub {
             username,
             public_key,
@@ -91,7 +71,8 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
             name,
             private_key,
             public_key,
-        } => ssh_user_key::import(linux_user, name, private_key, public_key, None).await,
+            comment,
+        } => ssh_user_key::import(linux_user, name, private_key, public_key, comment).await,
         Request::SshUserKeyDelete { linux_user, name } => {
             ssh_user_key::delete(linux_user, name).await
         }
@@ -101,6 +82,7 @@ pub async fn dispatch(req: Request, gid: u32) -> Response {
         Request::SshUserKeyPublicGet { linux_user, name } => {
             ssh_user_key::public_get(linux_user, name).await
         }
+        Request::SshUserKeyList { linux_user } => ssh_user_key::list(linux_user).await,
         Request::FileList { path } => file::list(path).await,
         Request::FileRead { path } => file::read(path).await,
         Request::FileWrite {

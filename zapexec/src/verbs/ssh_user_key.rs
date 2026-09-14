@@ -119,21 +119,26 @@ fn read_pub_line(pub_path: &Path) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-/// 解析家目录 + 校验用户名/密钥名，返回 (home, uid, gid)。
-fn account(home_owner: &str, name: &str) -> Result<(PathBuf, u32, u32), Response> {
+/// 解析家目录 + 校验用户名，返回 (home, uid, gid)。
+fn home_of(home_owner: &str) -> Result<(PathBuf, u32, u32), Response> {
     if !valid_username(home_owner) {
         return Err(Response::err(-1, "无效的系统用户名"));
     }
+    match user_info(home_owner) {
+        Some((uid, gid, home)) => Ok((home, uid, gid)),
+        None => Err(Response::err(-1, format!("系统用户 '{home_owner}' 不存在"))),
+    }
+}
+
+/// 解析家目录 + 校验用户名/密钥名，返回 (home, uid, gid)。
+fn account(home_owner: &str, name: &str) -> Result<(PathBuf, u32, u32), Response> {
     if !valid_key_name(name) {
         return Err(Response::err(
             -1,
             "无效的密钥名称（仅允许字母/数字/-/_，最长 64 字符）",
         ));
     }
-    match user_info(home_owner) {
-        Some((uid, gid, home)) => Ok((home, uid, gid)),
-        None => Err(Response::err(-1, format!("系统用户 '{home_owner}' 不存在"))),
-    }
+    home_of(home_owner)
 }
 
 fn finish_json(
@@ -360,10 +365,83 @@ pub async fn public_get(linux_user: String, name: String) -> Response {
         let pub_path = pub_key_path(&home, &name);
         match read_pub_line(&pub_path) {
             Some(pub_line) => {
-                Response::ok("ok", Some(json!({ "name": name, "public_key": pub_line })))
+                let comment = pub_line.split_whitespace().nth(2).unwrap_or_default();
+                Response::ok(
+                    "ok",
+                    Some(json!({
+                        "name": name,
+                        "public_key": pub_line,
+                        "comment": comment,
+                        "fingerprint": fingerprint_of(&pub_path),
+                    })),
+                )
             }
             None => Response::err(-1, format!("公钥 'zap_{name}.pub' 不存在")),
         }
+    })
+    .await
+    .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))
+}
+
+/// 扫描家目录列出全部面板密钥（`~/.ssh/zap_<name>.pub`）。
+///
+/// 这是「我的密钥」列表的**唯一权威来源**：密钥只以家目录文件存在，不落数据库，
+/// 因此库重建/迁移后列表依然完整。只读 `.pub`，私钥内容绝不外传。
+pub async fn list(linux_user: String) -> Response {
+    tokio::task::spawn_blocking(move || {
+        let (home, _, _) = match home_of(&linux_user) {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+        let dir = home.join(".ssh");
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            // ~/.ssh 还不存在 = 尚未创建任何密钥
+            Err(_) => return Response::ok("ok", Some(json!({ "items": [] }))),
+        };
+        let mut items: Vec<(String, serde_json::Value)> = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Some(name) = file_name
+                .strip_prefix("zap_")
+                .and_then(|s| s.strip_suffix(".pub"))
+            else {
+                continue;
+            };
+            if !valid_key_name(name) {
+                continue;
+            }
+            let Some(pub_line) = read_pub_line(&path) else {
+                continue;
+            };
+            let mut parts = pub_line.split_whitespace();
+            let key_type = parts.next().unwrap_or("unknown").to_string();
+            let _blob = parts.next();
+            let comment = parts.next().unwrap_or_default().to_string();
+            let created_at = std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            items.push((
+                name.to_string(),
+                json!({
+                    "name": name,
+                    "key_type": key_type,
+                    "comment": comment,
+                    "fingerprint": fingerprint_of(&path),
+                    "public_key": pub_line,
+                    "created_at": created_at,
+                }),
+            ));
+        }
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+        let list: Vec<serde_json::Value> = items.into_iter().map(|(_, v)| v).collect();
+        Response::ok("ok", Some(json!({ "items": list })))
     })
     .await
     .unwrap_or_else(|e| Response::err(-1, format!("任务执行失败: {e}")))

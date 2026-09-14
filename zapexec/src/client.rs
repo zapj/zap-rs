@@ -50,11 +50,6 @@ enum ClientVerb {
         pid: u32,
         signal: Option<String>,
     },
-    SshKeyList,
-    SshKeyGenerate {
-        name: String,
-    },
-    SshKeyAuthorizedList,
     FileList {
         path: String,
     },
@@ -120,14 +115,6 @@ pub async fn run(args: ClientArgs) {
         ClientVerb::ServiceAction { name, action } => Request::ServiceAction { name, action },
         ClientVerb::ProcessList => Request::ProcessList,
         ClientVerb::ProcessKill { pid, signal } => Request::ProcessKill { pid, signal },
-        ClientVerb::SshKeyList => Request::SshKeyList,
-        ClientVerb::SshKeyGenerate { name } => Request::SshKeyGenerate {
-            name,
-            key_type: None,
-            bits: None,
-            comment: None,
-        },
-        ClientVerb::SshKeyAuthorizedList => Request::SshKeyAuthorizedList,
         ClientVerb::FileList { path } => Request::FileList { path },
         ClientVerb::FileRead { path } => Request::FileRead { path },
         ClientVerb::FileWrite { path, content } => Request::FileWrite {

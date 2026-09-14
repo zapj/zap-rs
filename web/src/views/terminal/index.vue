@@ -210,10 +210,8 @@
             <el-select v-model="form.ssh_key_name" :placeholder="t('terminal.selectKey')" clearable>
               <el-option
                 v-for="key in sshKeys"
-                :key="key.scope + ':' + key.name"
-                :label="
-                  key.scope === 'system' ? key.name + t('terminal.keySystemSuffix') : key.name
-                "
+                :key="key.name"
+                :label="key.name"
                 :value="key.name"
               />
             </el-select>
@@ -331,7 +329,6 @@
         style="margin-bottom: 12px"
       >
         {{ t('terminal.keyAlert') }}
-        <template v-if="isAdmin">{{ t('terminal.keyAlertAdmin') }}</template>
         <div v-if="!canUseUserKeys" style="margin-top: 4px">
           {{ t('terminal.keyModeDisabled') }}
         </div>
@@ -366,20 +363,7 @@
         max-height="400"
         :empty-text="t('terminal.noKeys')"
       >
-        <el-table-column prop="name" :label="t('common.name')" min-width="130">
-          <template #default="{ row }">
-            <span>{{ row.name }}</span>
-            <el-tag
-              v-if="row.scope === 'system'"
-              size="small"
-              type="warning"
-              effect="plain"
-              style="margin-left: 6px"
-            >
-              {{ t('terminal.system') }}
-            </el-tag>
-          </template>
-        </el-table-column>
+        <el-table-column prop="name" :label="t('common.name')" min-width="130" />
         <el-table-column
           prop="comment"
           :label="t('terminal.comment')"
@@ -393,24 +377,21 @@
         </el-table-column>
         <el-table-column :label="t('common.operation')" width="220" align="right">
           <template #default="{ row }">
-            <template v-if="row.scope === 'user'">
-              <el-button link type="primary" size="small" @click="copyPub(row)">{{
-                t('terminal.copyPub')
-              }}</el-button>
-              <el-button link type="primary" size="small" @click="viewPrivate(row)">
-                {{ t('terminal.viewPrivate') }}
-              </el-button>
-              <el-button
-                link
-                type="danger"
-                size="small"
-                :disabled="isReadOnly"
-                @click="removeKey(row)"
-              >
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-            <span v-else class="dim">{{ t('terminal.systemKeyOnly') }}</span>
+            <el-button link type="primary" size="small" @click="copyPub(row)">{{
+              t('terminal.copyPub')
+            }}</el-button>
+            <el-button link type="primary" size="small" @click="viewPrivate(row)">
+              {{ t('terminal.viewPrivate') }}
+            </el-button>
+            <el-button
+              link
+              type="danger"
+              size="small"
+              :disabled="isReadOnly"
+              @click="removeKey(row)"
+            >
+              {{ t('common.delete') }}
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -556,7 +537,7 @@ const isReadOnly = computed(() => userStore.roles.includes('demo'))
 const isAdmin = computed(() => userStore.roles.includes('admin'))
 
 const connections = ref<SshConnection[]>([])
-const sshKeys = ref<{ name: string; scope: 'user' | 'system' }[]>([])
+const sshKeys = ref<{ name: string; scope: 'user' }[]>([])
 const activeConnId = ref<number | null>(null)
 
 // 「我的密钥」能力门禁：仅「独立系统用户」(system) 模式支持家目录密钥（取自 /terminal/keys 响应）

@@ -996,23 +996,3 @@ async fn table_exists(table_name: &str) -> bool {
             .await;
     result.is_ok()
 }
-
-async fn ensure_column(table: &str, column: &str, decl: &str) {
-    if column_exists(table, column).await {
-        return;
-    }
-    let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {decl}");
-    let _ = get_db_pool().await.execute(sql.as_str()).await;
-}
-
-async fn column_exists(table: &str, column: &str) -> bool {
-    let pool = get_db_pool().await;
-    let rows: Result<Vec<(String,)>, sqlx::Error> =
-        sqlx::query_as(&format!("PRAGMA table_info({table})"))
-            .fetch_all(pool)
-            .await;
-    match rows {
-        Ok(rs) => rs.iter().any(|(name,)| name == column),
-        Err(_) => false,
-    }
-}

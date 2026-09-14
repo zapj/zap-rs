@@ -139,48 +139,8 @@ pub enum Request {
     /// 终止进程（signal 缺省为 TERM，9 表示 KILL）
     #[serde(rename = "process.kill")]
     ProcessKill { pid: u32, signal: Option<String> },
-    /// 列出 SSH 密钥
-    #[serde(rename = "ssh_key.list")]
-    SshKeyList,
-    /// 读取公钥内容
-    #[serde(rename = "ssh_key.get")]
-    SshKeyGet { name: String },
-    /// 生成 SSH 密钥
-    #[serde(rename = "ssh_key.generate")]
-    SshKeyGenerate {
-        name: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        key_type: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        bits: Option<u32>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        comment: Option<String>,
-    },
-    /// 导入 SSH 密钥
-    #[serde(rename = "ssh_key.import")]
-    SshKeyImport {
-        name: String,
-        private_key: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        public_key: Option<String>,
-    },
-    /// 删除 SSH 密钥
-    #[serde(rename = "ssh_key.delete")]
-    SshKeyDelete { name: String },
-    /// 列出 authorized_keys 条目
-    #[serde(rename = "ssh_key.authorized_list")]
-    SshKeyAuthorizedList,
-    /// 授权密钥（加入 authorized_keys）
-    #[serde(rename = "ssh_key.authorize")]
-    SshKeyAuthorize { name: String },
-    /// 取消授权（按 authorized_keys 索引）
-    #[serde(rename = "ssh_key.deauthorize")]
-    SshKeyDeauthorize { index: usize },
-    /// 把公钥写入本机系统用户的 ~/.ssh/authorized_keys（root 特权，仅本地回环连接用）
-    #[serde(rename = "ssh_key.install_local")]
-    SshKeyInstallLocal { username: String, key_name: String },
-    /// 把指定的公钥内容写入本机系统用户的 ~/.ssh/authorized_keys（root 特权，
-    /// 支持「用户自己的家目录密钥」做本地回环授权，公钥内容由 zapd 鉴权后下发）
+    /// 把指定的公钥内容写入本机系统用户的 `~/.ssh/authorized_keys`（root 特权，
+    /// 用于「我的密钥」的本地回环授权，公钥内容由 zapd 鉴权后下发）
     #[serde(rename = "ssh_key.install_pub")]
     SshKeyInstallPub {
         username: String,
@@ -206,6 +166,8 @@ pub enum Request {
         private_key: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         public_key: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        comment: Option<String>,
     },
     /// 删除面板用户自己的 SSH 密钥（含 .pub）
     #[serde(rename = "ssh_user_key.delete")]
@@ -216,6 +178,10 @@ pub enum Request {
     /// 读取用户家目录公钥内容
     #[serde(rename = "ssh_user_key.public_get")]
     SshUserKeyPublicGet { linux_user: String, name: String },
+    /// 列出用户家目录下全部面板密钥（`~/.ssh/zap_<name>.pub`）。
+    /// 密钥只存家目录文件、不落 DB，故列表一律以磁盘扫描为准
+    #[serde(rename = "ssh_user_key.list")]
+    SshUserKeyList { linux_user: String },
     /// 读取主机名与 DNS 解析器配置
     #[serde(rename = "network.get")]
     NetworkGet,
@@ -873,18 +839,12 @@ mod tests {
             r#"{"verb":"time.sync"}"#
         );
         assert_eq!(
-            serde_json::to_string(&Request::SshKeyList).unwrap(),
-            r#"{"verb":"ssh_key.list"}"#
-        );
-        assert_eq!(
-            serde_json::to_string(&Request::SshKeyGenerate {
-                name: "k".into(),
-                key_type: Some("ed25519".into()),
-                bits: None,
-                comment: None,
+            serde_json::to_string(&Request::SshKeyInstallPub {
+                username: "admin".into(),
+                public_key: "ssh-ed25519 AAAA".into(),
             })
             .unwrap(),
-            r#"{"verb":"ssh_key.generate","name":"k","key_type":"ed25519"}"#
+            r#"{"verb":"ssh_key.install_pub","username":"admin","public_key":"ssh-ed25519 AAAA"}"#
         );
     }
 

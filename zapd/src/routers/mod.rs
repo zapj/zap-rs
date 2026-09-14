@@ -50,7 +50,6 @@ pub mod fpm_spec;
 pub mod notice;
 pub mod package;
 pub mod site;
-pub mod ssh_keys;
 pub mod ssh_terminal;
 pub mod ssh_user_keys;
 pub mod ssl;
@@ -469,30 +468,6 @@ fn api_routers() -> Router {
         .route("/system/fpm-specs/add", post(fpm_spec::spec_add))
         .route("/system/fpm-specs/update", post(fpm_spec::spec_update))
         .route("/system/fpm-specs/delete", post(fpm_spec::spec_delete))
-        // SSH key management (admin only)
-        .route("/system/config/ssh/keys", get(ssh_keys::list_keys))
-        .route(
-            "/system/config/ssh/keys/content",
-            get(ssh_keys::get_key_content),
-        )
-        .route(
-            "/system/config/ssh/keys/generate",
-            post(ssh_keys::generate_key),
-        )
-        .route("/system/config/ssh/keys/import", post(ssh_keys::import_key))
-        .route("/system/config/ssh/keys/delete", post(ssh_keys::delete_key))
-        .route(
-            "/system/config/ssh/authorized_keys",
-            get(ssh_keys::list_authorized_keys),
-        )
-        .route(
-            "/system/config/ssh/authorize",
-            post(ssh_keys::authorize_key),
-        )
-        .route(
-            "/system/config/ssh/deauthorize",
-            post(ssh_keys::deauthorize_key),
-        )
         // SSH terminal
         .route("/terminal/connections", get(ssh_terminal::list_connections))
         .route(
