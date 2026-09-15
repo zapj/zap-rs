@@ -71,6 +71,14 @@ async fn init_system_user_table_schema() {
         package_id INTEGER NOT NULL DEFAULT 0,
         totp_secret TEXT NOT NULL DEFAULT '',
         totp_enabled INTEGER NOT NULL DEFAULT 0,
+        -- 磁盘用量（字节）与采集时间：定时任务 du 家目录写入（0 = 尚未采集）
+        disk_used_bytes INTEGER NOT NULL DEFAULT 0,
+        disk_stat_at INTEGER NOT NULL DEFAULT 0,
+        -- 本月出站流量（字节）：解析名下站点 nginx access.log 汇总（0 = 尚未采集）
+        bandwidth_used_bytes INTEGER NOT NULL DEFAULT 0,
+        -- 流量统计周期（YYYYMM）：跨月自动重置本月计数
+        bandwidth_period TEXT NOT NULL DEFAULT '',
+        bandwidth_stat_at INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER,
         updated_at INTEGER
     )
@@ -782,6 +790,14 @@ async fn init_site_table() {
         log_root TEXT NOT NULL DEFAULT '',
         status INTEGER NOT NULL DEFAULT 1,
         remark TEXT NOT NULL DEFAULT '',
+        -- 流量统计：access.log 增量解析游标（inode 变化 / 文件变小 = 日志轮转，从 0 重读）
+        traffic_offset INTEGER NOT NULL DEFAULT 0,
+        traffic_inode TEXT NOT NULL DEFAULT '',
+        traffic_total_bytes INTEGER NOT NULL DEFAULT 0,
+        -- 本月流量（字节）与所属周期（YYYYMM）
+        traffic_month_bytes INTEGER NOT NULL DEFAULT 0,
+        traffic_month TEXT NOT NULL DEFAULT '',
+        traffic_stat_at INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER,
         updated_at INTEGER
     );

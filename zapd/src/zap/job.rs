@@ -230,8 +230,18 @@ pub async fn init_system_jobs() {
     tokio::spawn(async move {
         cleanup_monitor_data().await;
     });
+    // 启动 60s 后补采一次资源用量（避开启动期 IO 高峰）
+    tokio::spawn(async {
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        usage_scheduled_task().await;
+    });
     let mut sched_map = GLOBAL_SCHEDULED_MAP.write().await;
     sched_map.insert("zap".to_string(), sched);
+}
+
+/// 用户资源用量采集（磁盘 du + 站点流量日志解析）
+async fn usage_scheduled_task() {
+    crate::zap::usage::collect_all().await;
 }
 
 pub async fn add_jobs(sched: &JobScheduler) {
@@ -256,6 +266,13 @@ pub async fn add_jobs(sched: &JobScheduler) {
     })
     .expect("invalid cron: daily cleanup");
     let _ = sched.add(clean).await;
+
+    // 每 30 分钟（整点 / 半点）：采集用户磁盘用量与站点流量
+    let usage = Job::new_async("0 0,30 * * * *", |_uuid, _lock| {
+        Box::pin(usage_scheduled_task())
+    })
+    .expect("invalid cron: usage collect");
+    let _ = sched.add(usage).await;
 }
 
 pub async fn stop_system_job() {

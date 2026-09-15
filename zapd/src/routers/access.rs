@@ -105,6 +105,8 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
     // ── 登录态即可访问的个人接口 ─────────────────────────────
     ("/auth", Required::User, None),
     ("/user", Required::User, None),
+    // ── 仪表盘统计卡片：任意登录用户，数据范围由 handler 按 owner 收敛 ──
+    ("/dashboard/counts", Required::User, None),
     // ── 文档（CHANGELOG / 用户手册 / FAQ / 升级指南）：所有已登录用户 ──
     ("/docs", Required::User, None),
     // ── 站点：view / create / update / delete / state / sync ──

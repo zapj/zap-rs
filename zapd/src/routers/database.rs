@@ -166,12 +166,37 @@ fn schema_prefix(claims: &ValidatedClaims) -> Option<String> {
     if is_admin(claims) {
         return None;
     }
-    let user: String = claims
-        .sub
+    Some(schema_prefix_of(&claims.sub))
+}
+
+/// 用户名 → 库名前缀（非字母数字统一替换为 `_`，与建库补前缀规则一致）
+pub(crate) fn schema_prefix_of(username: &str) -> String {
+    let user: String = username
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
-    Some(format!("{user}_"))
+    format!("{user}_")
+}
+
+/// 统计库数量：`prefixes` 为空表示统计全部非系统库（admin）。
+///
+/// MySQL 不可用 / 未配置时返回 0（不阻断仪表盘渲染）。
+pub(crate) fn count_schemas(prefixes: &[String]) -> i64 {
+    let Ok(out) = run_sql("SELECT s.SCHEMA_NAME FROM information_schema.SCHEMATA s") else {
+        return 0;
+    };
+    let mut n = 0i64;
+    for line in out.lines() {
+        let name = line.trim();
+        if name.is_empty() || SYSTEM_SCHEMAS.contains(&name) {
+            continue;
+        }
+        if !prefixes.is_empty() && !prefixes.iter().any(|p| name.starts_with(p.as_str())) {
+            continue;
+        }
+        n += 1;
+    }
+    n
 }
 
 /// 校验库归属：非管理员只能操作自己前缀下的库。

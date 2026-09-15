@@ -14,6 +14,23 @@
       </el-input>
     </div>
 
+    <!-- 统计卡片（经销商视角：名下用户 / 站点 / 数据库） -->
+    <el-row v-if="isReseller" :gutter="16" class="stat-row">
+      <el-col v-for="c in statCards" :key="c.key" :xs="24" :sm="8">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-body">
+            <el-icon class="stat-icon" :style="{ color: c.color }">
+              <Icon :icon="c.icon" />
+            </el-icon>
+            <div class="stat-meta">
+              <div class="stat-value">{{ c.value }}</div>
+              <div class="stat-title">{{ c.title }}</div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- 常规信息 + 使用情况 -->
     <el-row :gutter="16" class="info-row">
       <!-- 常规信息 -->
@@ -80,12 +97,16 @@
                 t('dashboardCpanel.domainLimit', { n: fmtLimit(pkg.max_domains) })
               }}</span>
             </el-descriptions-item>
-            <el-descriptions-item :label="t('dashboardCpanel.diskQuota')">{{
-              fmtMb(pkg.disk_quota_mb)
-            }}</el-descriptions-item>
-            <el-descriptions-item :label="t('dashboardCpanel.bandwidth')">{{
-              fmtMb(pkg.max_bandwidth_mb)
-            }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.diskQuota')">
+              <span>{{ account.disk_used_bytes ? formatBytes(account.disk_used_bytes) : '0 B' }}</span>
+              <span class="muted"> / {{ fmtMb(pkg.disk_quota_mb) }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item :label="t('dashboardCpanel.bandwidth')">
+              <span>{{
+                account.bandwidth_used_bytes ? formatBytes(account.bandwidth_used_bytes) : '0 B'
+              }}</span>
+              <span class="muted"> / {{ fmtMb(pkg.max_bandwidth_mb) }}</span>
+            </el-descriptions-item>
             <el-descriptions-item :label="t('dashboardCpanel.fpmSpec')">
               <el-tag v-if="!pkg.fpm_spec_ref" size="small" type="info" effect="plain">
                 {{ t('dashboardCpanel.panelDefault') }}
@@ -130,8 +151,10 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Icon } from '@/icons'
+import { formatBytes } from '@/utils/fmt'
 import { useUserStore } from '@/stores/user'
-import { getSystemInfo } from '@/api/dashboard'
+import { getDashboardCounts, getSystemInfo } from '@/api/dashboard'
+import type { DashboardCounts } from '@/api/dashboard'
 import { getUserInfo } from '@/api/user'
 import { getCertList } from '@/api/ssl'
 import { http } from '@/utils/request'
@@ -153,6 +176,7 @@ const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 const roles = userStore.roles
+const isReseller = computed(() => roles.includes('reseller') && !roles.includes('admin'))
 
 const keyword = ref('')
 
@@ -241,6 +265,32 @@ function handleClick(item: AppEntry) {
 const account = ref<Record<string, any>>({})
 const server = ref<Record<string, any>>({})
 const stats = ref({ total: 0, running: 0, domains: 0, ssl: 0 })
+/** 统计卡片数据（/dashboard/counts，按角色收敛范围） */
+const counts = ref<DashboardCounts>({ users: 0, sites: 0, databases: 0 })
+
+const statCards = computed(() => [
+  {
+    key: 'users',
+    title: t('dashboardCpanel.statUsers'),
+    value: counts.value.users,
+    icon: 'material-symbols:group',
+    color: '#9254de',
+  },
+  {
+    key: 'sites',
+    title: t('dashboardCpanel.statSites'),
+    value: counts.value.sites,
+    icon: 'material-symbols:public',
+    color: '#409eff',
+  },
+  {
+    key: 'databases',
+    title: t('dashboardCpanel.statDatabases'),
+    value: counts.value.databases,
+    icon: 'material-symbols:database',
+    color: '#67c23a',
+  },
+])
 /** 当前生效套餐（/user/info 返回；未绑定时回退全局默认套餐） */
 const packageBound = ref(false)
 const pkg = ref<Record<string, any>>({})
@@ -309,8 +359,18 @@ async function loadStats() {
   }
 }
 
+async function loadCounts() {
+  if (!isReseller.value) return
+  try {
+    const res = await getDashboardCounts()
+    if (res?.data) counts.value = { ...counts.value, ...res.data }
+  } catch {
+    /* ignore */
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([loadAccount(), loadServer(), loadStats()])
+  await Promise.all([loadAccount(), loadServer(), loadStats(), loadCounts()])
 })
 </script>
 
@@ -325,6 +385,35 @@ onMounted(async () => {
 
 .search-input {
   max-width: 480px;
+}
+
+.stat-row {
+  margin-bottom: 16px;
+}
+
+.stat-card :deep(.el-card__body) {
+  padding: 16px;
+}
+
+.stat-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.stat-icon {
+  font-size: 32px;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.stat-title {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 
 .info-row {

@@ -20,3 +20,14 @@ export async function getSystemOverview() {
 export async function getSystemAbout() {
   return http.get<ApiResponse>('/system/about')
 }
+
+/** 仪表盘统计卡片：按当前角色可见范围返回用户 / 站点 / 数据库数量 */
+export interface DashboardCounts {
+  users: number
+  sites: number
+  databases: number
+}
+
+export async function getDashboardCounts() {
+  return http.get<ApiResponse<DashboardCounts>>('/dashboard/counts')
+}

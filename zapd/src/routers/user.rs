@@ -32,6 +32,14 @@ struct UserInfo {
     permissions: String,
     owner_id: i64,
     package_id: i64,
+    /// 家目录磁盘用量（字节，定时任务 du 采集；0 = 未采集）
+    disk_used_bytes: i64,
+    disk_stat_at: i64,
+    /// 本月出站流量（字节，解析站点 access.log 汇总）
+    bandwidth_used_bytes: i64,
+    /// 流量统计周期（YYYYMM）
+    bandwidth_period: String,
+    bandwidth_stat_at: i64,
     created_at: i64,
     updated_at: i64,
 }
@@ -295,6 +303,12 @@ pub async fn user_info(claims: Claims) -> Json<Value> {
                 "fpm_spec_ref": user.fpm_spec_ref,
                 "last_login_ip": user.last_login_ip,
                 "last_login_time": user.last_login_time,
+                // 资源用量：磁盘（du 采集）/ 本月流量（access.log 汇总）
+                "disk_used_bytes": user.disk_used_bytes,
+                "disk_stat_at": user.disk_stat_at,
+                "bandwidth_used_bytes": user.bandwidth_used_bytes,
+                "bandwidth_period": user.bandwidth_period,
+                "bandwidth_stat_at": user.bandwidth_stat_at,
                 "roles": user.roles.split(',').collect::<Vec<&str>>(),
                 "permissions": perms,
                 // 套餐信息：package_bound 标记是否绑定自己的套餐（false = 回退全局默认）

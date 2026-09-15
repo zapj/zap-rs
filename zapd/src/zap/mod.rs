@@ -23,6 +23,7 @@ pub mod totp;
 pub mod types;
 pub mod update_config;
 pub mod updater;
+pub mod usage;
 pub mod user_cron;
 
 #[derive(Error, Debug)]

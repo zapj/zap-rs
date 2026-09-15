@@ -43,6 +43,7 @@ pub mod access;
 pub mod appstore;
 pub mod auth;
 pub mod cloud;
+pub mod dashboard;
 pub mod database;
 pub mod dev;
 pub mod docs;
@@ -254,6 +255,8 @@ fn api_routers() -> Router {
         .route("/system/user/delete", post(user::user_delete))
         .route("/system/user/resellers", get(user::reseller_list))
         .route("/system/user/home_sync", post(user::user_home_sync))
+        // 仪表盘统计卡片（按角色可见范围统计用户 / 站点 / 数据库数量）
+        .route("/dashboard/counts", get(dashboard::counts))
         // 套餐（Packages）：创建客户时选择的资源套餐
         .route("/system/package/list", get(package::package_list))
         .route("/system/package/add", post(package::package_add))
