@@ -6,11 +6,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
-use sqlx::Row;
 
-use crate::zap::{ZapError, appstore as ast};
+use crate::zap::{ZapError, appstore as ast, update_config};
 use crate::{config, db, zapexec};
 use sha2::Digest;
 use zap_proto::Request;
@@ -24,35 +23,10 @@ pub const UPGRADE_BINS: [&str; 4] = ["zapd", "zapexec", "zapctl", "zapupgrade"];
 /// appstore_runs 中系统升级运行的 action 标识。
 pub const ACTION_ZAP_UPDATE: &str = "zap_update";
 /// 默认更新渠道（与 build.sh 上传目录一致）。
-pub const DEFAULT_CHANNEL: &str = "https://mirrors.zap.cn/zap/releases";
+pub const DEFAULT_CHANNEL: &str = update_config::DEFAULT_CHANNEL;
 
-/// 自动更新配置（对应 update_config 单行表）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateConfig {
-    pub auto: i64,
-    pub cron: String,
-    pub channel: String,
-    pub last_check_at: i64,
-    pub last_check_version: String,
-    pub last_check_has_update: i64,
-    pub last_error: String,
-    pub updated_at: i64,
-}
-
-impl Default for UpdateConfig {
-    fn default() -> Self {
-        Self {
-            auto: 0,
-            cron: "0 3 * * *".to_string(),
-            channel: DEFAULT_CHANNEL.to_string(),
-            last_check_at: 0,
-            last_check_version: String::new(),
-            last_check_has_update: 0,
-            last_error: String::new(),
-            updated_at: 0,
-        }
-    }
-}
+/// 自动更新配置（来自 `{data}/update_config.yaml`）。
+pub use update_config::UpdateConfigFile as UpdateConfig;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LaunchInfo {
@@ -87,65 +61,22 @@ pub fn log_path_for(run_id: &str) -> String {
         .into_owned()
 }
 
-// ── 配置读写 ────────────────────────────────────────────────
+// ── 配置读写（`{data}/update_config.yaml`）──────────────────
 
-pub async fn load_config() -> UpdateConfig {
-    let pool = db::get_db_pool().await;
-    let row = sqlx::query(
-        "SELECT auto, cron, channel, last_check_at, last_check_version, last_check_has_update, last_error, updated_at \
-         FROM update_config WHERE id = 1",
-    )
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten();
-    match row {
-        Some(r) => UpdateConfig {
-            auto: r.get("auto"),
-            cron: r.get("cron"),
-            channel: r.get("channel"),
-            last_check_at: r.get("last_check_at"),
-            last_check_version: r.get("last_check_version"),
-            last_check_has_update: r.get("last_check_has_update"),
-            last_error: r.get("last_error"),
-            updated_at: r.get("updated_at"),
-        },
-        None => UpdateConfig::default(),
-    }
+/// 当前自动更新配置（同步：直接读 YAML 缓存，无需 DB）。
+pub fn load_config() -> UpdateConfig {
+    update_config::load()
 }
 
-pub async fn save_config(auto: bool, cron: &str, channel: &str) -> Result<(), ZapError> {
-    let now = chrono::Utc::now().timestamp();
-    let pool = db::get_db_pool().await;
-    sqlx::query(
-        "INSERT INTO update_config (id, auto, cron, channel, updated_at) VALUES (1, ?, ?, ?, ?) \
-         ON CONFLICT(id) DO UPDATE SET auto = excluded.auto, cron = excluded.cron, \
-         channel = excluded.channel, updated_at = excluded.updated_at",
-    )
-    .bind(auto as i64)
-    .bind(cron)
-    .bind(channel)
-    .bind(now)
-    .execute(pool)
-    .await?;
+/// 保存自动更新开关 / cron / 渠道。
+pub fn save_config(auto: bool, cron: &str, channel: &str) -> Result<(), ZapError> {
+    update_config::save(auto, cron, channel);
     Ok(())
 }
 
 /// 记录最近一次远端检查结果（不覆盖 auto/cron/channel）。
-pub async fn record_check(version: &str, has_update: i64, error: &str) {
-    let now = chrono::Utc::now().timestamp();
-    let pool = db::get_db_pool().await;
-    let _ = sqlx::query(
-        "UPDATE update_config SET last_check_at = ?, last_check_version = ?, \
-         last_check_has_update = ?, last_error = ?, updated_at = ? WHERE id = 1",
-    )
-    .bind(now)
-    .bind(version)
-    .bind(has_update)
-    .bind(error)
-    .bind(now)
-    .execute(pool)
-    .await;
+pub fn record_check(version: &str, has_update: bool, error: &str) {
+    update_config::record_check(version, has_update, error);
 }
 
 // ── 版本比较 ────────────────────────────────────────────────
@@ -327,22 +258,22 @@ pub async fn launch_update(username: &str) -> Result<LaunchInfo, ZapError> {
 }
 
 async fn launch_update_inner(username: &str) -> Result<LaunchInfo, ZapError> {
-    let cfg = load_config().await;
+    let cfg = load_config();
     let channel = cfg.channel.clone();
     let current = current_zapd_version();
 
     let latest = match check_remote_version(&channel).await {
         Ok(v) => v,
         Err(e) => {
-            record_check("", 0, &e.to_string()).await;
+            record_check("", false, &e.to_string());
             return Err(e);
         }
     };
     if !has_update(current, &latest) {
-        record_check(&latest, 0, "").await;
+        record_check(&latest, false, "");
         return Err(ZapError::New(-1, format!("当前已是最新版本 v{current}")));
     }
-    record_check(&latest, 1, "").await;
+    record_check(&latest, true, "");
 
     let run_id = ast::generate_run_id();
     let log_path = log_path_for(&run_id);
@@ -353,7 +284,7 @@ async fn launch_update_inner(username: &str) -> Result<LaunchInfo, ZapError> {
     let stage = match download_and_stage(&channel, &latest, &run_id).await {
         Ok(s) => s,
         Err(e) => {
-            record_check(&latest, 1, &e.to_string()).await;
+            record_check(&latest, true, &e.to_string());
             return Err(e);
         }
     };
@@ -369,7 +300,7 @@ async fn launch_update_inner(username: &str) -> Result<LaunchInfo, ZapError> {
     if resp.code != 0 {
         ast::finish_run(&run_id, "failed", resp.code as i64).await;
         let msg = format!("启动升级器失败: {}", resp.message);
-        record_check(&latest, 1, &msg).await;
+        record_check(&latest, true, &msg);
         return Err(ZapError::New(resp.code, msg));
     }
     ast::watch_log(run_id.clone(), log_path.clone());

@@ -21,6 +21,7 @@ pub mod server_env;
 pub mod system_info;
 pub mod totp;
 pub mod types;
+pub mod update_config;
 pub mod updater;
 pub mod user_cron;
 

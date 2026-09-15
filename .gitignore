@@ -20,3 +20,5 @@ data/sites/*
 data/ssl/
 data/backups/
 data/users/
+data/server_env.yaml
+data/update_config.yaml

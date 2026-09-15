@@ -1,7 +1,7 @@
-//! 自动更新调度：分钟粒度轮询 update_config，命中 cron 表达式时触发升级。
+//! 自动更新调度：分钟粒度轮询 `{data}/update_config.yaml`，命中 cron 表达式时触发升级。
 //!
 //! 用轻量轮询（而非 tokio-cron-scheduler）的原因：自动更新开关与 cron
-//! 由前端随时修改并落库，轮询方案配置即时生效、无需重建调度任务；
+//! 由前端随时修改并即时写入 YAML，轮询方案配置即时生效、无需重建调度任务；
 //! 且 zapd 升级重启后新实例会自然接续，不会留下孤儿调度器。
 
 use std::sync::atomic::Ordering;
@@ -97,7 +97,7 @@ pub fn start() {
             }
             last_min = minute;
 
-            let cfg = updater::load_config().await;
+            let cfg = updater::load_config();
             if cfg.auto == 0 || cfg.cron.trim().is_empty() {
                 continue;
             }

@@ -33,7 +33,7 @@ pub async fn status_get(claims: ValidatedClaims) -> ZapJsonResult {
     require_admin(&claims)?;
     // 惰性收尾：zapd 若在升级中被重启，遗留的 running 记录在此补全
     updater::finalize_stale_updates().await;
-    let cfg = updater::load_config().await;
+    let cfg = updater::load_config();
     let zapexec_version = match zapexec::call(Request::UpgradeInfo).await {
         Ok(r) if r.code == 0 => r
             .data
@@ -94,7 +94,7 @@ pub async fn config_save(
             "更新渠道需为 http(s):// 地址".to_string(),
         ));
     }
-    updater::save_config(payload.auto, &cron, &channel).await?;
+    updater::save_config(payload.auto, &cron, &channel)?;
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
@@ -116,17 +116,17 @@ pub async fn check(
     Extension(client_addr): Extension<SocketAddr>,
 ) -> ZapJsonResult {
     require_admin(&claims)?;
-    let cfg = updater::load_config().await;
+    let cfg = updater::load_config();
     let current = updater::current_zapd_version();
     let latest = match updater::check_remote_version(&cfg.channel).await {
         Ok(v) => v,
         Err(e) => {
-            updater::record_check("", 0, &e.to_string()).await;
+            updater::record_check("", false, &e.to_string());
             return Err(e);
         }
     };
     let has_update = updater::has_update(current, &latest);
-    updater::record_check(&latest, has_update as i64, "").await;
+    updater::record_check(&latest, has_update, "");
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
