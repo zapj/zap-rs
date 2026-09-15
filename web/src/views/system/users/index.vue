@@ -2,32 +2,28 @@
   <div class="users-container">
     <el-card>
       <template #header>
-        <span>{{ pageTitle }}</span>
+        <div class="card-header">
+          <span class="page-title">{{ pageTitle }}</span>
+          <!-- 搜索 + 新增：统一放在卡片右上角 -->
+          <div class="head-right">
+            <el-input
+              v-model="searchForm.username"
+              :placeholder="t('common.inputPlaceholder', { field: t('users.username') })"
+              clearable
+              style="width: 180px"
+              @keyup.enter="handleSearch"
+              @clear="handleSearch"
+            />
+            <el-button @click="handleSearch">{{ t('common.search') }}</el-button>
+            <el-button @click="resetSearch">{{ t('common.reset') }}</el-button>
+            <el-button type="primary" @click="handleAdd">
+              <el-icon><Plus /></el-icon>{{ isAdmin ? t('users.addUser') : t('users.addReseller') }}
+            </el-button>
+          </div>
+        </div>
       </template>
 
-      <!-- 搜索 -->
-      <el-form :inline="true" :model="searchForm" @submit.prevent>
-        <el-form-item :label="t('users.username')">
-          <el-input
-            v-model="searchForm.username"
-            :placeholder="t('common.inputPlaceholder', { field: t('users.username') })"
-            clearable
-            style="width: 180px"
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
-          <el-button @click="resetSearch">{{ t('common.reset') }}</el-button>
-        </el-form-item>
-      </el-form>
-
-      <div style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center">
-        <el-button type="primary" @click="handleAdd">
-          <el-icon><Plus /></el-icon>{{ isAdmin ? t('users.addUser') : t('users.addReseller') }}
-        </el-button>
-      </div>
-
-      <el-table :data="tableData" v-loading="loading" stripe>
+      <el-table :data="filteredData" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="username" :label="t('users.username')" width="120" />
         <el-table-column prop="nickname" :label="t('users.nickname')" width="120" />
@@ -112,13 +108,9 @@
         </el-table-column>
         <el-table-column :label="t('common.operation')" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button
-              type="primary"
-              link
-              :disabled="isRootLocked(row)"
-              @click="handleEdit(row)"
-              >{{ t('common.edit') }}</el-button
-            >
+            <el-button type="primary" link :disabled="isRootLocked(row)" @click="handleEdit(row)">{{
+              t('common.edit')
+            }}</el-button>
             <el-button
               :type="row.status === 1 ? 'warning' : 'success'"
               link
@@ -166,11 +158,7 @@
           <el-input v-model="form.username" :disabled="dialogType === 'edit'" />
         </el-form-item>
         <el-form-item :label="t('users.nickname')" prop="nickname">
-          <el-input
-            v-model="form.nickname"
-            :placeholder="t('users.nicknameTip')"
-            clearable
-          />
+          <el-input v-model="form.nickname" :placeholder="t('users.nicknameTip')" clearable />
         </el-form-item>
         <el-form-item :label="t('users.email')" prop="email">
           <el-input v-model="form.email" />
@@ -349,6 +337,18 @@ async function loadList() {
     loading.value = false
   }
 }
+
+/**
+ * 列表过滤：后端 /system/user/list 暂不支持关键字过滤，这里按用户名 / 昵称 / 邮箱本地过滤，
+ * 用户输入即时生效（点「搜索」或回车会顺带刷新一次列表）。
+ */
+const filteredData = computed(() => {
+  const kw = searchForm.username.trim().toLowerCase()
+  if (!kw) return tableData.value
+  return tableData.value.filter((u) =>
+    [u.username, u.nickname, u.email].some((f) => (f ?? '').toLowerCase().includes(kw)),
+  )
+})
 
 async function loadResellers() {
   if (!isAdmin.value) return
@@ -811,6 +811,26 @@ onMounted(() => {
 <style scoped>
 .users-container {
   padding: 20px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .home-dir {
