@@ -434,9 +434,10 @@ pub async fn user_list(claims: ValidatedClaims) -> ZapJsonResult {
 
     let pool = db::get_db_pool().await;
 
-    let mut querybuilder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
-        "SELECT id,username,email,phone,nickname,home_dir,linux_user,fpm_pool,fpm_spec_ref,last_login_ip,last_login_time,status,roles,permissions,owner_id,package_id,created_at,updated_at FROM user",
-    );
+    // 用 `SELECT *` 与 `UserInfo` 保持同步：sqlx::FromRow 按「列名」取值，
+    // 显式列清单一旦漏掉 user 表的新增列（如 disk_used_bytes），整行解析就会失败、
+    // 接口 500，表现为页面「加载不到任何用户」。
+    let mut querybuilder: QueryBuilder<'_, Sqlite> = QueryBuilder::new("SELECT * FROM user");
     if is_reseller && !is_admin {
         querybuilder
             .push(" WHERE owner_id = ")
