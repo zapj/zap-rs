@@ -124,6 +124,10 @@ async fn audit_permissions_set(claims: &jwt::Claims, ip: &str, uid: i64, keys: &
     .await;
 }
 
+/// 内置初始管理员（安装时创建的 admin）的用户 ID：
+/// 不可删除、不可禁用、角色不可变更，且除本人外任何人都不能修改其信息/密码。
+const ROOT_ADMIN_ID: i64 = 1;
+
 /// Require admin role; return error if not admin
 fn require_admin(claims: &jwt::Claims) -> Result<(), ZapError> {
     if jwt::is_admin(claims) {
@@ -494,7 +498,12 @@ pub async fn user_add(
     } else {
         claims.id as i64
     };
-    let nickname = payload.nickname.unwrap_or_else(|| payload.username.clone());
+    // 昵称可留空（空串/空白同样按未填写处理），默认与用户名同名
+    let nickname = payload
+        .nickname
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| payload.username.clone());
     // 空手机号存 NULL，避免 UNIQUE 约束下多个空串互相冲突
     let phone = payload
         .phone
@@ -660,6 +669,18 @@ pub async fn user_update(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<UpdateUserPayload>,
 ) -> ZapJsonResult {
+    // 内置管理员保护：不可禁用、角色不可变更；其余信息（含密码）仅本人可改
+    if payload.id == ROOT_ADMIN_ID {
+        if payload.status == Some(0) {
+            return Err(ZapError::New(-1, "内置管理员账号不可禁用".to_string()));
+        }
+        if payload.roles.is_some() {
+            return Err(ZapError::New(-1, "内置管理员的角色不可变更".to_string()));
+        }
+        if claims.id as i64 != ROOT_ADMIN_ID {
+            return Err(ZapError::New(-1, "内置管理员账号只能由本人修改".to_string()));
+        }
+    }
     // 非管理员不能修改角色（防止提权，admin 除外）
     if !jwt::is_admin(&claims) && payload.roles.is_some() {
         return Err(ZapError::New(-1, "权限不足，不能修改角色".to_string()));
@@ -740,9 +761,13 @@ pub async fn user_update(
         }
     }
     if let Some(ref nickname) = payload.nickname {
-        separated
-            .push("nickname = ")
-            .push_bind_unseparated(nickname);
+        let n = nickname.trim();
+        if n.is_empty() {
+            // 清空昵称时回退为用户名，避免列表/展示出现空白
+            separated.push("nickname = username");
+        } else {
+            separated.push("nickname = ").push_bind_unseparated(n);
+        }
     }
     if let Some(ref roles) = payload.roles {
         separated.push("roles = ").push_bind_unseparated(roles);
@@ -849,6 +874,9 @@ pub async fn user_delete(
     Extension(client_addr): Extension<SocketAddr>,
     Json(payload): Json<DeleteUserPayload>,
 ) -> ZapJsonResult {
+    if payload.id == ROOT_ADMIN_ID {
+        return Err(ZapError::New(-1, "内置管理员账号不可删除".to_string()));
+    }
     if jwt::is_admin(&claims) {
         // admin: full access (still cannot delete self)
     } else if jwt::is_reseller(&claims) {

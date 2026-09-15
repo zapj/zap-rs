@@ -1,4 +1,7 @@
-//! 脚本/自动化 → 计划任务（admin only）：cron_jobs CRUD / 启停 / 立即运行。
+//! 脚本/自动化 → 计划任务（admin only）：任务 CRUD / 启停 / 立即运行。
+//!
+//! 任务按管理员隔离存储：`data/users/<username>/cron-jobs.yaml`，
+//! 脚本仍以 admin（系统级）身份执行。
 
 use std::net::SocketAddr;
 
@@ -49,7 +52,7 @@ pub struct CronJobPayload {
 
 #[derive(Debug, Deserialize)]
 pub struct CronJobUpdatePayload {
-    pub id: i64,
+    pub id: String,
     pub name: String,
     pub script_path: String,
     pub schedule: String,
@@ -65,22 +68,19 @@ fn default_true() -> bool {
 
 #[derive(Debug, Deserialize)]
 pub struct CronIdPayload {
-    pub id: i64,
+    pub id: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CronTogglePayload {
-    pub id: i64,
+    pub id: String,
     pub enabled: bool,
 }
 
 /// GET /system/cron/list
 pub async fn cron_list(claims: ValidatedClaims) -> ZapJsonResult {
     ensure_admin(&claims)?;
-    let mut jobs = script_cron::list_jobs().await?;
-    for job in &mut jobs {
-        script_cron::refresh_next_run(job).await;
-    }
+    let jobs = script_cron::list(&claims.sub).await?;
     Ok(Json(json!({ "code": 0, "data": { "jobs": jobs } })))
 }
 
@@ -99,7 +99,7 @@ pub async fn cron_add(
     }
     check_script_path(&path)?;
     Cron::parse(&schedule).map_err(|e| ZapError::New(-1, format!("cron 表达式错误：{e}")))?;
-    let id = script_cron::insert_job(&name, &path, &schedule, payload.remark.trim()).await?;
+    let id = script_cron::add(&claims.sub, &name, &path, &schedule, payload.remark.trim()).await?;
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
@@ -128,11 +128,9 @@ pub async fn cron_update(
     }
     check_script_path(&path)?;
     Cron::parse(&schedule).map_err(|e| ZapError::New(-1, format!("cron 表达式错误：{e}")))?;
-    if script_cron::get_job(payload.id).await?.is_none() {
-        return Err(ZapError::New(-1, "计划任务不存在".to_string()));
-    }
-    script_cron::update_job(
-        payload.id,
+    script_cron::update(
+        &claims.sub,
+        &payload.id,
         &name,
         &path,
         &schedule,
@@ -158,8 +156,7 @@ pub async fn cron_delete(
     Json(payload): Json<CronIdPayload>,
 ) -> ZapJsonResult {
     ensure_admin(&claims)?;
-    if let Some(job) = script_cron::get_job(payload.id).await? {
-        script_cron::delete_job(payload.id).await?;
+    if let Some(job) = script_cron::delete(&claims.sub, &payload.id).await? {
         audit::log(
             Some(&claims),
             Some(client_addr.ip().to_string().as_str()),
@@ -179,7 +176,7 @@ pub async fn cron_toggle(
     Json(payload): Json<CronTogglePayload>,
 ) -> ZapJsonResult {
     ensure_admin(&claims)?;
-    script_cron::set_job_enabled(payload.id, payload.enabled).await?;
+    script_cron::set_enabled(&claims.sub, &payload.id, payload.enabled).await?;
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
@@ -188,7 +185,7 @@ pub async fn cron_toggle(
         } else {
             "cron_disable"
         },
-        &payload.id.to_string(),
+        &payload.id,
         "",
     )
     .await;
@@ -202,21 +199,13 @@ pub async fn cron_run_now(
     Json(payload): Json<CronIdPayload>,
 ) -> ZapJsonResult {
     ensure_admin(&claims)?;
-    let job = script_cron::get_job(payload.id)
+    let job = script_cron::get(&claims.sub, &payload.id)
         .await?
         .ok_or_else(|| ZapError::New(-1, "计划任务不存在".to_string()))?;
     let run_id =
-        script_cron::launch_script_run(&job.script_path, "manual", &claims.sub, job.id).await?;
+        script_cron::launch_script_run(&job.script_path, "manual", &claims.sub, &job.id).await?;
     // 立即运行同样刷新最近运行记录
-    let now = chrono::Local::now().timestamp();
-    let _ = sqlx::query(
-        "UPDATE cron_jobs SET last_run_at = ?, last_run_id = ?, updated_at = strftime('%s','now') WHERE id = ?",
-    )
-    .bind(now)
-    .bind(&run_id)
-    .bind(job.id)
-    .execute(crate::db::get_db_pool().await)
-    .await;
+    script_cron::mark_last_run(&claims.sub, &job.id, &run_id).await?;
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),
@@ -234,7 +223,7 @@ pub async fn cron_run_now(
 
 #[derive(Debug, Deserialize)]
 pub struct CronRunsQuery {
-    pub job_id: i64,
+    pub job_id: String,
     #[serde(default)]
     pub limit: Option<i64>,
 }
@@ -246,7 +235,7 @@ pub struct CronRunsQuery {
 pub async fn cron_runs(claims: ValidatedClaims, Query(q): Query<CronRunsQuery>) -> ZapJsonResult {
     ensure_admin(&claims)?;
     let limit = q.limit.unwrap_or(ast::MAX_RUNS_PER_JOB);
-    let runs = ast::list_runs_by_key(&format!("cron:{}", q.job_id), limit).await?;
+    let runs = ast::list_runs_by_key(&script_cron::job_key(&claims.sub, &q.job_id), limit).await?;
     Ok(Json(json!({
         "code": 0,
         "data": { "runs": runs, "keep": ast::MAX_RUNS_PER_JOB }
@@ -260,15 +249,12 @@ pub async fn cron_runs_clear(
     Json(payload): Json<CronIdPayload>,
 ) -> ZapJsonResult {
     ensure_admin(&claims)?;
-    let job = script_cron::get_job(payload.id)
+    let job = script_cron::get(&claims.sub, &payload.id)
         .await?
         .ok_or_else(|| ZapError::New(-1, "计划任务不存在".to_string()))?;
-    let n = ast::delete_runs_by_key(&format!("cron:{}", payload.id)).await?;
+    let n = ast::delete_runs_by_key(&script_cron::job_key(&claims.sub, &job.id)).await?;
     // 历史已清空：断开 last_run_id 引用，避免「上次运行」指向已删记录
-    let _ = sqlx::query("UPDATE cron_jobs SET last_run_id = '', last_run_at = 0 WHERE id = ?")
-        .bind(payload.id)
-        .execute(crate::db::get_db_pool().await)
-        .await;
+    script_cron::reset_last_run(&claims.sub, &job.id).await;
     audit::log(
         Some(&claims),
         Some(client_addr.ip().to_string().as_str()),

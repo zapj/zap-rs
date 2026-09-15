@@ -1,12 +1,12 @@
 import { http } from '@/utils/request'
 
 export interface CronJob {
-  id: number
+  id: string
   name: string
   script_path: string
   schedule: string
   remark: string
-  enabled: number
+  enabled: boolean
   last_run_at: number
   last_run_id: string
   next_run_at: number
@@ -26,22 +26,22 @@ export function listCronJobs() {
 }
 
 export function addCronJob(data: CronJobPayload) {
-  return http.post<{ code: number; message: string; data: { id: number } }>('/system/cron/add', data)
+  return http.post<{ code: number; message: string; data: { id: string } }>('/system/cron/add', data)
 }
 
-export function updateCronJob(data: CronJobPayload & { id: number; enabled: boolean }) {
+export function updateCronJob(data: CronJobPayload & { id: string; enabled: boolean }) {
   return http.post('/system/cron/update', data)
 }
 
-export function deleteCronJob(id: number) {
+export function deleteCronJob(id: string) {
   return http.post('/system/cron/delete', { id })
 }
 
-export function toggleCronJob(id: number, enabled: boolean) {
+export function toggleCronJob(id: string, enabled: boolean) {
   return http.post('/system/cron/toggle', { id, enabled })
 }
 
-export function runCronJobNow(id: number) {
+export function runCronJobNow(id: string) {
   return http.post<{ code: number; message: string; data: { run_id: string } }>('/system/cron/run_now', { id })
 }
 
@@ -61,7 +61,7 @@ export interface CronRunItem {
 }
 
 /** 某任务最近的运行历史（后端只保留最近 N 条，无需分页） */
-export function listCronRuns(jobId: number) {
+export function listCronRuns(jobId: string) {
   return http.get<{
     code: number
     message: string
@@ -70,7 +70,7 @@ export function listCronRuns(jobId: number) {
 }
 
 /** 清空某任务的运行历史（含日志文件与运行快照） */
-export function clearCronRuns(jobId: number) {
+export function clearCronRuns(jobId: string) {
   return http.post<{ code: number; message: string; data: { deleted: number } }>(
     '/system/cron/runs_clear',
     { id: jobId },

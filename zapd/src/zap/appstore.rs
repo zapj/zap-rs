@@ -33,7 +33,7 @@ pub struct AppstoreRun {
     pub status: String,
     pub exit_code: i64,
     pub log_path: String,
-    /// 任务归属键：`cron:<id>`（计划任务）| `crontab:<username>:<id>`（用户计划任务）
+    /// 任务归属键：`cron:<username>:<id>`（管理员计划任务）| `crontab:<username>:<id>`（用户计划任务）
     pub job_key: String,
     pub started_at: i64,
     pub finished_at: i64,
@@ -82,8 +82,9 @@ pub fn generate_run_id() -> String {
 /// 登记一条运行记录（status=running）。
 ///
 /// `job_key` 非空表示由定时任务触发，既是历史列表的查询条件，也是按任务
-/// 保留数量的依据：`cron:<id>`（计划任务）或 `crontab:<username>:<id>`（用户
-/// 计划任务）；非任务触发传空串。登记后会异步裁剪历史，避免无限增长。
+/// 保留数量的依据：`cron:<username>:<id>`（管理员计划任务）或
+/// `crontab:<username>:<id>`（用户计划任务）；非任务触发传空串。
+/// 登记后会异步裁剪历史，避免无限增长。
 pub async fn register_run_with_key(
     run_id: &str,
     action: &str,
@@ -239,21 +240,7 @@ async fn prune_keep_recent(scope: Option<&str>, keep: i64) {
         stale.len()
     );
     // 被裁掉的可能是某任务的「上次运行」：断开引用，避免查看日志时指向空记录
-    clear_dangling_last_run_ids().await;
-}
-
-/// 清掉 `cron_jobs` 里指向已删除运行记录的 `last_run_id`。
-///
-/// 用户计划任务的引用存在 crontab.yaml 里，由登记失败时的回滚兜底，这里只处理
-/// 落在 DB 中的计划任务表。
-pub async fn clear_dangling_last_run_ids() {
-    let pool = db::get_db_pool().await;
-    let _ = sqlx::query(
-        "UPDATE cron_jobs SET last_run_id = '' \
-         WHERE last_run_id <> '' AND last_run_id NOT IN (SELECT run_id FROM appstore_runs)",
-    )
-    .execute(pool)
-    .await;
+    crate::zap::script_cron::clear_dangling_last_run_ids().await;
 }
 
 /// 删除一次运行留下的磁盘产物：日志文件 + 运行快照目录。

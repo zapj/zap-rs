@@ -113,7 +113,7 @@ async function load() {
     const resp =
       props.variant === 'crontab'
         ? await listCrontabRuns(jobId.value)
-        : await listCronRuns(Number(jobId.value))
+        : await listCronRuns(jobId.value)
     runs.value = resp.data?.runs || []
     keep.value = resp.data?.keep || 50
   } catch (e: any) {
@@ -136,7 +136,7 @@ async function handleClear() {
     const resp =
       props.variant === 'crontab'
         ? await clearCrontabRuns(jobId.value)
-        : await clearCronRuns(Number(jobId.value))
+        : await clearCronRuns(jobId.value)
     ElMessage.success(t('cronHistory.cleared', { n: resp.data?.deleted ?? 0 }))
     runs.value = []
     emit('cleared')

@@ -333,7 +333,9 @@ const enUS: Messages = {
 
     usernameRequired: 'Please enter a username',
     usernameLength: '2–50 characters',
-    nicknameRequired: 'Please enter a nickname',
+    nicknameTip: 'Defaults to the username if left empty',
+    rootProtected:
+      'Built-in administrator is protected: it cannot be deleted or disabled, and only itself can edit it',
     emailRequired: 'Please enter an email address',
     emailInvalid: 'Invalid email address',
     passwordRequired: 'Please enter a password',

@@ -22,8 +22,6 @@ pub async fn init_schema() {
     crate::routers::ssh_terminal::init_table().await;
     // AppStore: run records table + menu
     init_appstore_runs_table().await;
-    // 脚本/自动化：计划任务表
-    init_cron_jobs_table().await;
     // IP 池管理表
     init_ip_pool_table().await;
     // 用户站点管理表
@@ -712,26 +710,7 @@ async fn init_hourly_stats_tables() {
 
 // ── appstore ────────────────────────────────────────────────
 
-// ── cron_jobs（脚本/自动化：计划任务）────────────────────────
-
-async fn init_cron_jobs_table() {
-    let sql = r#"
-    CREATE TABLE IF NOT EXISTS cron_jobs (
-        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL DEFAULT '',
-        script_path TEXT NOT NULL DEFAULT '',
-        schedule TEXT NOT NULL DEFAULT '',
-        remark TEXT NOT NULL DEFAULT '',
-        enabled INTEGER NOT NULL DEFAULT 1,
-        last_run_at INTEGER NOT NULL DEFAULT 0,
-        last_run_id TEXT NOT NULL DEFAULT '',
-        next_run_at INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL DEFAULT 0,
-        updated_at INTEGER NOT NULL DEFAULT 0
-    );
-    "#;
-    let _ = get_db_pool().await.execute(sql).await;
-}
+// ── cron（脚本/自动化：计划任务）已改为 data/users/<user>/cron-jobs.yaml ──
 
 // ── appstore ────────────────────────────────────────────────
 

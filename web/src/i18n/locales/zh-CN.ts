@@ -363,7 +363,8 @@ export default {
     // 校验
     usernameRequired: '请输入用户名',
     usernameLength: '2-50 个字符',
-    nicknameRequired: '请输入昵称',
+    nicknameTip: '留空则默认与用户名相同',
+    rootProtected: '内置管理员账号受保护：不可删除、不可禁用，仅本人可修改',
     emailRequired: '请输入邮箱',
     emailInvalid: '邮箱格式不正确',
     passwordRequired: '请输入密码',

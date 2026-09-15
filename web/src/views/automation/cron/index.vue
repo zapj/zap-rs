@@ -40,7 +40,7 @@
         <el-table-column :label="t('automationCron.colStatus')" width="90">
           <template #default="{ row }">
             <el-switch
-              :model-value="row.enabled === 1"
+              :model-value="row.enabled"
               :disabled="switching"
               @change="(v: boolean) => handleToggle(row, v)"
             />
@@ -56,7 +56,7 @@
         </el-table-column>
         <el-table-column :label="t('automationCron.colNextRun')" width="160">
           <template #default="{ row }">
-            {{ row.enabled === 1 && row.next_run_at > 0 ? fmt(row.next_run_at) : '—' }}
+            {{ row.enabled && row.next_run_at > 0 ? fmt(row.next_run_at) : '—' }}
           </template>
         </el-table-column>
         <el-table-column :label="t('common.operation')" width="240" fixed="right">
@@ -175,7 +175,7 @@ const { t } = useI18n()
 const loading = ref(false)
 const jobs = ref<CronJob[]>([])
 const switching = ref(false)
-const runningId = ref(0)
+const runningId = ref('')
 
 function fmt(ts: number) {
   return dayjs(ts * 1000).format('YYYY-MM-DD HH:mm')
@@ -273,7 +273,7 @@ function openEdit(row: CronJob) {
     script_path: row.script_path,
     schedule: row.schedule,
     remark: row.remark,
-    enabled: row.enabled === 1,
+    enabled: row.enabled,
   })
   preset.value = presets.value.some((p) => p.value === row.schedule && p.value !== 'custom')
     ? row.schedule
@@ -321,7 +321,7 @@ async function handleToggle(row: CronJob, v: boolean) {
   switching.value = true
   try {
     await toggleCronJob(row.id, v)
-    row.enabled = v ? 1 : 0
+    row.enabled = v
     ElMessage.success(v ? t('automationCron.enabled') : t('automationCron.disabled'))
   } catch (e: any) {
     ElMessage.error(e.message || t('automationCron.opFailed'))
@@ -344,7 +344,7 @@ async function handleRunNow(row: CronJob) {
   } catch (e: any) {
     ElMessage.error(e.message || t('automationCron.runFailed'))
   } finally {
-    runningId.value = 0
+    runningId.value = ''
   }
 }
 
@@ -382,7 +382,7 @@ const historyJobName = ref('')
 
 function openHistory(row: CronJob) {
   historyJobName.value = row.name
-  historyRef.value?.open({ id: String(row.id), name: row.name })
+  historyRef.value?.open({ id: row.id, name: row.name })
 }
 
 function handleViewRun(row: CronRunItem) {

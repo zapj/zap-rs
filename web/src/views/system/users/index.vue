@@ -112,19 +112,37 @@
         </el-table-column>
         <el-table-column :label="t('common.operation')" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link @click="handleEdit(row)">{{
-              t('common.edit')
-            }}</el-button>
+            <el-button
+              type="primary"
+              link
+              :disabled="isRootLocked(row)"
+              @click="handleEdit(row)"
+              >{{ t('common.edit') }}</el-button
+            >
             <el-button
               :type="row.status === 1 ? 'warning' : 'success'"
               link
+              :disabled="row.id === ROOT_USER_ID"
               @click="handleToggleStatus(row)"
             >
               {{ row.status === 1 ? t('common.disable') : t('common.enable') }}
             </el-button>
-            <el-button type="danger" link @click="handleDelete(row)">
-              {{ t('common.delete') }}
-            </el-button>
+            <el-tooltip
+              :disabled="row.id !== ROOT_USER_ID"
+              :content="t('users.rootProtected')"
+              placement="top"
+            >
+              <span>
+                <el-button
+                  type="danger"
+                  link
+                  :disabled="row.id === ROOT_USER_ID"
+                  @click="handleDelete(row)"
+                >
+                  {{ t('common.delete') }}
+                </el-button>
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
@@ -148,7 +166,11 @@
           <el-input v-model="form.username" :disabled="dialogType === 'edit'" />
         </el-form-item>
         <el-form-item :label="t('users.nickname')" prop="nickname">
-          <el-input v-model="form.nickname" />
+          <el-input
+            v-model="form.nickname"
+            :placeholder="t('users.nicknameTip')"
+            clearable
+          />
         </el-form-item>
         <el-form-item :label="t('users.email')" prop="email">
           <el-input v-model="form.email" />
@@ -157,7 +179,7 @@
           <el-input v-model="form.password" type="password" show-password />
         </el-form-item>
         <el-form-item v-if="isAdmin" :label="t('users.roles')" prop="roles">
-          <el-select v-model="form.roles">
+          <el-select v-model="form.roles" :disabled="editingId === ROOT_USER_ID">
             <el-option
               v-for="opt in roleOptions()"
               :key="opt.value"
@@ -300,6 +322,11 @@ const permCatalog = ref<PermGroupItem[]>([])
 
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.roles.includes('admin'))
+/** 内置初始管理员 ID：不可删除、不可禁用，仅本人可编辑 */
+const ROOT_USER_ID = 1
+/** 内置管理员行是否被当前登录者锁定（非本人不可编辑） */
+const isRootLocked = (row: UserListItem) =>
+  row.id === ROOT_USER_ID && userStore.userInfo.id !== ROOT_USER_ID
 const isReseller = computed(() => userStore.roles.includes('reseller'))
 const pageTitle = computed(() => t(isReseller.value ? 'users.titleReseller' : 'users.title'))
 
@@ -571,7 +598,7 @@ const rules = computed<FormRules<FormData>>(() => ({
     { required: true, message: t('users.usernameRequired'), trigger: 'blur' },
     { min: 2, max: 50, message: t('users.usernameLength'), trigger: 'blur' },
   ],
-  nickname: [{ required: true, message: t('users.nicknameRequired'), trigger: 'blur' }],
+  nickname: [{ max: 50, message: t('users.usernameLength'), trigger: 'blur' }],
   email: [
     { required: true, message: t('users.emailRequired'), trigger: 'blur' },
     { type: 'email', message: t('users.emailInvalid'), trigger: 'blur' },
@@ -592,6 +619,10 @@ function handleAdd() {
 }
 
 function handleEdit(row: UserListItem) {
+  if (isRootLocked(row)) {
+    ElMessage.warning(t('users.rootProtected'))
+    return
+  }
   dialogType.value = 'edit'
   editingId.value = row.id
   Object.assign(form, {
@@ -650,7 +681,7 @@ async function submitForm() {
         username: form.username,
         password: form.password,
         email: form.email,
-        nickname: form.nickname,
+        nickname: form.nickname.trim() || form.username,
       }
       if (isAdmin.value) {
         payload.roles = form.roles
@@ -673,10 +704,11 @@ async function submitForm() {
       const payload: UpdateUserPayload = {
         id: editingId.value!,
         email: form.email,
-        nickname: form.nickname,
+        nickname: form.nickname.trim() || form.username,
         status: form.status,
       }
-      if (isAdmin.value) {
+      // 内置管理员角色不可变更：编辑本人时不下发 roles / permissions
+      if (isAdmin.value && editingId.value !== ROOT_USER_ID) {
         payload.roles = form.roles
         payload.permissions = form.permissions
       }
@@ -692,8 +724,9 @@ async function submitForm() {
     }
     dialogVisible.value = false
     loadList()
-  } catch {
-    // 拦截器已弹窗
+  } catch (e: unknown) {
+    // 业务错误（如「邮箱已存在」）由拦截器 reject，这里统一提示
+    ElMessage.error((e as Error)?.message || t('error.system'))
   } finally {
     submitting.value = false
   }
@@ -701,6 +734,10 @@ async function submitForm() {
 
 // ── 状态切换 ───────────────────────────────────────────────
 async function handleToggleStatus(row: UserListItem) {
+  if (row.id === ROOT_USER_ID) {
+    ElMessage.warning(t('users.rootProtected'))
+    return
+  }
   const newStatus = row.status === 1 ? 0 : 1
   const action = newStatus === 1 ? t('common.enable') : t('common.disable')
   try {
@@ -716,13 +753,17 @@ async function handleToggleStatus(row: UserListItem) {
     await updateUser({ id: row.id, status: newStatus })
     row.status = newStatus
     ElMessage.success(t('users.toggleSuccess', { action }))
-  } catch {
-    // 拦截器已弹窗
+  } catch (e: unknown) {
+    ElMessage.error((e as Error)?.message || t('error.system'))
   }
 }
 
 // ── 删除 ───────────────────────────────────────────────────
 async function handleDelete(row: UserListItem) {
+  if (row.id === ROOT_USER_ID) {
+    ElMessage.warning(t('users.rootProtected'))
+    return
+  }
   try {
     await ElMessageBox.confirm(
       t('users.deleteConfirm', { name: row.username }),
@@ -736,8 +777,8 @@ async function handleDelete(row: UserListItem) {
     await deleteUser(row.id)
     ElMessage.success(t('common.deleteSuccess'))
     loadList()
-  } catch {
-    // 拦截器已弹窗
+  } catch (e: unknown) {
+    ElMessage.error((e as Error)?.message || t('error.system'))
   }
 }
 
