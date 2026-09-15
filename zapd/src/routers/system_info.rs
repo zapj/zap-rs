@@ -29,7 +29,11 @@ fn build_meta(value: Option<&'static str>) -> &'static str {
 /// 面板自身信息（About Zap）：版本、构建日期、git 提交、编译器版本等。
 /// 静态信息，无需频繁刷新。
 pub async fn about(_: ValidatedClaims) -> ZapJsonResult {
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
 
     Ok(Json(json!({
         "code": 0,
