@@ -502,3 +502,13 @@ html.dark {
   --el-box-shadow-light: 0 0 12px rgba(0, 0, 0, 0.3);
   --el-box-shadow: 0 0 16px rgba(0, 0, 0, 0.4);
 }
+
+/* 手机端：站点相关 Drawer（新增/编辑表单、日志、流量）占满整屏宽度
+   Drawer 宽度写在元素 style 上，需 !important 覆盖
+   两种选择器兼容自定义 class 落在 overlay 容器或 drawer 元素本身 */
+@media (max-width: 768px) {
+  .el-drawer.site-drawer,
+  .site-drawer .el-drawer {
+    width: 100% !important;
+  }
+}

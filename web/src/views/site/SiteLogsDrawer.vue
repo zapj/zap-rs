@@ -5,6 +5,7 @@
     size="72%"
     :close-on-click-modal="false"
     destroy-on-close
+    class="site-drawer"
   >
     <div class="log-toolbar">
       <el-radio-group v-model="kind" @change="onKindChange">
@@ -35,7 +36,12 @@
         @clear="loadLogs"
       />
       <el-select v-model="lines" style="width: 120px" @change="loadLogs">
-        <el-option v-for="n in [200, 500, 1000, 2000]" :key="n" :label="`${n} ${t('site.logLines')}`" :value="n" />
+        <el-option
+          v-for="n in [200, 500, 1000, 2000]"
+          :key="n"
+          :label="`${n} ${t('site.logLines')}`"
+          :value="n"
+        />
       </el-select>
 
       <el-button :icon="Refresh" @click="loadLogs">{{ t('common.refresh') }}</el-button>
@@ -65,12 +71,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { formatBytes } from '@/utils/fmt'
 import type { SiteLogFile } from '@/api/site'
-import {
-  clearSiteLogs,
-  getSiteLogArchives,
-  getSiteLogs,
-  rotateSiteLogs,
-} from '@/api/site'
+import { clearSiteLogs, getSiteLogArchives, getSiteLogs, rotateSiteLogs } from '@/api/site'
 
 const props = defineProps<{
   modelValue: boolean

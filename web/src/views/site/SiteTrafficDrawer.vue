@@ -5,6 +5,7 @@
     size="60%"
     :close-on-click-modal="false"
     destroy-on-close
+    class="site-drawer"
   >
     <div class="traffic-toolbar">
       <el-radio-group v-model="days" @change="load">
@@ -33,7 +34,12 @@
 
     <div class="section-title">{{ t('site.trafficTop', { n: days }) }}</div>
     <el-table :data="top" size="small" max-height="260">
-      <el-table-column prop="path" :label="t('site.trafficPath')" min-width="240" show-overflow-tooltip />
+      <el-table-column
+        prop="path"
+        :label="t('site.trafficPath')"
+        min-width="240"
+        show-overflow-tooltip
+      />
       <el-table-column prop="hits" :label="t('site.trafficHits')" width="120" align="right" />
       <el-table-column :label="t('site.trafficBytes')" width="140" align="right">
         <template #default="{ row }">{{ formatBytes(row.bytes) }}</template>

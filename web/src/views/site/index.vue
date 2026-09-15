@@ -36,6 +36,8 @@ interface SiteItem {
   disk_used_bytes?: number
   /** 磁盘占用采集时间戳（0 = 未采集） */
   disk_stat_at?: number
+  /** 本月出站流量（字节，access.log 解析结果） */
+  traffic_month_bytes?: number
   created_at: number
   updated_at: number
   // ── 站点扩展档案（site_profile）──
@@ -864,13 +866,18 @@ function openEdit(row: SiteItem) {
   form.web_root_sub = ''
   legacyDocRoot.value = ''
   if (row.web_root) {
-    const uname = row.owner_username || ''
-    const pre = uname ? `/home/${uname}/` : ''
-    if (pre && row.web_root.startsWith(pre + '/')) {
-      form.web_root_sub = row.web_root.slice(pre.length)
+    // 归属用户名可能为空（旧数据 / 非管理员视角），回退到 Linux 账号名
+    const uname = row.owner_username || row.linux_user || ''
+    const pre = uname ? `/home/${uname}` : ''
+    if (pre && row.web_root.startsWith(`${pre}/`)) {
+      // 家目录内 → 还原为相对子路径（不含前缀与分隔符）
+      form.web_root_sub = row.web_root.slice(pre.length + 1)
     } else if (!row.web_root_custom && uname) {
       // 不在家目录内的旧「自动目录」：编辑提交空路径 = 保持原目录不迁移，仅提示
       legacyDocRoot.value = row.web_root
+    } else {
+      // 「已有目录」模式且不在家目录内：原样回填绝对路径
+      form.web_root_sub = row.web_root
     }
   }
   lastAutoDir.value = form.web_root_sub
@@ -1268,15 +1275,191 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 表格 -->
-      <el-table
-        v-loading="loading"
-        :data="filtered"
-        border
-        stripe
-        @selection-change="handleSelectionChange"
-      >
+      <!-- 表格：简洁风格（无竖线边框、无斑马纹），行 hover 高亮 -->
+      <el-table v-loading="loading" :data="filtered" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="46" />
+        <!-- 行展开：站点详情与快捷功能（域名 / IP / PHP / SSL / 目录 / 部署状态等收进这里） -->
+        <el-table-column type="expand" width="36">
+          <template #default="{ row }">
+            <div class="site-detail">
+              <!-- 信息网格：简洁卡片风（无表格边框），手机端自动单列 -->
+              <div class="detail-grid">
+                <div class="info-item">
+                  <span class="info-label">{{ t('site.colDomains') }}</span>
+                  <div class="info-value">
+                    <div v-if="row.domains && row.domains.length" class="tag-list">
+                      <el-tag v-for="d in row.domains" :key="d" size="small" type="primary">
+                        {{ d }}
+                      </el-tag>
+                    </div>
+                    <span v-else class="dim">-</span>
+                  </div>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">{{ t('site.colIps') }}</span>
+                  <div class="info-value">
+                    <div v-if="row.ips && row.ips.length" class="tag-list">
+                      <el-tag v-for="ip in row.ips" :key="ip" size="small" effect="plain">
+                        {{ ip }}
+                      </el-tag>
+                    </div>
+                    <span v-else class="dim">-</span>
+                  </div>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">{{ t('site.formSiteType') }}</span>
+                  <div class="info-value">
+                    {{ typeMeta(row.site_type).label }}
+                    <template
+                      v-if="
+                        row.site_type === 'php' && row.pseudo_static && row.pseudo_static !== 'none'
+                      "
+                    >
+                      / {{ pseudoLabel(row.pseudo_static) }}
+                    </template>
+                  </div>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">{{ t('site.colPhpVersion') }}</span>
+                  <div class="info-value">
+                    <template v-if="row.php_instance">
+                      <el-tag
+                        v-if="phpRunningSet.has(row.php_instance)"
+                        size="small"
+                        type="success"
+                      >
+                        {{ row.php_instance }}
+                      </el-tag>
+                      <el-tag v-else size="small" type="danger" effect="plain">
+                        {{ row.php_instance + t('site.disabledSuffix') }}
+                      </el-tag>
+                      <el-tooltip
+                        v-if="channelOf(row)"
+                        :content="channelOf(row)!.tip"
+                        placement="top"
+                      >
+                        <el-tag
+                          size="small"
+                          :type="channelOf(row)!.kind === 'system' ? 'warning' : 'info'"
+                          effect="plain"
+                        >
+                          {{ channelOf(row)!.text }}
+                        </el-tag>
+                      </el-tooltip>
+                    </template>
+                    <span v-else class="dim">-</span>
+                  </div>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">SSL / TLS</span>
+                  <div class="info-value">
+                    <el-tag
+                      v-if="row.ssl_cert_id"
+                      size="small"
+                      :type="
+                        row.ssl_cert_name ? (row.force_https ? 'success' : 'primary') : 'danger'
+                      "
+                      effect="plain"
+                    >
+                      {{
+                        row.ssl_cert_name
+                          ? row.force_https
+                            ? t('site.httpsRedirect')
+                            : 'HTTPS'
+                          : t('site.certInvalid')
+                      }}
+                    </el-tag>
+                    <span v-else class="dim">-</span>
+                  </div>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">{{ t('site.colOwner') }}</span>
+                  <div class="info-value">
+                    {{ row.owner_username || ownerLabel(row.user_id) || '-' }}
+                  </div>
+                </div>
+                <div class="info-item wide">
+                  <span class="info-label">{{ t('site.colRoot') }}</span>
+                  <div class="info-value">
+                    <el-tooltip
+                      v-if="row.web_root"
+                      :content="t('site.rootTooltip', { log: row.log_root || '-' })"
+                      placement="top"
+                    >
+                      <code class="root-path">{{ row.web_root }}</code>
+                    </el-tooltip>
+                    <span v-else class="dim">{{ t('site.defaultRoot') }}</span>
+                  </div>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">{{ t('site.colDeploy') }}</span>
+                  <div class="info-value">
+                    <el-tooltip
+                      v-if="isSyncFailed(row)"
+                      :content="row.vhost_error || t('site.syncFailedRetry')"
+                      placement="top"
+                    >
+                      <el-tag
+                        size="small"
+                        type="danger"
+                        effect="plain"
+                        class="cursor-help"
+                        @click="showSyncError(row)"
+                      >
+                        {{ t('site.pillFailed') }}
+                      </el-tag>
+                    </el-tooltip>
+                    <el-tag
+                      v-else-if="row.vhost_state === 'synced'"
+                      size="small"
+                      type="success"
+                      effect="plain"
+                    >
+                      {{ t('site.syncedTag') }}
+                    </el-tag>
+                    <el-tag v-else size="small" type="info" effect="plain">
+                      {{ row.vhost_state === 'pending' ? t('site.pendingTag') : row.vhost_state }}
+                    </el-tag>
+                  </div>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">{{ t('site.colCreatedAt') }}</span>
+                  <div class="info-value">{{ fmtTime(row.created_at) }}</div>
+                </div>
+                <div class="info-item wide">
+                  <span class="info-label">{{ t('site.colRemark') }}</span>
+                  <div class="info-value">{{ row.remark || '-' }}</div>
+                </div>
+              </div>
+              <!-- 底栏：快捷操作（链接风格，类 Plesk footer） -->
+              <div class="detail-footer">
+                <div class="detail-actions">
+                  <el-button link type="primary" @click="openLogs(row)">{{
+                    t('site.logs')
+                  }}</el-button>
+                  <el-button link type="primary" @click="openTraffic(row)">{{
+                    t('site.traffic')
+                  }}</el-button>
+                  <el-button
+                    link
+                    type="primary"
+                    :loading="syncingId === row.id"
+                    :disabled="syncingId !== 0 && syncingId !== row.id"
+                    @click="syncSite(row.id)"
+                  >
+                    {{ isSyncFailed(row) ? t('site.retry') : t('site.sync') }}
+                  </el-button>
+                  <el-button link type="primary" @click="openEdit(row)">{{
+                    t('common.edit')
+                  }}</el-button>
+                  <el-button link type="danger" @click="removeRows([row])">{{
+                    t('common.delete')
+                  }}</el-button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="name"
           :label="t('site.colName')"
@@ -1305,181 +1488,20 @@ onMounted(() => {
                   {{ typeMeta(row.site_type).label }}
                 </el-tag>
               </el-tooltip>
-              <el-tag
-                v-if="row.site_type === 'php' && row.pseudo_static && row.pseudo_static !== 'none'"
-                size="small"
-                type="info"
-                effect="plain"
-                class="type-tag"
-              >
-                {{ pseudoLabel(row.pseudo_static) }}
-              </el-tag>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('site.colDomains')" min-width="200">
-          <template #default="{ row }">
-            <div v-if="row.domains && row.domains.length" class="tag-list">
-              <el-tag
-                v-for="d in row.domains"
-                :key="d"
-                size="small"
-                class="tag-item"
-                type="primary"
-              >
-                {{ d }}
-              </el-tag>
-            </div>
-            <span v-else class="dim">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('site.colIps')" min-width="180">
-          <template #default="{ row }">
-            <div v-if="row.ips && row.ips.length" class="tag-list">
-              <el-tag
-                v-for="ip in row.ips"
-                :key="ip"
-                size="small"
-                class="tag-item ip-tag"
-                effect="plain"
-              >
-                {{ ip }}
-              </el-tag>
-            </div>
-            <span v-else class="dim">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="SSL/TLS" width="118" align="center">
-          <template #default="{ row }">
-            <template v-if="row.ssl_cert_id">
-              <el-tooltip
-                :content="
-                  row.ssl_cert_name
-                    ? row.force_https
-                      ? t('site.certTipForce', { name: row.ssl_cert_name })
-                      : t('site.certTipBoth', { name: row.ssl_cert_name })
-                    : t('site.certTipStale')
-                "
-                placement="top"
-              >
-                <el-tag
-                  size="small"
-                  :type="row.ssl_cert_name ? (row.force_https ? 'success' : 'primary') : 'danger'"
-                  effect="plain"
-                >
-                  {{
-                    row.ssl_cert_name
-                      ? row.force_https
-                        ? t('site.httpsRedirect')
-                        : 'HTTPS'
-                      : t('site.certInvalid')
-                  }}
-                </el-tag>
-              </el-tooltip>
-            </template>
-            <span v-else class="dim">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('site.colPhpVersion')" min-width="170">
-          <template #default="{ row }">
-            <template v-if="row.php_instance">
-              <el-tag v-if="phpRunningSet.has(row.php_instance)" size="small" type="success">
-                {{ row.php_instance }}
-              </el-tag>
-              <el-tooltip v-else :content="t('site.phpDownTip')" placement="top">
-                <el-tag size="small" type="danger" effect="plain">
-                  {{ row.php_instance + t('site.disabledSuffix') }}
-                </el-tag>
-              </el-tooltip>
-            </template>
-            <span v-else class="dim">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('site.colPhpChannel')" min-width="170">
-          <template #default="{ row }">
-            <template v-if="channelOf(row)">
-              <el-tooltip :content="channelOf(row)!.tip" placement="top">
-                <el-tag
-                  v-if="channelOf(row)!.kind === 'system'"
-                  size="small"
-                  type="warning"
-                  effect="plain"
-                >
-                  {{ channelOf(row)!.text }}
-                </el-tag>
-                <el-tag v-else size="small" type="info" effect="plain">{{
-                  channelOf(row)!.text
-                }}</el-tag>
-              </el-tooltip>
-            </template>
-            <span v-else class="dim">-</span>
           </template>
         </el-table-column>
         <el-table-column
           v-if="canManageAll"
           :label="t('site.colOwner')"
-          min-width="150"
+          min-width="120"
           show-overflow-tooltip
         >
           <template #default="{ row }">
             {{ row.owner_username || ownerLabel(row.user_id) || '-' }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('site.colRoot')" min-width="250" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-tooltip
-              v-if="row.web_root"
-              :content="t('site.rootTooltip', { log: row.log_root || '-' })"
-              placement="top"
-            >
-              <span class="dim">{{ row.web_root }}</span>
-            </el-tooltip>
-            <span v-else class="dim">{{ t('site.defaultRoot') }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('site.colDisk')" width="130" align="right">
-          <template #default="{ row }">
-            <el-tooltip
-              v-if="row.disk_used_bytes"
-              :content="t('site.diskTip', { time: fmtTime(row.disk_stat_at) })"
-              placement="top"
-            >
-              <span>{{ formatBytes(row.disk_used_bytes) }}</span>
-            </el-tooltip>
-            <span v-else class="dim">{{ t('site.diskUnknown') }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('site.colDeploy')" width="140">
-          <template #default="{ row }">
-            <el-tooltip
-              v-if="isSyncFailed(row)"
-              :content="row.vhost_error || t('site.syncFailedRetry')"
-              placement="top"
-            >
-              <el-tag
-                size="small"
-                type="danger"
-                effect="plain"
-                class="cursor-help"
-                @click="showSyncError(row)"
-              >
-                {{ t('site.pillFailed') }}
-              </el-tag>
-            </el-tooltip>
-            <el-tag
-              v-else-if="row.vhost_state === 'synced'"
-              size="small"
-              type="success"
-              effect="plain"
-            >
-              {{ t('site.syncedTag') }}
-            </el-tag>
-            <el-tag v-else size="small" type="info" effect="plain">
-              {{ row.vhost_state === 'pending' ? t('site.pendingTag') : row.vhost_state }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('site.colStatus')" width="150">
+        <el-table-column :label="t('site.colStatus')" width="120">
           <template #default="{ row }">
             <el-tooltip
               :content="runState(row) === 'running' ? t('site.clickStop') : t('site.clickStart')"
@@ -1500,16 +1522,24 @@ onMounted(() => {
             </el-icon>
           </template>
         </el-table-column>
-        <el-table-column
-          prop="remark"
-          :label="t('site.colRemark')"
-          min-width="140"
-          show-overflow-tooltip
-        >
-          <template #default="{ row }">{{ row.remark || '-' }}</template>
+        <el-table-column :label="t('site.colDisk')" width="120" align="right">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.disk_used_bytes"
+              :content="t('site.diskTip', { time: fmtTime(row.disk_stat_at) })"
+              placement="top"
+            >
+              <span>{{ formatBytes(row.disk_used_bytes) }}</span>
+            </el-tooltip>
+            <span v-else class="dim">{{ t('site.diskUnknown') }}</span>
+          </template>
         </el-table-column>
-        <el-table-column :label="t('site.colCreatedAt')" min-width="150">
-          <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
+        <el-table-column :label="t('site.colTraffic')" width="120" align="right">
+          <template #default="{ row }">
+            <el-tooltip :content="t('site.trafficMonthTip')" placement="top">
+              <span>{{ formatBytes(row.traffic_month_bytes || 0) }}</span>
+            </el-tooltip>
+          </template>
         </el-table-column>
         <el-table-column :label="t('common.operation')" width="240" fixed="right">
           <template #default="{ row }">
@@ -1548,14 +1578,14 @@ onMounted(() => {
       :site-name="currentSite?.name || ''"
     />
 
-    <!-- 添加 / 编辑站点弹窗 -->
-    <el-dialog
+    <!-- 添加 / 编辑站点抽屉（手机端自动占满屏宽） -->
+    <el-drawer
       v-model="formVisible"
       :title="isEdit ? t('site.editSite') : t('site.addSite')"
-      width="980px"
-      top="2vh"
+      size="980px"
+      direction="rtl"
       :close-on-click-modal="false"
-      class="site-form-dialog"
+      class="site-drawer site-form-drawer"
     >
       <el-form label-width="118px" class="site-form site-tabs-form" @submit.prevent>
         <el-tabs v-model="activeTab" type="border-card" class="site-tabs">
@@ -2213,7 +2243,7 @@ onMounted(() => {
           t('common.save')
         }}</el-button>
       </template>
-    </el-dialog>
+    </el-drawer>
 
     <!-- 已有目录浏览（选择归属用户家目录下已存在的目录） -->
     <el-dialog v-model="dirDialog.visible" :title="t('site.selectDirTitle')" width="580px">
@@ -2536,10 +2566,55 @@ onMounted(() => {
 }
 
 /* ── 添加 / 编辑站点弹窗：左侧 Tab 分区 ─────────────────── */
-.site-form-dialog :deep(.el-dialog__body) {
-  max-height: calc(92vh - 130px);
+/* 表单 Drawer：内容区自适应滚动（手机端宽度见下方全局样式） */
+.site-form-drawer :deep(.el-drawer__body) {
   overflow-y: auto;
   padding-top: 4px;
+}
+/* 行展开详情面板：简洁信息网格（无表格边框，类 Plesk 概览页） */
+.site-detail {
+  padding: 6px 12px 10px 48px;
+}
+/* 展开行整行淡色底，突出当前查看的站点 */
+:deep(.el-table__expanded-cell) {
+  background: var(--el-color-primary-light-9) !important;
+}
+:deep(.el-table__expanded-cell:hover) {
+  background: var(--el-color-primary-light-9) !important;
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px 28px;
+}
+.info-item.wide {
+  grid-column: 1 / -1;
+}
+.info-label {
+  display: block;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 2px;
+}
+.info-value {
+  font-size: 13px;
+  line-height: 20px;
+  word-break: break-all;
+}
+.root-path {
+  font-family: var(--el-font-family, monospace);
+  font-size: 12px;
+}
+.detail-footer {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .site-tabs-form {
   max-height: none;

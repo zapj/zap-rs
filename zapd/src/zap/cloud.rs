@@ -1155,7 +1155,7 @@ mod tests {
             service: CloudService::S3Compat,
             // path 样式：主机名保持 127.0.0.1:1，不会被改写成 probe.127.0.0.1
             endpoint: "http://127.0.0.1:1".to_string(),
-            region: String::new(),
+            region: String::from("zap-test"),
             bucket: "probe".to_string(),
             root: String::new(),
             virtual_host_style: false,
