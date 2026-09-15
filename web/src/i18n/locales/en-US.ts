@@ -277,7 +277,7 @@ const enUS: Messages = {
     ownerSystemTag: 'System',
 
     homeDirTip:
-      'Site document root: {dir}/www/site-name-ID; site logs: {dir}/logs/site-name-ID (access.log / error.log)',
+      'Site document root: {dir}/www/site-name-ID; site logs: {dir}/logs/ID-site-name (access.log / error.log)',
     linuxUserTip:
       'Dedicated system user mode: site files are owned by {user}, and the PHP-FPM pool runs as this account ({dir})',
 

@@ -307,7 +307,7 @@ export default {
     ownerSystemTag: '系统',
 
     homeDirTip:
-      '站点文档根：{dir}/www/站点名-ID；站点日志：{dir}/logs/站点名-ID（access.log / error.log）',
+      '站点文档根：{dir}/www/站点名-ID；站点日志：{dir}/logs/ID-站点名（access.log / error.log）',
     linuxUserTip: '独立系统用户模式：站点文件 owner={user}，PHP-FPM pool 以该账号运行（{dir}）',
 
     // PHP-FPM 规格

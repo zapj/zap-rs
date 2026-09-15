@@ -94,6 +94,7 @@ import IconHelp from '~icons/material-symbols/help'
 import IconHelpOutline from '~icons/material-symbols/help-outline'
 import IconUpgrade from '~icons/material-symbols/upgrade'
 import IconArrowBack from '~icons/material-symbols/arrow-back'
+import IconElectricBoltOutline from '~icons/material-symbols/electric-bolt-outline' 
 
 /** 路由 / 数据库菜单里图标名的集合前缀 */
 export const ICON_PREFIX = 'material-symbols:'
@@ -255,6 +256,10 @@ export const Help = IconHelp
 export const HelpOutline = IconHelpOutline
 export const Upgrade = IconUpgrade
 export const ArrowBack = IconArrowBack
+
+
+// Logo Icon
+export const ElectricBoltOutline = IconElectricBoltOutline
 
 /**
  * 解析图标名 → 组件。

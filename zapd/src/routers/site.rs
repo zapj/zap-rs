@@ -499,7 +499,10 @@ fn validate_site_fields(
 
 /// 计算站点的文档根与日志目录：统一规划在归属用户家目录下
 /// - web_root = {home}/www/{sanitize(name)}-{site_id}
-/// - log_root = {home}/logs/{sanitize(name)}-{site_id}
+/// - log_root = {home}/logs/{site_id}-{sanitize(name)}
+///
+/// 日志目录用 ID 打头：站点改名不会造成日志目录漂移/旧目录残留，且按创建顺序排列，
+/// 后缀保留站点名便于人工辨认（统计按 `*/access.log` 扫描，不依赖命名）。
 ///
 /// 归属用户无 home_dir 时返回空串（执行端回退 {ZAP_PATH}/data/www/...，兼容老站点）
 async fn site_dirs_for(
@@ -522,8 +525,64 @@ async fn site_dirs_for(
     let seg = zap_proto::sanitize_site_name(name);
     Ok((
         format!("{home}/www/{seg}-{site_id}"),
-        format!("{home}/logs/{seg}-{site_id}"),
+        format!("{home}/logs/{site_id}-{seg}"),
     ))
+}
+
+/// 启动自检：把历史站点的日志目录从 `{name}-{id}` 迁移为 `{id}-{name}`。
+///
+/// - 库中 `log_root` 与当前规划值不一致时才更新（幂等）；
+/// - 旧目录存在且新目录不存在时整体 `rename`，历史 access.log / error.log 不丢
+///   （inode 不变，流量增量统计不会出现漏计/重计）；
+/// - 变更过的站点自动重同步 vhost，避免 nginx 仍指向旧路径。
+pub async fn migrate_log_roots() {
+    let pool = db::get_db_pool().await;
+    let rows: Vec<(i64, i64, String, String)> =
+        sqlx::query_as("SELECT id, user_id, name, log_root FROM site")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    let mut changed: Vec<i64> = Vec::new();
+
+    for (id, user_id, name, log_root) in rows {
+        let Ok((_, want)) = site_dirs_for(user_id, &name, id).await else {
+            continue;
+        };
+        let old_s = log_root.trim().to_string();
+        if want.is_empty() || old_s.is_empty() || old_s == want {
+            continue;
+        }
+        let old = std::path::Path::new(&old_s);
+        let new = std::path::Path::new(&want);
+        if old.is_dir() && !new.exists() {
+            match std::fs::rename(old, new) {
+                Ok(()) => info!("站点 {} 日志目录迁移: {} -> {}", id, old_s, want),
+                Err(e) => {
+                    warn!(
+                        "站点 {} 日志目录迁移失败（保留原路径）: {} -> {} err={}",
+                        id, old_s, want, e
+                    );
+                    continue;
+                }
+            }
+        }
+        if sqlx::query("UPDATE site SET log_root = ? WHERE id = ?")
+            .bind(&want)
+            .bind(id)
+            .execute(pool)
+            .await
+            .is_ok()
+        {
+            changed.push(id);
+        }
+    }
+
+    if !changed.is_empty() {
+        info!("日志目录命名迁移完成，重同步 {} 个站点 vhost", changed.len());
+        for id in changed {
+            let _ = sync_one_site(id).await;
+        }
+    }
 }
 
 /// 判重用键：除自身外，`a.com` 与 `www.a.com` 互为冲突键（同站点内允许共存，
@@ -1013,7 +1072,7 @@ fn clean_auto_sub(raw: &str, home: &str) -> Result<String, ZapError> {
 /// - `sub` 为空 → 面板默认规划 {home}/www/{sanitize(name)}-{site_id}（site_dirs_for）；
 /// - `sub` 非空 → {home}/{clean sub}（目录不存在时由 vhost 同步阶段递归创建，不会写占位覆盖已有文件）。
 ///
-/// 日志目录始终为 {home}/logs/{sanitize(name)}-{site_id}。
+/// 日志目录始终为 {home}/logs/{site_id}-{sanitize(name)}。
 async fn auto_dirs_for(
     owner: i64,
     name: &str,

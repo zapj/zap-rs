@@ -1006,7 +1006,7 @@ mod tests {
             mode: None,
             php_socket: None,
             web_root: Some("/home/zap/www/blog-1".into()),
-            log_root: Some("/home/zap/logs/blog-1".into()),
+            log_root: Some("/home/zap/logs/1-blog".into()),
             owner_user: Some("zap".into()),
             site_type: "php".into(),
             pseudo_static: "none".into(),
@@ -1027,7 +1027,7 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         assert_eq!(
             json,
-            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/blog-1","owner_user":"zap","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false,"force_https":false}"#
+            r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com"],"enabled":true,"web_root":"/home/zap/www/blog-1","log_root":"/home/zap/logs/1-blog","owner_user":"zap","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false,"force_https":false}"#
         );
         // 老版本 JSON（无 web_root/log_root）也能反序列化成功 → None
         let old: Request =

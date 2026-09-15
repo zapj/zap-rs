@@ -3,7 +3,7 @@
 //! 契约：每个面板用户在 `user.home_dir`（通常为 `/home/{linux_user}`）下拥有
 //! 私有空间：
 //! - `{home_dir}/www/{sanitize(site)}-{site_id}` —— 站点文档根（web tree）
-//! - `{home_dir}/logs/{sanitize(site)}-{site_id}` —— 站点 access/error 日志（log tree）
+//! - `{home_dir}/logs/{site_id}-{sanitize(site)}` —— 站点 access/error 日志（log tree）
 //! - `{home_dir}/tmp` —— PHP session / 上传临时目录（open_basedir 白名单）
 //!
 //! 运行账号 `owner` 为该面板用户对应的 Linux 系统账号（nologin）：
