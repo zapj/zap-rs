@@ -555,8 +555,7 @@ pub async fn user_add(
         lu = format!("{lu_base}-{n}");
         n += 1;
     }
-    let home_root = crate::routers::system_env::conf_get("user_home_root")
-        .await
+    let home_root = crate::zap::server_env::conf_get("user_home_root")
         .filter(|s| s.starts_with('/') && !s.contains("..") && s.len() > 1)
         .unwrap_or_else(|| "/home".to_string());
     let home_dir = format!("{home_root}/{lu}");

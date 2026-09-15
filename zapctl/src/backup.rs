@@ -24,6 +24,8 @@ pub const DEFAULT_BACKUP_DIR: &str = "/usr/local/zap/backup";
 
 const DB_FILE: &str = "zap.db";
 const CONFIG_FILE: &str = "zap.yaml";
+/// 归档内运行环境状态文件名（对应 {data}/server_env.yaml）
+const ENV_FILE: &str = "server_env.yaml";
 /// 归档内主密钥文件名（顶层，对应生产路径 /etc/zap/secret.key）
 const KEY_FILE: &str = "secret.key";
 /// 归档内凭据目录名（顶层，对应 /etc/zap/credentials 的整目录拷贝）
@@ -408,6 +410,16 @@ fn backup_zap(db_path: &str, output: Option<&str>) -> Result<(), String> {
             .map_err(|e| format!("备份配置文件失败 {}: {e}", cfg.display()))?;
     } else {
         warn("未找到配置文件，仅备份数据库");
+    }
+
+    // 运行环境状态（{data}/server_env.yaml）：面板/建站默认配置 + 自动探测快照
+    let env_file = crate::env::env_path(db_path);
+    if env_file.exists() {
+        std::fs::copy(&env_file, staging.join(ENV_FILE))
+            .map_err(|e| format!("备份运行环境状态失败 {}: {e}", env_file.display()))?;
+        ok(&format!("已纳入运行环境状态: {}", env_file.display()));
+    } else {
+        info("无 server_env.yaml，跳过");
     }
 
     // 主密钥：随库一起携带，保证换机/迁移还原后 zap.db 加密列与凭据仍可解密
@@ -796,6 +808,20 @@ fn do_zap_restore(db_path: &str, staging: &Path) -> Result<(), String> {
         ok(&format!("已还原配置文件 {}", cfg.display()));
     } else {
         warn("归档未包含 zap.yaml，仅还原数据库");
+    }
+
+    // 运行环境状态：还原到 {data}/server_env.yaml（与 zap.db 同级）
+    if staging.join(ENV_FILE).is_file() {
+        let dst = crate::env::env_path(db_path);
+        if let Some(parent) = dst.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建目录失败 {}: {e}", parent.display()))?;
+        }
+        std::fs::copy(staging.join(ENV_FILE), &dst)
+            .map_err(|e| format!("还原运行环境状态失败: {e}"))?;
+        ok(&format!("已还原运行环境状态 {}", dst.display()));
     }
 
     // 主密钥：归档含 secret.key 时以归档密钥覆盖本机密钥（0600），

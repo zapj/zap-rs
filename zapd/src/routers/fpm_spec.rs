@@ -160,7 +160,7 @@ pub async fn validate_spec_ref(
 /// 全局兜底 + 面板默认（scope=conf, fpm_pool_defaults）合并后的 base。
 async fn global_base() -> serde_json::Map<String, Value> {
     let mut base = crate::routers::system_env::default_fpm_spec();
-    if let Some(v) = crate::routers::system_env::conf_get("fpm_pool_defaults").await
+    if let Some(v) = crate::zap::server_env::conf_get("fpm_pool_defaults")
         && let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&v)
     {
         for (k, val) in obj {

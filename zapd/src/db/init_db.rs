@@ -1,4 +1,5 @@
 use sqlx::Executor;
+use tracing::{info, warn};
 
 use super::get_db_pool;
 
@@ -36,8 +37,6 @@ pub async fn init_schema() {
     init_packages_table().await;
     // 站内信（通知中心）表
     init_notice_message_table().await;
-    // 全局运行环境状态表（scope=auto 自动探测快照 / scope=conf 面板默认配置）
-    init_server_env_table().await;
     // API Token 管理表
     init_api_token_table().await;
     // SSL/TLS 证书管理表
@@ -939,23 +938,6 @@ async fn init_notice_message_table() {
         created_at INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_notice_user ON notice_message(user_id, id);
-    "#;
-    let _ = get_db_pool().await.execute(sql).await;
-}
-
-// ── server_env（全局运行环境状态表）───────────────────────────
-
-async fn init_server_env_table() {
-    let sql = r#"
-    CREATE TABLE IF NOT EXISTS server_env (
-        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        scope TEXT NOT NULL DEFAULT 'auto',
-        k TEXT NOT NULL DEFAULT '',
-        v TEXT NOT NULL DEFAULT '',
-        remark TEXT NOT NULL DEFAULT '',
-        updated_at INTEGER NOT NULL DEFAULT 0,
-        UNIQUE(scope, k)
-    );
     "#;
     let _ = get_db_pool().await.execute(sql).await;
 }

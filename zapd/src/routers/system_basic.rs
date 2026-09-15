@@ -1,6 +1,6 @@
 //! 面板基础设置（系统设置 → 基础设置，仅 admin）。
 //!
-//! 三个 Tab 的配置统一存储于 server_env(scope='conf')，键名带 `basic.` 前缀，
+//! 三个 Tab 的配置统一存储于 `{data}/server_env.yaml` 的 conf 区，键名带 `basic_` 前缀，
 //! 与运行环境的默认配置（webserver / php_default 等）互不干扰。
 //!
 //! 端点：
@@ -15,16 +15,14 @@ use axum::{Json, extract::Extension};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::db;
 use crate::zap::ZapError;
 use crate::zap::ZapJsonResult;
 use crate::zap::audit;
 use crate::zap::jwt::ValidatedClaims;
 use crate::zap::jwt::is_admin;
+use crate::zap::server_env;
 
 // ── 键定义 ──────────────────────────────────────────────────
-
-const CONF_SCOPE: &str = "conf";
 
 /// 基础设置（建站默认网络）：默认 IPv4 / 默认 IPv6 / 网络设备。
 /// 站点创建时未指定 IP 则使用这里的默认值。
@@ -48,15 +46,9 @@ const K_CONTACT_WECHAT: &str = "basic_contact_wechat";
 const K_CONTACT_PHONE: &str = "basic_contact_phone";
 const K_CONTACT_REMARK: &str = "basic_contact_remark";
 
-/// 读取 scope='conf' 全部键值。
-async fn load_conf() -> HashMap<String, String> {
-    let pool = db::get_db_pool().await;
-    let rows: Vec<(String, String)> = sqlx::query_as("SELECT k, v FROM server_env WHERE scope = ?")
-        .bind(CONF_SCOPE)
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    rows.into_iter().collect()
+/// 读取 conf 区全部键值（`{data}/server_env.yaml`）。
+fn load_conf() -> HashMap<String, String> {
+    server_env::conf_all().into_iter().collect()
 }
 
 fn get(conf: &HashMap<String, String>, key: &str) -> String {
@@ -70,7 +62,7 @@ pub async fn basic_get(claims: ValidatedClaims) -> ZapJsonResult {
     if !is_admin(&claims) {
         return Err(ZapError::New(-1, "仅管理员可查看基础设置".to_string()));
     }
-    let conf = load_conf().await;
+    let conf = load_conf();
     Ok(Json(json!({
         "code": 0,
         "message": "OK",
@@ -205,21 +197,8 @@ pub async fn basic_save(
         push_opt(&mut upserts, &c.remark, K_CONTACT_REMARK, 512)?;
     }
 
-    if !upserts.is_empty() {
-        let pool = db::get_db_pool().await;
-        let now = chrono::Local::now().timestamp();
-        for (k, v) in &upserts {
-            let _ = sqlx::query(
-                "INSERT INTO server_env (scope, k, v, remark, updated_at) VALUES ('conf', ?, ?, '面板基础设置', ?)
-                 ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at",
-            )
-            .bind(k)
-            .bind(v)
-            .bind(now)
-            .execute(pool)
-            .await;
-        }
-    }
+    // 一次落盘到 {data}/server_env.yaml
+    server_env::conf_set_many(&upserts, "面板基础设置");
 
     let detail = upserts
         .iter()

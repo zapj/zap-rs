@@ -107,6 +107,10 @@ async fn main() {
     // init db
     db::init_db::init_schema().await;
 
+    // 运行环境状态（{data}/server_env.yaml）：加载 + 启动时重新探测（过期/缺失时）
+    zap::server_env::init();
+    zap::server_env::refresh_on_startup(zap::server_env::STARTUP_STALE_SECS).await;
+
     // Security: admin password hint (only relevant when a fresh DB was created)
     match std::env::var("ZAP_ADMIN_PASSWORD").map(|p| p.trim().to_string()) {
         Ok(p) if !p.is_empty() => {

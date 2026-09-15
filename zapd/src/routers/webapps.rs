@@ -405,12 +405,10 @@ async fn serve_static(path: &Path) -> Result<Response, (StatusCode, String)> {
 }
 
 /// 定位系统 PHP-FPM 通道：
-/// 1) 面板默认 PHP（server_env.php_default）对应的 socket；
+/// 1) 面板默认 PHP（conf 区的 php_default）对应的 socket；
 /// 2) 任意已存在的 `php-fpm-*.sock`。
 async fn resolve_fpm_socket() -> Result<String, (StatusCode, String)> {
-    let prefer = crate::routers::system_env::conf_get("php_default")
-        .await
-        .unwrap_or_default();
+    let prefer = crate::zap::server_env::conf_get("php_default").unwrap_or_default();
     // 版本写法兼容：`8.3` / `83` / `php83` 都能命中 /run/php-fpm-8.3.sock
     let prefer_alt = prefer.replace('.', "");
     let prefer_ver = prefer.trim_start_matches("php").to_string();

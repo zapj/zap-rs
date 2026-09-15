@@ -6,26 +6,19 @@
 
 ## Before Upgrading
 
-1. **Back up the database**: `cp data/zap.db data/zap.db.bak.$(date +%s)`
-2. **Back up the config**: `cp data/zapd.yaml data/zapd.yaml.bak`
-3. **Back up sites**: if you use a custom path such as `/var/www`, `tar` it too.
+1. **Back up the data**: `cp -Rf data/  /root/data.bak.$(date +%s)`
+2. **Back up the config**: `cp -Rf /etc/zap/ /root/zap.bak.$(date +%s)`
 
 ## Upgrade
 
 ```bash
 curl -fsSL https://get.zap.sh | bash
 # or
-zapupgrade --to v0.6.0
+Login to the zapd server and click the "Upgrade" button in the panel. 
 ```
 
 ## After Upgrading
 
 1. Open the panel and confirm **Dashboard** and **Changelog** agree.
 2. Verify all cron tasks are still present.
-3. Diff your custom snippets against the new `nginx.conf` template.
 
-## Rollback
-
-```bash
-zapupgrade --rollback
-```

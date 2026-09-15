@@ -105,7 +105,7 @@ fn default_version() -> i64 {
 /// 配置中的 `db.path` 通常是相对路径（如 `data/zap.db`，相对 `zapd` 的
 /// WorkingDirectory）。这里统一转成**绝对路径**：zapexec 侧会对日志路径做
 /// 「必须位于 `{ZAP_PATH}/data/users/` 之下」的越权校验，相对路径无法比对。
-fn data_dir() -> PathBuf {
+pub(crate) fn data_dir() -> PathBuf {
     let cfg = crate::config::get_config().read().unwrap();
     let db_path = Path::new(&cfg.db.path);
     let dir = match db_path.parent() {

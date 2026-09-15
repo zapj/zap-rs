@@ -31,9 +31,8 @@ use crate::zap::audit;
 use crate::zap::jwt::ValidatedClaims;
 use crate::zap::jwt::is_admin;
 
-// ── 证书来源持久化（server_env scope='conf'，避免塞进 zap.yaml）──
+// ── 证书来源持久化（{data}/server_env.yaml 的 conf 区，避免塞进 zap.yaml）──
 
-const CONF_SCOPE: &str = "conf";
 const K_SSL_SOURCE: &str = "zap_ssl_source";
 const K_SSL_CERT_ID: &str = "zap_ssl_cert_id";
 
@@ -42,31 +41,12 @@ const SRC_SELF: &str = "self-signed";
 const SRC_LIBRARY: &str = "library";
 const SRC_MANUAL: &str = "manual";
 
-async fn conf_get(key: &str) -> String {
-    let pool = db::get_db_pool().await;
-    sqlx::query_as::<_, (String,)>("SELECT v FROM server_env WHERE scope = ? AND k = ?")
-        .bind(CONF_SCOPE)
-        .bind(key)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|(v,)| v)
-        .unwrap_or_default()
+fn conf_get(key: &str) -> String {
+    crate::zap::server_env::conf_get(key).unwrap_or_default()
 }
 
-async fn conf_set(key: &str, value: &str) {
-    let pool = db::get_db_pool().await;
-    let now = chrono::Local::now().timestamp();
-    let _ = sqlx::query(
-        "INSERT INTO server_env (scope, k, v, remark, updated_at) VALUES ('conf', ?, ?, 'Zap 设置', ?)
-         ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at",
-    )
-    .bind(key)
-    .bind(value)
-    .bind(now)
-    .execute(pool)
-    .await;
+fn conf_set(key: &str, value: &str) {
+    crate::zap::server_env::conf_set(key, value, "Zap 设置");
 }
 
 /// 当前生效的服务配置快照。
@@ -168,13 +148,13 @@ pub async fn zap_get(claims: ValidatedClaims) -> ZapJsonResult {
     let path = crate::config::config_path();
     let content = fs::read_to_string(&path).unwrap_or_default();
 
-    let source = conf_get(K_SSL_SOURCE).await;
+    let source = conf_get(K_SSL_SOURCE);
     let source = if source.is_empty() {
         SRC_SELF.to_string()
     } else {
         source
     };
-    let cert_id: i64 = conf_get(K_SSL_CERT_ID).await.parse().unwrap_or(0);
+    let cert_id: i64 = conf_get(K_SSL_CERT_ID).parse().unwrap_or(0);
 
     Ok(Json(json!({
         "code": 0,
@@ -461,8 +441,8 @@ pub async fn zap_save(
             c.server.key_file = key_file.clone();
         })
         .map_err(|e| ZapError::New(-1, e))?;
-        conf_set(K_SSL_SOURCE, &source).await;
-        conf_set(K_SSL_CERT_ID, &cert_id.to_string()).await;
+        conf_set(K_SSL_SOURCE, &source);
+        conf_set(K_SSL_CERT_ID, &cert_id.to_string());
         details.push(format!(
             "ssl={source},cert_file={cert_file},key_file={key_file}"
         ));
@@ -504,8 +484,8 @@ pub async fn ssl_self_sign(
             "自签证书生成失败，请检查目标目录是否可写".to_string(),
         ));
     }
-    conf_set(K_SSL_SOURCE, SRC_SELF).await;
-    conf_set(K_SSL_CERT_ID, "0").await;
+    conf_set(K_SSL_SOURCE, SRC_SELF);
+    conf_set(K_SSL_CERT_ID, "0");
 
     audit::log(
         Some(&claims),

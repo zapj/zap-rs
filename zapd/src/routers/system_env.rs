@@ -1,13 +1,13 @@
-//! 服务器运行环境（全局 env 状态表）管理。
+//! 服务器运行环境管理。
 //!
-//! 状态表 server_env 分为两层：
-//! - scope='auto' ：zapexec(root) 自动探测的快照（payload=整份 JSON），记录 detected 时间；
-//! - scope='conf' ：管理员手写的全局默认配置（webserver / php_default / database 等），
+//! 状态存放于 `{data}/server_env.yaml`（见 [`crate::zap::server_env`]），分两层：
+//! - `auto`：zapexec(root) 自动探测的快照（payload=整份 JSON），记录 detected 时间；
+//! - `conf`：管理员手写的全局默认配置（webserver / php_default / database 等），
 //!   供后续建站默认 PHP、SSL 签发等流程读取。
 //!
 //! 端点（均需管理员）：
 //! - GET  /system/env             读快照+默认配置；快照超 60s 自动刷新
-//! - POST /system/env/refresh     强制重测并落库
+//! - POST /system/env/refresh     强制重测并写入 server_env.yaml
 //! - POST /system/env/defaults    保存全局默认配置
 
 use std::collections::HashMap;
@@ -18,13 +18,12 @@ use axum::extract::Extension;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::db;
 use crate::zap::ZapError;
 use crate::zap::ZapJsonResult;
 use crate::zap::audit;
 use crate::zap::jwt::ValidatedClaims;
 use crate::zap::jwt::is_admin;
-use zap_proto::Request;
+use crate::zap::server_env;
 
 /// 快照超过该秒数后在 GET 时自动重测。
 const SNAPSHOT_STALE_SECS: i64 = 60;
@@ -32,72 +31,21 @@ const SNAPSHOT_STALE_SECS: i64 = 60;
 // ── 内部存取 ────────────────────────────────────────────────
 
 async fn probe_payload() -> Result<Value, ZapError> {
-    let resp = crate::zapexec::call(Request::EnvDetect).await?;
-    if resp.code != 0 {
-        return Err(ZapError::New(resp.code, resp.message));
-    }
-    match resp.data {
-        Some(v) => Ok(v),
-        None => Err(ZapError::New(-1, "环境探测未返回数据".to_string())),
-    }
+    server_env::probe().await.map_err(|e| ZapError::New(-1, e))
 }
 
-/// 保存探测快照（单行 payload，updated_at 即检测时间）。
-async fn save_snapshot(payload: &Value) -> i64 {
-    let pool = db::get_db_pool().await;
-    let now = chrono::Local::now().timestamp();
-    let text = payload.to_string();
-    let _ = sqlx::query(
-        "INSERT INTO server_env (scope, k, v, remark, updated_at) VALUES ('auto', 'payload', ?, ?, ?)
-         ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at",
-    )
-    .bind(&text)
-    .bind("运行环境自动探测快照")
-    .bind(now)
-    .execute(pool)
-    .await;
-    now
+/// 保存探测快照（写入 server_env.yaml 的 auto 区，detected_at 即检测时间）。
+fn save_snapshot(payload: &Value) -> i64 {
+    server_env::save_snapshot(payload)
 }
 
 /// 读取快照 (payload, detected_at)。
-async fn load_snapshot() -> (Option<Value>, i64) {
-    let pool = db::get_db_pool().await;
-    let row: Option<(String, i64)> = sqlx::query_as(
-        "SELECT v, updated_at FROM server_env WHERE scope = 'auto' AND k = 'payload'",
-    )
-    .fetch_optional(pool)
-    .await
-    .unwrap_or(None);
-    match row {
-        Some((text, ts)) => match serde_json::from_str::<Value>(&text) {
-            Ok(v) => (Some(v), ts),
-            Err(_) => (None, ts),
-        },
-        None => (None, 0),
-    }
+fn load_snapshot() -> (Option<Value>, i64) {
+    server_env::snapshot()
 }
 
-async fn load_conf() -> HashMap<String, String> {
-    let pool = db::get_db_pool().await;
-    let rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT k, v FROM server_env WHERE scope = 'conf'")
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
-    rows.into_iter().collect()
-}
-
-/// 读取全局 conf 键值（其它模块用：虚拟主机运行模式 / fpm 默认规格）。
-pub async fn conf_get(key: &str) -> Option<String> {
-    let pool = db::get_db_pool().await;
-    let row: Option<String> =
-        sqlx::query_scalar("SELECT v FROM server_env WHERE scope = 'conf' AND k = ?")
-            .bind(key)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-    row.filter(|s| !s.trim().is_empty())
+fn load_conf() -> HashMap<String, String> {
+    server_env::conf_all().into_iter().collect()
 }
 
 /// 面板默认 PHP-FPM pool 规格（JSON 对象；用户未自定义时的兜底）。
@@ -146,13 +94,13 @@ fn conf_json(conf: &HashMap<String, String>) -> Value {
 }
 
 /// 拼装 GET / refresh 的返回体。
-async fn build_env_data(
+fn build_env_data(
     payload: Option<Value>,
     detected_at: i64,
     refreshed: bool,
     error: Option<String>,
 ) -> Value {
-    let conf = load_conf().await;
+    let conf = load_conf();
     json!({
         "payload": payload.unwrap_or(Value::Null),
         "conf": conf_json(&conf),
@@ -170,27 +118,27 @@ pub async fn env_get(claims: ValidatedClaims) -> ZapJsonResult {
         return Err(ZapError::New(-1, "仅管理员可查看运行环境".to_string()));
     }
     let now = chrono::Local::now().timestamp();
-    let (payload, detected_at) = load_snapshot().await;
+    let (payload, detected_at) = load_snapshot();
     let stale = payload.is_none() || now - detected_at > SNAPSHOT_STALE_SECS;
 
     if stale {
         match probe_payload().await {
             Ok(v) => {
-                let t = save_snapshot(&v).await;
+                let t = save_snapshot(&v);
                 Ok(Json(
-                    json!({ "code": 0, "data": build_env_data(Some(v), t, true, None).await }),
+                    json!({ "code": 0, "data": build_env_data(Some(v), t, true, None) }),
                 ))
             }
             Err(e) => {
                 let msg = e.to_string();
                 Ok(Json(
-                    json!({ "code": 0, "data": build_env_data(payload, detected_at, false, Some(msg)).await }),
+                    json!({ "code": 0, "data": build_env_data(payload, detected_at, false, Some(msg)) }),
                 ))
             }
         }
     } else {
         Ok(Json(
-            json!({ "code": 0, "data": build_env_data(payload, detected_at, false, None).await }),
+            json!({ "code": 0, "data": build_env_data(payload, detected_at, false, None) }),
         ))
     }
 }
@@ -204,7 +152,7 @@ pub async fn env_refresh(
         return Err(ZapError::New(-1, "仅管理员可刷新运行环境".to_string()));
     }
     let payload = probe_payload().await?;
-    let t = save_snapshot(&payload).await;
+    let t = save_snapshot(&payload);
 
     audit::log(
         Some(&claims),
@@ -216,7 +164,7 @@ pub async fn env_refresh(
     .await;
 
     Ok(Json(
-        json!({ "code": 0, "message": "运行环境已刷新", "data": build_env_data(Some(payload), t, true, None).await }),
+        json!({ "code": 0, "message": "运行环境已刷新", "data": build_env_data(Some(payload), t, true, None) }),
     ))
 }
 
@@ -298,21 +246,9 @@ pub async fn env_defaults_save(
         upserts.push(("user_home_root".to_string(), v));
     }
 
-    let pool = db::get_db_pool().await;
-    let now = chrono::Local::now().timestamp();
-    for (k, v) in &upserts {
-        let _ = sqlx::query(
-            "INSERT INTO server_env (scope, k, v, remark, updated_at) VALUES ('conf', ?, ?, '面板默认配置', ?)
-             ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at",
-        )
-        .bind(k)
-        .bind(v)
-        .bind(now)
-        .execute(pool)
-        .await;
-    }
+    server_env::conf_set_many(&upserts, "面板默认配置");
 
-    let conf = load_conf().await;
+    let conf = load_conf();
     let detail = upserts
         .iter()
         .map(|(k, v)| format!("{k}={v}"))

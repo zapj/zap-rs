@@ -1,0 +1,72 @@
+version: 1
+updated_at: 1789438028
+conf:
+  database:
+    value: mysql
+    remark: 面板默认配置
+    updated_at: 1789437972
+  fpm_pool_defaults:
+    value: '{"pm":"dynamic","memory_limit":"256M","post_max_size":"128M","upload_max_filesize":"128M","max_children":10,"start_servers":3,"min_spare_servers":2,"max_spare_servers":5,"max_requests":1000,"request_terminate_timeout":300,"max_execution_time":300}'
+    remark: 面板默认配置
+    updated_at: 1789437972
+  php_default:
+    value: '7.3'
+    remark: 面板默认配置
+    updated_at: 1789438028
+  python_default:
+    value: '3.1'
+    remark: ''
+    updated_at: 1789437121
+  user_home_root:
+    value: /home
+    remark: 面板默认配置
+    updated_at: 1789437972
+  webserver:
+    value: ''
+    remark: 面板默认配置
+    updated_at: 1789437972
+auto:
+  detected_at: 1789437973
+  payload:
+    databases:
+    - binary: /usr/local/apps/mysql-8.4/bin/mysqld
+      name: mysql
+      running: true
+      version: 8.4.11
+    hostname: zap
+    os:
+      arch: x86_64
+      id: ubuntu
+      kernel: 6.6.114.1-microsoft-standard-WSL2
+      name: Ubuntu
+      version: '22.04'
+    php:
+      default: '7.4'
+      instances:
+      - binary: /usr/local/apps/php-74/bin/php
+        default: true
+        running: true
+        socket: /run/php-fpm-74.sock
+        version: 7.4.33
+      - binary: ''
+        default: false
+        running: true
+        socket: /run/php-fpm-admin-74.sock
+        version: admin-74
+    tools:
+    - name: git
+      version: git version 2.34.1
+    - name: python3
+      version: Python 3.10.12
+    - name: composer
+      version: Composer version 2.10.3 2026-08-27 13:34:23
+    - name: php
+      version: 'PHP 7.4.33 (cli) (built: Sep  8 2026 09:48:37) ( NTS )'
+    webserver:
+      binary: /usr/local/apps/nginx-1.31.5/sbin/nginx
+      conf: /usr/local/apps/nginx-1.31.5/conf/nginx.conf
+      flavor: nginx
+      running: true
+      sites_dir: /usr/local/apps/nginx-1.31.5/conf/sites-enabled
+      version: 1.31.5
+  error: ''

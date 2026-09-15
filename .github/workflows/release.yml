@@ -1,0 +1,124 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  PROJECT_NAME: zap-rs
+
+jobs:
+  build-linux:
+    name: Linux ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }} --locked
+
+      - name: Package artifact
+        run: |
+          chmod +x scripts/release/package.sh
+          bash scripts/release/package.sh package "${{ matrix.target }}" "target/${{ matrix.target }}/release/${{ env.PROJECT_NAME }}" "dist"
+
+      - name: Upload tar.gz
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  build-freebsd:
+    name: FreeBSD ${{ matrix.target }}
+    runs-on: [self-hosted, freebsd]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-freebsd
+          - target: aarch64-unknown-freebsd
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain on FreeBSD
+        shell: bash
+        run: |
+          set -e
+          if ! command -v rustc >/dev/null 2>&1; then
+            echo "rustc is not available on this runner"
+            exit 1
+          fi
+          rustup target add ${{ matrix.target }} || true
+
+      - name: Build
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }} --locked
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          chmod +x scripts/release/package.sh
+          bash scripts/release/package.sh package "${{ matrix.target }}" "target/${{ matrix.target }}/release/${{ env.PROJECT_NAME }}" "dist"
+
+      - name: Upload tar.gz
+        uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  release:
+    name: GitHub Release
+    needs: [build-linux, build-freebsd]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Generate sha256
+        run: |
+          chmod +x scripts/release/package.sh
+          bash scripts/release/package.sh checksum "dist"
+
+      - name: Optional sign shasum files
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          chmod +x scripts/release/package.sh
+          bash scripts/release/package.sh sign "dist"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/*.sha256.asc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

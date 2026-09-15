@@ -1,18 +1,19 @@
-//! `zapctl env` 子命令：管理 `server_env` 表（运行环境状态表）键值。
+//! `zapctl env` 子命令：管理 `{data}/server_env.yaml`（运行环境状态）。
 //!
-//! 表中数据按 scope 分为两类：
+//! 数据分两层：
 //! - `conf`：管理员维护的全局配置（webserver / php_default / database /
 //!   vhost_mode / fpm_pool_defaults / user_home_root / basic_* 等）；
-//! - `auto`：zapexec 自动探测的快照（k='payload'），由面板自动刷新，**只读**。
+//! - `auto`：zapexec 自动探测的快照（payload），由面板自动刷新，**只读**。
 //!
-//! 本子命令直连 SQLite（与 `zapctl user` 一致），写操作需 root。
+//! YAML 为唯一事实来源（面板启动时加载，变更即时写回）。本子命令直接读写该文件，
+//! 写操作需 root；zapd 会在下次读取时按 mtime 自动感知改动，无需重启。
 //! 仅对少数「写错即功能异常」的键做轻量校验，其余交给面板逻辑兜底。
 
 use std::io::Read;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 use clap::{Subcommand, ValueEnum};
-use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{NC, YELLOW, ensure_root, ok};
@@ -21,8 +22,8 @@ use crate::{NC, YELLOW, ensure_root, ok};
 const MAX_KEY_LEN: usize = 128;
 /// 值最大长度（64 KiB）。
 const MAX_VALUE_LEN: usize = 64 * 1024;
-/// 打开数据库时的忙等待上限，降低与 zapd 并发写冲突。
-const BUSY_TIMEOUT: Duration = Duration::from_secs(3);
+/// 状态文件名（与 zapd 保持一致）。
+const FILE_NAME: &str = "server_env.yaml";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Scope {
@@ -132,52 +133,96 @@ pub fn dispatch(cmd: EnvCommand, db_path: &str) -> Result<(), String> {
     }
 }
 
-// ── 数据库 ────────────────────────────────────────────────────
+// ── 状态文件读写 ──────────────────────────────────────────────
 
-fn open(db_path: &str) -> Result<Connection, String> {
-    let conn = Connection::open(db_path).map_err(|e| format!("无法打开数据库 {db_path}: {e}"))?;
-    // 与 zapd 并发访问时避免直接报 database is locked
-    let _ = conn.busy_timeout(BUSY_TIMEOUT);
-    Ok(conn)
+/// `{data}/server_env.yaml`：与 zap.db 同级目录。
+///
+/// 与 zapd 的 `data_dir()` 算法一致（相对路径相对当前工作目录解析）。
+pub fn env_path(db_path: &str) -> PathBuf {
+    let p = Path::new(db_path);
+    let dir = match p.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => PathBuf::from("data"),
+    };
+    dir.join(FILE_NAME)
 }
 
-/// 写入单条记录：存在则更新，不存在则新增。
-/// `remark` 为 `None` 时保留原有备注（新增时写入空串）。
-fn upsert(
-    conn: &Connection,
-    scope: Scope,
-    key: &str,
-    value: &str,
-    remark: Option<&str>,
-) -> Result<(), String> {
-    let existed: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM server_env WHERE scope = ?1 AND k = ?2)",
-            params![scope.as_str(), key],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ConfEntry {
+    #[serde(default)]
+    value: String,
+    #[serde(default)]
+    remark: String,
+    #[serde(default)]
+    updated_at: i64,
+}
 
-    let now = chrono::Local::now().timestamp();
-    if existed {
-        match remark {
-            Some(r) => conn.execute(
-                "UPDATE server_env SET v = ?1, remark = ?2, updated_at = ?3
-                 WHERE scope = ?4 AND k = ?5",
-                params![value, r, now, scope.as_str(), key],
-            ),
-            None => conn.execute(
-                "UPDATE server_env SET v = ?1, updated_at = ?2 WHERE scope = ?3 AND k = ?4",
-                params![value, now, scope.as_str(), key],
-            ),
-        }
-    } else {
-        conn.execute(
-            "INSERT INTO server_env (scope, k, v, remark, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![scope.as_str(), key, value, remark.unwrap_or(""), now],
-        )
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct AutoSection {
+    #[serde(default)]
+    detected_at: i64,
+    #[serde(default)]
+    payload: Option<Value>,
+    #[serde(default)]
+    error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct EnvFile {
+    #[serde(default)]
+    version: i64,
+    #[serde(default)]
+    updated_at: i64,
+    #[serde(default)]
+    conf: std::collections::BTreeMap<String, ConfEntry>,
+    #[serde(default)]
+    auto: AutoSection,
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn load(path: &Path) -> Result<EnvFile, String> {
+    if !path.exists() {
+        return Ok(EnvFile {
+            version: 1,
+            ..Default::default()
+        });
     }
-    .map_err(|e| format!("写入失败: {e}"))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("无法读取 {}: {e}", path.display()))?;
+    let mut f: EnvFile =
+        serde_yaml::from_str(&text).map_err(|e| format!("{} 格式错误: {e}", path.display()))?;
+    if f.version == 0 {
+        f.version = 1;
+    }
+    Ok(f)
+}
+
+/// 原子写回（tmp + rename）。
+fn save(path: &Path, file: &EnvFile) -> Result<(), String> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建目录失败 {}: {e}", parent.display()))?;
+    }
+    let mut file = file.clone();
+    file.version = 1;
+    file.updated_at = now();
+    let text = serde_yaml::to_string(&file).map_err(|e| format!("序列化失败: {e}"))?;
+    let tmp = path.with_extension("yaml.tmp");
+    std::fs::write(&tmp, &text).map_err(|e| format!("写入 {} 失败: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("替换 {} 失败: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
     Ok(())
 }
 
@@ -236,40 +281,54 @@ fn ensure_writable(scope: Scope) -> Result<(), String> {
 // ── 子命令实现 ────────────────────────────────────────────────
 
 fn cmd_list(db_path: &str, scope: Option<Scope>, json_out: bool) -> Result<(), String> {
-    let conn = open(db_path)?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, scope, k, v, remark, updated_at FROM server_env
-             WHERE (?1 IS NULL OR scope = ?1) ORDER BY scope, k",
-        )
-        .map_err(|e| e.to_string())?;
+    let path = env_path(db_path);
+    let file = load(&path)?;
 
-    let rows: Vec<(i64, String, String, String, String, i64)> = stmt
-        .query_map(params![scope.map(Scope::as_str)], |r| {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get(5)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<_, _>>()
-        .map_err(|e| e.to_string())?;
+    #[derive(serde::Serialize)]
+    struct Row {
+        scope: &'static str,
+        key: String,
+        value: String,
+        remark: String,
+        updated_at: i64,
+    }
+
+    let mut rows: Vec<Row> = Vec::new();
+    if matches!(scope, None | Some(Scope::Conf)) {
+        for (k, e) in &file.conf {
+            rows.push(Row {
+                scope: "conf",
+                key: k.clone(),
+                value: e.value.clone(),
+                remark: e.remark.clone(),
+                updated_at: e.updated_at,
+            });
+        }
+    }
+    if matches!(scope, None | Some(Scope::Auto)) {
+        let preview = match &file.auto.payload {
+            Some(v) => v.to_string(),
+            None => String::new(),
+        };
+        rows.push(Row {
+            scope: "auto",
+            key: "payload".to_string(),
+            value: preview,
+            remark: "zapexec 自动探测快照".to_string(),
+            updated_at: file.auto.detected_at,
+        });
+    }
 
     if json_out {
         let arr: Vec<Value> = rows
             .iter()
-            .map(|(id, scope, k, v, remark, ts)| {
+            .map(|r| {
                 json!({
-                    "id": id,
-                    "scope": scope,
-                    "key": k,
-                    "value": v,
-                    "remark": remark,
-                    "updated_at": ts,
+                    "scope": r.scope,
+                    "key": r.key,
+                    "value": r.value,
+                    "remark": r.remark,
+                    "updated_at": r.updated_at,
                 })
             })
             .collect();
@@ -283,17 +342,18 @@ fn cmd_list(db_path: &str, scope: Option<Scope>, json_out: bool) -> Result<(), S
     }
 
     println!(
-        "{:<6} {:<6} {:<28} {:<40} {:<16} {:<20}",
-        "ID", "SCOPE", "KEY", "VALUE", "REMARK", "UPDATED"
+        "{:<6} {:<28} {:<40} {:<20} {:<20}",
+        "SCOPE", "KEY", "VALUE", "REMARK", "UPDATED"
     );
-    println!("{}", "-".repeat(122));
-    for (id, scope, k, v, remark, ts) in &rows {
+    println!("{}", "-".repeat(118));
+    for r in &rows {
         println!(
-            "{id:<6} {scope:<6} {:<28} {:<40} {:<16} {:<20}",
-            ellipsis(k, 28),
-            ellipsis(v, 40),
-            ellipsis(remark, 16),
-            format_time(*ts),
+            "{:<6} {:<28} {:<40} {:<20} {:<20}",
+            r.scope,
+            ellipsis(&r.key, 28),
+            ellipsis(&r.value, 40),
+            ellipsis(&r.remark, 20),
+            format_time(r.updated_at),
         );
     }
     Ok(())
@@ -301,18 +361,30 @@ fn cmd_list(db_path: &str, scope: Option<Scope>, json_out: bool) -> Result<(), S
 
 fn cmd_get(db_path: &str, key: &str, scope: Scope, json_out: bool) -> Result<(), String> {
     validate_key(key)?;
-    let conn = open(db_path)?;
-    let row: Option<(String, String, i64)> = conn
-        .query_row(
-            "SELECT v, remark, updated_at FROM server_env WHERE scope = ?1 AND k = ?2",
-            params![scope.as_str(), key],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
+    let path = env_path(db_path);
+    let file = load(&path)?;
 
-    let Some((value, remark, ts)) = row else {
-        return Err(format!("{}:{key} 不存在", scope.as_str()));
+    let (value, remark, ts) = match scope {
+        Scope::Conf => {
+            let Some(e) = file.conf.get(key) else {
+                return Err(format!("{}:{key} 不存在", scope.as_str()));
+            };
+            (e.value.clone(), e.remark.clone(), e.updated_at)
+        }
+        Scope::Auto => {
+            if key != "payload" {
+                return Err(format!("{}:{key} 不存在", scope.as_str()));
+            }
+            (
+                file.auto
+                    .payload
+                    .clone()
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+                "zapexec 自动探测快照".to_string(),
+                file.auto.detected_at,
+            )
+        }
     };
 
     if json_out {
@@ -350,8 +422,15 @@ fn cmd_set(
     validate_value(&value)?;
     validate_known_key(key, value.trim())?;
 
-    let conn = open(db_path)?;
-    upsert(&conn, scope, key, &value, remark)?;
+    let path = env_path(db_path);
+    let mut file = load(&path)?;
+    let entry = file.conf.entry(key.to_string()).or_default();
+    entry.value = value.clone();
+    entry.updated_at = now();
+    if let Some(r) = remark {
+        entry.remark = r.to_string();
+    }
+    save(&path, &file)?;
 
     if json_out {
         let out = json!({
@@ -365,7 +444,7 @@ fn cmd_set(
         println!("{}", to_json(&out)?);
     } else {
         ok(&format!("已设置 {}:{key}", scope.as_str()));
-        println!("{YELLOW}[!]{NC} 面板与建站流程实时读取该表，无需重启 zapd");
+        println!("{YELLOW}[!]{NC} 面板与建站流程按 mtime 自动感知改动，无需重启 zapd");
     }
     Ok(())
 }
@@ -375,17 +454,12 @@ fn cmd_unset(db_path: &str, key: &str, scope: Scope, json_out: bool) -> Result<(
     ensure_writable(scope)?;
     validate_key(key)?;
 
-    let conn = open(db_path)?;
-    let n = conn
-        .execute(
-            "DELETE FROM server_env WHERE scope = ?1 AND k = ?2",
-            params![scope.as_str(), key],
-        )
-        .map_err(|e| format!("删除失败: {e}"))?;
-
-    if n == 0 {
+    let path = env_path(db_path);
+    let mut file = load(&path)?;
+    if file.conf.remove(key).is_none() {
         return Err(format!("{}:{key} 不存在", scope.as_str()));
     }
+    save(&path, &file)?;
 
     if json_out {
         let out = json!({
@@ -393,7 +467,7 @@ fn cmd_unset(db_path: &str, key: &str, scope: Scope, json_out: bool) -> Result<(
             "action": "unset",
             "scope": scope.as_str(),
             "key": key,
-            "removed": n,
+            "removed": 1,
         });
         println!("{}", to_json(&out)?);
     } else {
@@ -478,12 +552,15 @@ fn cmd_import(
         return Ok(());
     }
 
-    let mut conn = open(db_path)?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let path = env_path(db_path);
+    let mut env_file = load(&path)?;
+    let ts = now();
     for (k, v) in &items {
-        upsert(&tx, scope, k, v, None)?;
+        let entry = env_file.conf.entry(k.clone()).or_default();
+        entry.value = v.clone();
+        entry.updated_at = ts;
     }
-    tx.commit().map_err(|e| format!("提交失败: {e}"))?;
+    save(&path, &env_file)?;
 
     if json_out {
         let out = json!({
