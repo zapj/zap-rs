@@ -275,13 +275,13 @@ export const asyncRoutes: Array<RouteRecordRaw> = [
     path: '/server-status',
     component: Layout,
     redirect: '/server-status/index',
-    meta: { title: '服务器状态', icon: 'material-symbols:monitoring', roles: ['admin'] },
+    meta: { title: '服务器状态', icon: 'material-symbols:monitor-heart', roles: ['admin'] },
     children: [
       {
         path: 'index',
         name: 'ServerStatusIndex',
         component: () => import('@/views/server-status/index.vue'),
-        meta: { title: '服务器信息', icon: 'material-symbols:info', affix: true },
+        meta: { title: 'Server Monitor', icon: 'material-symbols:monitoring', affix: true },
       },
       {
         path: 'nginx-server',

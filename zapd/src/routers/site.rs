@@ -14,9 +14,12 @@ use crate::{
     zap::{
         ZapError, ZapJsonResult, audit,
         jwt::{self, ValidatedClaims},
+        server_env,
     },
 };
 use zap_proto::{LocationSpec, Request, UpstreamSpec};
+
+use super::system_basic::{K_IPV4 as K_DEFAULT_IPV4, K_IPV6 as K_DEFAULT_IPV6};
 
 // ── SQL 行结构 ──────────────────────────────────────────────
 
@@ -2568,6 +2571,11 @@ async fn sync_one_site_inner(
         (None, None)
     };
 
+    // 共享主机地址：面板基础设置「默认 IPv4/IPv6」非空时，站点 vhost 绑定 IP:80 / IP:443；
+    // 留空则沿用通配监听（listen 80）。存量站点重新同步（保存/启停）即生效。
+    let listen_ipv4 = server_env::conf_get(K_DEFAULT_IPV4).unwrap_or_default();
+    let listen_ipv6 = server_env::conf_get(K_DEFAULT_IPV6).unwrap_or_default();
+
     let resp = crate::zapexec::call(Request::SiteVhostSync {
         site_id: id,
         name: name.clone(),
@@ -2591,6 +2599,8 @@ async fn sync_one_site_inner(
         ssl_ciphers: prof.9,
         ssl_prefer_server_ciphers: prof.10,
         ssl_http2: prof.11,
+        listen_ipv4,
+        listen_ipv6,
     })
     .await?;
 

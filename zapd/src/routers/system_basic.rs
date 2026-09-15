@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 
 use axum::{Json, extract::Extension};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::zap::ZapError;
 use crate::zap::ZapJsonResult;
@@ -30,10 +30,12 @@ use crate::zap::server_env;
 // ── 键定义 ──────────────────────────────────────────────────
 
 /// 基础设置（建站默认网络）：默认 IPv4 / 默认 IPv6 / 网络设备。
-/// 站点创建时未指定 IP 则使用这里的默认值。
-const K_IPV4: &str = "basic_default_ipv4";
-const K_IPV6: &str = "basic_default_ipv6";
-const K_IFACE: &str = "basic_network_iface";
+///
+/// 站点 vhost 同步时读取：非空 → `listen {ip}:80` / `listen {ip}:443 ssl`；
+/// 留空（默认）→ 通配 `listen 80`。见 [`crate::routers::site::sync_site_vhost`]。
+pub(crate) const K_IPV4: &str = "basic_default_ipv4";
+pub(crate) const K_IPV6: &str = "basic_default_ipv6";
+pub(crate) const K_IFACE: &str = "basic_network_iface";
 
 /// Mail（发信参数，供后续系统通知 / 工单邮件发送使用）。
 const K_MAIL_HOST: &str = "basic_mail_host";
@@ -83,6 +85,51 @@ fn mail_password_view(conf: &HashMap<String, String>) -> (bool, String) {
     (true, crypto::mask_secret(&plain))
 }
 
+/// 网络候选：来自 zapexec 环境探测快照（`server_env.yaml` 的 auto 区）。
+///
+/// 返回 `(interfaces, ipv4_all, ipv6_all, default_ipv4, default_ipv6)`，
+/// 供面板下拉选择；探测快照缺失时全部为空（此时仍可手工填写）。
+fn network_options() -> (Vec<Value>, Vec<String>, Vec<String>, String, String) {
+    let Some(payload) = server_env::snapshot().0 else {
+        return (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            String::new(),
+            String::new(),
+        );
+    };
+    let net = payload.get("network").cloned().unwrap_or(Value::Null);
+    let strs = |key: &str| -> Vec<String> {
+        net.get(key)
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let interfaces = net
+        .get("interfaces")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let text = |key: &str| -> String {
+        net.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    (
+        interfaces,
+        strs("ipv4_all"),
+        strs("ipv6_all"),
+        text("default_ipv4"),
+        text("default_ipv6"),
+    )
+}
+
 // ── handlers ────────────────────────────────────────────────
 
 /// GET /system/config/basic
@@ -92,6 +139,7 @@ pub async fn basic_get(claims: ValidatedClaims) -> ZapJsonResult {
     }
     let conf = load_conf();
     let (mail_password_set, mail_password_hint) = mail_password_view(&conf);
+    let (net_ifaces, net_ipv4, net_ipv6, net_def_v4, net_def_v6) = network_options();
     Ok(Json(json!({
         "code": 0,
         "message": "OK",
@@ -100,6 +148,14 @@ pub async fn basic_get(claims: ValidatedClaims) -> ZapJsonResult {
                 "ipv4": get(&conf, K_IPV4),
                 "ipv6": get(&conf, K_IPV6),
                 "iface": get(&conf, K_IFACE),
+                // 下拉候选（zapexec 环境探测）；空数组表示尚未探测到
+                "network": {
+                    "interfaces": net_ifaces,
+                    "ipv4_all": net_ipv4,
+                    "ipv6_all": net_ipv6,
+                    "default_ipv4": net_def_v4,
+                    "default_ipv6": net_def_v6,
+                },
             },
             "mail": {
                 "host": get(&conf, K_MAIL_HOST),

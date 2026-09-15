@@ -4,6 +4,9 @@
       <el-tab-pane :label="t('statusTabs.info')" name="info">
         <InfoPage v-if="active === 'info'" />
       </el-tab-pane>
+      <el-tab-pane :label="t('statusTabs.monitor')" name="monitor">
+        <MonitorPage v-if="active === 'monitor'" />
+      </el-tab-pane>
       <el-tab-pane :label="t('statusTabs.load')" name="load">
         <LoadPage v-if="active === 'load'" />
       </el-tab-pane>
@@ -25,8 +28,10 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import InfoPage from './info/index.vue'
+import MonitorPage from './monitor/index.vue'
 import LoadPage from './load/index.vue'
 import CpuPage from './cpu/index.vue'
 import MemoryPage from './memory/index.vue'
@@ -34,8 +39,12 @@ import DiskPage from './disk/index.vue'
 import NetworkPage from './network/index.vue'
 
 const { t } = useI18n()
+const route = useRoute()
 
-const active = ref('info')
+/** 支持 `?tab=monitor` 直达指定页签（首页「系统信息」的查看详情跳转监控页） */
+const TAB_NAMES = ['info', 'monitor', 'load', 'cpu', 'memory', 'disk', 'network']
+const wanted = String(route.query.tab || '')
+const active = ref(TAB_NAMES.includes(wanted) ? wanted : 'info')
 </script>
 
 <style scoped>

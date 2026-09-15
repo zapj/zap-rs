@@ -148,6 +148,7 @@ export default {
     firewall: '防火墙',
     'server-time': '服务器时间',
     'server-info': '服务器信息',
+    'server-monitor': 'Server Monitor',
     process: '进程管理',
     'system-service': '系统服务',
     runtime: '运行环境',
@@ -508,14 +509,21 @@ export default {
     tabMail: 'Mail',
     tabContact: '联系信息',
 
-    basicHint: '创建站点时使用的默认网络参数：地址留空则由系统自动分配。',
+    basicHint:
+      '创建站点时使用的默认网络参数（候选地址来自系统探测）。选择「默认」= 不指定，站点沿用通配监听。',
+    useDefault: '默认（不指定）',
     ipv4: '默认 IPv4 地址',
-    ipv4Placeholder: '如 192.168.1.100（留空=自动分配）',
+    ipv4Placeholder: '选择或输入 IPv4（留空=不指定）',
+    ipv4Hint: '指定后，新建/重新同步的站点将绑定该共享地址（listen IP:80 / IP:443）。',
     ipv6: '默认 IPv6 地址',
-    ipv6Placeholder: '如 2408:8207::1（留空=自动分配）',
+    ipv6Placeholder: '选择或输入 IPv6（留空=不指定）',
+    ipv6Hint: '指定后，站点将绑定 listen [IPv6]:80 / [IPv6]:443。',
     iface: '网络设备 (Ethernet Device)',
-    ifacePlaceholder: '如 eth0 / ens18（默认 eth0）',
+    ifacePlaceholder: '选择或输入网卡名（留空=不指定）',
+    ifaceHint: '仅作标记，实际监听地址以 IPv4 / IPv6 为准。',
     saveBasic: '保存基础设置',
+    saveAndSyncAll: '保存并应用到全部站点',
+    syncAllHint: '新站点立即生效；存量站点需重新同步 vhost 才会绑定新地址。',
 
     mailHint: '配置发送邮件所需的 SMTP 参数（供系统通知等场景使用）。密码留空表示不修改原密码。',
     smtpHost: 'SMTP 服务器',
@@ -1443,11 +1451,31 @@ export default {
   /** 服务器状态 - 页签 */
   statusTabs: {
     info: '服务器信息',
+    monitor: 'Server Monitor',
     load: '系统负载',
     cpu: 'CPU',
     memory: '内存',
     disk: '硬盘',
     network: '网络',
+  },
+
+  /** 服务器状态 - Server Monitor（实时监控图表） */
+  statusMonitor: {
+    hint: 'CPU / 内存 / 系统负载 / 网络实时曲线，每 5 秒自动刷新（数据来自系统状态采样）。',
+  },
+
+  /** 系统实时监控图表（Server Monitor / 首页共用组件） */
+  systemMonitor: {
+    cpu: 'CPU',
+    memory: '内存',
+    systemLoad: '系统负载',
+    network: '网络速率',
+    autoRefresh: '{sec}s 后刷新',
+    load1m: '1 分钟',
+    load5m: '5 分钟',
+    load15m: '15 分钟',
+    upload: '上行',
+    download: '下行',
   },
 
   /** 服务器状态 - CPU */
@@ -1809,7 +1837,7 @@ export default {
   /** 仪表盘 - 管理员 */
   dashboardAdmin: {
     serverInfo: '服务器信息',
-    aboutZap: '关于 Zap',
+    aboutZap: 'About Zap',
     os: '操作系统',
     hostname: '主机名',
     vendor: '厂商',
@@ -1820,6 +1848,7 @@ export default {
     uptime: '运行时间',
     serverStatus: '服务器状态',
     systemLoad: '系统负载',
+    kernel: '内核',
     memory: '内存',
     diskRoot: '根分区',
     diskUsage: '磁盘使用',

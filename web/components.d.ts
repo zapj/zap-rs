@@ -75,6 +75,7 @@ declare module 'vue' {
     Permission: typeof import('./src/components/Permission/index.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SystemMonitor: typeof import('./src/components/SystemMonitor.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

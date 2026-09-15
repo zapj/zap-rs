@@ -35,6 +35,7 @@ fn detect_inner() -> Response {
         "php": detect_php(),
         "databases": detect_databases(),
         "tools": detect_tools(),
+        "network": detect_network(),
     });
     Response::ok("服务器运行环境探测完成", Some(data))
 }
@@ -516,6 +517,166 @@ fn detect_tools() -> Value {
     json!(out)
 }
 
+// ── 网络接口 / IP ────────────────────────────────────────────
+
+/// 需要排除的虚拟/容器接口前缀（面板建站不会绑定这些地址）。
+const SKIP_IFACE_PREFIXES: [&str; 8] = [
+    "lo", "docker", "br-", "veth", "virbr", "cni", "flannel", "tunl",
+];
+
+fn skip_iface(name: &str) -> bool {
+    name == "lo" || SKIP_IFACE_PREFIXES.iter().any(|p| name.starts_with(p))
+}
+
+/// 解析 `ip -o -4 addr show` 输出，得到「接口 → IPv4 列表」。
+///
+/// 例：`2: eth0    inet 10.0.0.5/24 brd ...` → `("eth0", "10.0.0.5")`。
+fn parse_ipv4_lines(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut it = line.split_whitespace();
+        // 形如 `2: eth0    inet 10.0.0.5/24 ...`
+        let Some(idx) = it.next() else { continue };
+        let Some(iface) = it.next() else { continue };
+        let iface = iface.trim_end_matches(':').to_string();
+        if !idx.ends_with(':') || skip_iface(&iface) {
+            continue;
+        }
+        // 找到 `inet` 后取地址段
+        let mut it = line.split_whitespace().skip_while(|t| *t != "inet");
+        let _ = it.next();
+        let Some(addr) = it.next() else { continue };
+        let ip = addr.split('/').next().unwrap_or("").to_string();
+        if ip.is_empty() {
+            continue;
+        }
+        out.push((iface, ip));
+    }
+    out
+}
+
+/// 解析 `ip -o -6 addr show` 输出，得到「接口 → IPv6 列表」（去掉 scope link）。
+fn parse_ipv6_lines(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if !line.contains(" inet6 ") {
+            continue;
+        }
+        let mut it = line.split_whitespace();
+        let Some(idx) = it.next() else { continue };
+        let Some(iface) = it.next() else { continue };
+        let iface = iface.trim_end_matches(':').to_string();
+        if !idx.ends_with(':') || skip_iface(&iface) {
+            continue;
+        }
+        let mut it = line.split_whitespace().skip_while(|t| *t != "inet6");
+        let _ = it.next();
+        let Some(addr) = it.next() else { continue };
+        let ip = addr.split('/').next().unwrap_or("").to_string();
+        // 链路本地地址（fe80::）不作为对外服务地址候选
+        if ip.is_empty() || ip.to_ascii_lowercase().starts_with("fe80") {
+            continue;
+        }
+        out.push((iface, ip));
+    }
+    out
+}
+
+fn run_ip(family: &str) -> String {
+    root_cmd("ip")
+        .args(["-o", family, "addr", "show"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// 网卡与地址探测：供面板「基础设置 → 默认 IPv4/IPv6/网络设备」下拉选择。
+///
+/// 结构：`{ interfaces: [{name, mac, state, ipv4[], ipv6[]}], default_ipv4, default_ipv6 }`。
+/// `default_*` 取首个 UP 且带地址的网卡的对应地址（`ip route get` 失败时兜底）。
+fn detect_network() -> Value {
+    use std::collections::BTreeMap;
+
+    let v4 = parse_ipv4_lines(&run_ip("-4"));
+    let v6 = parse_ipv6_lines(&run_ip("-6"));
+
+    let mut order: Vec<String> = Vec::new();
+    let mut map: BTreeMap<String, Value> = BTreeMap::new();
+    for (iface, ip) in v4.iter() {
+        if !order.contains(iface) {
+            order.push(iface.clone());
+        }
+        let e = map.entry(iface.clone()).or_insert_with(|| {
+            json!({
+                "name": iface,
+                "mac": iface_mac(iface),
+                "state": iface_state(iface),
+                "ipv4": Vec::<String>::new(),
+                "ipv6": Vec::<String>::new(),
+            })
+        });
+        if let Some(arr) = e.get_mut("ipv4").and_then(|v| v.as_array_mut())
+            && !arr.iter().any(|x| x == ip)
+        {
+            arr.push(json!(ip));
+        }
+    }
+    for (iface, ip) in v6.iter() {
+        let e = map.entry(iface.clone()).or_insert_with(|| {
+            json!({
+                "name": iface,
+                "mac": iface_mac(iface),
+                "state": iface_state(iface),
+                "ipv4": Vec::<String>::new(),
+                "ipv6": Vec::<String>::new(),
+            })
+        });
+        if let Some(arr) = e.get_mut("ipv6").and_then(|v| v.as_array_mut())
+            && !arr.iter().any(|x| x == ip)
+        {
+            arr.push(json!(ip));
+        }
+    }
+
+    let interfaces: Vec<Value> = map.values().cloned().collect();
+    // 默认出口地址：`ip route get 1.1.1.1` 的 src；失败时取首个网卡的首个地址
+    let default_ipv4 = default_route_ip("-4").or_else(|| v4.first().map(|(_, ip)| ip.clone()));
+    let default_ipv6 = default_route_ip("-6").or_else(|| v6.first().map(|(_, ip)| ip.clone()));
+
+    json!({
+        "interfaces": interfaces,
+        "ipv4_all": v4.iter().map(|(_, ip)| ip.clone()).collect::<Vec<_>>(),
+        "ipv6_all": v6.iter().map(|(_, ip)| ip.clone()).collect::<Vec<_>>(),
+        "default_ipv4": default_ipv4.unwrap_or_default(),
+        "default_ipv6": default_ipv6.unwrap_or_default(),
+    })
+}
+
+fn iface_mac(iface: &str) -> String {
+    std::fs::read_to_string(format!("/sys/class/net/{iface}/address"))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn iface_state(iface: &str) -> String {
+    std::fs::read_to_string(format!("/sys/class/net/{iface}/operstate"))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// `ip -o route get` 输出里的 `src <ip>`。
+fn default_route_ip(family: &str) -> Option<String> {
+    let out = root_cmd("ip")
+        .args(["-o", family, "route", "get", "1.1.1.1"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let mut it = text.split_whitespace().skip_while(|t| *t != "src");
+    let _ = it.next();
+    it.next().map(|s| s.to_string())
+}
+
 // ── 单测（纯函数部分）────────────────────────────────────────
 
 #[cfg(test)]
@@ -542,6 +703,28 @@ mod tests {
         assert!(php_version("Usage: php [options]").is_none());
         assert_eq!(short_version("8.3.7"), "8.3");
         assert_eq!(short_version("7.4"), "7.4");
+    }
+
+    #[test]
+    fn parse_ip_addr_lines() {
+        let v4 = "2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0\\       valid_lft forever preferred_lft forever\n\
+                  3: eth1    inet 192.168.1.7/24 scope global eth1\n\
+                  1: lo    inet 127.0.0.1/8 scope host lo\n";
+        assert_eq!(
+            parse_ipv4_lines(v4),
+            vec![
+                ("eth0".to_string(), "10.0.0.5".to_string()),
+                ("eth1".to_string(), "192.168.1.7".to_string())
+            ]
+        );
+
+        let v6 = "2: eth0    inet6 2408:4005:xxx::1/64 scope global \n\
+                  2: eth0    inet6 fe80::1/64 scope link \n\
+                  1: lo    inet6 ::1/128 scope host \n";
+        assert_eq!(
+            parse_ipv6_lines(v6),
+            vec![("eth0".to_string(), "2408:4005:xxx::1".to_string())]
+        );
     }
 
     #[test]

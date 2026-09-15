@@ -130,6 +130,7 @@ const enUS: Messages = {
     firewall: 'Firewall',
     'server-time': 'Server Time',
     'server-info': 'Server Info',
+    'server-monitor': 'Server Monitor',
     process: 'Processes',
     'system-service': 'System Services',
     runtime: 'Runtime',
@@ -476,14 +477,22 @@ const enUS: Messages = {
     tabContact: 'Contact Info',
 
     basicHint:
-      'Default network parameters used when creating a site. Leave the address empty to let the system assign one automatically.',
+      'Default network parameters used when creating a site (candidates come from system detection). Choose "Default" to leave it unspecified — sites then listen on all addresses.',
+    useDefault: 'Default (unspecified)',
     ipv4: 'Default IPv4 Address',
-    ipv4Placeholder: 'e.g. 192.168.1.100 (empty = auto assign)',
+    ipv4Placeholder: 'Pick or type an IPv4 (empty = unspecified)',
+    ipv4Hint:
+      'When set, new / re-synced sites bind this shared address (listen IP:80 / IP:443).',
     ipv6: 'Default IPv6 Address',
-    ipv6Placeholder: 'e.g. 2408:8207::1 (empty = auto assign)',
+    ipv6Placeholder: 'Pick or type an IPv6 (empty = unspecified)',
+    ipv6Hint: 'When set, sites bind listen [IPv6]:80 / [IPv6]:443.',
     iface: 'Network Device (Ethernet)',
-    ifacePlaceholder: 'e.g. eth0 / ens18 (default eth0)',
+    ifacePlaceholder: 'Pick or type an interface (empty = unspecified)',
+    ifaceHint: 'Informational only — the actual listen address follows IPv4 / IPv6.',
     saveBasic: 'Save Basic Settings',
+    saveAndSyncAll: 'Save and apply to all sites',
+    syncAllHint:
+      'New sites use it right away; existing sites bind the new address after a vhost re-sync.',
 
     mailHint:
       'SMTP parameters used to send mail (system notifications, etc.). Leave the password empty to keep the current one.',
@@ -1442,11 +1451,31 @@ const enUS: Messages = {
   /** Server status - tabs */
   statusTabs: {
     info: 'Server Info',
+    monitor: 'Server Monitor',
     load: 'System Load',
     cpu: 'CPU',
     memory: 'Memory',
     disk: 'Disks',
     network: 'Network',
+  },
+
+  /** Server status - Server Monitor (live charts) */
+  statusMonitor: {
+    hint: 'Live CPU / memory / system load / network charts, refreshed every 5 seconds.',
+  },
+
+  /** Live system charts (shared by Server Monitor / dashboard) */
+  systemMonitor: {
+    cpu: 'CPU',
+    memory: 'Memory',
+    systemLoad: 'System Load',
+    network: 'Network',
+    autoRefresh: 'refresh in {sec}s',
+    load1m: '1 min',
+    load5m: '5 min',
+    load15m: '15 min',
+    upload: 'Upload',
+    download: 'Download',
   },
 
   /** Server status - CPU */
@@ -1827,6 +1856,7 @@ const enUS: Messages = {
     uptime: 'Uptime',
     serverStatus: 'Server Status',
     systemLoad: 'System Load',
+    kernel: 'Kernel',
     memory: 'Memory',
     diskRoot: 'Root Disk',
     diskUsage: 'Disk Usage',

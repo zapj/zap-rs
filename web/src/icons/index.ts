@@ -57,6 +57,7 @@ import IconMemory from '~icons/material-symbols/memory'
 import IconMenu from '~icons/material-symbols/menu'
 import IconMenuBook from '~icons/material-symbols/menu-book'
 import IconMonitor from '~icons/material-symbols/monitor'
+import IconMonitorHeart from '~icons/material-symbols/monitor-heart'
 import IconMonitoring from '~icons/material-symbols/monitoring'
 import IconMoreVert from '~icons/material-symbols/more-vert'
 import IconContentCopy from '~icons/material-symbols/content-copy'
@@ -149,6 +150,7 @@ export const ICON_MAP: Record<string, Component> = {
   menu: IconMenu,
   'menu-book': IconMenuBook,
   monitor: IconMonitor,
+  'monitor-heart': IconMonitorHeart,
   monitoring: IconMonitoring,
   'more-vert': IconMoreVert,
   'note-add': IconNoteAdd,

@@ -368,9 +368,9 @@ async fn init_menus_table() {
 
     -- Server status（子菜单：服务器信息 tabs + Nginx Server，应用商店之后，admin）
     INSERT INTO menus (id, parent_id, name, path, component, redirect, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (8, 0, 'server-status', '/server-status', 'Layout', '/server-status/index', 'dir', '服务器状态', 'material-symbols:monitoring', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (8, 0, 'server-status', '/server-status', 'Layout', '/server-status/index', 'dir', '服务器状态', 'material-symbols:monitor-heart', 1, 'admin', 8, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
-    VALUES (81, 8, 'server-status-index', 'index', 'server-status/index', 'menu', '服务器信息', 'material-symbols:info', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
+    VALUES (81, 8, 'server-status-index', 'index', 'server-status/index', 'menu', 'Server Monitor', 'material-symbols:monitoring', 1, 'admin', 1, 1, strftime('%s','now'), strftime('%s','now'));
     INSERT INTO menus (id, parent_id, name, path, component, type, title, icon, affix, roles, sort_order, status, created_at, updated_at)
     VALUES (87, 8, 'server-status-nginx', 'nginx-server', 'server-status/nginx-server/index', 'menu', 'Nginx Server', 'material-symbols:monitor', 1, 'admin', 2, 1, strftime('%s','now'), strftime('%s','now'));
 

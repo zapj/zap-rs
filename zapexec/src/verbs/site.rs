@@ -477,6 +477,27 @@ struct VhostRenderSpec<'a> {
     ssl_files: Option<(&'a str, &'a str)>,
     force_https: bool,
     ssl_tls: Option<&'a SslTlsCfg>,
+    /// 共享主机 IPv4（面板基础设置「默认 IPv4」）；空 = 通配 `listen 80`
+    listen_ipv4: &'a str,
+    /// 共享主机 IPv6（面板基础设置「默认 IPv6」）；空 = 通配 `listen [::]:80`
+    listen_ipv6: &'a str,
+}
+
+/// 生成 listen 指令：指定了共享 IP 就绑定 `IP:端口`，否则通配。
+///
+/// `suffix` 为附加参数（如 ` ssl` / ` ssl http2`）。
+fn listen_directive(ipv4: &str, ipv6: &str, port: u16, suffix: &str) -> String {
+    let v4 = if ipv4.trim().is_empty() {
+        format!("    listen {port}{suffix};\n")
+    } else {
+        format!("    listen {}:{port}{suffix};\n", ipv4.trim())
+    };
+    let v6 = if ipv6.trim().is_empty() {
+        format!("    listen [::]:{port}{suffix};\n")
+    } else {
+        format!("    listen [{}]:{port}{suffix};\n", ipv6.trim())
+    };
+    format!("{v4}{v6}")
 }
 
 fn render_vhost_full(a: VhostRenderSpec<'_>) -> String {
@@ -496,7 +517,12 @@ fn render_vhost_full(a: VhostRenderSpec<'_>) -> String {
         ssl_files,
         force_https,
         ssl_tls,
+        listen_ipv4,
+        listen_ipv6,
     } = a;
+    // 监听地址：指定共享 IP 时绑定 `IP:端口`，否则沿用通配监听
+    let listen_80 = listen_directive(listen_ipv4, listen_ipv6, 80, "");
+    let listen_443 = listen_directive(listen_ipv4, listen_ipv6, 443, " ssl");
     let s_type = norm_site_type(site_type);
     let comment = name.chars().filter(|c| !c.is_control()).collect::<String>();
     let server_name = {
@@ -613,10 +639,10 @@ fn render_vhost_full(a: VhostRenderSpec<'_>) -> String {
     // SSL/TLS：绑定证书后才监听 443；允许 HTTP 跳转时 80 只保留 301
     let http2_enabled = ssl_files.is_some() && ssl_tls.map(|c| c.http2).unwrap_or(false);
     // nginx < 1.25.1 只能把 http2 内嵌到 listen 参数；新版本用独立 `http2 on;` 指令
-    let listen_443: &str = if http2_enabled && ssl_tls.is_some_and(|c| !c.http2_on_syntax) {
-        "    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n"
+    let listen_443 = if http2_enabled && ssl_tls.is_some_and(|c| !c.http2_on_syntax) {
+        listen_directive(listen_ipv4, listen_ipv6, 443, " ssl http2")
     } else {
-        "    listen 443 ssl;\n    listen [::]:443 ssl;\n"
+        listen_443
     };
     let ssl_directives = ssl_files.map(|(cert, key)| {
         let mut s = format!("    ssl_certificate {cert};\n    ssl_certificate_key {key};\n");
@@ -643,12 +669,12 @@ fn render_vhost_full(a: VhostRenderSpec<'_>) -> String {
     match (&ssl_directives, force_https) {
         (Some(sd), true) => {
             out.push_str("server {\n");
-            out.push_str("    listen 80;\n    listen [::]:80;\n");
+            out.push_str(&listen_80);
             out.push_str(&format!("    server_name {server_name};\n"));
             out.push_str("    return 301 https://$host$request_uri;\n");
             out.push_str("}\n\n");
             out.push_str("server {\n");
-            out.push_str(listen_443);
+            out.push_str(&listen_443);
             out.push_str(&format!("    server_name {server_name};\n"));
             out.push_str(sd);
             out.push_str(&core);
@@ -656,13 +682,13 @@ fn render_vhost_full(a: VhostRenderSpec<'_>) -> String {
         }
         _ => {
             out.push_str("server {\n");
-            out.push_str("    listen 80;\n    listen [::]:80;\n");
+            out.push_str(&listen_80);
             out.push_str(&format!("    server_name {server_name};\n"));
             out.push_str(&core);
             out.push_str("}\n");
             if let Some(sd) = &ssl_directives {
                 out.push_str("server {\n");
-                out.push_str(listen_443);
+                out.push_str(&listen_443);
                 out.push_str(&format!("    server_name {server_name};\n"));
                 out.push_str(sd);
                 out.push_str(&core);
@@ -1248,6 +1274,8 @@ pub(super) struct SiteConfig {
     pub(super) ssl_ciphers: String,
     pub(super) ssl_prefer_server_ciphers: bool,
     pub(super) ssl_http2: bool,
+    pub(super) listen_ipv4: String,
+    pub(super) listen_ipv6: String,
 }
 
 /// 同步站点完整 vhost 配置（拆箱到阻塞线程执行）。
@@ -1328,6 +1356,8 @@ fn vhost_sync_inner(cfg: SiteConfig) -> Result<Response, String> {
         ssl_ciphers,
         ssl_prefer_server_ciphers,
         ssl_http2,
+        listen_ipv4,
+        listen_ipv6,
     } = cfg;
     let name = &name;
     let domains = &domains;
@@ -1518,6 +1548,8 @@ fn vhost_sync_inner(cfg: SiteConfig) -> Result<Response, String> {
         ssl_files: ssl_refs,
         force_https,
         ssl_tls: ssl_tls_cfg.as_ref(),
+        listen_ipv4: &listen_ipv4,
+        listen_ipv6: &listen_ipv6,
     });
 
     // 面板侧快照（渲染源 / 入参 / 历史版本）：失败不影响发布，仅作排障与回滚副本
@@ -1676,6 +1708,73 @@ mod tests {
     use super::*;
     use zap_proto::UpstreamServer;
 
+    /// 指定共享 IP 时监听 `IP:80` / `IP:443 ssl`；未指定（默认）沿用通配监听。
+    #[test]
+    fn shared_ip_binds_listen_address() {
+        let domains = vec!["a.com".to_string()];
+        let s = render_vhost_full(VhostRenderSpec {
+            site_id: 11,
+            name: "shared",
+            domains: &domains,
+            root: "/home/u/www/shared-11",
+            php_socket: None,
+            access_log: None,
+            error_log: None,
+            site_type: "php",
+            pseudo_static: "none",
+            pseudo_custom: "",
+            upstreams: &[],
+            locations: &[],
+            ssl_files: Some(("/a/fullchain.pem", "/a/key.pem")),
+            force_https: false,
+            ssl_tls: None,
+            listen_ipv4: "1.2.3.4",
+            listen_ipv6: "2408::1",
+        });
+        assert!(s.contains("listen 1.2.3.4:80;"), "共享 IPv4 应绑定 IP:80");
+        assert!(
+            s.contains("listen [2408::1]:80;"),
+            "共享 IPv6 应绑定 [IP]:80"
+        );
+        assert!(s.contains("listen 1.2.3.4:443 ssl;"));
+        assert!(s.contains("listen [2408::1]:443 ssl;"));
+        assert!(!s.contains("listen 80;"), "不应再出现通配监听");
+
+        let d = render_vhost_full(VhostRenderSpec {
+            site_id: 12,
+            name: "default",
+            domains: &domains,
+            root: "/home/u/www/default-12",
+            php_socket: None,
+            access_log: None,
+            error_log: None,
+            site_type: "php",
+            pseudo_static: "none",
+            pseudo_custom: "",
+            upstreams: &[],
+            locations: &[],
+            ssl_files: None,
+            force_https: false,
+            ssl_tls: None,
+            listen_ipv4: "",
+            listen_ipv6: "",
+        });
+        assert!(d.contains("listen 80;"));
+        assert!(d.contains("listen [::]:80;"));
+    }
+
+    #[test]
+    fn listen_directive_forms() {
+        assert_eq!(
+            listen_directive("", "", 80, ""),
+            "    listen 80;\n    listen [::]:80;\n"
+        );
+        assert_eq!(
+            listen_directive("1.2.3.4", "2408::1", 443, " ssl"),
+            "    listen 1.2.3.4:443 ssl;\n    listen [2408::1]:443 ssl;\n"
+        );
+    }
+
     /// 收敛脚本必须是「chown + find chmod」，且 find 的 `{}` 占位符不能被 format! 吞掉
     /// （历史 bug：生成 `-exec chmod 755 \;` 缺文件参数，权限从未真正收敛）。
     #[test]
@@ -1756,6 +1855,8 @@ mod tests {
             ssl_files: None,
             force_https: false,
             ssl_tls: None,
+            listen_ipv4: "",
+            listen_ipv6: "",
         })
     }
 
@@ -1868,6 +1969,8 @@ mod tests {
             ssl_files: None,
             force_https: false,
             ssl_tls: None,
+            listen_ipv4: "",
+            listen_ipv6: "",
         });
         assert!(s.contains("root /home/u/www/s-1;"));
         assert!(s.contains("try_files $uri $uri/ =404;"));
@@ -1892,6 +1995,8 @@ mod tests {
             ssl_files: None,
             force_https: false,
             ssl_tls: None,
+            listen_ipv4: "",
+            listen_ipv6: "",
         });
         assert!(
             s.contains("rewrite ^(.*)$ /index.php?s=$1 last;"),
@@ -1914,6 +2019,8 @@ mod tests {
             ssl_files: None,
             force_https: false,
             ssl_tls: None,
+            listen_ipv4: "",
+            listen_ipv6: "",
         });
         assert!(s2.contains("try_files $uri $uri/ /index.php?$query_string;"));
         assert!(
@@ -1971,6 +2078,8 @@ mod tests {
             ssl_files: None,
             force_https: false,
             ssl_tls: None,
+            listen_ipv4: "",
+            listen_ipv6: "",
         });
         assert!(s.contains("upstream backend {"), "应渲染 upstream 块");
         assert!(s.contains("server 127.0.0.1:9001;"));
@@ -2174,6 +2283,8 @@ mod tests {
             ssl_files: Some(("/etc/zap/ssl/fullchain.pem", "/etc/zap/ssl/key.pem")),
             force_https: false,
             ssl_tls: Some(&cfg),
+            listen_ipv4: "",
+            listen_ipv6: "",
         });
         assert!(
             s.contains("listen 443 ssl;"),
@@ -2209,6 +2320,8 @@ mod tests {
             ssl_files: Some(("/a/fullchain.pem", "/a/key.pem")),
             force_https: false,
             ssl_tls: Some(&cfg2),
+            listen_ipv4: "",
+            listen_ipv6: "",
         });
         assert!(
             s2.contains("listen 443 ssl http2;"),

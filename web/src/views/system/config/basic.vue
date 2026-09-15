@@ -20,30 +20,67 @@
           />
           <el-form :model="basic" label-width="150px" style="max-width: 660px" @submit.prevent>
             <el-form-item :label="t('basicCfg.ipv4')">
-              <el-input
+              <el-select
                 v-model="basic.ipv4"
-                :placeholder="t('basicCfg.ipv4Placeholder')"
+                filterable
+                allow-create
                 clearable
-              />
+                default-first-option
+                style="width: 320px"
+                :placeholder="t('basicCfg.ipv4Placeholder')"
+              >
+                <el-option :label="t('basicCfg.useDefault')" value="" />
+                <el-option v-for="ip in net.ipv4All" :key="ip" :label="ip" :value="ip" />
+              </el-select>
+              <div class="field-hint">{{ t('basicCfg.ipv4Hint') }}</div>
             </el-form-item>
             <el-form-item :label="t('basicCfg.ipv6')">
-              <el-input
+              <el-select
                 v-model="basic.ipv6"
-                :placeholder="t('basicCfg.ipv6Placeholder')"
+                filterable
+                allow-create
                 clearable
-              />
+                default-first-option
+                style="width: 320px"
+                :placeholder="t('basicCfg.ipv6Placeholder')"
+              >
+                <el-option :label="t('basicCfg.useDefault')" value="" />
+                <el-option v-for="ip in net.ipv6All" :key="ip" :label="ip" :value="ip" />
+              </el-select>
+              <div class="field-hint">{{ t('basicCfg.ipv6Hint') }}</div>
             </el-form-item>
             <el-form-item :label="t('basicCfg.iface')">
-              <el-input
+              <el-select
                 v-model="basic.iface"
-                :placeholder="t('basicCfg.ifacePlaceholder')"
+                filterable
+                allow-create
                 clearable
-              />
+                default-first-option
+                style="width: 320px"
+                :placeholder="t('basicCfg.ifacePlaceholder')"
+              >
+                <el-option :label="t('basicCfg.useDefault')" value="" />
+                <el-option
+                  v-for="it in net.interfaces"
+                  :key="it.name"
+                  :label="ifaceLabel(it)"
+                  :value="it.name"
+                />
+              </el-select>
+              <div class="field-hint">{{ t('basicCfg.ifaceHint') }}</div>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="savingBasic" @click="saveBasic">
                 {{ t('basicCfg.saveBasic') }}
               </el-button>
+              <el-button
+                :loading="syncingAll"
+                :disabled="savingBasic"
+                @click="saveBasicAndSyncAll"
+              >
+                {{ t('basicCfg.saveAndSyncAll') }}
+              </el-button>
+              <div class="field-hint">{{ t('basicCfg.syncAllHint') }}</div>
             </el-form-item>
           </el-form>
         </el-tab-pane>
@@ -173,7 +210,7 @@
 import { computed, reactive, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { getBasicSettings, saveBasicSettings } from '@/api/systemBasic'
+import { getBasicSettings, saveBasicSettings, syncAllSites } from '@/api/systemBasic'
 
 const { t } = useI18n()
 
@@ -182,6 +219,7 @@ const loading = ref(false)
 const savingBasic = ref(false)
 const savingMail = ref(false)
 const savingContact = ref(false)
+const syncingAll = ref(false)
 
 const basic = reactive({ ipv4: '', ipv6: '', iface: '' })
 const mail = reactive({
@@ -209,6 +247,18 @@ const encryptionOptions = computed(() => [
   { value: 'tls', label: 'STARTTLS (587)' },
   { value: 'none', label: t('basicCfg.encNone') },
 ])
+
+// 系统探测到的网络候选（zapexec 环境探测），用于下拉选择
+const net = reactive<{
+  ipv4All: string[]
+  ipv6All: string[]
+  interfaces: { name: string; mac: string; state: string; ipv4: string[]; ipv6: string[] }[]
+}>({ ipv4All: [], ipv6All: [], interfaces: [] })
+
+function ifaceLabel(it: { name: string; ipv4?: string[] }): string {
+  const addrs = (it.ipv4 ?? []).join(', ')
+  return addrs ? `${it.name} (${addrs})` : it.name
+}
 
 const IPV4_RE = /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/
 
@@ -269,6 +319,28 @@ async function saveBasic() {
   }
 }
 
+/** 保存基础设置并把新的共享地址应用到全部站点（重新同步 vhost） */
+async function saveBasicAndSyncAll() {
+  savingBasic.value = true
+  syncingAll.value = true
+  try {
+    await saveBasicSettings({
+      basic: {
+        ipv4: basic.ipv4.trim(),
+        ipv6: basic.ipv6.trim(),
+        iface: basic.iface.trim(),
+      },
+    })
+    const res = await syncAllSites()
+    ElMessage.success(res.message || t('basicCfg.basicSaved'))
+  } catch {
+    /* handled */
+  } finally {
+    savingBasic.value = false
+    syncingAll.value = false
+  }
+}
+
 async function saveMail() {
   const port = String(mail.port).trim()
   const num = Number(port)
@@ -325,6 +397,12 @@ onMounted(load)
 <style scoped>
 .basic-config {
   padding: 4px;
+}
+.field-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
 }
 .card-header {
   display: flex;

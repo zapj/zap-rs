@@ -522,6 +522,14 @@ pub enum Request {
         /// 是否启用 HTTP/2（nginx ≥ 1.25.1 渲染 `http2 on;`，旧版回退 `listen 443 ssl http2`）
         #[serde(default, skip_serializing_if = "is_false")]
         ssl_http2: bool,
+        /// 共享主机 IPv4：非空时 vhost 监听 `listen {ip}:80` / `listen {ip}:443 ssl`
+        /// （来自面板基础设置的「默认 IPv4」）；空 = 沿用 `listen 80`（通配所有地址）。
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        listen_ipv4: String,
+        /// 共享主机 IPv6：非空时 vhost 监听 `listen [{ip}]:80` / `listen [{ip}]:443 ssl`；
+        /// 空 = 沿用 `listen [::]:80`。
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        listen_ipv6: String,
     },
     /// 列出目录下的子目录（root 特权）：供面板站点「选择已有站点目录」浏览。
     /// 仅返回目录名（不含点目录），路径必须为绝对路径且存在。
@@ -961,6 +969,8 @@ mod tests {
                 ssl_ciphers: String::new(),
                 ssl_prefer_server_ciphers: false,
                 ssl_http2: false,
+                listen_ipv4: String::new(),
+                listen_ipv6: String::new(),
             })
             .unwrap(),
             r#"{"verb":"site.vhost_sync","site_id":1,"name":"blog","domains":["a.com","b.com"],"enabled":true,"php_socket":"unix:/var/run/php-fpm-8.3.sock","site_type":"php","pseudo_static":"none","pseudo_custom":"","web_root_custom":false,"force_https":false}"#
@@ -1011,6 +1021,8 @@ mod tests {
             ssl_ciphers: String::new(),
             ssl_prefer_server_ciphers: false,
             ssl_http2: false,
+            listen_ipv4: String::new(),
+            listen_ipv6: String::new(),
         };
         let json = serde_json::to_string(&req).unwrap();
         assert_eq!(
