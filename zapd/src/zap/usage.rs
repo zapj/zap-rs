@@ -1,13 +1,16 @@
-//! 用户资源用量采集（磁盘 / 带宽）。
+//! 用户资源用量采集（磁盘 / 带宽）与站点流量分析。
 //!
 //! - **磁盘**：定时对 `user.home_dir` 执行 `du -sb`，写回
 //!   `user.disk_used_bytes` / `disk_stat_at`；
 //! - **带宽**：增量解析站点 `access.log`（nginx main / combined 的
 //!   `$body_bytes_sent`），按站点记 `site.traffic_*`，再按归属用户汇总
-//!   写入 `user.bandwidth_used_bytes`（按月，`bandwidth_period` 为 YYYYMM）。
+//!   写入 `user.bandwidth_used_bytes`（按月，`bandwidth_period` 为 YYYYMM）；
+//! - **分析**：同一次解析顺带产出按天流量（`site_traffic_daily`）与
+//!   按天 Top URL（`site_traffic_path`），供站点「流量」页使用。
 //!
 //! 日志路径取 `site.log_root/access.log`（不依赖目录命名）。
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -23,24 +26,98 @@ fn period_now() -> String {
     Local::now().format("%Y%m").to_string()
 }
 
-/// 从 access.log 单行取 `$body_bytes_sent`（nginx main / combined）。
+/// 单日 Top URL 保留条数（超出按 hits 修剪，避免表无限膨胀）
+const TOP_PATH_KEEP: i64 = 200;
+
+/// access.log 单行解析结果（均为行内切片，避免逐行分配）
+struct LineStat<'a> {
+    /// 响应字节数（$body_bytes_sent）
+    bytes: u64,
+    /// 请求日期 YYYYMMDD（解析失败为空串）
+    day: String,
+    /// 请求路径（去掉 query string）
+    path: &'a str,
+}
+
+/// nginx 时间字段 `15/Sep/2026:10:00:00` → `20260915`；解析失败返回空串。
+fn day_of_nginx_time(t: &str) -> String {
+    let date = t.split(':').next().unwrap_or(t);
+    let mut it = date.split('/');
+    let dd = it.next().unwrap_or("");
+    let mon = it.next().unwrap_or("");
+    let yyyy = it.next().unwrap_or("");
+    let mm = match mon {
+        "Jan" => "01",
+        "Feb" => "02",
+        "Mar" => "03",
+        "Apr" => "04",
+        "May" => "05",
+        "Jun" => "06",
+        "Jul" => "07",
+        "Aug" => "08",
+        "Sep" => "09",
+        "Oct" => "10",
+        "Nov" => "11",
+        "Dec" => "12",
+        _ => "",
+    };
+    if mm.is_empty() || dd.len() != 2 || yyyy.len() != 4 {
+        return String::new();
+    }
+    format!("{yyyy}{mm}{dd}")
+}
+
+/// 解析一行：`ip - - [time] "GET /path?x=1 HTTP/1.1" 200 1234 "ref" "ua"`
 ///
-/// 取请求行结束引号后的第二个字段：`<status> <bytes> "<referer>" ...`，
-/// 可容忍 referer / UA 中的空格；`-` 与解析失败按 0 计。
-fn parse_body_bytes(line: &str) -> u64 {
+/// 取请求行内的路径与结束引号后的第二个字段（`$body_bytes_sent`），
+/// 可容忍 referer / UA 中的空格；解析失败按 0 / 空值处理。
+fn parse_line(line: &str) -> LineStat<'_> {
+    let mut stat = LineStat {
+        bytes: 0,
+        day: String::new(),
+        path: "",
+    };
+    // 时间：[15/Sep/2026:10:00:00 +0800]
+    if let (Some(s), Some(e)) = (line.find('['), line.find(']'))
+        && s < e
+    {
+        stat.day = day_of_nginx_time(&line[s + 1..e]);
+    }
     let Some(start) = line.find('"') else {
-        return 0;
+        return stat;
     };
     let rest = &line[start + 1..];
     let Some(end) = rest.find('"') else {
-        return 0;
+        return stat;
     };
+    // 请求行：METHOD path PROTO
+    let req = &rest[..end];
+    let mut ri = req.split_whitespace();
+    let _method = ri.next();
+    if let Some(p) = ri.next() {
+        stat.path = match p.find('?') {
+            Some(i) => &p[..i],
+            None => p,
+        };
+    }
+    // 请求行之后：status bytes "referer" ...
     let mut it = rest[end + 1..].split_whitespace();
     let _status = it.next();
-    match it.next() {
-        Some(v) => v.parse::<u64>().unwrap_or(0),
-        None => 0,
+    if let Some(v) = it.next() {
+        stat.bytes = v.parse::<u64>().unwrap_or(0);
     }
+    stat
+}
+
+/// 一次日志解析的聚合结果
+#[derive(Default)]
+struct LogAgg {
+    /// 总响应字节数
+    bytes: u64,
+    /// day -> (bytes, requests)
+    days: HashMap<String, (u64, u64)>,
+    /// (day, path) -> (hits, bytes)
+    paths: HashMap<(String, String), (u64, u64)>,
 }
 
 /// 目录字节数：`du -sb` 优先，不支持 `-b` 时回退 `du -sk` × 1024
@@ -93,11 +170,11 @@ pub async fn collect_disk_usage() {
     }
 }
 
-/// 从 `offset` 起累加日志中的响应字节数（同步 IO，调用方包 spawn_blocking）
-fn sum_bytes(path: &Path, offset: u64) -> std::io::Result<u64> {
+/// 从 `offset` 起聚合日志（同步 IO，调用方包 spawn_blocking）
+fn aggregate(path: &Path, offset: u64) -> std::io::Result<LogAgg> {
     let mut f = std::fs::File::open(path)?;
     f.seek(SeekFrom::Start(offset))?;
-    let mut total = 0u64;
+    let mut agg = LogAgg::default();
     let mut reader = BufReader::new(f);
     let mut line = String::new();
     loop {
@@ -106,9 +183,26 @@ fn sum_bytes(path: &Path, offset: u64) -> std::io::Result<u64> {
         if n == 0 {
             break;
         }
-        total = total.saturating_add(parse_body_bytes(line.trim_end()));
+        let stat = parse_line(line.trim_end());
+        if stat.day.is_empty() {
+            // 时间解析失败的行只累计总字节，不进入按天/Top URL 统计
+            agg.bytes = agg.bytes.saturating_add(stat.bytes);
+            continue;
+        }
+        agg.bytes = agg.bytes.saturating_add(stat.bytes);
+        let e = agg.days.entry(stat.day.clone()).or_insert((0, 0));
+        e.0 = e.0.saturating_add(stat.bytes);
+        e.1 += 1;
+        if !stat.path.is_empty() {
+            let e = agg
+                .paths
+                .entry((stat.day.clone(), stat.path.to_string()))
+                .or_insert((0, 0));
+            e.0 += 1;
+            e.1 = e.1.saturating_add(stat.bytes);
+        }
     }
-    Ok(total)
+    Ok(agg)
 }
 
 /// 采集站点流量并汇总到用户（本月出站字节数）
@@ -143,14 +237,15 @@ pub async fn collect_bandwidth() {
         }
 
         let p = path.clone();
-        let delta = match tokio::task::spawn_blocking(move || sum_bytes(&p, start)).await {
+        let agg = match tokio::task::spawn_blocking(move || aggregate(&p, start)).await {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => {
                 warn!("流量日志解析失败: site={} err={}", id, e);
-                0
+                continue;
             }
-            Err(_) => 0,
+            Err(_) => continue,
         };
+        let delta = agg.bytes;
         if delta == 0 {
             debug!("站点 {} 本轮无新增流量", id);
         }
@@ -173,6 +268,52 @@ pub async fn collect_bandwidth() {
         .bind(id)
         .execute(pool)
         .await;
+
+        // 按天汇总 + 按天 Top URL（增量累加）
+        for (day, (bytes, reqs)) in &agg.days {
+            let _ = sqlx::query(
+                "INSERT INTO site_traffic_daily (site_id, day, bytes, requests) VALUES (?, ?, ?, ?) \
+                 ON CONFLICT(site_id, day) DO UPDATE SET \
+                   bytes = bytes + excluded.bytes, requests = requests + excluded.requests",
+            )
+            .bind(id)
+            .bind(day)
+            .bind(*bytes as i64)
+            .bind(*reqs as i64)
+            .execute(pool)
+            .await;
+        }
+        let mut touched_days: Vec<String> = agg.paths.keys().map(|(d, _)| d.clone()).collect();
+        touched_days.sort();
+        touched_days.dedup();
+        for ((day, p), (hits, bytes)) in &agg.paths {
+            let _ = sqlx::query(
+                "INSERT INTO site_traffic_path (site_id, day, path, hits, bytes) VALUES (?, ?, ?, ?, ?) \
+                 ON CONFLICT(site_id, day, path) DO UPDATE SET \
+                   hits = hits + excluded.hits, bytes = bytes + excluded.bytes",
+            )
+            .bind(id)
+            .bind(day)
+            .bind(p)
+            .bind(*hits as i64)
+            .bind(*bytes as i64)
+            .execute(pool)
+            .await;
+        }
+        for day in touched_days {
+            let _ = sqlx::query(
+                "DELETE FROM site_traffic_path WHERE site_id = ? AND day = ? AND path NOT IN ( \
+                   SELECT path FROM site_traffic_path WHERE site_id = ? AND day = ? \
+                   ORDER BY hits DESC, bytes DESC LIMIT ?)",
+            )
+            .bind(id)
+            .bind(&day)
+            .bind(id)
+            .bind(&day)
+            .bind(TOP_PATH_KEEP)
+            .execute(pool)
+            .await;
+        }
     }
 
     // 按归属用户汇总本月流量（无站点的用户归零）
@@ -200,16 +341,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_body_bytes() {
-        let line = r#"1.2.3.4 - - [15/Sep/2026:10:00:00 +0800] "GET / HTTP/1.1" 200 1234 "http://ref" "Mozilla/5.0 (X11)""#;
-        assert_eq!(parse_body_bytes(line), 1234);
+    fn parses_line_fields() {
+        let line = r#"1.2.3.4 - - [15/Sep/2026:10:00:00 +0800] "GET /a/b?x=1 HTTP/1.1" 200 1234 "http://ref" "Mozilla/5.0 (X11)""#;
+        let s = parse_line(line);
+        assert_eq!(s.bytes, 1234);
+        assert_eq!(s.day, "20260915");
+        assert_eq!(s.path, "/a/b");
 
-        // referer / UA 含空格不影响取值
-        let line2 = r#"1.2.3.4 - alice [15/Sep/2026:10:00:00 +0800] "POST /a?b=c HTTP/1.0" 404 56 "-" "curl 8.0 x""#;
-        assert_eq!(parse_body_bytes(line2), 56);
+        // referer / UA 含空格、POST + 404
+        let line2 = r#"1.2.3.4 - alice [01/Jan/2026:00:00:00 +0800] "POST /p HTTP/1.0" 404 56 "-" "curl 8.0 x""#;
+        let s2 = parse_line(line2);
+        assert_eq!(s2.bytes, 56);
+        assert_eq!(s2.day, "20260101");
+        assert_eq!(s2.path, "/p");
 
-        // 无字节位（dash）与异常行
-        assert_eq!(parse_body_bytes(r#"- - - [x] "GET / HTTP/1.1" 200 -"#), 0);
-        assert_eq!(parse_body_bytes("garbage"), 0);
+        // 异常行
+        let s3 = parse_line("garbage");
+        assert_eq!(s3.bytes, 0);
+        assert!(s3.day.is_empty());
+    }
+
+    #[test]
+    fn nginx_time_to_day() {
+        assert_eq!(day_of_nginx_time("15/Sep/2026:10:00:00"), "20260915");
+        assert_eq!(day_of_nginx_time("9/Feb/2025:1:2:3"), "");
+        assert_eq!(day_of_nginx_time("bad"), "");
     }
 }

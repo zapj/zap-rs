@@ -273,6 +273,13 @@ pub async fn add_jobs(sched: &JobScheduler) {
     })
     .expect("invalid cron: usage collect");
     let _ = sched.add(usage).await;
+
+    // 每日 00:05：站点日志轮转（按天切割 + gzip 归档 + 清理超期 + nginx reopen）
+    let rotate = Job::new_async("0 5 0 * * *", |_uuid, _lock| {
+        Box::pin(crate::zap::logrotate::rotate_all())
+    })
+    .expect("invalid cron: log rotate");
+    let _ = sched.add(rotate).await;
 }
 
 pub async fn stop_system_job() {

@@ -6,6 +6,16 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+/// 日志归档默认保留天数（site.log_rotate）
+fn default_keep_days() -> u32 {
+    30
+}
+
+/// 日志读取默认行数（site.log_read）
+fn default_log_lines() -> usize {
+    200
+}
+
 /// 反代 upstream 定义：vhost 渲染为 nginx `upstream <name> { ... }` 块。
 /// server 行一律以 `servers_ext` 表单字段维护（开发期不兼容旧版文本 servers）。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -535,6 +545,49 @@ pub enum Request {
     /// 仅返回目录名（不含点目录），路径必须为绝对路径且存在。
     #[serde(rename = "fs.browse_dirs")]
     FsBrowseDirs { base: String },
+    /// 站点 nginx 日志轮转（root）：按天把 access.log / error.log 切割为
+    /// `{kind}.log-YYYYMMDD` 并 gzip 归档，清理超期归档，最后通知 nginx 重新打开日志。
+    #[serde(rename = "site.log_rotate")]
+    SiteLogRotate {
+        /// 待轮转的站点日志目录（面板规划 `{home}/logs/{site_id}-{name}`）
+        log_roots: Vec<String>,
+        /// 归档保留天数（超过即删除）
+        #[serde(default = "default_keep_days")]
+        keep_days: u32,
+    },
+    /// 站点日志归档列表（`access.log-YYYYMMDD.gz` / `error.log-YYYYMMDD.gz`）
+    #[serde(rename = "site.log_list")]
+    SiteLogList { log_root: String },
+    /// 读取站点日志（当前日志或归档）尾部行，支持关键词 / 状态码过滤
+    #[serde(rename = "site.log_read")]
+    SiteLogRead {
+        /// 站点日志目录
+        log_root: String,
+        /// access | error（空 = access）
+        #[serde(default)]
+        kind: String,
+        /// 归档文件名（空 = 当前日志）
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        archive: String,
+        /// 返回的最大行数（从文件尾部取）
+        #[serde(default = "default_log_lines")]
+        lines: usize,
+        /// 关键词过滤（空 = 不过滤）
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        keyword: String,
+        /// access.log 状态码过滤（如 `404`；空 = 不过滤）
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        status: String,
+    },
+    /// 清空站点当前日志（truncate）并通知 nginx 重新打开
+    #[serde(rename = "site.log_clear")]
+    SiteLogClear {
+        /// 站点日志目录
+        log_root: String,
+        /// access | error；空 = 两者都清空
+        #[serde(default)]
+        kind: String,
+    },
     /// 防火墙状态：探测后端（firewalld / ufw / nftables / iptables）并返回规则列表
     #[serde(rename = "firewall.status")]
     FirewallStatus {

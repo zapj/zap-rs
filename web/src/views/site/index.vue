@@ -9,6 +9,8 @@ import { getInstalledApps } from '@/api/appstore'
 import { getCertList } from '@/api/ssl'
 import type { SslCertItem } from '@/api/ssl'
 import { useI18n } from 'vue-i18n'
+import SiteLogsDrawer from './SiteLogsDrawer.vue'
+import SiteTrafficDrawer from './SiteTrafficDrawer.vue'
 
 interface SiteItem {
   id: number
@@ -1113,6 +1115,21 @@ async function syncSite(id: number): Promise<boolean> {
   }
 }
 
+// ── 站点日志 / 流量分析抽屉 ────────────────────────────────
+const logsVisible = ref(false)
+const trafficVisible = ref(false)
+const currentSite = ref<SiteItem | null>(null)
+
+function openLogs(row: SiteItem) {
+  currentSite.value = row
+  logsVisible.value = true
+}
+
+function openTraffic(row: SiteItem) {
+  currentSite.value = row
+  trafficVisible.value = true
+}
+
 // ── 三态启停：running / stopped / maintenance（一次调用完成落库 + vhost 同步）──
 async function setRunState(row: SiteItem, state: 'running' | 'stopped' | 'maintenance') {
   stateLoadingId.value = row.id
@@ -1477,7 +1494,7 @@ onMounted(() => {
         <el-table-column :label="t('site.colCreatedAt')" min-width="150">
           <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.operation')" width="160" fixed="right">
+        <el-table-column :label="t('common.operation')" width="240" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -1487,6 +1504,10 @@ onMounted(() => {
               @click="syncSite(row.id)"
               >{{ isSyncFailed(row) ? t('site.retry') : t('site.sync') }}</el-button
             >
+            <el-button link type="primary" @click="openLogs(row)">{{ t('site.logs') }}</el-button>
+            <el-button link type="primary" @click="openTraffic(row)">{{
+              t('site.traffic')
+            }}</el-button>
             <el-button link type="primary" :icon="Edit" @click="openEdit(row)">{{
               t('common.edit')
             }}</el-button>
@@ -1497,6 +1518,18 @@ onMounted(() => {
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 站点日志 / 流量分析 -->
+    <SiteLogsDrawer
+      v-model="logsVisible"
+      :site-id="currentSite?.id || 0"
+      :site-name="currentSite?.name || ''"
+    />
+    <SiteTrafficDrawer
+      v-model="trafficVisible"
+      :site-id="currentSite?.id || 0"
+      :site-name="currentSite?.name || ''"
+    />
 
     <!-- 添加 / 编辑站点弹窗 -->
     <el-dialog

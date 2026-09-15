@@ -611,6 +611,12 @@ fn api_routers() -> Router {
         // 站点启停 / 维护三态切换（running / stopped / maintenance）
         .route("/site/state", post(site::site_state))
         .route("/site/sync_all", post(site::site_sync_all))
+        // 站点日志（查看 / 归档 / 清空 / 轮转）与流量分析
+        .route("/site/logs", get(site::site_logs))
+        .route("/site/logs/archives", get(site::site_logs_archives))
+        .route("/site/logs/clear", post(site::site_logs_clear))
+        .route("/site/logs/rotate", post(site::site_logs_rotate))
+        .route("/site/traffic", get(site::site_traffic))
         // SSL/TLS：证书管理（手动导入 / 自签名 / Let's Encrypt）
         .route("/ssl/cert/list", get(ssl::cert_list))
         .route("/ssl/cert/detail", get(ssl::cert_detail))

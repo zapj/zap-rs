@@ -15,6 +15,7 @@ pub mod fastcgi;
 pub mod global;
 pub mod job;
 pub mod jwt;
+pub mod logrotate;
 pub mod notify;
 pub mod script_cron;
 pub mod server_env;

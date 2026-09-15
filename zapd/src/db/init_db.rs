@@ -803,6 +803,26 @@ async fn init_site_table() {
     );
     CREATE INDEX idx_site_user_id ON site(user_id);
 
+    -- 站点按天流量（解析 access.log 增量累加，供站点流量分析曲线使用）
+    CREATE TABLE IF NOT EXISTS site_traffic_daily (
+        site_id INTEGER NOT NULL,
+        day TEXT NOT NULL,              -- YYYYMMDD
+        bytes INTEGER NOT NULL DEFAULT 0,
+        requests INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site_id, day)
+    );
+
+    -- 站点按天 Top URL（每天每站点最多保留 TOP_PATH_KEEP 条，其余按 hits 修剪）
+    CREATE TABLE IF NOT EXISTS site_traffic_path (
+        site_id INTEGER NOT NULL,
+        day TEXT NOT NULL,              -- YYYYMMDD
+        path TEXT NOT NULL,
+        hits INTEGER NOT NULL DEFAULT 0,
+        bytes INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site_id, day, path)
+    );
+    CREATE INDEX idx_traffic_path_day ON site_traffic_path(site_id, day);
+
     CREATE TABLE site_domain (
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         site_id INTEGER NOT NULL DEFAULT 0,

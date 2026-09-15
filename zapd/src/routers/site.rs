@@ -578,7 +578,10 @@ pub async fn migrate_log_roots() {
     }
 
     if !changed.is_empty() {
-        info!("日志目录命名迁移完成，重同步 {} 个站点 vhost", changed.len());
+        info!(
+            "日志目录命名迁移完成，重同步 {} 个站点 vhost",
+            changed.len()
+        );
         for id in changed {
             let _ = sync_one_site(id).await;
         }
@@ -2723,6 +2726,249 @@ pub async fn site_sync_all(
 /// PHP 实例 → 版本后缀：php8.3 → 8.3，php74 → 74
 fn php_version_suffix(php_instance: &str) -> String {
     php_instance.trim_start_matches("php").to_string()
+}
+
+// ── 站点日志 / 流量分析 ──────────────────────────────────────
+// 日志读写一律经 zapexec（日志文件归 www:www，面板进程未必有权限直读）。
+
+/// 取站点日志目录（面板规划 {home}/logs/{site_id}-{name}）
+async fn log_root_of(site_id: i64) -> Result<String, ZapError> {
+    let pool = db::get_db_pool().await;
+    let row: Option<(String,)> = sqlx::query_as("SELECT log_root FROM site WHERE id = ?")
+        .bind(site_id)
+        .fetch_optional(pool)
+        .await?;
+    match row {
+        Some((root,)) if !root.trim().is_empty() => Ok(root),
+        _ => Err(ZapError::New(-1, "该站点尚未配置日志目录".to_string())),
+    }
+}
+
+fn default_log_lines() -> usize {
+    200
+}
+
+fn default_traffic_days() -> u32 {
+    30
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SiteLogsQuery {
+    pub id: i64,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub archive: String,
+    #[serde(default = "default_log_lines")]
+    pub lines: usize,
+    #[serde(default)]
+    pub keyword: String,
+    #[serde(default)]
+    pub status: String,
+}
+
+/// GET /api/site/logs：站点日志尾部行（当前日志或归档，支持关键词 / 状态码过滤）
+pub async fn site_logs(claims: ValidatedClaims, Query(q): Query<SiteLogsQuery>) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    site_in_scope(&claims, q.id).await?;
+    let log_root = log_root_of(q.id).await?;
+    let resp = crate::zapexec::call(Request::SiteLogRead {
+        log_root,
+        kind: q.kind,
+        archive: q.archive,
+        lines: q.lines,
+        keyword: q.keyword,
+        status: q.status,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": resp.data.unwrap_or_default(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SiteLogsArchivesQuery {
+    pub id: i64,
+}
+
+/// GET /api/site/logs/archives：当前日志与历史归档列表（供查看 / 下载历史）
+pub async fn site_logs_archives(
+    claims: ValidatedClaims,
+    Query(q): Query<SiteLogsArchivesQuery>,
+) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    site_in_scope(&claims, q.id).await?;
+    let log_root = log_root_of(q.id).await?;
+    let resp = crate::zapexec::call(Request::SiteLogList { log_root }).await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": resp.data.unwrap_or_default(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SiteLogsClearPayload {
+    pub id: i64,
+    /// access | error；空 = 两者都清空
+    #[serde(default)]
+    pub kind: String,
+}
+
+/// POST /api/site/logs/clear：清空站点当前日志
+pub async fn site_logs_clear(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<SiteLogsClearPayload>,
+) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    site_in_scope(&claims, payload.id).await?;
+    let log_root = log_root_of(payload.id).await?;
+    let resp = crate::zapexec::call(Request::SiteLogClear {
+        log_root,
+        kind: payload.kind.clone(),
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    let kind = if payload.kind.trim().is_empty() {
+        "all".to_string()
+    } else {
+        payload.kind
+    };
+    let _ = audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "site_logs_clear",
+        &format!("id={}", payload.id),
+        &format!("kind={}", kind),
+    )
+    .await;
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": resp.data.unwrap_or_default(),
+    })))
+}
+
+/// POST /api/site/logs/rotate：手动轮转该站点日志（按天切割 + 归档）
+pub async fn site_logs_rotate(
+    claims: ValidatedClaims,
+    Extension(client_addr): Extension<SocketAddr>,
+    Json(payload): Json<SiteLogsClearPayload>,
+) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    site_in_scope(&claims, payload.id).await?;
+    let log_root = log_root_of(payload.id).await?;
+    // 切割前先把当前日志增量统计完，避免归档部分漏计
+    crate::zap::usage::collect_bandwidth().await;
+    let resp = crate::zapexec::call(Request::SiteLogRotate {
+        log_roots: vec![log_root],
+        keep_days: crate::zap::logrotate::KEEP_DAYS,
+    })
+    .await?;
+    if resp.code != 0 {
+        return Err(ZapError::New(resp.code, resp.message));
+    }
+    let _ = audit::log(
+        Some(&claims),
+        Some(client_addr.ip().to_string().as_str()),
+        "site_logs_rotate",
+        &format!("id={}", payload.id),
+        "manual",
+    )
+    .await;
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": resp.data.unwrap_or_default(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SiteTrafficQuery {
+    pub id: i64,
+    #[serde(default = "default_traffic_days")]
+    pub days: u32,
+}
+
+/// GET /api/site/traffic：站点流量分析（按天曲线 + Top URL + 汇总）
+pub async fn site_traffic(
+    claims: ValidatedClaims,
+    Query(q): Query<SiteTrafficQuery>,
+) -> ZapJsonResult {
+    require_manageable(&claims)?;
+    site_in_scope(&claims, q.id).await?;
+    let pool = db::get_db_pool().await;
+    let days = if q.days == 0 { 30 } else { q.days.min(365) };
+    let today = chrono::Local::now().format("%Y%m%d").to_string();
+    let since = (chrono::Local::now() - chrono::Duration::days(days as i64 - 1))
+        .format("%Y%m%d")
+        .to_string();
+
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT day, bytes, requests FROM site_traffic_daily \
+         WHERE site_id = ? AND day >= ? ORDER BY day",
+    )
+    .bind(q.id)
+    .bind(&since)
+    .fetch_all(pool)
+    .await?;
+    let map: std::collections::HashMap<String, (i64, i64)> =
+        rows.into_iter().map(|(d, b, r)| (d, (b, r))).collect();
+
+    // 补齐连续日期（无流量的日子补 0，前端曲线才不会出现断档）
+    let mut daily: Vec<serde_json::Value> = Vec::new();
+    for i in 0..days {
+        let d = (chrono::Local::now() - chrono::Duration::days(days as i64 - 1 - i as i64))
+            .format("%Y%m%d")
+            .to_string();
+        let (b, r) = map.get(&d).copied().unwrap_or((0, 0));
+        daily.push(json!({ "day": d, "bytes": b, "requests": r }));
+    }
+
+    let top: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT path, SUM(hits), SUM(bytes) FROM site_traffic_path \
+         WHERE site_id = ? AND day >= ? GROUP BY path ORDER BY SUM(hits) DESC, SUM(bytes) DESC LIMIT 20",
+    )
+    .bind(q.id)
+    .bind(&since)
+    .fetch_all(pool)
+    .await?;
+    let top: Vec<serde_json::Value> = top
+        .into_iter()
+        .map(|(p, h, b)| json!({ "path": p, "hits": h, "bytes": b }))
+        .collect();
+
+    let summary: Option<(i64, i64, String)> = sqlx::query_as(
+        "SELECT traffic_month_bytes, traffic_total_bytes, traffic_month FROM site WHERE id = ?",
+    )
+    .bind(q.id)
+    .fetch_optional(pool)
+    .await?;
+    let (month_bytes, total_bytes, month) = summary.unwrap_or((0, 0, String::new()));
+
+    Ok(Json(json!({
+        "code": 0,
+        "message": "OK",
+        "data": {
+            "daily": daily,
+            "top": top,
+            "today_bytes": map.get(&today).map(|v| v.0).unwrap_or(0),
+            "month_bytes": month_bytes,
+            "month": month,
+            "total_bytes": total_bytes,
+        },
+    })))
 }
 
 #[cfg(test)]

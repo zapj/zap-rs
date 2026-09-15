@@ -5,6 +5,7 @@ mod env;
 mod file;
 mod firewall;
 mod fs;
+mod logs;
 mod network;
 mod nginx;
 mod php;
@@ -289,6 +290,20 @@ pub async fn dispatch(req: Request) -> Response {
         }
         Request::SiteVhostRemove { site_id, name } => site::vhost_remove(site_id, name).await,
         Request::FsBrowseDirs { base } => fs::browse_dirs(base).await,
+        Request::SiteLogRotate {
+            log_roots,
+            keep_days,
+        } => logs::rotate(log_roots, keep_days).await,
+        Request::SiteLogList { log_root } => logs::list(log_root).await,
+        Request::SiteLogRead {
+            log_root,
+            kind,
+            archive,
+            lines,
+            keyword,
+            status,
+        } => logs::read(log_root, kind, archive, lines, keyword, status).await,
+        Request::SiteLogClear { log_root, kind } => logs::clear(log_root, kind).await,
         Request::FirewallStatus { panel_port } => firewall::status(panel_port).await,
         Request::FirewallRuleAdd {
             port,

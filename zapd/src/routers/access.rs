@@ -161,6 +161,32 @@ const RULES: &[(&str, Required, Option<Perm>)] = &[
         Required::Reseller,
         Some(Perm::action("site", "sync")),
     ),
+    // ── 站点日志与流量分析 ────────────────────────────────
+    (
+        "/site/logs",
+        Required::User,
+        Some(Perm::action("site", "view")),
+    ),
+    (
+        "/site/logs/archives",
+        Required::User,
+        Some(Perm::action("site", "view")),
+    ),
+    (
+        "/site/logs/clear",
+        Required::User,
+        Some(Perm::action("site", "update")),
+    ),
+    (
+        "/site/logs/rotate",
+        Required::User,
+        Some(Perm::action("site", "update")),
+    ),
+    (
+        "/site/traffic",
+        Required::User,
+        Some(Perm::action("site", "view")),
+    ),
     // ── SSL 证书：view / create / update / delete ────────────
     (
         "/ssl/cert/list",
