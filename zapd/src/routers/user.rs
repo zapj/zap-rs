@@ -678,7 +678,10 @@ pub async fn user_update(
             return Err(ZapError::New(-1, "内置管理员的角色不可变更".to_string()));
         }
         if claims.id as i64 != ROOT_ADMIN_ID {
-            return Err(ZapError::New(-1, "内置管理员账号只能由本人修改".to_string()));
+            return Err(ZapError::New(
+                -1,
+                "内置管理员账号只能由本人修改".to_string(),
+            ));
         }
     }
     // 非管理员不能修改角色（防止提权，admin 除外）
