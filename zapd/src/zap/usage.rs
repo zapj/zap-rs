@@ -220,6 +220,41 @@ fn aggregate(path: &Path, offset: u64) -> std::io::Result<LogAgg> {
     Ok(agg)
 }
 
+/// 采集站点磁盘占用（web_root + log_root，与用户家目录同口径）
+pub async fn collect_site_disk() {
+    let pool = get_db_pool().await;
+    let rows: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT id, web_root, log_root FROM site")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    let now = Local::now().timestamp();
+
+    for (id, web_root, log_root) in rows {
+        let mut total: u64 = 0;
+        let mut sampled = false;
+        for dir in [&web_root, &log_root] {
+            if dir.trim().is_empty() {
+                continue;
+            }
+            if let Some(v) = du_bytes(dir).await {
+                total = total.saturating_add(v);
+                sampled = true;
+            }
+        }
+        // 两个目录都不存在 / 采集失败时保留上次结果，避免把有效值覆盖成 0
+        if !sampled {
+            continue;
+        }
+        let _ = sqlx::query("UPDATE site SET disk_used_bytes = ?, disk_stat_at = ? WHERE id = ?")
+            .bind(total as i64)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await;
+    }
+}
+
 /// 采集站点流量并汇总到用户（本月出站字节数）
 pub async fn collect_bandwidth() {
     let pool = get_db_pool().await;
@@ -349,6 +384,7 @@ pub async fn collect_bandwidth() {
 /// 一次跑完磁盘 + 带宽（供定时任务调用）
 pub async fn collect_all() {
     collect_disk_usage().await;
+    collect_site_disk().await;
     collect_bandwidth().await;
 }
 

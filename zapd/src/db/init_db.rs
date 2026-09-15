@@ -4,9 +4,10 @@ use super::get_db_pool;
 
 /// 建表与种子数据入口。
 ///
-/// **约定（开发阶段）**：数据库通过 `--reset-db` 重建，因此这里**不做任何老库兼容迁移**
-/// —— 没有 `ALTER TABLE ... ADD COLUMN` 兜底、没有数据搬运、没有版本水位表。
-/// 改字段请直接改对应的 `CREATE TABLE`，然后重置数据库。
+/// **约定（开发阶段）**：表结构改动以 `CREATE TABLE` 为准，全新数据库直接按此建表；
+/// 对**已存在**的库，新增列通过 `migrate_add_columns()` 幂等 `ALTER TABLE ... ADD COLUMN`
+/// 补齐（只加列，不做数据搬运 / 改类型 / 版本水位表），所以加列后**不必** `--reset-db`；
+/// 删列、改类型、改约束仍需重建数据库。
 pub async fn init_schema() {
     init_system_user_table_schema().await;
     init_system_monitor_table_schema().await;
@@ -38,6 +39,50 @@ pub async fn init_schema() {
     init_api_token_table().await;
     // SSL/TLS 证书管理表
     init_ssl_cert_table().await;
+    // 老库补列：新增列自动 ALTER 到已有表，避免每次加列都必须重建数据库
+    migrate_add_columns().await;
+}
+
+/// 幂等补列：列已存在则跳过，否则 `ALTER TABLE ... ADD COLUMN`。
+async fn ensure_column(table: &str, column: &str, decl: &str) {
+    if !table_exists(table).await {
+        return;
+    }
+    let pool = get_db_pool().await;
+    let exists: bool =
+        sqlx::query_scalar("SELECT COUNT(*) > 0 FROM pragma_table_info(?) WHERE name = ?")
+            .bind(table)
+            .bind(column)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(false);
+    if exists {
+        return;
+    }
+    let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {decl}");
+    if let Err(e) = sqlx::query(&sql).execute(pool).await {
+        eprintln!("补列失败 {table}.{column}: {e}");
+    }
+}
+
+/// 历史库新增列清单：CREATE TABLE 里加列后，同步登记到这里即可自动迁移。
+async fn migrate_add_columns() {
+    // user：磁盘用量（du 家目录）+ 本月带宽（access.log 汇总）
+    ensure_column("user", "disk_used_bytes", "INTEGER NOT NULL DEFAULT 0").await;
+    ensure_column("user", "disk_stat_at", "INTEGER NOT NULL DEFAULT 0").await;
+    ensure_column("user", "bandwidth_used_bytes", "INTEGER NOT NULL DEFAULT 0").await;
+    ensure_column("user", "bandwidth_period", "TEXT NOT NULL DEFAULT ''").await;
+    ensure_column("user", "bandwidth_stat_at", "INTEGER NOT NULL DEFAULT 0").await;
+    // site：access.log 增量解析游标 + 流量计数
+    ensure_column("site", "traffic_offset", "INTEGER NOT NULL DEFAULT 0").await;
+    ensure_column("site", "traffic_inode", "TEXT NOT NULL DEFAULT ''").await;
+    ensure_column("site", "traffic_total_bytes", "INTEGER NOT NULL DEFAULT 0").await;
+    ensure_column("site", "traffic_month_bytes", "INTEGER NOT NULL DEFAULT 0").await;
+    ensure_column("site", "traffic_month", "TEXT NOT NULL DEFAULT ''").await;
+    ensure_column("site", "traffic_stat_at", "INTEGER NOT NULL DEFAULT 0").await;
+    // site：磁盘占用（web_root + log_root）
+    ensure_column("site", "disk_used_bytes", "INTEGER NOT NULL DEFAULT 0").await;
+    ensure_column("site", "disk_stat_at", "INTEGER NOT NULL DEFAULT 0").await;
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -798,6 +843,9 @@ async fn init_site_table() {
         traffic_month_bytes INTEGER NOT NULL DEFAULT 0,
         traffic_month TEXT NOT NULL DEFAULT '',
         traffic_stat_at INTEGER NOT NULL DEFAULT 0,
+        -- 站点磁盘占用（字节）：web_root + log_root 的 du 结果（0 = 尚未采集）
+        disk_used_bytes INTEGER NOT NULL DEFAULT 0,
+        disk_stat_at INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER,
         updated_at INTEGER
     );

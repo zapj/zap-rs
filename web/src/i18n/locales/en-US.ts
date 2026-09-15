@@ -483,8 +483,7 @@ const enUS: Messages = {
     useDefault: 'Default (unspecified)',
     ipv4: 'Default IPv4 Address',
     ipv4Placeholder: 'Pick or type an IPv4 (empty = unspecified)',
-    ipv4Hint:
-      'When set, new / re-synced sites bind this shared address (listen IP:80 / IP:443).',
+    ipv4Hint: 'When set, new / re-synced sites bind this shared address (listen IP:80 / IP:443).',
     ipv6: 'Default IPv6 Address',
     ipv6Placeholder: 'Pick or type an IPv6 (empty = unspecified)',
     ipv6Hint: 'When set, sites bind listen [IPv6]:80 / [IPv6]:443.',
@@ -727,7 +726,8 @@ const enUS: Messages = {
 
   /** Documents menu (Changelog / User Manual / FAQ / Upgrade Guide) */
   docs: {
-    intro: 'Documentation and release notes for the panel. Sources live in data/www/html/ on the server and are rendered to HTML by the backend.',
+    intro:
+      'Documentation and release notes for the panel. Sources live in data/www/html/ on the server and are rendered to HTML by the backend.',
     changelog: 'Changelog',
     manual: 'User Manual',
     faq: 'FAQ',
@@ -3055,6 +3055,9 @@ const enUS: Messages = {
     colPhpChannel: 'PHP Runtime Channel',
     colOwner: 'Owner',
     colRoot: 'Site Directory',
+    colDisk: 'Disk Usage',
+    diskTip: 'Document root + log dir, measured at {time}',
+    diskUnknown: 'Not measured',
     colDeploy: 'Deploy',
     colStatus: 'Status',
     colRemark: 'Remark',
@@ -3139,7 +3142,8 @@ const enUS: Messages = {
       'No running PHP instance: install and start a PHP version under App Store → Installed Apps first',
     formPseudo: 'Pseudo-static',
     pseudoCustomAdminOnly: 'Custom rules are available to administrators only',
-    pseudoCustomPlaceholder: 'e.g. location / \\{ try_files $uri $uri/ /index.php?s=$uri&$args; \\}',
+    pseudoCustomPlaceholder:
+      'e.g. location / \\{ try_files $uri $uri/ /index.php?s=$uri&$args; \\}',
     certStaleTitle: 'The certificate bound to this site is invalid',
     formCert: 'SSL Certificate',
     certPlaceholder: 'Select a certificate from SSL/TLS → Certificates (selecting enables HTTPS)',

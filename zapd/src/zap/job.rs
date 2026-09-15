@@ -239,7 +239,7 @@ pub async fn init_system_jobs() {
     sched_map.insert("zap".to_string(), sched);
 }
 
-/// 用户资源用量采集（磁盘 du + 站点流量日志解析）
+/// 资源用量采集（用户磁盘 du + 站点磁盘 du + 站点流量日志解析）
 async fn usage_scheduled_task() {
     crate::zap::usage::collect_all().await;
 }

@@ -1340,6 +1340,9 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
     let mut ve_map: HashMap<i64, String> = HashMap::new();
     let mut vt_map: HashMap<i64, i64> = HashMap::new();
     let mut dir_map: HashMap<i64, (String, String)> = HashMap::new();
+    // 站点磁盘占用（字节，定时任务 du web_root + log_root；0 = 尚未采集）
+    let mut disk_map: HashMap<i64, i64> = HashMap::new();
+    let mut disk_stat_map: HashMap<i64, i64> = HashMap::new();
     // 站点扩展档案（类型 / 伪静态 / 自定义目录 / upstream / location）
     let mut pf_map: HashMap<i64, ProfileRow> = HashMap::new();
     // 归属用户的 Linux 系统账号（system 模式下 PHP pool 按此账号隔离）
@@ -1384,17 +1387,20 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
             ve_map.insert(sid, err);
             vt_map.insert(sid, ts);
         }
-        // 站点文档根 / 日志目录（独立 map，不进入主行 tuple）
+        // 站点文档根 / 日志目录 / 磁盘占用（独立 map，不进入主行 tuple）
         let dirsql = format!(
-            "SELECT id, web_root, log_root FROM site WHERE id IN ({}) ORDER BY id",
+            "SELECT id, web_root, log_root, disk_used_bytes, disk_stat_at \
+             FROM site WHERE id IN ({}) ORDER BY id",
             ph
         );
-        let mut dirq = sqlx::query_as::<_, (i64, String, String)>(&dirsql);
+        let mut dirq = sqlx::query_as::<_, (i64, String, String, i64, i64)>(&dirsql);
         for id in &ids {
             dirq = dirq.bind(id);
         }
-        for (sid, w, l) in dirq.fetch_all(pool).await? {
+        for (sid, w, l, disk, ds_at) in dirq.fetch_all(pool).await? {
             dir_map.insert(sid, (w, l));
+            disk_map.insert(sid, disk);
+            disk_stat_map.insert(sid, ds_at);
         }
         // 站点扩展档案（类型 / 伪静态 / 自定义目录 / upstream / location / SSL 绑定 / TLS 高级）
         let psql2 = format!(
@@ -1543,6 +1549,8 @@ pub async fn site_list(claims: ValidatedClaims, Query(q): Query<SiteListQuery>) 
                 "vhost_synced_at": vt_map.get(&r.0).copied().unwrap_or(0),
                 "web_root": dir_map.get(&r.0).map(|d| d.0.clone()).unwrap_or_default(),
                 "log_root": dir_map.get(&r.0).map(|d| d.1.clone()).unwrap_or_default(),
+                "disk_used_bytes": disk_map.get(&r.0).copied().unwrap_or(0),
+                "disk_stat_at": disk_stat_map.get(&r.0).copied().unwrap_or(0),
                 "site_type": pf_map.get(&r.0).map(|p| p.0.clone()).unwrap_or_else(|| "php".into()),
                 "pseudo_static": pf_map.get(&r.0).map(|p| p.1.clone()).unwrap_or_else(|| "none".into()),
                 "pseudo_custom": pf_map.get(&r.0).map(|p| p.2.clone()).unwrap_or_default(),

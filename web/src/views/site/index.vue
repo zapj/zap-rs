@@ -8,6 +8,7 @@ import type { InstalledApp } from '@/api/appstore'
 import { getInstalledApps } from '@/api/appstore'
 import { getCertList } from '@/api/ssl'
 import type { SslCertItem } from '@/api/ssl'
+import { formatBytes } from '@/utils/fmt'
 import { useI18n } from 'vue-i18n'
 import SiteLogsDrawer from './SiteLogsDrawer.vue'
 import SiteTrafficDrawer from './SiteTrafficDrawer.vue'
@@ -31,6 +32,10 @@ interface SiteItem {
   vhost_synced_at: number
   web_root: string
   log_root: string
+  /** 站点磁盘占用（字节，web_root + log_root；0 = 尚未采集） */
+  disk_used_bytes?: number
+  /** 磁盘占用采集时间戳（0 = 未采集） */
+  disk_stat_at?: number
   created_at: number
   updated_at: number
   // ── 站点扩展档案（site_profile）──
@@ -1430,6 +1435,18 @@ onMounted(() => {
               <span class="dim">{{ row.web_root }}</span>
             </el-tooltip>
             <span v-else class="dim">{{ t('site.defaultRoot') }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('site.colDisk')" width="130" align="right">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.disk_used_bytes"
+              :content="t('site.diskTip', { time: fmtTime(row.disk_stat_at) })"
+              placement="top"
+            >
+              <span>{{ formatBytes(row.disk_used_bytes) }}</span>
+            </el-tooltip>
+            <span v-else class="dim">{{ t('site.diskUnknown') }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('site.colDeploy')" width="140">

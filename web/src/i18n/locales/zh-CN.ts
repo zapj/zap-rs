@@ -320,7 +320,8 @@ export default {
     fpmGlobalTemplate: '{name}（全局）',
     fpmInheritOption: '继承 {owner} 名下默认规格',
     fpmCustomOption: '自定义 JSON（高级）',
-    fpmCustomPlaceholder: '覆盖面板默认的 JSON，如 \\{"max_children": 16, "memory_limit": "512M"\\}',
+    fpmCustomPlaceholder:
+      '覆盖面板默认的 JSON，如 \\{"max_children": 16, "memory_limit": "512M"\\}',
     fpmKeepTip: '保留该用户原自定义规格（{json}）。如需修改请改选模板或自定义。',
     fpmTipInherit:
       '选用「{owner}」名下默认规格：优先 {owner}_default 模板，其次名下最新模板；若名下没有模板则回退面板默认。',
@@ -743,7 +744,8 @@ export default {
 
   /** 文档菜单（CHANGELOG / 用户手册 / FAQ / 升级指南） */
   docs: {
-    intro: '面板使用文档与版本说明。文档源文件位于服务器 data/www/html/ 下，由后端渲染为 HTML 后展示。',
+    intro:
+      '面板使用文档与版本说明。文档源文件位于服务器 data/www/html/ 下，由后端渲染为 HTML 后展示。',
     changelog: '更新日志',
     manual: '用户手册',
     faq: '常见问题',
@@ -2997,6 +2999,9 @@ export default {
     colPhpChannel: 'PHP 运行通道',
     colOwner: '归属用户',
     colRoot: '站点目录',
+    colDisk: '磁盘占用',
+    diskTip: '文档根 + 日志目录，统计于 {time}',
+    diskUnknown: '未采集',
     colDeploy: '部署',
     colStatus: '状态',
     colRemark: '备注',
@@ -3078,7 +3083,8 @@ export default {
     phpNoneTip: '没有运行中的 PHP 实例：请先在「应用商店 → 已安装应用」中安装并启动 PHP 版本',
     formPseudo: '伪静态',
     pseudoCustomAdminOnly: '自定义规则仅管理员可用',
-    pseudoCustomPlaceholder: '例如：location / \\{ try_files $uri $uri/ /index.php?s=$uri&$args; \\}',
+    pseudoCustomPlaceholder:
+      '例如：location / \\{ try_files $uri $uri/ /index.php?s=$uri&$args; \\}',
     certStaleTitle: '站点绑定的证书已失效',
     formCert: 'SSL 证书',
     certPlaceholder: '从「SSL/TLS → 证书管理」中选择证书（选择后启用 HTTPS）',
