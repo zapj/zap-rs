@@ -7,7 +7,25 @@
 
 use tracing::warn;
 
-pub use zap_crypto::{decrypt, encrypt};
+pub use zap_crypto::{decrypt, encrypt, is_encrypted};
+
+/// 掩码展示：长值保留头尾各 2 位（`ab****yz`），短值一律 `******`。
+///
+/// 用于「已保存密钥/密码」的回显提示：只给足够辨识度，不泄露完整值，
+/// 短值连长度也不暴露（`******`）。
+pub fn mask_secret(plain: &str) -> String {
+    let chars: Vec<char> = plain.chars().collect();
+    if chars.len() <= 8 {
+        return if chars.is_empty() {
+            String::new()
+        } else {
+            "******".to_string()
+        };
+    }
+    let head: String = chars[..2].iter().collect();
+    let tail: String = chars[chars.len() - 2..].iter().collect();
+    format!("{head}****{tail}")
+}
 
 /// 密码加密入口（加密失败时返回原文并告警，避免服务不可用）。
 pub fn encrypt_password(pwd: &str) -> String {
@@ -70,6 +88,24 @@ mod tests {
         let enc = encrypt("hello").unwrap();
         let tampered = format!("{}X", enc);
         assert!(decrypt(&tampered).is_err());
+    }
+
+    #[test]
+    fn mask_secret_hides_value() {
+        assert_eq!(mask_secret(""), "");
+        // 短值不暴露长度
+        assert_eq!(mask_secret("abc"), "******");
+        assert_eq!(mask_secret("12345678"), "******");
+        // 长值只留头尾各 2 位
+        assert_eq!(mask_secret("MyP@ssw0rd123"), "My****23");
+    }
+
+    #[test]
+    fn is_encrypted_detects_ciphertext() {
+        let enc = encrypt_password("secret");
+        assert!(is_encrypted(&enc));
+        assert!(!is_encrypted("plain-password"));
+        assert!(!is_encrypted(""));
     }
 
     #[test]

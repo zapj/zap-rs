@@ -97,7 +97,7 @@
                 v-model="mail.password"
                 type="password"
                 show-password
-                :placeholder="t('basicCfg.passwordPlaceholder')"
+                :placeholder="mailPasswordPlaceholder"
               />
             </el-form-item>
             <el-form-item>
@@ -194,6 +194,15 @@ const mail = reactive({
 })
 const contact = reactive({ name: '', email: '', qq: '', wechat: '', phone: '', remark: '' })
 
+// 已保存的密码只回显掩码提示（后端返回 password_hint），留空提交即表示不修改
+const mailPasswordSet = ref(false)
+const mailPasswordHint = ref('')
+const mailPasswordPlaceholder = computed(() =>
+  mailPasswordSet.value
+    ? t('basicCfg.passwordKeepHint', { hint: mailPasswordHint.value || t('basicCfg.saved') })
+    : t('basicCfg.passwordPlaceholder'),
+)
+
 // 协议名保持英文，只有「无加密」需要本地化
 const encryptionOptions = computed(() => [
   { value: 'ssl', label: 'SSL / TLS (465)' },
@@ -222,7 +231,9 @@ async function load() {
     mail.encryption = d.mail.encryption || 'tls'
     mail.from = d.mail.from ?? ''
     mail.username = d.mail.username ?? ''
-    mail.password = '' // 密码不回显
+    mail.password = '' // 密码不回显（后端仅返回是否已设置 + 掩码）
+    mailPasswordSet.value = d.mail.password_set === true
+    mailPasswordHint.value = d.mail.password_hint ?? '' 
     contact.name = d.contact.name ?? ''
     contact.email = d.contact.email ?? ''
     contact.qq = d.contact.qq ?? ''
@@ -279,6 +290,7 @@ async function saveMail() {
     })
     mail.password = ''
     ElMessage.success(t('basicCfg.mailSaved'))
+    await load() // 重新拉取，刷新已保存密码的掩码提示
   } catch {
     /* handled */
   } finally {

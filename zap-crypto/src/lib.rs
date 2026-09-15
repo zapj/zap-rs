@@ -116,6 +116,13 @@ pub fn encrypt(plaintext: &str) -> Result<String, String> {
     Ok(format!("{PREFIX}{}:{}", B64.encode(nonce), B64.encode(ct)))
 }
 
+/// 是否为当前格式的密文（`v1:` 前缀）。
+///
+/// 非密文即历史明文数据，[`decrypt`] 会原样返回，调用侧可据此做一次性迁移。
+pub fn is_encrypted(encrypted: &str) -> bool {
+    encrypted.starts_with(PREFIX)
+}
+
 /// 解密；非 `v1:` 前缀视为历史明文原样返回。
 pub fn decrypt(encrypted: &str) -> Result<String, String> {
     if encrypted.is_empty() {

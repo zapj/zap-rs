@@ -7,6 +7,10 @@
 //! - GET  /system/config/basic   读取基础 / Mail / 联系信息
 //! - POST /system/config/basic   保存（支持按 Tab 部分提交，未传字段保持不变；
 //!   Mail 密码留空表示不改动原密码）
+//!
+//! **Mail 密码**为敏感项：库中只存 [`crate::zap::crypto`] 的 `v1:` 密文，
+//! 读取时仅返回「是否已设置 + 掩码提示」（历史明文值在首次读取时就地加密回写）。
+//! 后续发信逻辑取用时应走 `crypto::decrypt_password()`。
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -18,6 +22,7 @@ use serde_json::json;
 use crate::zap::ZapError;
 use crate::zap::ZapJsonResult;
 use crate::zap::audit;
+use crate::zap::crypto;
 use crate::zap::jwt::ValidatedClaims;
 use crate::zap::jwt::is_admin;
 use crate::zap::server_env;
@@ -55,6 +60,29 @@ fn get(conf: &HashMap<String, String>, key: &str) -> String {
     conf.get(key).cloned().unwrap_or_default()
 }
 
+/// Mail 密码：读取密文并给出「是否已设置 + 掩码提示」。
+///
+/// 密码本身永不回显；历史上明文保存的值在这里顺手加密回写一次（一次性迁移）。
+fn mail_password_view(conf: &HashMap<String, String>) -> (bool, String) {
+    let stored = get(conf, K_MAIL_PASSWORD);
+    if stored.is_empty() {
+        return (false, String::new());
+    }
+    if !crypto::is_encrypted(&stored) {
+        // 历史明文：就地升级为密文
+        server_env::conf_set(
+            K_MAIL_PASSWORD,
+            &crypto::encrypt_password(&stored),
+            "面板基础设置",
+        );
+    }
+    let plain = crypto::decrypt_password(&stored);
+    if plain.is_empty() {
+        return (false, String::new());
+    }
+    (true, crypto::mask_secret(&plain))
+}
+
 // ── handlers ────────────────────────────────────────────────
 
 /// GET /system/config/basic
@@ -63,6 +91,7 @@ pub async fn basic_get(claims: ValidatedClaims) -> ZapJsonResult {
         return Err(ZapError::New(-1, "仅管理员可查看基础设置".to_string()));
     }
     let conf = load_conf();
+    let (mail_password_set, mail_password_hint) = mail_password_view(&conf);
     Ok(Json(json!({
         "code": 0,
         "message": "OK",
@@ -78,8 +107,10 @@ pub async fn basic_get(claims: ValidatedClaims) -> ZapJsonResult {
                 "encryption": get(&conf, K_MAIL_ENCRYPTION),
                 "from": get(&conf, K_MAIL_FROM),
                 "username": get(&conf, K_MAIL_USERNAME),
-                // 密码仅写入不回显，避免泄露
+                // 密码仅写入不回显（库中为密文），只给「是否已设置」与掩码提示
                 "password": "",
+                "password_set": mail_password_set,
+                "password_hint": mail_password_hint,
             },
             "contact": {
                 "name": get(&conf, K_CONTACT_NAME),
@@ -184,7 +215,14 @@ pub async fn basic_save(
         if let Some(p) = &m.password {
             let p = p.trim().to_string();
             if !p.is_empty() {
-                upserts.push((K_MAIL_PASSWORD.to_string(), p));
+                if p.len() > 256 {
+                    return Err(ZapError::New(
+                        -1,
+                        "「mail.password」长度超限（最大 256 字符）".to_string(),
+                    ));
+                }
+                // 敏感项：密文入库（{data}/server_env.yaml 只存 v1: 密文）
+                upserts.push((K_MAIL_PASSWORD.to_string(), crypto::encrypt_password(&p)));
             }
         }
     }

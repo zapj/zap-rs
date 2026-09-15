@@ -529,6 +529,8 @@ export default {
     accountPlaceholder: 'SMTP 登录账号',
     password: '密码',
     passwordPlaceholder: '留空=不修改原密码',
+    passwordKeepHint: '留空=沿用已保存的密码（{hint}）',
+    saved: '已保存',
     saveMail: '保存 Mail 设置',
 
     contactHint: '面板对外展示的服务商 / 客服联系方式。',

@@ -1,6 +1,6 @@
 {
   "name": "zap-admin-vue3",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A Vue 3 admin template with Element Plus, Pinia, and Vite.",
   "build-date": "",
   "author": "Zap Team <z@zap.cn>",
@@ -13,10 +13,10 @@
     "vite",
     "admin-template"
   ],
-  "homepage": "https://zap.dev",
+  "homepage": "https://zap.sh",
   "repository": {
     "type": "git",
-    "url": "https://github.com/zapj/zap-admin-vue3.git"
+    "url": "https://github.com/zapsh/zap-admin-vue3.git"
   },
   "private": true,
   "type": "module",

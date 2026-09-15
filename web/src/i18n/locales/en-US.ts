@@ -498,6 +498,8 @@ const enUS: Messages = {
     accountPlaceholder: 'SMTP login account',
     password: 'Password',
     passwordPlaceholder: 'Empty = keep current password',
+    passwordKeepHint: 'Leave empty to keep the saved password ({hint})',
+    saved: 'saved',
     saveMail: 'Save Mail Settings',
 
     contactHint: 'Provider / support contact details displayed by the panel.',

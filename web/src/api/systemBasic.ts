@@ -12,7 +12,12 @@ export interface MailPaneData {
   encryption: string
   from: string
   username: string
+  /** 密码不回显，恒为空串 */
   password: string
+  /** 是否已保存过密码 */
+  password_set?: boolean
+  /** 已保存密码的掩码提示，如 ab****yz */
+  password_hint?: string
 }
 
 export interface ContactPaneData {

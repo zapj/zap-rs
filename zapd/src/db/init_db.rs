@@ -1,5 +1,4 @@
 use sqlx::Executor;
-use tracing::{info, warn};
 
 use super::get_db_pool;
 
