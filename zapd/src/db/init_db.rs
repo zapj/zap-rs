@@ -41,13 +41,6 @@ pub async fn init_schema() {
     init_api_token_table().await;
     // SSL/TLS 证书管理表
     init_ssl_cert_table().await;
-    // 系统更新：自动更新配置已迁出数据库，现为 {data}/update_config.yaml。
-    // 旧库遗留的 update_config 表直接删除，不做数据迁移。
-    drop_legacy_update_config_table().await;
-    // 菜单（menus/role_menus）与角色权限（role_permissions）为静态基础数据：
-    // SSL/TLS、应用商店（含已安装应用）、服务器状态、脚本/自动化（自定义脚本+计划任务）、
-    // 系统设置（含审计日志、Zap 设置、系统更新）、服务器配置、开发 —— 一次 seed 到位，
-    // 不做运行时补插；重置数据库后回到初始状态。
 }
 
 // ── user ───────────────────────────────────────────────────
@@ -944,19 +937,6 @@ async fn init_notice_message_table() {
 }
 
 // ── helper ─────────────────────────────────────────────────
-
-/// 系统更新配置（单行表）：自动更新开关 / cron / 渠道 / 最近检查信息。
-/// 自动更新配置已改为 `{data}/update_config.yaml`（启动时加载 + 即时写回），
-/// 旧库里的 `update_config` 表不再使用，直接丢弃（不迁移数据）。
-async fn drop_legacy_update_config_table() {
-    if !table_exists("update_config").await {
-        return;
-    }
-    match get_db_pool().await.execute("DROP TABLE update_config").await {
-        Ok(_) => info!("已删除遗留表 update_config（自动更新配置改用 update_config.yaml）"),
-        Err(e) => warn!("删除遗留表 update_config 失败: {e}"),
-    }
-}
 
 async fn table_exists(table_name: &str) -> bool {
     let pool = get_db_pool().await;
