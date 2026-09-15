@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { Delete, Edit, FolderOpened, Loading, Plus, Refresh, Search } from '@/icons'
+import { Delete, Edit, FolderOpened, Icon, Loading, Plus, Refresh, Search } from '@/icons'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/user'
@@ -423,6 +424,27 @@ const channelMap = computed<Record<number, ChannelInfo | null>>(() => {
   return m
 })
 const channelOf = (row: SiteItem): ChannelInfo | null => channelMap.value[row.id] ?? null
+/** PHP-FPM pool 名与 socket 均以 Linux 账号命名（见 zap-proto PhpPoolSync） */
+const phpPoolName = (row: SiteItem) => row.linux_user || ''
+
+// ── 行展开：当前展开行高亮；快捷入口跳转到文件/数据库/定时任务 ──
+const router = useRouter()
+const expandedIds = ref<Set<number>>(new Set())
+function onExpandChange(_row: SiteItem, rows: SiteItem[]) {
+  expandedIds.value = new Set(rows.map((r) => r.id))
+}
+function rowClassName({ row }: { row: SiteItem }) {
+  return expandedIds.value.has(row.id) ? 'row-expanded' : ''
+}
+function goFiles() {
+  router.push('/files/index')
+}
+function goDatabase() {
+  router.push('/database/index')
+}
+function goCron() {
+  router.push('/crontab/index')
+}
 
 // ── 站点能力（当前操作者可用反代与否，依角色与套餐而定；自定义目录已全量开放）──
 const siteFeature = ref<SiteFeature | null>(null)
@@ -1275,13 +1297,43 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 表格：简洁风格（无竖线边框、无斑马纹），行 hover 高亮 -->
-      <el-table v-loading="loading" :data="filtered" @selection-change="handleSelectionChange">
+      <!-- 表格：Plesk 风格（细边框 + 展开行整行高亮，无斑马纹） -->
+      <el-table
+        v-loading="loading"
+        :data="filtered"
+        border
+        :row-class-name="rowClassName"
+        @expand-change="onExpandChange"
+        @selection-change="handleSelectionChange"
+      >
         <el-table-column type="selection" width="46" />
         <!-- 行展开：站点详情与快捷功能（域名 / IP / PHP / SSL / 目录 / 部署状态等收进这里） -->
         <el-table-column type="expand" width="36">
           <template #default="{ row }">
             <div class="site-detail">
+              <!-- 快捷入口：文件 / 数据库 / 日志 / 定时任务（类 Plesk 概览卡片） -->
+              <div class="quick-links">
+                <button class="quick-item" type="button" @click="goFiles">
+                  <el-icon class="quick-icon"><Icon icon="material-symbols:folder" /></el-icon>
+                  <span class="quick-text">{{ t('menu.files') }}</span>
+                </button>
+                <button class="quick-item" type="button" @click="goDatabase">
+                  <el-icon class="quick-icon"><Icon icon="material-symbols:database" /></el-icon>
+                  <span class="quick-text">{{ t('menu.database') }}</span>
+                </button>
+                <button class="quick-item" type="button" @click="openLogs(row)">
+                  <el-icon class="quick-icon"><Icon icon="material-symbols:description" /></el-icon>
+                  <span class="quick-text">{{ t('site.logs') }}</span>
+                </button>
+                <button class="quick-item" type="button" @click="openTraffic(row)">
+                  <el-icon class="quick-icon"><Icon icon="material-symbols:analytics" /></el-icon>
+                  <span class="quick-text">{{ t('site.traffic') }}</span>
+                </button>
+                <button class="quick-item" type="button" @click="goCron">
+                  <el-icon class="quick-icon"><Icon icon="material-symbols:schedule" /></el-icon>
+                  <span class="quick-text">{{ t('menu.crontab-index') }}</span>
+                </button>
+              </div>
               <!-- 信息网格：简洁卡片风（无表格边框），手机端自动单列 -->
               <div class="detail-grid">
                 <div class="info-item">
@@ -1319,9 +1371,12 @@ onMounted(() => {
                     </template>
                   </div>
                 </div>
-                <div class="info-item">
+                <div v-if="row.site_type === 'php'" class="info-item">
                   <span class="info-label">{{ t('site.colPhpVersion') }}</span>
-                  <div class="info-value">
+                  <div class="info-value php-cell">
+                    <el-icon class="php-icon"
+                      ><Icon icon="material-symbols:deployed-code"
+                    /></el-icon>
                     <template v-if="row.php_instance">
                       <el-tag
                         v-if="phpRunningSet.has(row.php_instance)"
@@ -1348,6 +1403,10 @@ onMounted(() => {
                       </el-tooltip>
                     </template>
                     <span v-else class="dim">-</span>
+                  </div>
+                  <div class="info-value php-pool">
+                    <span class="dim">{{ t('site.colPhpChannel') }}：</span>
+                    <code>{{ phpPoolName(row) || '-' }}</code>
                   </div>
                 </div>
                 <div class="info-item">
@@ -1434,12 +1493,6 @@ onMounted(() => {
               <!-- 底栏：快捷操作（链接风格，类 Plesk footer） -->
               <div class="detail-footer">
                 <div class="detail-actions">
-                  <el-button link type="primary" @click="openLogs(row)">{{
-                    t('site.logs')
-                  }}</el-button>
-                  <el-button link type="primary" @click="openTraffic(row)">{{
-                    t('site.traffic')
-                  }}</el-button>
                   <el-button
                     link
                     type="primary"
@@ -1541,26 +1594,35 @@ onMounted(() => {
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.operation')" width="240" fixed="right">
+        <!-- 操作：纯图标按钮（类 Plesk 行内图标），悬停显示文字说明 -->
+        <el-table-column :label="t('common.operation')" width="120" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button
-              link
-              type="primary"
-              :loading="syncingId === row.id"
-              :disabled="syncingId !== 0 && syncingId !== row.id"
-              @click="syncSite(row.id)"
-              >{{ isSyncFailed(row) ? t('site.retry') : t('site.sync') }}</el-button
+            <el-tooltip
+              :content="isSyncFailed(row) ? t('site.retry') : t('site.sync')"
+              placement="top"
             >
-            <el-button link type="primary" @click="openLogs(row)">{{ t('site.logs') }}</el-button>
-            <el-button link type="primary" @click="openTraffic(row)">{{
-              t('site.traffic')
-            }}</el-button>
-            <el-button link type="primary" :icon="Edit" @click="openEdit(row)">{{
-              t('common.edit')
-            }}</el-button>
-            <el-button link type="danger" :icon="Delete" @click="removeRows([row])">{{
-              t('common.delete')
-            }}</el-button>
+              <el-button
+                link
+                type="primary"
+                class="icon-btn"
+                :icon="Refresh"
+                :loading="syncingId === row.id"
+                :disabled="syncingId !== 0 && syncingId !== row.id"
+                @click="syncSite(row.id)"
+              />
+            </el-tooltip>
+            <el-tooltip :content="t('common.edit')" placement="top">
+              <el-button link type="primary" class="icon-btn" :icon="Edit" @click="openEdit(row)" />
+            </el-tooltip>
+            <el-tooltip :content="t('common.delete')" placement="top">
+              <el-button
+                link
+                type="danger"
+                class="icon-btn"
+                :icon="Delete"
+                @click="removeRows([row])"
+              />
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
@@ -2571,16 +2633,72 @@ onMounted(() => {
   overflow-y: auto;
   padding-top: 4px;
 }
-/* 行展开详情面板：简洁信息网格（无表格边框，类 Plesk 概览页） */
+/* 行展开详情面板：白底 + 外边框卡片（类 Plesk 概览页） */
 .site-detail {
-  padding: 6px 12px 10px 48px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  padding: 10px 14px 12px 14px;
+  margin: 4px 0;
 }
-/* 展开行整行淡色底，突出当前查看的站点 */
+/* 当前展开的行：整行高亮（与 hover/选中同色系） */
+:deep(.el-table__row.row-expanded) > .el-table__cell {
+  background: var(--el-color-primary-light-9);
+}
+/* 展开内容单元格本身保持底色，由内部卡片承载内容 */
 :deep(.el-table__expanded-cell) {
-  background: var(--el-color-primary-light-9) !important;
+  background: transparent;
+  padding: 0 8px !important;
 }
-:deep(.el-table__expanded-cell:hover) {
-  background: var(--el-color-primary-light-9) !important;
+/* 行内图标按钮：只有图标，靠 tooltip 说明 */
+.icon-btn {
+  padding: 2px 4px;
+  height: auto;
+  font-size: 16px;
+}
+/* 快捷入口卡片 */
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.quick-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-blank);
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background-color 0.15s;
+}
+.quick-item:hover {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
+}
+.quick-icon {
+  font-size: 18px;
+}
+.php-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.php-icon {
+  font-size: 18px;
+  color: var(--el-color-primary);
+}
+.php-pool {
+  margin-top: 2px;
+  font-size: 12px;
 }
 .detail-grid {
   display: grid;
