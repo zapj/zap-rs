@@ -109,6 +109,21 @@ fn parse_line(line: &str) -> LineStat<'_> {
     stat
 }
 
+/// 站点流量采集游标（字段顺序与下方 SELECT 一一对应）
+#[derive(sqlx::FromRow)]
+struct SiteTrafficRow {
+    id: i64,
+    log_root: String,
+    /// 已解析到的字节偏移
+    traffic_offset: i64,
+    /// 上次解析时的 inode（变化 = 日志被轮转 / 重建）
+    traffic_inode: String,
+    /// 月计数所属周期 YYYYMM
+    traffic_month: String,
+    traffic_month_bytes: i64,
+    traffic_total_bytes: i64,
+}
+
 /// 一次日志解析的聚合结果
 #[derive(Default)]
 struct LogAgg {
@@ -209,8 +224,8 @@ fn aggregate(path: &Path, offset: u64) -> std::io::Result<LogAgg> {
 pub async fn collect_bandwidth() {
     let pool = get_db_pool().await;
     let period = period_now();
-    let rows: Vec<(i64, i64, String, i64, String, String, i64, i64)> = sqlx::query_as(
-        "SELECT id, user_id, log_root, traffic_offset, traffic_inode, traffic_month, \
+    let rows: Vec<SiteTrafficRow> = sqlx::query_as(
+        "SELECT id, log_root, traffic_offset, traffic_inode, traffic_month, \
                 traffic_month_bytes, traffic_total_bytes \
          FROM site WHERE log_root <> ''",
     )
@@ -219,18 +234,19 @@ pub async fn collect_bandwidth() {
     .unwrap_or_default();
     let now = Local::now().timestamp();
 
-    for (id, _user_id, log_root, offset, inode, month, month_bytes, total) in rows {
-        let path: PathBuf = Path::new(&log_root).join("access.log");
+    for row in rows {
+        let id = row.id;
+        let path: PathBuf = Path::new(&row.log_root).join("access.log");
         let Ok(meta) = std::fs::metadata(&path) else {
             continue;
         };
         let cur_inode = meta.ino().to_string();
         let size = meta.len();
         // 日志轮转 / 重建：inode 变化或文件变小 → 从头重新统计
-        let start = if cur_inode != inode || size < offset as u64 {
+        let start = if cur_inode != row.traffic_inode || size < row.traffic_offset as u64 {
             0
         } else {
-            offset as u64
+            row.traffic_offset as u64
         };
         if size <= start {
             continue;
@@ -250,8 +266,8 @@ pub async fn collect_bandwidth() {
             debug!("站点 {} 本轮无新增流量", id);
         }
 
-        let new_month_bytes = if month == period {
-            month_bytes.saturating_add(delta as i64)
+        let new_month_bytes = if row.traffic_month == period {
+            row.traffic_month_bytes.saturating_add(delta as i64)
         } else {
             delta as i64
         };
@@ -261,7 +277,7 @@ pub async fn collect_bandwidth() {
         )
         .bind(size as i64)
         .bind(&cur_inode)
-        .bind(total.saturating_add(delta as i64))
+        .bind(row.traffic_total_bytes.saturating_add(delta as i64))
         .bind(new_month_bytes)
         .bind(&period)
         .bind(now)
