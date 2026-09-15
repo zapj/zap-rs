@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { Delete, Edit, FolderOpened, Icon, Loading, Plus, Refresh, Search } from '@/icons'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
+import {
+  ArrowRight,
+  Delete,
+  Edit,
+  FolderOpened,
+  Icon,
+  Loading,
+  Plus,
+  Refresh,
+  Search,
+} from '@/icons'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElCheckbox, ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import type { InstalledApp } from '@/api/appstore'
@@ -432,6 +442,22 @@ const router = useRouter()
 const expandedIds = ref<Set<number>>(new Set())
 function onExpandChange(_row: SiteItem, rows: SiteItem[]) {
   expandedIds.value = new Set(rows.map((r) => r.id))
+}
+
+// 单击整行展开/收起详情：展开箭头列与勾选列交给自身处理，操作列（右侧固定）不触发
+const tableRef = ref<{ toggleRowExpansion: (row: SiteItem, expanded?: boolean) => void }>()
+function onRowClick(row: SiteItem, column?: { type?: string; fixed?: string | boolean }) {
+  if (column?.type === 'expand' || column?.type === 'selection') return
+  if (column?.fixed === 'right' || column?.fixed === true) return
+  tableRef.value?.toggleRowExpansion(row)
+}
+
+function isExpanded(row: SiteItem) {
+  return expandedIds.value.has(row.id)
+}
+// 站点名列里的折叠按钮 / 整行点击共用
+function toggleExpand(row: SiteItem) {
+  tableRef.value?.toggleRowExpansion(row)
 }
 function rowClassName({ row }: { row: SiteItem }) {
   return expandedIds.value.has(row.id) ? 'row-expanded' : ''
@@ -1192,12 +1218,45 @@ async function removeRows(rows: SiteItem[]) {
     ElMessage.warning(t('site.selectSiteFirst'))
     return
   }
+  // 确认框：列出站点名 + 绑定域名，并给出「同时删除网站数据与日志」选项
+  const removeData = ref(false)
+  const shown = rows.slice(0, 6)
   try {
     await ElMessageBox.confirm(
-      t('site.confirmDeleteN', { n: rows.length }),
+      h('div', { class: 'delete-confirm' }, [
+        h('div', { class: 'dc-title' }, t('site.confirmDeleteN', { n: rows.length })),
+        h(
+          'div',
+          { class: 'dc-list' },
+          shown.map((r) =>
+            h('div', { class: 'dc-item' }, [
+              h('span', { class: 'dc-name' }, r.name || r.domains[0] || `#${r.id}`),
+              h('span', { class: 'dc-domains' }, r.domains.length ? r.domains.join(', ') : '-'),
+            ]),
+          ),
+        ),
+        rows.length > shown.length
+          ? h('div', { class: 'dc-more' }, t('site.deleteMore', { n: rows.length - shown.length }))
+          : null,
+        h(
+          'div',
+          { class: 'dc-check' },
+          h(
+            ElCheckbox,
+            {
+              modelValue: removeData.value,
+              'onUpdate:modelValue': (v: unknown) => (removeData.value = v === true),
+            },
+            { default: () => t('site.deleteDataOpt') },
+          ),
+        ),
+        h('div', { class: 'dc-tip' }, t('site.deleteDataTip')),
+      ]),
       t('site.confirmDeleteTitle'),
       {
         type: 'warning',
+        // 勾选删除数据属于高危操作：确认按钮保持 danger，但不做二次输入验证
+        confirmButtonClass: 'el-button--danger',
       },
     )
   } catch {
@@ -1205,6 +1264,7 @@ async function removeRows(rows: SiteItem[]) {
   }
   const res = await http.post<{ code: number; message: string }>('/site/delete', {
     ids: rows.map((r) => r.id),
+    remove_data: removeData.value,
   })
   ElMessage.success(res.message)
   load()
@@ -1297,18 +1357,20 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 表格：Plesk 风格（细边框 + 展开行整行高亮，无斑马纹） -->
       <el-table
+        ref="tableRef"
         v-loading="loading"
         :data="filtered"
         border
         :row-class-name="rowClassName"
+        @row-click="onRowClick"
         @expand-change="onExpandChange"
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="46" />
-        <!-- 行展开：站点详情与快捷功能（域名 / IP / PHP / SSL / 目录 / 部署状态等收进这里） -->
-        <el-table-column type="expand" width="36">
+        <!-- 行展开：站点详情与快捷功能（域名 / IP / PHP / SSL / 目录 / 部署状态等收进这里）。
+             本列只承载展开内容，自带箭头由 CSS 隐藏，改用站点名列里的折叠按钮控制 -->
+        <el-table-column type="expand" width="1">
           <template #default="{ row }">
             <div class="site-detail">
               <!-- 快捷入口：文件 / 数据库 / 日志 / 定时任务（类 Plesk 概览卡片） -->
@@ -1490,7 +1552,7 @@ onMounted(() => {
                   <div class="info-value">{{ row.remark || '-' }}</div>
                 </div>
               </div>
-              <!-- 底栏：快捷操作（链接风格，类 Plesk footer） -->
+              <!-- 底栏：快捷操作 -->
               <div class="detail-footer">
                 <div class="detail-actions">
                   <el-button
@@ -1521,6 +1583,15 @@ onMounted(() => {
         >
           <template #default="{ row }">
             <div class="name-cell">
+              <!-- 折叠/展开按钮合并进站点名列（展开列本身已隐藏） -->
+              <span
+                class="expander"
+                :class="{ 'is-open': isExpanded(row) }"
+                :title="isExpanded(row) ? t('common.collapse') : t('common.expand')"
+                @click.stop="toggleExpand(row)"
+              >
+                <el-icon><ArrowRight /></el-icon>
+              </span>
               <span class="site-name">{{ row.name || '-' }}</span>
               <el-tooltip
                 :content="
@@ -1565,7 +1636,7 @@ onMounted(() => {
                 :type="runStateTagType(row)"
                 effect="plain"
                 class="status-toggle"
-                @click="toggleStatus(row)"
+                @click.stop="toggleStatus(row)"
               >
                 {{ runStateText(row) }}
               </el-tag>
@@ -1594,8 +1665,8 @@ onMounted(() => {
             </el-tooltip>
           </template>
         </el-table-column>
-        <!-- 操作：纯图标按钮（类 Plesk 行内图标），悬停显示文字说明 -->
-        <el-table-column :label="t('common.operation')" width="120" fixed="right" align="center">
+        <!-- 操作：纯图标按钮，悬停显示文字说明 -->
+        <el-table-column :label="t('common.operation')" width="150" fixed="right" align="center">
           <template #default="{ row }">
             <el-tooltip
               :content="isSyncFailed(row) ? t('site.retry') : t('site.sync')"
@@ -1608,11 +1679,17 @@ onMounted(() => {
                 :icon="Refresh"
                 :loading="syncingId === row.id"
                 :disabled="syncingId !== 0 && syncingId !== row.id"
-                @click="syncSite(row.id)"
+                @click.stop="syncSite(row.id)"
               />
             </el-tooltip>
             <el-tooltip :content="t('common.edit')" placement="top">
-              <el-button link type="primary" class="icon-btn" :icon="Edit" @click="openEdit(row)" />
+              <el-button
+                link
+                type="primary"
+                class="icon-btn"
+                :icon="Edit"
+                @click.stop="openEdit(row)"
+              />
             </el-tooltip>
             <el-tooltip :content="t('common.delete')" placement="top">
               <el-button
@@ -1620,7 +1697,7 @@ onMounted(() => {
                 type="danger"
                 class="icon-btn"
                 :icon="Delete"
-                @click="removeRows([row])"
+                @click.stop="removeRows([row])"
               />
             </el-tooltip>
           </template>
@@ -2512,6 +2589,29 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
 }
+/* 合并进站点名列的折叠/展开按钮：展开时箭头旋转 90° */
+.name-cell .expander {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition:
+    transform 0.2s,
+    color 0.2s,
+    background 0.2s;
+}
+.name-cell .expander:hover {
+  color: var(--el-color-primary);
+  background: var(--el-fill-color);
+}
+.name-cell .expander.is-open {
+  transform: rotate(90deg);
+}
 .dir-picker {
   display: flex;
   width: 100%;
@@ -2633,13 +2733,26 @@ onMounted(() => {
   overflow-y: auto;
   padding-top: 4px;
 }
-/* 行展开详情面板：白底 + 外边框卡片（类 Plesk 概览页） */
+/* 行展开详情面板：白底 + 外边框卡片 */
 .site-detail {
   background: var(--el-bg-color-overlay);
-  border: 1px solid var(--el-border-color);
   border-radius: 4px;
   padding: 10px 14px 12px 14px;
   margin: 4px 0;
+}
+/* 内置展开列收窄为不可见的 1px（折叠控件已合并到站点名列）。
+   不能 display:none 隐藏单元格：表头/表体是两个独立 table，
+   少一格会导致整列错位；保留结构、只藏箭头即可对齐 */
+:deep(.el-table__expand-column) {
+  padding: 0 !important;
+  border-right: none !important;
+}
+:deep(.el-table__expand-column .cell) {
+  display: none !important;
+}
+/* 整行可点击展开/收起，光标提示可点 */
+:deep(.el-table__body .el-table__row) {
+  cursor: pointer;
 }
 /* 当前展开的行：整行高亮（与 hover/选中同色系） */
 :deep(.el-table__row.row-expanded) > .el-table__cell {

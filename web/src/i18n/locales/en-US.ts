@@ -10,6 +10,8 @@ const enUS: Messages = {
   common: {
     confirm: 'OK',
     cancel: 'Cancel',
+    expand: 'Expand',
+    collapse: 'Collapse',
     save: 'Save',
     saveSuccess: 'Saved successfully',
     createSuccess: 'Created successfully',
@@ -3037,6 +3039,10 @@ const enUS: Messages = {
     selectSiteFirst: 'Please select a site first',
     confirmDeleteN: 'Delete the {n} selected site(s)?',
     confirmDeleteTitle: 'Confirm Delete',
+    deleteDataOpt: 'Also delete site data and logs',
+    deleteDataTip:
+      'If checked, the site directory (website files) and log directory (access.log / error.log and their archives) are removed as well — this cannot be undone. If unchecked, only the site configuration is deleted and the data is kept.',
+    deleteMore: '…and {n} more site(s)',
     pillRunning: 'Running',
     pillRunningTip: 'Show running sites only',
     pillStopped: 'Stopped',

@@ -223,6 +223,10 @@ pub struct SiteDirsPayload {
 #[derive(Debug, Deserialize)]
 pub struct SiteDeletePayload {
     pub ids: Vec<i64>,
+    /// 是否同时删除站点数据：网站文件（web_root）+ 日志（log_root）。
+    /// 前端删除确认框勾选后才为 true，未勾选只删配置，站点目录与日志保留。
+    #[serde(default)]
+    pub remove_data: bool,
 }
 
 // ── 工具函数 ────────────────────────────────────────────────
@@ -2295,6 +2299,78 @@ pub async fn site_delete(
         }
     }
 
+    // 勾选「同时删除网站数据」：删除前先取回目录规划（DB 记录删除后就没了），
+    // 再让执行端 rm -rf 文档根与日志目录（日志随网站数据一起删，避免残留）。
+    // 目录清理失败只记录告警，不阻塞站点本身删除（否则 zapexec 不可用时站点删不掉）。
+    let mut data_removed = 0usize;
+    if payload.remove_data {
+        let dph = payload
+            .ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        let dsql = format!(
+            "SELECT id, user_id, name, web_root, log_root FROM site WHERE id IN ({})",
+            dph
+        );
+        let mut dq = sqlx::query_as::<_, (i64, i64, String, String, String)>(&dsql);
+        for id in &payload.ids {
+            dq = dq.bind(id);
+        }
+        let dir_rows = dq
+            .fetch_all(db::get_db_pool().await)
+            .await
+            .unwrap_or_default();
+
+        let mut web_roots: Vec<String> = Vec::new();
+        let mut log_roots: Vec<String> = Vec::new();
+        for (id, user_id, name, web_root, log_root) in dir_rows {
+            // 库中为空时用统一规划值兜底（老站点或未同步过的站点）
+            let (def_web, def_log) = site_dirs_for(user_id, &name, id).await.unwrap_or_default();
+            let w = if web_root.trim().is_empty() {
+                def_web
+            } else {
+                web_root.trim().to_string()
+            };
+            let l = if log_root.trim().is_empty() {
+                def_log
+            } else {
+                log_root.trim().to_string()
+            };
+            if !w.is_empty() {
+                web_roots.push(w);
+            }
+            if !l.is_empty() {
+                log_roots.push(l);
+            }
+        }
+
+        if !web_roots.is_empty() || !log_roots.is_empty() {
+            let want = web_roots.len() + log_roots.len();
+            match crate::zapexec::call(Request::SiteDataRemove {
+                web_roots,
+                log_roots,
+            })
+            .await
+            {
+                Ok(resp) if resp.code == 0 => {
+                    data_removed = resp
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.get("count").and_then(|c| c.as_u64()))
+                        .unwrap_or(want as u64) as usize;
+                }
+                Ok(resp) => {
+                    tracing::warn!("remove site data failed: {}", resp.message);
+                }
+                Err(e) => {
+                    tracing::warn!("remove site data error: {}", e);
+                }
+            }
+        }
+    }
+
     let placeholders = payload
         .ids
         .iter()
@@ -2356,14 +2432,29 @@ pub async fn site_delete(
         Some(client_addr.ip().to_string().as_str()),
         "site_delete",
         &format!("ids={:?}", payload.ids),
-        &format!("deleted={}", deleted),
+        &format!(
+            "deleted={} remove_data={} data_dirs_removed={}",
+            deleted, payload.remove_data, data_removed
+        ),
     )
     .await;
-    info!("site delete: ids={:?} deleted={}", payload.ids, deleted);
+    info!(
+        "site delete: ids={:?} deleted={} remove_data={} data_dirs_removed={}",
+        payload.ids, deleted, payload.remove_data, data_removed
+    );
+
+    let msg = if payload.remove_data {
+        format!(
+            "已删除 {} 个站点，并清理了 {} 个数据/日志目录",
+            deleted, data_removed
+        )
+    } else {
+        format!("已删除 {} 个站点", deleted)
+    };
 
     Ok(Json(json!({
         "code": 0,
-        "message": format!("已删除 {} 个站点", deleted)
+        "message": msg
     })))
 }
 

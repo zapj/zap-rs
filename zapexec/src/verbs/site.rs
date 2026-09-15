@@ -1666,6 +1666,105 @@ pub async fn vhost_remove(site_id: i64, name: String) -> Response {
     .unwrap_or_else(|e| Response::err(-1, e))
 }
 
+/// 站点数据目录删除（root）：站点删除时勾选「同时删除网站数据」才调用。
+///
+/// 清理范围 = 文档根（网站文件）+ 日志目录（access.log / error.log 及其轮转归档），
+/// 日志随网站数据一起删，不留残留。
+///
+/// 安全边界（任一不满足即跳过该路径，不整体失败）：
+/// - 绝对路径、不含 `..` 段；
+/// - 真实路径（canonicalize，穿透符号链接）位于 `/home/*`（至少两级：`/home/{u}/{dir}`）
+///   或面板数据目录 `{ZAP_PATH}/data/{www,logs}` 之下（至少一级）；
+/// - 不允许是上述容器目录本身（避免误删整个 www / logs / 家目录）。
+pub async fn data_remove(web_roots: Vec<String>, log_roots: Vec<String>) -> Response {
+    tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        let mut removed: Vec<String> = Vec::new();
+        let mut skipped: Vec<String> = Vec::new();
+
+        for raw in web_roots.iter().chain(log_roots.iter()) {
+            let path = raw.trim();
+            if path.is_empty() {
+                continue;
+            }
+            if !path.starts_with('/') || path.split('/').any(|s| s == "..") {
+                skipped.push(path.to_string());
+                continue;
+            }
+            // canonicalize 同时确认存在性：已删/不存在视为完成，不重复统计
+            let real = match std::fs::canonicalize(path) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            if !data_path_allowed(&real) {
+                skipped.push(path.to_string());
+                continue;
+            }
+            match std::fs::remove_dir_all(&real) {
+                Ok(()) => removed.push(path.to_string()),
+                Err(e) => {
+                    // 文档根被替换成文件/软链的极端情况：退化为删文件
+                    if std::fs::remove_file(&real).is_ok() {
+                        removed.push(path.to_string());
+                    } else {
+                        skipped.push(format!("{path} ({e})"));
+                    }
+                }
+            }
+        }
+
+        let data = json!({
+            "removed": removed,
+            "skipped": skipped,
+            "count": removed.len(),
+        });
+        if skipped.is_empty() {
+            Ok(Response::ok(
+                format!("已删除 {} 个站点数据目录", removed.len()),
+                Some(data),
+            ))
+        } else {
+            Ok(Response::err(
+                -1,
+                format!(
+                    "已删除 {} 个目录，{} 个被跳过（路径不在允许范围内）：{}",
+                    removed.len(),
+                    skipped.len(),
+                    skipped.join(", ")
+                ),
+            ))
+        }
+    })
+    .await
+    .unwrap_or_else(|e| Ok(Response::err(-1, format!("任务执行失败: {e}"))))
+    .unwrap_or_else(|e| Response::err(-1, e))
+}
+
+/// 站点数据目录白名单：只允许删除家目录内（`{home}/{user}/{...}`）与
+/// 面板数据目录内（`{ZAP_PATH}/data/{www,logs}/{...}`）的路径，且必须是其下子目录。
+fn data_path_allowed(real: &Path) -> bool {
+    let s = real.to_string_lossy().to_string();
+    let zap = zap_path().to_string_lossy().to_string();
+    let bases: Vec<(String, usize)> = vec![
+        ("/home".to_string(), 2),
+        (format!("{zap}/data/www"), 1),
+        (format!("{zap}/data/logs"), 1),
+    ];
+    for (base, min_depth) in bases {
+        let Some(rest) = s.strip_prefix(&base) else {
+            continue;
+        };
+        let depth = rest
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|x| !x.is_empty())
+            .count();
+        if depth >= min_depth {
+            return true;
+        }
+    }
+    false
+}
+
 pub(super) fn nginx_test(bin: &Path) -> Result<(), String> {
     let o = root_cmd("bash")
         .args(["-c"])

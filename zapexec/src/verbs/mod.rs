@@ -289,6 +289,10 @@ pub async fn dispatch(req: Request) -> Response {
             .await
         }
         Request::SiteVhostRemove { site_id, name } => site::vhost_remove(site_id, name).await,
+        Request::SiteDataRemove {
+            web_roots,
+            log_roots,
+        } => site::data_remove(web_roots, log_roots).await,
         Request::FsBrowseDirs { base } => fs::browse_dirs(base).await,
         Request::SiteLogRotate {
             log_roots,

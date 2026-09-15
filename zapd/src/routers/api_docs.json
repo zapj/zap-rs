@@ -221,8 +221,9 @@
           { "name": "remark", "type": "string", "required": false, "desc": "备注" }
         ] },
         { "method": "POST", "path": "/site/update", "summary": "修改站点（domains / ips 不传则保持原样，传入则整体覆盖）" },
-        { "method": "POST", "path": "/site/delete", "summary": "删除站点（级联清理域名 / IP 绑定）", "params": [
-          { "name": "ids", "type": "int[]", "required": true, "desc": "站点 ID 列表（支持批量）" }
+        { "method": "POST", "path": "/site/delete", "summary": "删除站点（级联清理域名 / IP 绑定；可选删除网站数据）", "params": [
+          { "name": "ids", "type": "int[]", "required": true, "desc": "站点 ID 列表（支持批量）" },
+          { "name": "remove_data", "type": "bool", "required": false, "desc": "true = 同时删除站点文档根（网站文件）与日志目录；false / 不传 = 只删配置，保留数据" }
         ] }
       ]
     },

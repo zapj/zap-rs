@@ -626,6 +626,18 @@ pub enum Request {
     /// 移除站点 Nginx vhost（站点删除时清理，幂等）
     #[serde(rename = "site.vhost_remove")]
     SiteVhostRemove { site_id: i64, name: String },
+    /// 删除站点数据目录（root 特权）：站点删除时若勾选「同时删除网站数据」，
+    /// 文档根（网站文件）与日志目录（access.log / error.log 及其归档）一起 rm -rf。
+    /// 安全边界由执行端兜底：路径须为绝对路径、不含 `..`，
+    /// 且位于用户家目录（/home/*）或面板数据目录（{ZAP_PATH}/data/{www,logs}）之内，
+    /// 不允许是这些容器目录本身。
+    #[serde(rename = "site.data_remove")]
+    SiteDataRemove {
+        /// 站点文档根（web_root）列表
+        web_roots: Vec<String>,
+        /// 站点日志目录（log_root）列表：随网站数据一并删除
+        log_roots: Vec<String>,
+    },
     /// 探测服务器运行环境快照（OS / Web 服务器 / PHP / 数据库 / 工具链）
     #[serde(rename = "env.detect")]
     EnvDetect,

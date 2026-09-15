@@ -512,3 +512,50 @@ html.dark {
     width: 100% !important;
   }
 }
+/* 站点删除确认框（MessageBox 挂载在 body 下，需全局样式）：
+   站点名 + 绑定域名列表 + 「同时删除网站数据与日志」勾选 */
+.delete-confirm .dc-title {
+  margin-bottom: 8px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.delete-confirm .dc-list {
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: var(--el-fill-color-lighter);
+}
+.delete-confirm .dc-item {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 0;
+  line-height: 1.5;
+}
+.delete-confirm .dc-item + .dc-item {
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+.delete-confirm .dc-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+.delete-confirm .dc-domains {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  word-break: break-all;
+}
+.delete-confirm .dc-more {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.delete-confirm .dc-check {
+  margin-top: 10px;
+}
+.delete-confirm .dc-tip {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
