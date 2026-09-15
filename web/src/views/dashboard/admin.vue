@@ -25,7 +25,7 @@
     <!-- 服务器状态 -->
     <div class="section-title-row">
       <span class="section-title">{{ t('dashboardAdmin.serverStatus') }}</span>
-      <el-link type="primary" :underline="false" @click="go('/server-status/index?tab=monitor')">
+      <el-link type="primary" underline="never" @click="go('/server-status/index?tab=monitor')">
         {{ t('dashboardAdmin.viewDetails') }}
       </el-link>
     </div>
@@ -68,7 +68,7 @@
           <template #header>
             <div class="card-header">
               <span>{{ t('dashboardAdmin.serverInfo') }}</span>
-              <el-link type="primary" :underline="false" @click="go('/server-status/index')">
+              <el-link type="primary" underline="never" @click="go('/server-status/index')">
                 {{ t('dashboardAdmin.viewDetails') }}
               </el-link>
             </div>
@@ -133,13 +133,13 @@
             </el-descriptions-item>
           </el-descriptions>
           <div class="about-actions">
-            <el-link type="primary" :underline="false" @click="go('/docs/manual')">
+            <el-link type="primary" underline="never" @click="go('/docs/manual')">
               {{ t('dashboardAdmin.docs') }}
             </el-link>
-            <el-link type="primary" :underline="false" @click="go('/dev/api-docs')">
+            <el-link type="primary" underline="never" @click="go('/dev/api-docs')">
               {{ t('dashboardAdmin.apiDocs') }}
             </el-link>
-            <el-link type="primary" :underline="false" target="_blank" href="https://github.com/zapsh/zap">
+            <el-link type="primary" underline="never" target="_blank" href="https://github.com/zapsh/zap">
               Github
             </el-link>
           </div>
